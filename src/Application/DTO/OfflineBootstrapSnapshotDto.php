@@ -59,6 +59,24 @@ final readonly class OfflineBootstrapSnapshotDto implements JsonSerializable
      *   active_dispatched_order?: array<string, mixed>|null,
      *   last_confirmed_order?: array<string, mixed>|null
      * } $vanStock
+     * @param list<array{
+     *   id: int|null,
+     *   code: string,
+     *   category: string,
+     *   category_label: string,
+     *   name: string,
+     *   default_solution_id: int|null,
+     *   solutions: list<array{
+     *     id: int|null,
+     *     root_cause_id: int|null,
+     *     code: string,
+     *     name: string,
+     *     is_default: bool,
+     *     is_active: bool
+     *   }>
+     * }> $rootCauseTaxonomy Catálogo activo que permite clasificar resoluciones
+     *   en sótanos sin cobertura (Módulo 25, RF-03.2, EARS 03.2). Viaja sin
+     *   importes ni costes (Art. V.4).
      */
     public DateTimeImmutable $syncedAt;
 
@@ -71,7 +89,8 @@ final readonly class OfflineBootstrapSnapshotDto implements JsonSerializable
         public array $preventiveOrders,
         public array $preventiveChecklistsByOrder,
         public array $sparePartsCatalogByMachine,
-        public array $vanStock
+        public array $vanStock,
+        public array $rootCauseTaxonomy = []
     ) {
         if ($technicianId <= 0) {
             throw new InvalidArgumentException('El paquete de ruta exige un técnico autenticado.');
@@ -114,6 +133,7 @@ final readonly class OfflineBootstrapSnapshotDto implements JsonSerializable
             'synced_at' => $this->syncedAt->format('Y-m-d\TH:i:sP'),
             'warn_after_seconds' => self::WARN_AFTER_SECONDS,
             'readonly_after_seconds' => self::READONLY_AFTER_SECONDS,
+            'root_cause_taxonomy' => array_values($this->rootCauseTaxonomy),
             'route' => [
                 'stops' => array_values($this->route['stops'] ?? []),
                 'enabled_locations' => array_values($this->route['enabled_locations'] ?? []),

@@ -22,7 +22,7 @@
 'use strict';
 
 /** Nombre de caché versionado (contratos §2.2). Subirlo es lo que invalida el shell. */
-const CACHE_NAME = 'vendguard-app-shell-v2';
+const CACHE_NAME = 'vendguard-app-shell-v3';
 
 /** Prefijo de la superficie HTTP que jamás entra en caché (Art. V.4). */
 const API_PATH_PREFIX = '/api/';
@@ -55,6 +55,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/api.js',
   '/assets/js/store.js',
   '/assets/js/vendor/vue.esm-browser.prod.js',
+  '/assets/js/vendor/chart.umd.min.js',
   // Utilidades
   '/assets/js/utils/AuditActionLabels.js',
   '/assets/js/utils/DateTimeFormat.js',
@@ -92,6 +93,8 @@ const APP_SHELL_ASSETS = [
   '/assets/js/components/CoordinatorPreventiveOrdersTab.js',
   '/assets/js/components/CoordinatorPreventiveSettingsModal.js',
   '/assets/js/components/CoordinatorRefundsTab.js',
+  '/assets/js/components/CoordinatorRootCauseCatalogModal.js',
+  '/assets/js/components/CoordinatorRootCauseParetoTab.js',
   '/assets/js/components/CoordinatorSanitarySweepPanel.js',
   '/assets/js/components/CoordinatorSparePartsAnalyticsTab.js',
   '/assets/js/components/CoordinatorSparePartsTab.js',

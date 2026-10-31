@@ -17,17 +17,22 @@ use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentReplacedPart;
 use VendGuard\Core\Domain\Model\IncidentServiceSheet;
 use VendGuard\Core\Domain\Model\OldPartDestination;
+use VendGuard\Core\Domain\Model\RootCause;
 use VendGuard\Core\Domain\Model\SparePartRequest;
 use VendGuard\Core\Domain\Model\SparePartRequestStatus;
+use VendGuard\Core\Domain\Model\StandardSolution;
 use VendGuard\Core\Domain\Repository\IncidentReplacedPartRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentServiceSheetRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\RootCauseRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
+use VendGuard\Infrastructure\Repository\PdoRootCauseRepository;
+use VendGuard\Core\Service\ResolutionTaxonomyValidator;
 use VendGuard\Core\Service\ResolutionValidator;
 use VendGuard\Core\Service\ServiceSheetValidator;
 
@@ -67,6 +72,9 @@ class SparePartTraceabilityService
     /** Hoja de servicio firmada del responsable de sede (Módulo 19). */
     private IncidentServiceSheetRepositoryInterface $serviceSheetRepo;
 
+    /** Catálogo maestro de causas y soluciones (Módulo 25). */
+    private ?RootCauseRepositoryInterface $rootCauseRepo;
+
     public function __construct(
         SparePartRequestRepositoryInterface $requestRepo,
         IncidentReplacedPartRepositoryInterface $replacedPartRepo,
@@ -77,7 +85,8 @@ class SparePartTraceabilityService
         IncidentServiceSheetRepositoryInterface $serviceSheetRepo,
         ?AuditLogger $auditLogger = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
-        ?TransactionManagerInterface $transactionManager = null
+        ?TransactionManagerInterface $transactionManager = null,
+        ?RootCauseRepositoryInterface $rootCauseRepo = null
     ) {
         $this->requestRepo = $requestRepo;
         $this->replacedPartRepo = $replacedPartRepo;
@@ -89,6 +98,12 @@ class SparePartTraceabilityService
         $this->auditLogger = $auditLogger;
         $this->notificationEnqueuer = $notificationEnqueuer;
         $this->transactionManager = $transactionManager;
+        $this->rootCauseRepo = $rootCauseRepo;
+    }
+
+    private function rootCauses(): RootCauseRepositoryInterface
+    {
+        return $this->rootCauseRepo ??= new PdoRootCauseRepository();
     }
 
     private function transactions(): TransactionManagerInterface
@@ -348,6 +363,16 @@ class SparePartTraceabilityService
 
         ResolutionValidator::validate($diagnosis, $action);
 
+        // 3.a Clasificación del cierre en Causa Raíz y Solución Estandarizada
+        //     (Módulo 25, Art. V.1 / D2 / QA 3). La validación es independiente
+        //     de los dos textos anteriores: una taxonomía impecable no rescata un
+        //     diagnóstico corto y la clasificación no añade ni un carácter a los
+        //     campos libres. El bloque puede ser `null` en llamadas históricas que
+        //     no envían ninguna clave y no exigen taxonomía; en cuanto llega una de
+        //     las dos claves, ambas pasan a ser obligatorias.
+        /** @var array{root_cause: RootCause, standard_solution: StandardSolution}|null $taxonomy */
+        $taxonomy = $this->validateResolutionTaxonomy($data);
+
         // 3.b Declaraciones sanitarias de cierre sobre máquina en cuarentena o con el
         //     Reloj Sanitario Biológico vencido (RF-03.5.2, Art. II). La ruta HTTP
         //     decide CUÁNDO son exigibles (`sanitaryResolutionRequirement()`); aquí se
@@ -520,6 +545,7 @@ class SparePartTraceabilityService
                 $partEntities,
                 $sheetData,
                 $enqueuer,
+                $taxonomy,
                 &$insertedParts,
                 &$insertedSheet
             ): Incident {
@@ -540,6 +566,20 @@ class SparePartTraceabilityService
                 }
 
                 $resolved = $this->incidentRepo->resolve($incidentId, $technicianId, $diagnosis, $action);
+
+                // 5.a La clasificación se congela en la MISMA transacción que el
+                //     cierre. `update()` persiste las siete columnas y, si el
+                //     expediente ya tenía una clasificación previa (reapertura en
+                //     garantía < 48 h), la perpetúa antes de sobrescribirla en el
+                //     historial inmutable (C1, Art. III.3).
+                if ($taxonomy !== null) {
+                    $resolved = $resolved->applyResolutionTaxonomySnapshot(
+                        $taxonomy['root_cause'],
+                        $taxonomy['standard_solution']
+                    );
+
+                    $this->incidentRepo->update($resolved);
+                }
 
                 if ($enqueuer !== null) {
                     $enqueuer->enqueueResolution($resolved);
@@ -569,6 +609,13 @@ class SparePartTraceabilityService
                 recordedAt: (string)$insertedSheet->getRecordedAt(),
             );
 
+        $rootCauseClassification = $taxonomy === null
+            ? null
+            : $this->buildTaxonomyClassification(
+                $taxonomy['root_cause'],
+                $taxonomy['standard_solution']
+            );
+
         // 6. Registro inmutable en auditoría (después del commit: la hoja nace con el cierre
         //    y la auditoría deja constancia de que se guardó, sin copiar el trazo).
         if ($this->auditLogger !== null) {
@@ -585,17 +632,19 @@ class SparePartTraceabilityService
                     'total_parts_cost' => round($totalPartsCost, 2),
                     'sanitary_declarations' => $sanitaryRecord,
                     'service_sheet' => $sheetDto?->toArray(),
+                    'root_cause_classification' => $rootCauseClassification,
                 ], static fn($value): bool => $value !== null),
                 metadata: [
                     'replaced_parts_count' => count($insertedParts),
                     'total_parts_cost' => round($totalPartsCost, 2),
                     'sanitary_declarations_recorded' => $sanitaryRecord !== null,
                     'service_sheet_recorded' => $sheetDto !== null,
+                    'taxonomy_classified' => $rootCauseClassification !== null,
                 ]
             );
         }
 
-        return [
+        $response = [
             'id' => $resolvedIncident->getId(),
             'ticket_code' => $resolvedIncident->getTicketCode(),
             'status' => IncidentStatus::RESOLVED->value,
@@ -605,6 +654,118 @@ class SparePartTraceabilityService
             'replaced_parts' => array_map(fn(IncidentReplacedPart $p) => $p->toArray(), $insertedParts),
             'sanitary_declarations' => $sanitaryRecord,
             'service_sheet' => $sheetDto?->toArray(),
+        ];
+
+        if ($rootCauseClassification !== null) {
+            // Contrato §4.3: el bloque de clasificación viaja con el cierre y, además,
+            // se publican las dos referencias en la forma plana que consume la UI.
+            $response['root_cause_classification'] = $rootCauseClassification;
+            $response['root_cause'] = $rootCauseClassification['root_cause'];
+            $response['standard_solution'] = $rootCauseClassification['standard_solution'];
+        }
+
+        return $response;
+    }
+
+    /**
+     * Valida la clasificación recibida y devuelve las entidades que deben
+     * congelarse en el expediente (Módulo 25, RF-02, RF-03.3, QA 3).
+     *
+     * Reglas de compatibilidad que respeta este método:
+     *   1. Una llamada histórica sin ninguna clave de taxonomía y sin
+     *      `require_taxonomy` sigue cerrando con las siete columnas en NULL.
+     *   2. En cuanto llega `root_cause_id` o `standard_solution_id` —o el canal
+     *      exige taxonomía— ambas referencias son obligatorias, deben existir,
+     *      pertenecer a la misma causa y, en cierre online, estar activas.
+     *   3. En una sincronización diferida (`is_offline_deferred_sync = true`) se
+     *      tolera que el catálogo se haya desactivado mientras el técnico estaba
+     *      sin cobertura (`EARS 03.3`): el trabajo ya estaba hecho.
+     *
+     * @param array<string, mixed> $data Cuerpo de resolución.
+     * @return array{root_cause: RootCause, standard_solution: StandardSolution}|null
+     *
+     * @throws InvalidResolutionException Si la clasificación no cumple las reglas.
+     */
+    private function validateResolutionTaxonomy(array $data): ?array
+    {
+        $hasRootCauseKey = array_key_exists('root_cause_id', $data);
+        $hasSolutionKey = array_key_exists('standard_solution_id', $data);
+        $requireTaxonomy = $hasRootCauseKey
+            || $hasSolutionKey
+            || filter_var($data['require_taxonomy'] ?? false, FILTER_VALIDATE_BOOLEAN) === true;
+
+        if (!$requireTaxonomy) {
+            return null;
+        }
+
+        $rootCauseId = $this->positiveIdOrNull($data['root_cause_id'] ?? null);
+        $solutionId = $this->positiveIdOrNull($data['standard_solution_id'] ?? null);
+        $isOfflineDeferredSync = filter_var(
+            $data['is_offline_deferred_sync'] ?? false,
+            FILTER_VALIDATE_BOOLEAN
+        ) === true;
+
+        $rootCause = $rootCauseId !== null ? $this->rootCauses()->findRootCauseById($rootCauseId) : null;
+        $solution = $solutionId !== null ? $this->rootCauses()->findSolutionById($solutionId) : null;
+
+        $shouldFreeze = ResolutionTaxonomyValidator::validate(
+            $rootCauseId,
+            $solutionId,
+            $rootCause,
+            $solution,
+            $isOfflineDeferredSync,
+            true
+        );
+
+        if (!$shouldFreeze || $rootCause === null || $solution === null) {
+            return null;
+        }
+
+        return ['root_cause' => $rootCause, 'standard_solution' => $solution];
+    }
+
+    /**
+     * Identificador positivo o `null`; un `0`, un texto no numérico o una ausencia
+     * equivalen a no haber seleccionado la referencia.
+     */
+    private function positiveIdOrNull(mixed $value): ?int
+    {
+        if (is_int($value)) {
+            return $value > 0 ? $value : null;
+        }
+
+        if (is_string($value) && ctype_digit(trim($value))) {
+            $parsed = (int)trim($value);
+
+            return $parsed > 0 ? $parsed : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Bloque público de la clasificación congelada (contrato §4.3 y §4.5).
+     *
+     * @return array{
+     *   root_cause: array{id: int|null, code: string, category: string, category_label: string, name: string},
+     *   standard_solution: array{id: int|null, code: string, name: string}
+     * }
+     */
+    private function buildTaxonomyClassification(RootCause $rootCause, StandardSolution $solution): array
+    {
+        return [
+            'root_cause' => [
+                'id' => $rootCause->getId(),
+                'code' => $rootCause->getCode(),
+                'category' => $rootCause->getCategory()->value,
+                'category_label' => $rootCause->getCategory()->label(),
+                'name' => $rootCause->getName(),
+            ],
+            'standard_solution' => [
+                'id' => $solution->getId(),
+                'code' => $solution->getCode(),
+                'name' => $solution->getName(),
+            ],
         ];
     }
 

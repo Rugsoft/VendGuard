@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Presentation\Routing;
 
 use VendGuard\Presentation\Controller\CoordinatorRefundController;
+use VendGuard\Presentation\Controller\CoordinatorRootCauseController;
 use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
 use VendGuard\Presentation\Controller\CoordinatorVanRestockOrderController;
 use VendGuard\Presentation\Controller\CoordinatorZoneController;
@@ -129,6 +130,9 @@ class AppRouter
         $router->get('/api/coordinator/incidents/{id}/suggested-technicians', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getSuggestedTechnicians'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/assign', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'assignTechnician'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/cancel', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'cancelIncident'], [$coordinatorAuth]);
+        // Resolución administrativa manual (Módulo 25, QA 3): exige causa raíz y
+        // solución estandarizada y congela los cinco snapshots en el expediente.
+        $router->post('/api/coordinator/incidents/{id}/resolve', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'resolveIncident'], [$coordinatorAuth]);
         // Pausa por bloqueo de sede, reanudación manual y cancelación por inactividad
         // (Módulo 11: T-PAUSE-13). La coordinación puede pausar cualquier ticket activo y
         // elegir si la reanudación devuelve la avería a "Asignada" o a "En curso"; la
@@ -231,6 +235,19 @@ class AppRouter
         // el servicio cuenta en el periodo en que se resolvió (contratos §6.4).
         $router->get('/api/coordinator/metrics/csat', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getCsat'], [$coordinatorAuth]);
         $router->get('/api/coordinator/metrics/export', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'exportMetrics'], [$coordinatorAuth]);
+        // Pareto 80/20 de causas raíz (Módulo 25, RF-05). La exportación se registra
+        // antes que el informe porque el Router resuelve por orden de declaración.
+        $router->get('/api/coordinator/metrics/root-causes-pareto/export', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'exportRootCausesParetoCsv'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/metrics/root-causes-pareto', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getRootCausesPareto'], [$coordinatorAuth]);
+
+        // Catálogo maestro de causas raíz y soluciones estandarizadas (Módulo 25,
+        // RF-01, QA 1 y QA 5). Todas las rutas exigen COORDINATOR: el técnico y la
+        // sede reciben 403 y el catálogo nunca se publica fuera de Coordinación.
+        $router->get('/api/coordinator/root-causes', [CoordinatorRootCauseController::class, 'listCatalog'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/root-causes', [CoordinatorRootCauseController::class, 'createRootCause'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/root-causes/{id}', [CoordinatorRootCauseController::class, 'updateRootCause'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/root-causes/{id}/solutions', [CoordinatorRootCauseController::class, 'createSolution'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/root-causes/{id}/solutions/{solutionId}', [CoordinatorRootCauseController::class, 'updateSolution'], [$coordinatorAuth]);
         // Registro de jornada y horas efectivas (Módulo 22, contrato §5.1 y §5.2).
         // El router resuelve por orden de registro: la descarga se registra antes que
         // el informe para que `/work-hours/export` no se interprete como otra ruta.
@@ -310,6 +327,11 @@ class AppRouter
         $router->post('/api/technician/offline/deactivated-account-dump', [TechnicianOfflineSyncController::class, 'dumpDeactivatedAccount'], [$technicianDeactivatedAuth]);
 
         $router->get('/api/technician/my-route', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMyRoute'], [$technicianAuth]);
+        // Catálogo activo de causas raíz para el selector de resolución (Módulo 25,
+        // RF-02.3). La ruta acredita a cualquier usuario interno y el controlador
+        // restringe el acceso a TECHNICIAN y COORDINATOR.
+        $internalAuthenticated = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware();
+        $router->get('/api/technician/root-causes', [\VendGuard\Presentation\Controller\TechnicianController::class, 'listActiveRootCauses'], [$internalAuthenticated]);
         // Avería Oportunista In Situ (Módulo 16: T-OPP-09, RF-01 a RF-05).
         // El catálogo exige que la sede esté habilitada para este técnico; el alta y
         // la asunción revalidan esa habilitación en el servicio, bajo su propia
@@ -319,6 +341,10 @@ class AppRouter
         $router->post('/api/technician/opportunistic/incidents/{id}/assume', [TechnicianOpportunisticController::class, 'assumeIncident'], [$technicianAuth]);
         // Historial de averías de una máquina de la ruta (solo lectura, Art. V.4).
         $router->get('/api/technician/machines/{id}/history', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMachineHistory'], [$technicianAuth]);
+        // Detalle read-only de una avería para el técnico (Módulo 25, EARS 04.1):
+        // resolución congelada y cierres previos de una reapertura, sin costes ni
+        // datos de sede (Art. V.4).
+        $router->get('/api/technician/incidents/{id}/detail', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getIncidentDetail'], [$technicianAuth]);
         $router->get('/api/technician/my-metrics', [\VendGuard\Presentation\Controller\TechnicianMetricsController::class, 'getMyMetrics'], [$technicianAuth]);
         // Valoración CSAT propia (incremento 20.1, RF-20.1.1): endpoint separado para que
         // un fallo del agregado no vacíe el resto del panel.

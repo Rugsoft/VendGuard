@@ -36,8 +36,10 @@ import {
   OfflineQueueError,
   OfflineStorage,
   PERISHABLE_MACHINE_TYPES,
+  buildResolutionTaxonomyClassification,
   evaluateSnapshotValidity,
   extractConsumedCatalogParts,
+  normalizeResolutionTaxonomySelection,
   photoAttachmentBlob,
   requiresSanitarySeal,
   serializePhoto,
@@ -181,6 +183,7 @@ export function generateClientMutationId(now = new Date(), suffix = null) {
 export function buildOfflineWorkSummary(item) {
   const payload = item?.payload ?? {};
   const sheet = payload?.service_sheet ?? null;
+  const classification = item?.offline_root_cause_classification ?? null;
   const declaredText = textOrNull(
     payload.pause_reason ?? payload.pending_parts_reason ?? payload.reason_text
   ) ?? textOrNull(payload.notes);
@@ -188,6 +191,12 @@ export function buildOfflineWorkSummary(item) {
   return {
     diagnosis: textOrNull(payload.diagnosis),
     action_taken: textOrNull(payload.action_taken),
+    // La clasificación declarada in situ viaja al volcado (`C5`, `EARS 03.4`):
+    // el servidor la conserva en el JSON de conflicto y en la Nota Interna de
+    // Taller aunque el catálogo haya cambiado después.
+    ...(classification !== null && typeof classification === 'object'
+      ? { offline_root_cause_classification: { ...classification } }
+      : {}),
     pause_reason: declaredText,
     // Un paso de estado puede rechazarse sin parte de trabajo (un inicio): el
     // volcado sigue siendo obligatorio y deja constancia de lo ocurrido.
@@ -490,6 +499,19 @@ export class OfflineSyncManager {
 
     const payload = request?.payload ?? {};
 
+    // Clasificación de la resolución (`Módulo 25`, `RF-03.3`, `D1`): cuando la
+    // copia ya trae catálogo, la pareja causa/solución es obligatoria antes de
+    // encolar. No se tocan `diagnosis` ni `action_taken`: son declaraciones
+    // libres e independientes (Art. V.1).
+    let offlineRootCauseClassification = null;
+    if (operationType === 'RESOLVE_INCIDENT') {
+      const catalogAvailable = Array.isArray(snapshot?.root_cause_taxonomy)
+        && snapshot.root_cause_taxonomy.length > 0;
+
+      normalizeResolutionTaxonomySelection(payload, { required: catalogAvailable });
+      offlineRootCauseClassification = buildResolutionTaxonomyClassification(snapshot, payload);
+    }
+
     if (requiresSanitarySeal(operationType, payload, request?.machineType)
       && request?.sanitarySealConfirmed !== true) {
       throw new OfflineQueueError('SANITARY_SEAL_CONFIRMATION_REQUIRED', OFFLINE_MESSAGES.SANITARY_SEAL_REQUIRED);
@@ -541,6 +563,7 @@ export class OfflineSyncManager {
         chain_ended_at: null,
         sanitary_seal_confirmed: request?.sanitarySealConfirmed === true,
         payload,
+        offline_root_cause_classification: offlineRootCauseClassification,
         photo_attachment: photoAttachment,
         provisional_parts_deducted: extractConsumedCatalogParts(operationType, payload),
         conflict: null

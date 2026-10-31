@@ -1,5 +1,5 @@
 -- =============================================================================
--- VendGuard · DDL canónico del motor nuevo · COMPLETO (34 tablas)
+-- VendGuard · DDL canónico del motor nuevo · COMPLETO (36 tablas)
 -- PostgreSQL 15+ (certificado contra PostgreSQL 16.15 en deploy/local/postgres/)
 -- Fichero: database/supabase_init.sql
 -- Módulo: 12-hybrid-supabase-migration · T-HYBRID-01 (tablas 1-10) y T-HYBRID-02 (tablas 11-20)
@@ -8,7 +8,7 @@
 -- QUÉ ES ESTE FICHERO
 --   La creación del esquema relacional del motor nuevo: extensiones, los tipos
 --   `ENUM` del dominio con su tabla de correspondencia, las funciones canónicas
---   de blindaje y **las 34 tablas** con sus claves, restricciones, índices y
+--   de blindaje y **las 36 tablas** con sus claves, restricciones, índices y
 --   disparadores. La Parte 1 (§4) cubre `locations`, `machines`, `users`,
 --   `incidents`, `incident_history`, `incident_comments`, `audit_log`,
 --   `route_settings`, `preventive_settings` y `preventive_orders`; la Parte 2
@@ -23,7 +23,8 @@
 --   `technician_absences` (M21), `technician_shifts` (M21) y
 --   `technician_shift_logs` (M22), más las tablas 32 y 33 del Módulo 23
 --   (`van_restock_orders` y `van_restock_order_items`) y la Tabla 34 del
---   Módulo 24 (`offline_sync_mutations`).
+--   Módulo 24 (`offline_sync_mutations`) y, cerrando el catálogo, las tablas
+--   35 y 36 del Módulo 25 (`root_causes` y `standard_solutions`).
 --
 -- CONTRATO QUE LO RIGE (no al revés)
 --   specs/technical/schema_correspondence_contract.md. Este DDL se escribe
@@ -243,7 +244,11 @@ BEGIN
         'TECHNICIAN_VAN_STOCK',
         -- Orden de carga del Módulo 23 (RF-01 a RF-05): su ciclo de vida se
         -- audita con tipo propio para no confundirlo con el saldo del vehículo.
-        'VAN_RESTOCK_ORDER'
+        'VAN_RESTOCK_ORDER',
+        -- Gobierno del catálogo de causas raíz (Módulo 25): cada alta, edición,
+        -- cambio de predeterminada o baja lógica se registra contra esta entidad,
+        -- no contra la avería que se clasifica con ella.
+        'ROOT_CAUSE_TAXONOMY'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -690,6 +695,140 @@ CREATE OR REPLACE TRIGGER trg_touch_users
 
 
 -- -----------------------------------------------------------------------------
+-- Tablas 35 y 36 · root_causes y standard_solutions — taxonomía de causas raíz
+-- -----------------------------------------------------------------------------
+-- Se declaran aquí, antes de `incidents`, porque la Tabla 4 referencia ambas
+-- con claves foráneas `ON DELETE RESTRICT` (Art. III.1): una causa o solución
+-- con expedientes históricos no puede desaparecer del catálogo. La numeración
+-- 35/36 es la del contrato de correspondencia (§2); el orden de creación lo
+-- impone el grafo de dependencias, no el número.
+--
+-- · `code` y `category` son inmutables tras el alta: el código es la identidad
+--   estable del Pareto y la categoría se congela en el cierre (C4, QA 1).
+-- · La baja es lógica (`is_active`); no hay `deleted_at` porque el catálogo no
+--   se borra ni siquiera lógicamente, se desactiva.
+-- · `uq_standard_solutions_default_per_cause` es un índice único parcial: a lo
+--   sumo una solución predeterminada activa por causa (D1, EARS 01.1).
+
+CREATE TABLE IF NOT EXISTS root_causes (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY,
+    code        VARCHAR(32) NOT NULL,
+    category    incident_category NOT NULL,
+    name        VARCHAR(150) NOT NULL,
+    description TEXT,
+    is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_root_causes PRIMARY KEY (id),
+    CONSTRAINT uq_root_causes_code UNIQUE (code),
+    CONSTRAINT chk_root_causes_code_format CHECK (
+        btrim(code) ~ '^[A-Z0-9_-]{3,32}$' AND code = btrim(code)
+    ),
+    CONSTRAINT chk_root_causes_name_len CHECK (
+        char_length(btrim(name)) BETWEEN 5 AND 150
+    ),
+    CONSTRAINT chk_root_causes_description_len CHECK (
+        description IS NULL OR char_length(btrim(description)) BETWEEN 1 AND 500
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_root_causes_category_active
+    ON root_causes (category, is_active, code);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_root_causes
+    BEFORE DELETE ON root_causes
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_root_causes
+    BEFORE UPDATE ON root_causes
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+-- Inmutabilidad de `code` y `category` tras la creación (C4, QA 1).
+CREATE OR REPLACE FUNCTION enforce_root_causes_immutability()
+RETURNS TRIGGER AS $fn$
+BEGIN
+    IF NEW.code IS DISTINCT FROM OLD.code THEN
+        RAISE EXCEPTION 'ROOT_CAUSE_CODE_IMMUTABLE: El código de una causa raíz no puede modificarse una vez creado (C4).'
+            USING ERRCODE = '45000';
+    END IF;
+
+    IF NEW.category IS DISTINCT FROM OLD.category THEN
+        RAISE EXCEPTION 'ROOT_CAUSE_CATEGORY_IMMUTABLE: La categoría técnica de una causa raíz no puede modificarse una vez creada (QA 1).'
+            USING ERRCODE = '45000';
+    END IF;
+
+    RETURN NEW;
+END;
+$fn$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER trg_immutable_root_causes
+    BEFORE UPDATE ON root_causes
+    FOR EACH ROW EXECUTE FUNCTION enforce_root_causes_immutability();
+
+CREATE TABLE IF NOT EXISTS standard_solutions (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY,
+    root_cause_id   BIGINT NOT NULL,
+    code            VARCHAR(32) NOT NULL,
+    name            VARCHAR(150) NOT NULL,
+    is_default      BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_standard_solutions PRIMARY KEY (id),
+    CONSTRAINT uq_standard_solutions_code UNIQUE (code),
+    CONSTRAINT fk_standard_solutions_root_cause FOREIGN KEY (root_cause_id)
+        REFERENCES root_causes (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_standard_solutions_code_format CHECK (
+        btrim(code) ~ '^[A-Z0-9_-]{3,32}$' AND code = btrim(code)
+    ),
+    CONSTRAINT chk_standard_solutions_name_len CHECK (
+        char_length(btrim(name)) BETWEEN 5 AND 150
+    ),
+    -- Una solución inactiva jamás puede conservar la marca de predeterminada
+    -- (al desactivarla, la aplicación debe relevar antes a su sucesora, C2).
+    CONSTRAINT chk_standard_solutions_default_active CHECK (
+        is_default = FALSE OR is_active = TRUE
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_standard_solutions_default_per_cause
+    ON standard_solutions (root_cause_id)
+    WHERE is_default = TRUE AND is_active = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_standard_solutions_cause_active
+    ON standard_solutions (root_cause_id, is_active, is_default DESC, code ASC);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_standard_solutions
+    BEFORE DELETE ON standard_solutions
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_standard_solutions
+    BEFORE UPDATE ON standard_solutions
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+-- Inmutabilidad de `code` y de la causa padre tras la creación (C4, QA 1).
+CREATE OR REPLACE FUNCTION enforce_standard_solutions_immutability()
+RETURNS TRIGGER AS $fn$
+BEGIN
+    IF NEW.code IS DISTINCT FROM OLD.code THEN
+        RAISE EXCEPTION 'STANDARD_SOLUTION_CODE_IMMUTABLE: El código de una solución estandarizada no puede modificarse una vez creado (C4).'
+            USING ERRCODE = '45000';
+    END IF;
+
+    IF NEW.root_cause_id IS DISTINCT FROM OLD.root_cause_id THEN
+        RAISE EXCEPTION 'STANDARD_SOLUTION_CAUSE_IMMUTABLE: La causa raíz padre de una solución estandarizada no puede modificarse una vez creada (QA 1).'
+            USING ERRCODE = '45000';
+    END IF;
+
+    RETURN NEW;
+END;
+$fn$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER trg_immutable_standard_solutions
+    BEFORE UPDATE ON standard_solutions
+    FOR EACH ROW EXECUTE FUNCTION enforce_standard_solutions_immutability();
+
+
 -- Tabla 4 · incidents — núcleo operativo; concentra el blindaje constitucional
 -- -----------------------------------------------------------------------------
 -- · `uq_machine_active_ticket` es el índice único **parcial** que sustituye a la
@@ -750,6 +889,19 @@ CREATE TABLE IF NOT EXISTS incidents (
     opportunistic_origin_reason     opportunistic_origin_reason,
     opportunistic_informant_name    VARCHAR(100),
     chronic_predecessor_incident_id BIGINT,
+    -- Módulo 25 · clasificación del cierre. Las dos referencias apuntan al
+    -- catálogo maestro y los cinco snapshots congelan lo que estaba vigente en
+    -- el instante de la resolución: un renombrado posterior no reescribe el
+    -- expediente histórico (Art. III.3, C4). Los siete campos son anulables en
+    -- bloque para no inventar clasificación en averías históricas, preventivas
+    -- o en la retirada de una máquina crónica (QA 3).
+    root_cause_id                       BIGINT,
+    standard_solution_id                BIGINT,
+    root_cause_code_snapshot            VARCHAR(32),
+    root_cause_category_snapshot        incident_category,
+    root_cause_name_snapshot            VARCHAR(150),
+    standard_solution_code_snapshot     VARCHAR(32),
+    standard_solution_name_snapshot     VARCHAR(150),
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at                  TIMESTAMPTZ,
@@ -793,6 +945,34 @@ CREATE TABLE IF NOT EXISTS incidents (
             )
         )
     ),
+    -- Referencias al catálogo de taxonomía (Módulo 25), con la misma política
+    -- constitucional que el resto del expediente: ni borrado físico ni cascada.
+    CONSTRAINT fk_incidents_root_cause FOREIGN KEY (root_cause_id)
+        REFERENCES root_causes (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_incidents_standard_solution FOREIGN KEY (standard_solution_id)
+        REFERENCES standard_solutions (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    -- O la avería no tiene taxonomía (los siete campos NULL) o la tiene
+    -- completa: media clasificación no es un estado representable (EARS 02.5).
+    CONSTRAINT chk_incidents_taxonomy_coherence CHECK (
+        (
+            root_cause_id IS NULL
+            AND standard_solution_id IS NULL
+            AND root_cause_code_snapshot IS NULL
+            AND root_cause_category_snapshot IS NULL
+            AND root_cause_name_snapshot IS NULL
+            AND standard_solution_code_snapshot IS NULL
+            AND standard_solution_name_snapshot IS NULL
+        )
+        OR (
+            root_cause_id IS NOT NULL
+            AND standard_solution_id IS NOT NULL
+            AND root_cause_code_snapshot IS NOT NULL
+            AND root_cause_category_snapshot IS NOT NULL
+            AND root_cause_name_snapshot IS NOT NULL
+            AND standard_solution_code_snapshot IS NOT NULL
+            AND standard_solution_name_snapshot IS NOT NULL
+        )
+    ),
     CONSTRAINT fk_incidents_chronic_predecessor FOREIGN KEY (chronic_predecessor_incident_id)
         REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
@@ -805,6 +985,20 @@ CREATE INDEX IF NOT EXISTS idx_incidents_created_at ON incidents (created_at);
 CREATE INDEX IF NOT EXISTS idx_incidents_location ON incidents (location_id);
 CREATE INDEX IF NOT EXISTS idx_incidents_status_urgency ON incidents (status, urgency);
 CREATE INDEX IF NOT EXISTS idx_incidents_technician ON incidents (assigned_technician_id);
+-- Universo del Pareto 80/20: expedientes vivos resueltos o cerrados, por fecha
+-- de resolución vigente y causa raíz (Módulo 25, QA 2, C3).
+-- En bases preexistentes anteriores al Módulo 25, `CREATE TABLE IF NOT EXISTS
+-- incidents` no añade `root_cause_id` (eso lo hace la migración
+-- `021_root_cause_taxonomy.sql` en el paso 4/6 de `bin/init_cloud_db.php`). Se
+-- tolera `undefined_column` para no abortar el paso 3/6 antes de llegar al
+-- ejecutor, igual que en los índices territoriales y oportunistas.
+DO $do$
+BEGIN
+    CREATE INDEX IF NOT EXISTS idx_incidents_pareto_resolved
+        ON incidents (resolved_at, root_cause_id)
+        WHERE status IN ('RESOLVED', 'CLOSED') AND deleted_at IS NULL;
+EXCEPTION WHEN duplicate_object OR undefined_column THEN NULL;
+END $do$;
 
 -- Índice parcial de las intervenciones oportunistas vigentes (RF-06.4): el
 -- indicador de desplazamientos evitados sólo cuenta lo no borrado lógicamente.

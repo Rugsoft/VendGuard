@@ -592,6 +592,248 @@ class SeedRunner
     }
 
     /**
+     * Catálogo inicial de causas raíz y soluciones estandarizadas (Módulo 25).
+     *
+     * Es el mismo catálogo que declara `database/supabase_seeds.sql` (sección 17):
+     * 16 causas repartidas en las 5 categorías de `incident_category` y 34
+     * soluciones, con exactamente una predeterminada activa por causa (D1). El
+     * banco del arnés lo necesita porque sus suites crean incidencias y resuelven
+     * con taxonomía, y no deben depender de un fichero SQL externo.
+     *
+     * El alta es **insertar si no existe** (`DO NOTHING`) y nunca reafirma los
+     * campos: el catálogo lo gobierna Coordinación y un renombrado, una baja
+     * lógica o un cambio de predeterminada posterior no puede deshacerse al
+     * resembrar el parque.
+     *
+     * @return array{root_causes: int, standard_solutions: int} Filas canónicas procesadas.
+     */
+    public function seedRootCauseTaxonomy(): array
+    {
+        $causeSql = sprintf(
+            "INSERT INTO root_causes (code, category, name, description, is_active)
+             VALUES (:code, :category, :name, NULL, %s)
+             %s",
+            $this->dialect->booleanLiteral(true),
+            $this->dialect->upsertDoNothing(['code'])
+        );
+        $causeStmt = $this->pdo->prepare($causeSql);
+        $causeIdStmt = $this->pdo->prepare('SELECT id FROM root_causes WHERE code = :code');
+
+        // El booleano de `is_default` va como literal y no como parámetro: PDO
+        // convierte `false` en cadena vacía al ejecutar un array de valores, y
+        // PostgreSQL la rechaza como booleano (22P02). Se preparan las dos formas
+        // una sola vez y cada solución usa la que le corresponde.
+        $solutionTemplate = "INSERT INTO standard_solutions (root_cause_id, code, name, is_default, is_active)
+             VALUES (:root_cause_id, :code, :name, %s, %s)
+             %s";
+        $solutionStmts = [];
+        foreach ([true, false] as $isDefault) {
+            $solutionStmts[$isDefault ? 1 : 0] = $this->pdo->prepare(sprintf(
+                $solutionTemplate,
+                $this->dialect->booleanLiteral($isDefault),
+                $this->dialect->booleanLiteral(true),
+                $this->dialect->upsertDoNothing(['code'])
+            ));
+        }
+
+        $causeCount = 0;
+        $solutionCount = 0;
+
+        foreach (self::canonicalRootCauseTaxonomyRows() as $cause) {
+            $causeStmt->execute([
+                ':code' => $cause['code'],
+                ':category' => $cause['category'],
+                ':name' => $cause['name'],
+            ]);
+
+            $causeIdStmt->execute([':code' => $cause['code']]);
+            $causeId = $causeIdStmt->fetchColumn();
+            if ($causeId === false) {
+                throw new RuntimeException(
+                    'No se pudo resolver la causa raíz sembrada «' . $cause['code'] . '» (Módulo 25).'
+                );
+            }
+            $causeCount++;
+
+            foreach ($cause['solutions'] as $solution) {
+                $solutionStmts[$solution['is_default'] ? 1 : 0]->execute([
+                    ':root_cause_id' => $causeId,
+                    ':code' => $solution['code'],
+                    ':name' => $solution['name'],
+                ]);
+                $solutionCount++;
+            }
+        }
+
+        return [
+            'root_causes' => $causeCount,
+            'standard_solutions' => $solutionCount,
+        ];
+    }
+
+    /**
+     * Catálogo canónico de causas raíz con sus soluciones (Módulo 25).
+     *
+     * Cada causa declara una única solución inicial `is_default = true`; las
+     * demás nacen activas y no predeterminadas. Los códigos son inmutables y
+     * coinciden con los de `database/supabase_seeds.sql`; `CloudDeploySchemaParityTest`
+     * vigila esa paridad.
+     *
+     * @return list<array{code: string, category: string, name: string, solutions: list<array{code: string, name: string, is_default: bool}>}>
+     */
+    private static function canonicalRootCauseTaxonomyRows(): array
+    {
+        return [
+            [
+                'code' => 'RC-COLD-01',
+                'category' => 'TEMPERATURE_COLD',
+                'name' => 'Sonda térmica NTC descalibrada o derivada',
+                'solutions' => [
+                    ['code' => 'SOL-COLD-01A', 'name' => 'Recalibración y ajuste de sonda NTC en cámara', 'is_default' => true],
+                    ['code' => 'SOL-COLD-01B', 'name' => 'Sustitución de sonda térmica NTC roscada', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-COLD-02',
+                'category' => 'TEMPERATURE_COLD',
+                'name' => 'Obstrucción o suciedad en condensador / ventilador evaporador',
+                'solutions' => [
+                    ['code' => 'SOL-COLD-02A', 'name' => 'Limpieza de batería condensadora y desbloqueo de turbina', 'is_default' => true],
+                    ['code' => 'SOL-COLD-02B', 'name' => 'Sustitución de motor ventilador de evaporador', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-COLD-03',
+                'category' => 'TEMPERATURE_COLD',
+                'name' => 'Fuga de gas refrigerante o fallo de compresor hermético',
+                'solutions' => [
+                    ['code' => 'SOL-COLD-03A', 'name' => 'Sellado de circuito y recarga de refrigerante', 'is_default' => true],
+                    ['code' => 'SOL-COLD-03B', 'name' => 'Sustitución de grupo frigorífico / compresor', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-COLD-04',
+                'category' => 'TEMPERATURE_COLD',
+                'name' => 'Disparo de termostato de seguridad en caldera / grupo térmico',
+                'solutions' => [
+                    ['code' => 'SOL-COLD-04A', 'name' => 'Rearme manual de termostato y purga térmica', 'is_default' => true],
+                    ['code' => 'SOL-COLD-04B', 'name' => 'Sustitución de termostato de seguridad 135°C', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-PAY-01',
+                'category' => 'PAYMENT_SYSTEM',
+                'name' => 'Moneda doblada o cuerpo extraño en selector multimoneda',
+                'solutions' => [
+                    ['code' => 'SOL-PAY-01A', 'name' => 'Apertura de canal, retirada de objeto y limpieza óptica', 'is_default' => true],
+                    ['code' => 'SOL-PAY-01B', 'name' => 'Sustitución de monedero selector MDB', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-PAY-02',
+                'category' => 'PAYMENT_SYSTEM',
+                'name' => 'Tubos de cambio agotados o atasco en casete de devolución',
+                'solutions' => [
+                    ['code' => 'SOL-PAY-02A', 'name' => 'Desatasco de casete, nivelación y prueba de expulsión', 'is_default' => true],
+                    ['code' => 'SOL-PAY-02B', 'name' => 'Sustitución de casete / módulo de cambio', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-PAY-03',
+                'category' => 'PAYMENT_SYSTEM',
+                'name' => 'Pérdida de enlace o bloqueo en terminal Contactless / Nayax',
+                'solutions' => [
+                    ['code' => 'SOL-PAY-03A', 'name' => 'Reinicio de bus MDB y reconexión de antena 4G', 'is_default' => true],
+                    ['code' => 'SOL-PAY-03B', 'name' => 'Sustitución de terminal lector Contactless MDB', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-JAM-01',
+                'category' => 'PRODUCT_JAM',
+                'name' => 'Atasco de producto en espiral o bandeja de extracción',
+                'solutions' => [
+                    ['code' => 'SOL-JAM-01A', 'name' => 'Liberación de canal, realineado de espiral y test de giro', 'is_default' => true],
+                    ['code' => 'SOL-JAM-01B', 'name' => 'Reconfiguración de paso de espiral según envase', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-JAM-02',
+                'category' => 'PRODUCT_JAM',
+                'name' => 'Fallo de motor extractor de espiral o microinterruptor de leva',
+                'solutions' => [
+                    ['code' => 'SOL-JAM-02A', 'name' => 'Ajuste de leva y reconexión de terminal de motor', 'is_default' => true],
+                    ['code' => 'SOL-JAM-02B', 'name' => 'Sustitución de motor extractor de espiral 24V', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-JAM-03',
+                'category' => 'PRODUCT_JAM',
+                'name' => 'Suciedad o desalineación en fotocélula de detección de caída',
+                'solutions' => [
+                    ['code' => 'SOL-JAM-03A', 'name' => 'Limpieza de lentes infrarrojas y calibración de barrera', 'is_default' => true],
+                    ['code' => 'SOL-JAM-03B', 'name' => 'Sustitución de sensor fotocélula de caída', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-JAM-04',
+                'category' => 'PRODUCT_JAM',
+                'name' => 'Bloqueo mecánico o pérdida de estanqueidad en grupo infusor de café',
+                'solutions' => [
+                    ['code' => 'SOL-JAM-04A', 'name' => 'Desmontaje, higienización, engrase alimentario y cambio de juntas', 'is_default' => true],
+                    ['code' => 'SOL-JAM-04B', 'name' => 'Sustitución de grupo infusor de café espresso', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-ELEC-01',
+                'category' => 'ELECTRICAL_OFF',
+                'name' => 'Disparo de protección magneto-térmica o diferencial del edificio',
+                'solutions' => [
+                    ['code' => 'SOL-ELEC-01A', 'name' => 'Verificación de toma de corriente, rearme y arranque supervisado', 'is_default' => true],
+                    ['code' => 'SOL-ELEC-01B', 'name' => 'Sustitución de fusible interno o filtro antiparasitario', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-ELEC-02',
+                'category' => 'ELECTRICAL_OFF',
+                'name' => 'Fallo en fuente de alimentación conmutada o placa de potencia',
+                'solutions' => [
+                    ['code' => 'SOL-ELEC-02A', 'name' => 'Reseteo de etapa de potencia y apriete de bornes', 'is_default' => true],
+                    ['code' => 'SOL-ELEC-02B', 'name' => 'Sustitución de fuente / placa electrónica de control', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-ELEC-03',
+                'category' => 'ELECTRICAL_OFF',
+                'name' => 'Avería o apagado de pantalla Display LCD frontal',
+                'solutions' => [
+                    ['code' => 'SOL-ELEC-03A', 'name' => 'Reconexión de faja plana de datos y ajuste de contraste', 'is_default' => true],
+                    ['code' => 'SOL-ELEC-03B', 'name' => 'Sustitución de módulo Display LCD gráfico', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-OTH-01',
+                'category' => 'OTHER',
+                'name' => 'Obstrucción calcárea o fallo de electroválvula / bomba hidráulica',
+                'solutions' => [
+                    ['code' => 'SOL-OTH-01A', 'name' => 'Descalcificación de circuito y limpieza de asiento de válvula', 'is_default' => true],
+                    ['code' => 'SOL-OTH-01B', 'name' => 'Sustitución de electroválvula o bomba vibratoria', 'is_default' => false],
+                    ['code' => 'SOL-OTH-01C', 'name' => 'Sustitución de cartucho filtrante antical', 'is_default' => false],
+                ],
+            ],
+            [
+                'code' => 'RC-OTH-02',
+                'category' => 'OTHER',
+                'name' => 'Vandalismo, golpe externo en puerta/botonera o falsa alarma sin fallo',
+                'solutions' => [
+                    ['code' => 'SOL-OTH-02A', 'name' => 'Ajuste mecánico de cerradura/puerta y test funcional completo', 'is_default' => true],
+                    ['code' => 'SOL-OTH-02B', 'name' => 'Verificación integral sin anomalía técnica reproducible (falsa alarma)', 'is_default' => false],
+                    ['code' => 'SOL-OTH-02C', 'name' => 'Reparación de botonera o cristal frontal', 'is_default' => false],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * Carga programática de órdenes preventivas y certificados sanitarios iniciales.
      *
      * @return array{orders: int, certificates: int}
@@ -1937,6 +2179,10 @@ class SeedRunner
             $zoneTechnicianCount = $this->seedTechnicianZoneAssignments();
             $this->seedTerritorialInheritance();
             $prevCount = $this->seedPreventiveSettings();
+            // El catálogo de taxonomía (Módulo 25) no depende de otras maestras: se
+            // siembra antes de las órdenes preventivas para que cualquier suite que
+            // resuelva una avería encuentre causa y solución.
+            $taxonomyCounts = $this->seedRootCauseTaxonomy();
             $this->seedPreventiveOrdersAndCertificates();
             $checklistOrders = $this->seedPreventiveChecklistItems();
             $auditEvents = $this->seedPreventiveAuditTrail();
@@ -1961,6 +2207,8 @@ class SeedRunner
                 'zone_postal_codes' => $zonePostalCodeCount,
                 'technician_zone_assignments' => $zoneTechnicianCount,
                 'preventive_settings' => $prevCount,
+                'root_causes' => $taxonomyCounts['root_causes'],
+                'standard_solutions' => $taxonomyCounts['standard_solutions'],
                 'preventive_checklists' => $checklistOrders,
                 'preventive_audit_events' => $auditEvents,
                 'spare_parts' => $partsRes['parts'],

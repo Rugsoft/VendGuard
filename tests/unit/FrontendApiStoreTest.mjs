@@ -419,6 +419,27 @@ assert('8.3 403 NOT_ASSIGNED_TO_TECHNICIAN surfaces as structured ApiError',
     && historyForbiddenError.status === 403
     && historyForbiddenError.code === 'NOT_ASSIGNED_TO_TECHNICIAN');
 
+// 8.4: Technician incident detail client (T-TAXONOMY-18, EARS 04.1)
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: {
+    incident: { id: 3200, ticket_code: 'INC-2026-0320', status: 'CLOSED' },
+    machine: { id: 12, code: 'VM-012' },
+    resolution: { diagnosis: 'Moneda doblada.', corrective_action: 'Retirada del objeto.' },
+    previous_classifications: [ { root_cause: { code: 'RC-ELE-001' } } ]
+  } })
+};
+
+const technicianIncidentDetail = await api.technician.getIncidentDetail(3200);
+assert('8.4 getIncidentDetail dispatches GET to /technician/incidents/{id}/detail',
+  lastFetchCall.url === '/api/technician/incidents/3200/detail' && lastFetchCall.options.method === 'GET');
+assert('8.5 getIncidentDetail unwraps the resolution and previous classifications',
+  technicianIncidentDetail?.incident?.ticket_code === 'INC-2026-0320'
+    && technicianIncidentDetail?.resolution?.diagnosis === 'Moneda doblada.'
+    && technicianIncidentDetail?.previous_classifications?.length === 1);
+
 // ---------------------------------------------------------------------
 // TEST GROUP 9: Pending-Info SLA Pause & Resume Methods (T-PAUSE-15, RF-01, RF-02, RF-04)
 // ---------------------------------------------------------------------

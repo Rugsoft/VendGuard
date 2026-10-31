@@ -227,6 +227,48 @@ const COMMENT_THREAD_PAGE_SIZE = 50;
  * @param {{limit?: number|string, beforeId?: number|string|null}} [params={}]
  * @returns {string} Cadena de consulta (`?...`) lista para concatenar, o cadena vacía.
  */
+/**
+ * Query del motor Pareto 80/20 (contrato §6.1).
+ *
+ * Solo se envían las claves que el servidor interpreta; los valores vacíos se
+ * omiten para que un input en blanco de la barra de filtros no se convierta en
+ * `manufacturer=` y rompa la comparación. Las fechas `start_date`/`end_date`
+ * de la vista se traducen al par canónico `from`/`to`.
+ *
+ * @param {Object} [params={}]
+ * @returns {string} Query string con `?` o cadena vacía.
+ */
+function buildParetoQuery(params = {}) {
+  const filters = params ?? {};
+  const query = new URLSearchParams();
+  const pairs = [
+    ['period_days', filters.period_days ?? filters.periodDays],
+    ['period', filters.period],
+    ['from', filters.from ?? filters.start_date],
+    ['to', filters.to ?? filters.end_date],
+    ['manufacturer', filters.manufacturer],
+    ['machine_model', filters.machine_model ?? filters.machineModel],
+    ['category', filters.category],
+    ['location_id', filters.location_id ?? filters.locationId],
+    ['technician_id', filters.technician_id ?? filters.technicianId]
+  ];
+
+  for (const [key, value] of pairs) {
+    if (value !== null && value !== undefined && String(value).trim() !== '') {
+      query.set(key, String(value).trim());
+    }
+  }
+
+  const vitalFewOnly = filters.vital_few_only ?? filters.vitalFewOnly;
+  if (vitalFewOnly === true || vitalFewOnly === 1 || vitalFewOnly === '1' || vitalFewOnly === 'true') {
+    query.set('vital_few_only', '1');
+  }
+
+  const qs = query.toString();
+
+  return qs ? `?${qs}` : '';
+}
+
 function buildCommentQuery(params = {}) {
   const query = new URLSearchParams();
   const limit = params.limit ?? COMMENT_THREAD_PAGE_SIZE;
@@ -847,6 +889,140 @@ export class ApiClient {
       setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 1000);
     }
     return true;
+  }
+
+  // =========================================================================
+  // ROOT CAUSE TAXONOMY (Módulo 25 · RF-01 a RF-05, contratos §4–§6)
+  // =========================================================================
+
+  /**
+   * Catálogo activo de causas raíz y soluciones para el técnico (contrato §4.1).
+   *
+   * `preferred_category` no filtra: ordena primero las causas de la categoría
+   * de la avería y las transversales `OTHER`, y marca `is_suggested_for_category`.
+   * Se acepta tanto la cadena como el objeto de filtros para no obligar a la
+   * vista a conocer la forma exacta de la query.
+   *
+   * @param {string|{preferred_category?: string, preferredCategory?: string}|null} [preferredCategory=null]
+   * @returns {Promise<{preferred_category: string|null, items: Array<Object>}>}
+   */
+  getTechnicianRootCauses(preferredCategory = null) {
+    const value = preferredCategory !== null && typeof preferredCategory === 'object'
+      ? (preferredCategory.preferred_category ?? preferredCategory.preferredCategory ?? null)
+      : preferredCategory;
+    const query = new URLSearchParams();
+    if (value !== null && value !== undefined && String(value).trim() !== '') {
+      query.set('preferred_category', String(value).trim().toUpperCase());
+    }
+    const qs = query.toString();
+
+    return this.get(`/technician/root-causes${qs ? `?${qs}` : ''}`);
+  }
+
+  /**
+   * Catálogo completo del coordinador, activas e inactivas (contrato §5.1).
+   *
+   * @param {{only_active?: boolean|number|string, onlyActive?: boolean|number|string, category?: string}} [filters={}]
+   * @returns {Promise<{items: Array<Object>}>}
+   */
+  getCoordinatorRootCauses(filters = {}) {
+    const query = new URLSearchParams();
+    const onlyActive = filters?.only_active ?? filters?.onlyActive ?? null;
+    if (onlyActive === true || onlyActive === 1 || onlyActive === '1' || onlyActive === 'true') {
+      query.set('only_active', '1');
+    }
+    if (filters?.category !== null && filters?.category !== undefined
+      && String(filters.category).trim() !== '') {
+      query.set('category', String(filters.category).trim().toUpperCase());
+    }
+    const qs = query.toString();
+
+    return this.get(`/coordinator/root-causes${qs ? `?${qs}` : ''}`);
+  }
+
+  /**
+   * Alta atómica de una causa raíz con su solución predeterminada inicial
+   * (contrato §5.2, `QA 1`). El servidor rechaza el payload sin
+   * `initial_solution`; la vista no debe inventarla.
+   *
+   * @param {Object} payload
+   * @returns {Promise<Object>}
+   */
+  createRootCause(payload) {
+    return this.post('/coordinator/root-causes', payload);
+  }
+
+  /**
+   * Edición de una causa raíz y su vigencia (contrato §5.3). `code` y
+   * `category` son inmutables en el servidor (`C4`).
+   *
+   * @param {number|string} rootCauseId
+   * @param {Object} payload
+   * @returns {Promise<Object>}
+   */
+  updateRootCause(rootCauseId, payload) {
+    return this.put(`/coordinator/root-causes/${encodeURIComponent(rootCauseId)}`, payload);
+  }
+
+  /**
+   * Añade una solución estandarizada a una causa existente (contrato §5.4).
+   *
+   * @param {number|string} rootCauseId
+   * @param {Object} payload
+   * @returns {Promise<Object>}
+   */
+  createStandardSolution(rootCauseId, payload) {
+    return this.post(
+      `/coordinator/root-causes/${encodeURIComponent(rootCauseId)}/solutions`,
+      payload
+    );
+  }
+
+  /**
+   * Edita, conmuta como predeterminada o activa/desactiva una solución
+   * (contrato §5.5, `C2`). El servidor aplica las guardas de la última
+   * solución activa y de la predeterminada vigente.
+   *
+   * @param {number|string} rootCauseId
+   * @param {number|string} solutionId
+   * @param {Object} payload
+   * @returns {Promise<Object>}
+   */
+  updateStandardSolution(rootCauseId, solutionId, payload) {
+    return this.put(
+      `/coordinator/root-causes/${encodeURIComponent(rootCauseId)}/solutions/${encodeURIComponent(solutionId)}`,
+      payload
+    );
+  }
+
+  /**
+   * Informe Pareto 80/20 del periodo y filtros activos (contrato §6.1).
+   *
+   * @param {{period_days?: number|string, period?: string, from?: string, to?: string,
+   *   manufacturer?: string, machine_model?: string, category?: string,
+   *   location_id?: number|string, technician_id?: number|string,
+   *   vital_few_only?: boolean|string|number}} [filters={}]
+   * @returns {Promise<Object>}
+   */
+  getRootCausesPareto(filters = {}) {
+    return this.get(`/coordinator/metrics/root-causes-pareto${buildParetoQuery(filters)}`);
+  }
+
+  /**
+   * Descarga el CSV `UTF-8 BOM` en dos secciones (contrato §6.2). El nombre
+   * definitivo lo decide el servidor mediante `Content-Disposition`.
+   *
+   * @param {Object} [filters={}]
+   * @returns {Promise<boolean>}
+   */
+  exportRootCausesParetoCsv(filters = {}) {
+    const today = new Date().toISOString().slice(0, 10);
+
+    return this.downloadFile(
+      '/coordinator/metrics/root-causes-pareto/export',
+      `vendguard_pareto_garantias_${today}.csv`,
+      filters
+    );
   }
 
   // =========================================================================
@@ -1768,6 +1944,18 @@ export class ApiClient {
      */
     getMachineHistory: (machineId) => {
       return this.get(`/technician/machines/${encodeURIComponent(machineId)}/history`);
+    },
+
+    /**
+     * Retrieves the read-only detail of an incident the technician owns or that
+     * belongs to a machine in the technician's route (Módulo 25, EARS 04.1).
+     * Includes the frozen resolution and the previous classifications preserved
+     * across guarantee reopenings; never exposes costs or refund data (Art. V.4).
+     * @param {number|string} incidentId
+     * @returns {Promise<Object>}
+     */
+    getIncidentDetail: (incidentId) => {
+      return this.get(`/technician/incidents/${encodeURIComponent(incidentId)}/detail`);
     },
 
     /**

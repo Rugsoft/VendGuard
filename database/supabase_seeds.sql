@@ -11,8 +11,10 @@
 --   operativas del Módulo 17 con sus códigos postales y el cuadrante técnico demo,
 --   la configuración de la ruta base, las 13 máquinas del parque, el personal
 --   interno con su contraseña hasheada, las frecuencias normativas del preventivo,
---   el catálogo maestro de repuestos con sus compatibilidades por modelo y las
---   cuatro órdenes de carga demo del Módulo 23 (una por estado del ciclo). Solo
+--   el catálogo maestro de repuestos con sus compatibilidades por modelo, el
+--   catálogo de taxonomía de causas raíz y soluciones estandarizadas del Módulo
+--   25 (16 causas y 34 soluciones) y las cuatro órdenes de carga demo del Módulo
+--   23 (una por estado del ciclo). Solo
 --   datos: no crea ni modifica esquema, que es responsabilidad de
 --   `database/supabase_init.sql` y de `database/supabase_migrations/`.
 --
@@ -1110,9 +1112,95 @@ WHERE m.stop_type = 'PREVENTIVE_ORDER'
   );
 
 -- ============================================================================
+-- SECCIÓN 17 · root_causes y standard_solutions — taxonomía inicial (Módulo 25)
+-- ============================================================================
+-- QUÉ SIEMBRA
+--   Las 16 causas raíz del catálogo inicial, repartidas en las 5 categorías de
+--   `incident_category`, y sus 34 soluciones estandarizadas. Cada causa nace con
+--   exactamente una solución activa marcada como predeterminada (`is_default`),
+--   que es la que el modal de resolución preselecciona en un toque (D1).
+--
+-- POR QUÉ `DO NOTHING` Y NO `DO UPDATE`
+--   A diferencia del resto de maestras, este catálogo lo gobierna Coordinación
+--   desde su panel: puede renombrar una causa, añadir soluciones o cambiar cuál
+--   es la predeterminada. Un `DO UPDATE` en cada arranque desharía esos cambios
+--   y, peor aún, podría dejar dos soluciones predeterminadas activas si el
+--   coordinador ya había relevado la de la semilla. La semilla sólo asegura que
+--   la fila exista; nunca reescribe una decisión posterior.
+--
+-- ORDEN
+--   Primero las causas y después las soluciones, que resuelven su
+--   `root_cause_id` por el código único de la causa. Así el fichero es
+--   idempotente y no depende de los identificadores que asigne la secuencia en
+--   cada base.
+
+INSERT INTO root_causes (code, category, name, description, is_active)
+VALUES
+    ('RC-COLD-01', 'TEMPERATURE_COLD', 'Sonda térmica NTC descalibrada o derivada', NULL, TRUE),
+    ('RC-COLD-02', 'TEMPERATURE_COLD', 'Obstrucción o suciedad en condensador / ventilador evaporador', NULL, TRUE),
+    ('RC-COLD-03', 'TEMPERATURE_COLD', 'Fuga de gas refrigerante o fallo de compresor hermético', NULL, TRUE),
+    ('RC-COLD-04', 'TEMPERATURE_COLD', 'Disparo de termostato de seguridad en caldera / grupo térmico', NULL, TRUE),
+    ('RC-PAY-01', 'PAYMENT_SYSTEM', 'Moneda doblada o cuerpo extraño en selector multimoneda', NULL, TRUE),
+    ('RC-PAY-02', 'PAYMENT_SYSTEM', 'Tubos de cambio agotados o atasco en casete de devolución', NULL, TRUE),
+    ('RC-PAY-03', 'PAYMENT_SYSTEM', 'Pérdida de enlace o bloqueo en terminal Contactless / Nayax', NULL, TRUE),
+    ('RC-JAM-01', 'PRODUCT_JAM', 'Atasco de producto en espiral o bandeja de extracción', NULL, TRUE),
+    ('RC-JAM-02', 'PRODUCT_JAM', 'Fallo de motor extractor de espiral o microinterruptor de leva', NULL, TRUE),
+    ('RC-JAM-03', 'PRODUCT_JAM', 'Suciedad o desalineación en fotocélula de detección de caída', NULL, TRUE),
+    ('RC-JAM-04', 'PRODUCT_JAM', 'Bloqueo mecánico o pérdida de estanqueidad en grupo infusor de café', NULL, TRUE),
+    ('RC-ELEC-01', 'ELECTRICAL_OFF', 'Disparo de protección magneto-térmica o diferencial del edificio', NULL, TRUE),
+    ('RC-ELEC-02', 'ELECTRICAL_OFF', 'Fallo en fuente de alimentación conmutada o placa de potencia', NULL, TRUE),
+    ('RC-ELEC-03', 'ELECTRICAL_OFF', 'Avería o apagado de pantalla Display LCD frontal', NULL, TRUE),
+    ('RC-OTH-01', 'OTHER', 'Obstrucción calcárea o fallo de electroválvula / bomba hidráulica', NULL, TRUE),
+    ('RC-OTH-02', 'OTHER', 'Vandalismo, golpe externo en puerta/botonera o falsa alarma sin fallo', NULL, TRUE)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO standard_solutions (root_cause_id, code, name, is_default, is_active)
+SELECT rc.id, seed.code, seed.name, seed.is_default, TRUE
+  FROM (
+      VALUES
+          ('RC-COLD-01', 'SOL-COLD-01A', 'Recalibración y ajuste de sonda NTC en cámara', TRUE),
+          ('RC-COLD-01', 'SOL-COLD-01B', 'Sustitución de sonda térmica NTC roscada', FALSE),
+          ('RC-COLD-02', 'SOL-COLD-02A', 'Limpieza de batería condensadora y desbloqueo de turbina', TRUE),
+          ('RC-COLD-02', 'SOL-COLD-02B', 'Sustitución de motor ventilador de evaporador', FALSE),
+          ('RC-COLD-03', 'SOL-COLD-03A', 'Sellado de circuito y recarga de refrigerante', TRUE),
+          ('RC-COLD-03', 'SOL-COLD-03B', 'Sustitución de grupo frigorífico / compresor', FALSE),
+          ('RC-COLD-04', 'SOL-COLD-04A', 'Rearme manual de termostato y purga térmica', TRUE),
+          ('RC-COLD-04', 'SOL-COLD-04B', 'Sustitución de termostato de seguridad 135°C', FALSE),
+          ('RC-PAY-01', 'SOL-PAY-01A', 'Apertura de canal, retirada de objeto y limpieza óptica', TRUE),
+          ('RC-PAY-01', 'SOL-PAY-01B', 'Sustitución de monedero selector MDB', FALSE),
+          ('RC-PAY-02', 'SOL-PAY-02A', 'Desatasco de casete, nivelación y prueba de expulsión', TRUE),
+          ('RC-PAY-02', 'SOL-PAY-02B', 'Sustitución de casete / módulo de cambio', FALSE),
+          ('RC-PAY-03', 'SOL-PAY-03A', 'Reinicio de bus MDB y reconexión de antena 4G', TRUE),
+          ('RC-PAY-03', 'SOL-PAY-03B', 'Sustitución de terminal lector Contactless MDB', FALSE),
+          ('RC-JAM-01', 'SOL-JAM-01A', 'Liberación de canal, realineado de espiral y test de giro', TRUE),
+          ('RC-JAM-01', 'SOL-JAM-01B', 'Reconfiguración de paso de espiral según envase', FALSE),
+          ('RC-JAM-02', 'SOL-JAM-02A', 'Ajuste de leva y reconexión de terminal de motor', TRUE),
+          ('RC-JAM-02', 'SOL-JAM-02B', 'Sustitución de motor extractor de espiral 24V', FALSE),
+          ('RC-JAM-03', 'SOL-JAM-03A', 'Limpieza de lentes infrarrojas y calibración de barrera', TRUE),
+          ('RC-JAM-03', 'SOL-JAM-03B', 'Sustitución de sensor fotocélula de caída', FALSE),
+          ('RC-JAM-04', 'SOL-JAM-04A', 'Desmontaje, higienización, engrase alimentario y cambio de juntas', TRUE),
+          ('RC-JAM-04', 'SOL-JAM-04B', 'Sustitución de grupo infusor de café espresso', FALSE),
+          ('RC-ELEC-01', 'SOL-ELEC-01A', 'Verificación de toma de corriente, rearme y arranque supervisado', TRUE),
+          ('RC-ELEC-01', 'SOL-ELEC-01B', 'Sustitución de fusible interno o filtro antiparasitario', FALSE),
+          ('RC-ELEC-02', 'SOL-ELEC-02A', 'Reseteo de etapa de potencia y apriete de bornes', TRUE),
+          ('RC-ELEC-02', 'SOL-ELEC-02B', 'Sustitución de fuente / placa electrónica de control', FALSE),
+          ('RC-ELEC-03', 'SOL-ELEC-03A', 'Reconexión de faja plana de datos y ajuste de contraste', TRUE),
+          ('RC-ELEC-03', 'SOL-ELEC-03B', 'Sustitución de módulo Display LCD gráfico', FALSE),
+          ('RC-OTH-01', 'SOL-OTH-01A', 'Descalcificación de circuito y limpieza de asiento de válvula', TRUE),
+          ('RC-OTH-01', 'SOL-OTH-01B', 'Sustitución de electroválvula o bomba vibratoria', FALSE),
+          ('RC-OTH-01', 'SOL-OTH-01C', 'Sustitución de cartucho filtrante antical', FALSE),
+          ('RC-OTH-02', 'SOL-OTH-02A', 'Ajuste mecánico de cerradura/puerta y test funcional completo', TRUE),
+          ('RC-OTH-02', 'SOL-OTH-02B', 'Verificación integral sin anomalía técnica reproducible (falsa alarma)', FALSE),
+          ('RC-OTH-02', 'SOL-OTH-02C', 'Reparación de botonera o cristal frontal', FALSE)
+  ) AS seed(cause_code, code, name, is_default)
+  JOIN root_causes rc ON rc.code = seed.cause_code
+ON CONFLICT (code) DO NOTHING;
+
+-- ============================================================================
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante · 5 saldos de stock de furgoneta · 1 configuración de ruta ·
 --       13 máquinas · 6 usuarios internos · 5 frecuencias normativas · 13 repuestos ·
+--       16 causas raíz · 34 soluciones estandarizadas (Módulo 25) ·
 --       50 compatibilidades · 1 canal emergencias · 2 turnos demo ·
 --       11 eventos de bitácora · 2 eventos de auditoría de jornada ·
 --       4 órdenes de carga (una por estado) · 9 líneas (1 con baja lógica) ·

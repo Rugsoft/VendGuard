@@ -352,6 +352,10 @@ assert(
     isBrowserOffline: () => false,
     resolveDiagnosis: 'Sustituido motor extractor averiado por bloqueo mecánico',
     resolveAction: 'Instalado motor extractor nuevo modelo compatible de repuesto',
+    // Clasificación obligatoria del Módulo 25 (D1/D2): el doble declara la pareja ya elegida.
+    selectedRootCauseId: 1,
+    selectedStandardSolutionId: 11,
+    isTaxonomySelectionValid: true,
     resolvePartsData: {
       replaced_parts_declared: true,
       replaced_parts: [
@@ -400,6 +404,8 @@ assert(
     capturedResolve.payload.replaced_parts_declared === true &&
     capturedResolve.payload.replaced_parts.length === 1 &&
     capturedResolve.payload.replaced_parts[0].destination === 'TALLER' &&
+    capturedResolve.payload.root_cause_id === 1 &&
+    capturedResolve.payload.standard_solution_id === 11 &&
     capturedResolve.payload.service_sheet.absence_reason === 'Sede sin conserjería; llave en la central.'
   );
 
@@ -423,6 +429,7 @@ assert(
     selectedIncident: { id: 104 },
     resolveDiagnosis: 'Diagnóstico suficientemente largo para cumplir los 20 caracteres',
     resolveAction: 'Acción correctiva suficientemente larga para cumplir los 20 caracteres',
+    isTaxonomySelectionValid: true,
     $refs: {
       resolutionPartsBlockRef: {
         validate: () => ({ isValid: false, error: 'Debe responder si hubo sustitución de piezas.' })

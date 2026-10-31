@@ -38,6 +38,9 @@ use VendGuard\Infrastructure\Database\PdoTransactionManager;
  * Recibe un contexto con:
  *
  *   - `is_offline` (`bool`): la operación llegó desde la cola del dispositivo.
+ *   - `is_offline_deferred_sync` (`bool`): la misma señal, con el nombre que
+ *     consume `SparePartTraceabilityService` para tolerar que el catálogo de
+ *     causas se haya desactivado durante el cierre in situ (`D2`, `EARS 03.3`).
  *   - `effective_occurred_at` (`DateTimeImmutable`): instante real corregido que
  *     debe grabarse como hora de la intervención in situ (`RF-04.3`, `QA 4`).
  *   - `synced_at` (`DateTimeImmutable`): instante de recepción en el servidor.
@@ -183,6 +186,9 @@ final class OfflineSyncService
                 ? $snapshot['spare_parts_catalog_by_machine']
                 : [],
             vanStock: is_array($snapshot['van_stock'] ?? null) ? $snapshot['van_stock'] : [],
+            rootCauseTaxonomy: is_array($snapshot['root_cause_taxonomy'] ?? null)
+                ? $snapshot['root_cause_taxonomy']
+                : [],
         );
     }
 
@@ -234,6 +240,7 @@ final class OfflineSyncService
         if ($metadata === null) {
             $transition = $this->invokeTransition($applyTransition, [
                 'is_offline' => false,
+                'is_offline_deferred_sync' => false,
                 'effective_occurred_at' => $syncedAt,
                 'synced_at' => $syncedAt,
                 'clock_skew_adjusted' => false,
@@ -341,6 +348,11 @@ final class OfflineSyncService
             //    la dueña de la reserva llega aquí.
             $transition = $this->invokeTransition($applyTransition, [
                 'is_offline' => true,
+                // La resolución que llega desde la cola tolera que el catálogo se
+                // haya desactivado mientras el técnico estaba sin cobertura
+                // (`D2`, `EARS 03.3`). El controlador traslada esta bandera al
+                // servicio de resolución, que no puede inferirla del cuerpo.
+                'is_offline_deferred_sync' => true,
                 'effective_occurred_at' => $resolved['effective_occurred_at'],
                 'synced_at' => $syncedAt,
                 'clock_skew_adjusted' => $resolved['clock_skew_adjusted'],

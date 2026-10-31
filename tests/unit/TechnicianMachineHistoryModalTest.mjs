@@ -85,13 +85,21 @@ const HISTORY_FIXTURE = {
     {
       id: 3401, ticket_code: 'INC-2026-0341', status: 'REOPENED', urgency: 'HIGH',
       category: 'PAYMENT_SYSTEM', description: 'No expende producto', technician_name: 'Marc Puig',
-      created_at: '2026-10-05 08:00:00', resolved_at: null, closed_at: null, reopen_count: 2
+      created_at: '2026-10-05 08:00:00', resolved_at: null, closed_at: null, reopen_count: 2,
+      root_cause: null, standard_solution: null
     },
     {
       id: 3200, ticket_code: 'INC-2026-0320', status: 'CLOSED', urgency: 'MEDIUM',
       category: 'PRODUCT_JAM', description: 'Atasco de producto', technician_name: 'Jordi Ruta',
       created_at: '2026-09-10 09:00:00', resolved_at: '2026-09-10 11:00:00', closed_at: '2026-09-12 11:00:01',
-      reopen_count: 1
+      reopen_count: 1,
+      root_cause: {
+        id: 5, code: 'RC-PAY-001', category: 'PAYMENT_SYSTEM',
+        category_label: 'Sistema de Pago / Monedero', name: 'Moneda doblada en el selector multimoneda'
+      },
+      standard_solution: {
+        id: 9, code: 'SOL-PAY-001A', name: 'Apertura de canal y limpieza óptica'
+      }
     }
   ]
 };
@@ -116,6 +124,9 @@ const buildInstance = () => {
     errorCode: '',
     machineInfo: null,
     history: [],
+    details: {},
+    detailLoading: {},
+    detailErrors: {},
     machine: { id: 12, code: 'VM-012', model: 'Necta Koro' },
     modelValue: false,
     $emit: () => {}
@@ -140,6 +151,16 @@ assert('2.2 Almacena el bloque machine y el historial desempaquetado',
 assert('2.3 Sin errores tras una carga correcta', modal.errorMessage === '' && modal.errorCode === '' && modal.isLoading === false);
 assert('2.4 El subtítulo combina código y modelo de la máquina',
   modal.machineSubtitle === 'VM-012 · Necta Koro');
+assert('2.5 La clasificación congelada se pinta con código, categoría y solución (EARS 04.1)',
+  modal.taxonomyLabel(modal.history[1]).includes('[RC-PAY-001]')
+    && modal.taxonomyLabel(modal.history[1]).includes('Sistema de Pago / Monedero')
+    && modal.taxonomyLabel(modal.history[1]).includes('[SOL-PAY-001A]'));
+assert('2.6 Una avería sin clasificar no inventa etiqueta (EARS 04.1)',
+  modal.taxonomyLabel(modal.history[0]) === '');
+assert('2.7 La plantilla publica la insignia con un testid estable y tokens del sistema',
+  TechnicianMachineHistoryModal.template.includes("machine-history-taxonomy-")
+    && TechnicianMachineHistoryModal.template.includes('var(--color-hairline)')
+    && TechnicianMachineHistoryModal.template.includes('var(--radius-interactive'));
 
 // ─── 3. Estado vacío ─────────────────────────────────────────────────────────
 console.log('\n--- Grupo 3: Estado vacío ---');
@@ -196,6 +217,83 @@ assert('5.2 Sin abrir de nuevo el diálogo no se dispara ninguna carga adicional
 
 const watcher = TechnicianMachineHistoryModal.watch?.modelValue;
 assert('5.3 El watcher de modelValue está declarado', typeof watcher?.handler === 'function');
+
+// ─── 6. Detalle ampliado del expediente (T-TAXONOMY-18, EARS 04.1) ──────────
+console.log('\n--- Grupo 6: Detalle ampliado del expediente (T-TAXONOMY-18) ---');
+
+let detailCalls = [];
+let detailFailure = null;
+const DETAIL_FIXTURE = {
+  incident: {
+    id: 3200, ticket_code: 'INC-2026-0320', status: 'CLOSED', urgency: 'MEDIUM',
+    category: 'PRODUCT_JAM', description: 'Atasco de producto', reopen_count: 1
+  },
+  machine: { id: 12, code: 'VM-012', model: 'Necta Koro' },
+  resolution: {
+    diagnosis: 'Moneda doblada bloqueando el selector.',
+    corrective_action: 'Apertura de canal, retirada del objeto y prueba de expendido.',
+    root_cause: {
+      code: 'RC-PAY-001', category: 'PAYMENT_SYSTEM',
+      category_label: 'Sistema de Pago / Monedero', name: 'Moneda doblada en el selector multimoneda'
+    },
+    standard_solution: { code: 'SOL-PAY-001A', name: 'Apertura de canal y limpieza óptica' }
+  },
+  previous_classifications: [
+    {
+      root_cause: {
+        code: 'RC-ELE-001', category: 'ELECTRICAL_OFF',
+        category_label: 'Máquina apagada / Sin corriente', name: 'Fallo de placa controladora'
+      },
+      standard_solution: { code: 'SOL-ELE-001A', name: 'Sustitución de placa y prueba de arranque' },
+      preserved_at: '2026-09-11 09:30:00'
+    }
+  ]
+};
+
+api.technician.getIncidentDetail = async (incidentId) => {
+  detailCalls.push(incidentId);
+  if (detailFailure) {
+    throw detailFailure;
+  }
+  return DETAIL_FIXTURE;
+};
+
+const detailModal = buildInstance();
+await detailModal.toggleDetail({ id: 3200 });
+assert('6.1 Abrir el detalle consulta el endpoint del expediente una sola vez',
+  detailCalls.length === 1 && detailCalls[0] === 3200);
+assert('6.2 El detalle cargado conserva resolución y cierres anteriores',
+  detailModal.details[3200]?.resolution?.diagnosis === 'Moneda doblada bloqueando el selector.'
+    && detailModal.details[3200]?.previous_classifications?.length === 1);
+assert('6.3 Cerrar el detalle lo oculta sin repetir la llamada',
+  await (async () => {
+    await detailModal.toggleDetail({ id: 3200 });
+    return detailModal.details[3200] === undefined && detailCalls.length === 1;
+  })());
+assert('6.4 La etiqueta del cierre anterior reutiliza código, categoría y solución',
+  detailModal.previousClassificationLabel(DETAIL_FIXTURE.previous_classifications[0])
+    === '[RC-ELE-001] Fallo de placa controladora (Máquina apagada / Sin corriente) → [SOL-ELE-001A] Sustitución de placa y prueba de arranque');
+
+const detailErrorModal = buildInstance();
+detailFailure = new ApiError(403, 'NOT_ASSIGNED_TO_TECHNICIAN', 'Not assigned.');
+await detailErrorModal.toggleDetail({ id: 3200 });
+assert('6.5 Un 403 en el detalle se declara en su propio expediente sin romper la lista',
+  detailErrorModal.detailErrors[3200] === 'Not assigned.'
+    && detailErrorModal.details[3200] === undefined
+    && detailErrorModal.detailLoading[3200] === false
+    && detailErrorModal.history.length === 0);
+detailFailure = null;
+
+assert('6.6 La plantilla publica el conmutador y el panel con testids y tokens del sistema',
+  TechnicianMachineHistoryModal.template.includes("btn-machine-history-detail-")
+    && TechnicianMachineHistoryModal.template.includes("machine-history-detail-")
+    && TechnicianMachineHistoryModal.template.includes('var(--color-hairline)')
+    && TechnicianMachineHistoryModal.template.includes('var(--radius-interactive'));
+assert('6.7 El detalle no publica costes, reintegros ni datos de sede (Art. V.4)',
+  !TechnicianMachineHistoryModal.template.includes('parts_cost')
+    && !TechnicianMachineHistoryModal.template.includes('refund')
+    && !TechnicianMachineHistoryModal.template.includes('iban')
+    && !TechnicianMachineHistoryModal.template.includes('phone'));
 
 // ---------------------------------------------------------------------
 // SUMMARY

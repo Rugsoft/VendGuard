@@ -17,6 +17,7 @@ use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\OpportunisticMode;
 use VendGuard\Core\Domain\ValueObject\OpportunisticOriginReason;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Core\Service\ResolutionTaxonomyHistoryParser;
 
 /**
  * Assembles the coordinator's integral incident detail (module 09).
@@ -103,11 +104,25 @@ final class CoordinatorIncidentDetailService
      */
     private ?IncidentPauseService $pauseService = null;
 
+    /**
+     * Parser de los cierres anteriores preservados en `incident_history`
+     * (`EARS 04.1`, `C1`, Art. III.3). Se inyecta en pruebas y se construye
+     * bajo demanda en producción: es puro y no abre conexiones.
+     */
+    private ?ResolutionTaxonomyHistoryParser $taxonomyHistoryParser = null;
+
     public function __construct(
         private readonly IncidentRepositoryInterface $incidentRepo,
-        ?IncidentPauseService $pauseService = null
+        ?IncidentPauseService $pauseService = null,
+        ?ResolutionTaxonomyHistoryParser $taxonomyHistoryParser = null
     ) {
         $this->pauseService = $pauseService;
+        $this->taxonomyHistoryParser = $taxonomyHistoryParser;
+    }
+
+    private function taxonomyHistory(): ResolutionTaxonomyHistoryParser
+    {
+        return $this->taxonomyHistoryParser ??= new ResolutionTaxonomyHistoryParser();
     }
 
     /**
@@ -383,6 +398,19 @@ final class CoordinatorIncidentDetailService
                     : null,
             'created_at' => (string)($incident['created_at'] ?? ''),
             'updated_at' => (string)($incident['updated_at'] ?? ''),
+            // Taxonomía congelada al cierre (Módulo 25, RF-04, Art. III.3).
+            // Permite al DTO construir el bloque root_cause_classification.
+            'root_cause_id' => isset($incident['root_cause_id']) && $incident['root_cause_id'] !== null
+                ? (int)$incident['root_cause_id']
+                : null,
+            'standard_solution_id' => isset($incident['standard_solution_id']) && $incident['standard_solution_id'] !== null
+                ? (int)$incident['standard_solution_id']
+                : null,
+            'root_cause_code_snapshot' => $incident['root_cause_code_snapshot'] ?? null,
+            'root_cause_category_snapshot' => $incident['root_cause_category_snapshot'] ?? null,
+            'root_cause_name_snapshot' => $incident['root_cause_name_snapshot'] ?? null,
+            'standard_solution_code_snapshot' => $incident['standard_solution_code_snapshot'] ?? null,
+            'standard_solution_name_snapshot' => $incident['standard_solution_name_snapshot'] ?? null,
         ];
     }
 
@@ -473,7 +501,7 @@ final class CoordinatorIncidentDetailService
 
         $effectiveEnd = $resolvedAt ?? $closedAt ?? $cancelledAt ?? $now;
 
-        return [
+        $timeline = [
             'created_at' => (string)($incident['created_at'] ?? ''),
             'assigned_at' => $incident['assigned_at'] ?? null,
             'started_at' => $incident['started_at'] ?? null,
@@ -484,6 +512,15 @@ final class CoordinatorIncidentDetailService
             'time_to_first_response_minutes' => $this->diffInMinutes($createdAt, $startedAt),
             'total_elapsed_minutes' => $this->diffInMinutes($createdAt, $effectiveEnd) ?? 0,
         ];
+
+        // Los cierres previos sólo aparecen cuando existieron: una avería sin
+        // reapertura conserva exactamente el contrato anterior (EARS 04.1).
+        $previousClassifications = $this->taxonomyHistory()->extractPreviousClassifications($history);
+        if ($previousClassifications !== []) {
+            $timeline['previous_classifications'] = $previousClassifications;
+        }
+
+        return $timeline;
     }
 
     /**

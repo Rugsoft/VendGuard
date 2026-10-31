@@ -75,6 +75,16 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_TECHNICIAN_VAN_STOCK = 'TECHNICIAN_VAN_STOCK';
 
     /**
+     * Catálogo maestro de causas raíz y soluciones estandarizadas (Módulo 25).
+     *
+     * Cada alta o edición del catálogo registra su antes/después bajo este tipo
+     * (Art. III.3, QA 1). La migración 021 añadió el valor al enum
+     * `audit_entity_type`; reutilizar `MACHINE` o `TICKET` apuntaría a un
+     * expediente ajeno y rompería la trazabilidad del catálogo.
+     */
+    public const ENTITY_ROOT_CAUSE_TAXONOMY = 'ROOT_CAUSE_TAXONOMY';
+
+    /**
      * Orden de carga de furgoneta (Módulo 23, RF-01 a RF-05).
      *
      * El enumerado `audit_log.entity_type` admite este valor desde la migración
@@ -108,6 +118,7 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_TECHNICIAN_ZONE,
         self::ENTITY_TECHNICIAN_VAN_STOCK,
         self::ENTITY_VAN_RESTOCK_ORDER,
+        self::ENTITY_ROOT_CAUSE_TAXONOMY,
     ];
 
     /**

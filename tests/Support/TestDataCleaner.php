@@ -32,7 +32,8 @@ declare(strict_types=1);
  * Palabras prohibidas: no se desactivan los disparadores ni las restricciones del motor
  * (`session_replication_role`, `ALTER TABLE … DISABLE TRIGGER`), que dejarían filas
  * huérfanas silenciosas y saltarían el blindaje del Art. III.1, ni se **vacían** las
- * maestras (users, machines, locations, settings, audit_log): la restitución del parque
+ * maestras (users, machines, locations, settings, audit_log, root_causes,
+ * standard_solutions): la restitución del parque
  * sólo drena sus filas fuera del catálogo canónico del sembrador (§8.5).
  */
 
@@ -93,6 +94,12 @@ final class TestDataCleaner
         'route_settings',
         'preventive_settings',
         'audit_log',
+        // Catálogo maestro de taxonomía (Módulo 25): una causa o solución con
+        // expedientes históricos no se borra (Art. III.1) y, aunque no cuelga de
+        // ninguna raíz de purga, se protege de forma explícita para que una
+        // futura raíz no arrastre el catálogo completo por el grafo de FKs.
+        'root_causes',
+        'standard_solutions',
     ];
 
     /**

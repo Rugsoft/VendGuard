@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace VendGuard\Application\DTO;
 
+use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+
 /**
  * Immutable consolidated projection of one incident file for the Coordinación triage board.
  *
@@ -198,6 +200,24 @@ final readonly class CoordinatorIncidentDetailDto
      */
     public function toArray(): array
     {
+        $technicalIntervention = $this->technicalIntervention;
+        $classification = $this->rootCauseClassification();
+
+        // La clasificación sólo aparece cuando el expediente tiene los cinco
+        // snapshots congelados. Una avería histórica sin clasificar conserva
+        // exactamente el contrato anterior, sin bloques vacíos que la UI tenga
+        // que distinguir de una clasificación real (Art. V.4, `RF-04`).
+        if ($classification !== null) {
+            $technicalIntervention['root_cause_classification'] = $classification;
+
+            if (isset($technicalIntervention['resolution'])
+                && is_array($technicalIntervention['resolution'])) {
+                $technicalIntervention['resolution']['root_cause'] = $classification['root_cause'];
+                $technicalIntervention['resolution']['standard_solution']
+                    = $classification['standard_solution'];
+            }
+        }
+
         return [
             'incident' => $this->incident,
             'location' => $this->location,
@@ -205,10 +225,65 @@ final readonly class CoordinatorIncidentDetailDto
             'technician' => $this->technician,
             'timeline' => $this->timeline,
             'sla' => $this->sla,
-            'technical_intervention' => $this->technicalIntervention,
+            'technical_intervention' => $technicalIntervention,
             'comments' => $this->comments,
             'refund' => $this->refund,
             'permissions' => $this->permissions,
+        ];
+    }
+
+    /**
+     * Bloque de clasificación construido exclusivamente con los snapshots
+     * congelados en `incidents` (Art. III.3, `RF-04`, `C4`).
+     *
+     * No consulta el catálogo vigente: un renombrado posterior no puede alterar
+     * lo que se declaró al cerrar el expediente. El nombre vigente pertenece al
+     * Pareto y a las pantallas de administración, no a esta ficha histórica.
+     *
+     * @return array{
+     *   root_cause: array{
+     *     id: int,
+     *     code: string,
+     *     category: string,
+     *     category_label: string|null,
+     *     name: string
+     *   },
+     *   standard_solution: array{id: int, code: string, name: string}
+     * }|null
+     */
+    private function rootCauseClassification(): ?array
+    {
+        $rootCauseId = $this->incident['root_cause_id'] ?? null;
+        $solutionId = $this->incident['standard_solution_id'] ?? null;
+        $rootCauseCode = $this->incident['root_cause_code_snapshot'] ?? null;
+        $rootCauseName = $this->incident['root_cause_name_snapshot'] ?? null;
+        $solutionCode = $this->incident['standard_solution_code_snapshot'] ?? null;
+        $solutionName = $this->incident['standard_solution_name_snapshot'] ?? null;
+
+        if (!is_numeric($rootCauseId) || !is_numeric($solutionId)
+            || !is_string($rootCauseCode) || !is_string($rootCauseName)
+            || !is_string($solutionCode) || !is_string($solutionName)) {
+            return null;
+        }
+
+        $categoryValue = $this->incident['root_cause_category_snapshot'] ?? null;
+        $category = is_string($categoryValue)
+            ? IncidentCategory::tryFrom($categoryValue)
+            : null;
+
+        return [
+            'root_cause' => [
+                'id' => (int)$rootCauseId,
+                'code' => $rootCauseCode,
+                'category' => $categoryValue !== null ? (string)$categoryValue : '',
+                'category_label' => $category?->label(),
+                'name' => $rootCauseName,
+            ],
+            'standard_solution' => [
+                'id' => (int)$solutionId,
+                'code' => $solutionCode,
+                'name' => $solutionName,
+            ],
         ];
     }
 }

@@ -397,6 +397,122 @@ export function extractConsumedCatalogParts(operationType, payload = {}) {
 }
 
 /**
+ * Selección de taxonomía que viaja en una resolución (`RF-03.3`, `EARS 03.3`).
+ *
+ * Normaliza la pareja `root_cause_id` / `standard_solution_id` sin tocar los
+ * textos libres: la clasificación es un dato aparte y jamás rellena
+ * `diagnosis` ni `action_taken` (`D2`, Art. V.1). Con `required` activo —la
+ * copia local ya trae catálogo— una resolución sin la pareja completa se
+ * rechaza antes de entrar en la bandeja; el servidor vuelve a validarla al
+ * sincronizar (`EARS 03.3`).
+ *
+ * @param {Object} payload
+ * @param {{required?: boolean}} [options={}]
+ * @returns {{root_cause_id: number, standard_solution_id: number}|null}
+ * @throws {OfflineQueueError}
+ */
+export function normalizeResolutionTaxonomySelection(payload = {}, options = {}) {
+  const required = options?.required === true;
+  const rawRootCause = payload?.root_cause_id ?? null;
+  const rawSolution = payload?.standard_solution_id ?? null;
+  const hasRootCause = rawRootCause !== null && rawRootCause !== undefined && String(rawRootCause).trim() !== '';
+  const hasSolution = rawSolution !== null && rawSolution !== undefined && String(rawSolution).trim() !== '';
+
+  if (!hasRootCause && !hasSolution) {
+    if (required) {
+      throw new OfflineQueueError(
+        'MISSING_ROOT_CAUSE_TAXONOMY',
+        'Selecciona una causa raíz y una solución estandarizada antes de guardar la resolución.'
+      );
+    }
+
+    return null;
+  }
+
+  if (!hasRootCause || !hasSolution) {
+    throw new OfflineQueueError(
+      'MISSING_ROOT_CAUSE_TAXONOMY',
+      'La causa raíz y la solución estandarizada deben seleccionarse juntas.'
+    );
+  }
+
+  const rootCauseId = Number(rawRootCause);
+  const standardSolutionId = Number(rawSolution);
+
+  if (!Number.isInteger(rootCauseId) || rootCauseId < 1
+    || !Number.isInteger(standardSolutionId) || standardSolutionId < 1) {
+    throw new OfflineQueueError(
+      'INVALID_ROOT_CAUSE_TAXONOMY',
+      'La causa raíz o la solución estandarizada seleccionadas no son válidas.'
+    );
+  }
+
+  return {
+    root_cause_id: rootCauseId,
+    standard_solution_id: standardSolutionId
+  };
+}
+
+/**
+ * Bloque de clasificación que acompaña a una resolución en la bandeja (`C5`).
+ *
+ * Se resuelve contra el catálogo de la copia local para que el volcado de
+ * conflictos conserve códigos y nombres aunque el coordinador haya editado el
+ * catálogo después. Si la copia no contiene la pareja —una bandeja antigua o un
+ * catálogo desactualizado— se devuelve `null` y el servidor decidirá; nunca se
+ * inventan etiquetas a medias.
+ *
+ * @param {Object|null} snapshot
+ * @param {Object} payload
+ * @returns {Object|null}
+ * @throws {OfflineQueueError}
+ */
+export function buildResolutionTaxonomyClassification(snapshot, payload = {}) {
+  const selection = normalizeResolutionTaxonomySelection(payload);
+  if (selection === null) {
+    return null;
+  }
+
+  const taxonomy = Array.isArray(snapshot?.root_cause_taxonomy)
+    ? snapshot.root_cause_taxonomy
+    : [];
+  const rootCause = taxonomy.find((cause) => Number(cause?.id) === selection.root_cause_id) ?? null;
+
+  if (rootCause === null) {
+    return null;
+  }
+
+  const solutions = Array.isArray(rootCause.solutions) ? rootCause.solutions : [];
+  const solution = solutions.find((candidate) => Number(candidate?.id) === selection.standard_solution_id)
+    ?? null;
+
+  if (solution === null) {
+    // Si la solución existe bajo otra causa, la pareja es incompatible y se
+    // corta aquí: esperar al servidor solo retrasaría un conflicto evitable.
+    const foreignOwner = taxonomy.find((cause) => Array.isArray(cause?.solutions)
+      && cause.solutions.some((candidate) => Number(candidate?.id) === selection.standard_solution_id));
+
+    if (foreignOwner !== undefined) {
+      throw new OfflineQueueError(
+        'INCOMPATIBLE_STANDARD_SOLUTION',
+        'La solución estandarizada seleccionada no pertenece a la causa raíz indicada.'
+      );
+    }
+
+    return null;
+  }
+
+  return {
+    root_cause_id: selection.root_cause_id,
+    root_cause_code: String(rootCause.code ?? ''),
+    root_cause_name: String(rootCause.name ?? ''),
+    standard_solution_id: selection.standard_solution_id,
+    standard_solution_code: String(solution.code ?? ''),
+    standard_solution_name: String(solution.name ?? '')
+  };
+}
+
+/**
  * Valida la fotografía antes de encolarla (`EARS 03.5.2`, `QA 3`, `Art. V.5`).
  *
  * La firma digital no entra aquí a propósito: viaja dentro de
@@ -635,6 +751,12 @@ export function normalizeSnapshot(bootstrap, previous = null) {
         : []
     },
     preventive_orders: Array.isArray(bootstrap?.preventive_orders) ? bootstrap.preventive_orders : [],
+    // Catálogo de clasificación para resolver sin cobertura (Módulo 25, RF-03.2,
+    // contrato §4.2). Viaja en el documento de IndexedDB sin cambiar la versión
+    // del esquema local ni abrir un almacén nuevo.
+    root_cause_taxonomy: Array.isArray(bootstrap?.root_cause_taxonomy)
+      ? bootstrap.root_cause_taxonomy
+      : [],
     preventive_checklists_by_order: bootstrap?.preventive_checklists_by_order ?? {},
     spare_parts_catalog_by_machine: bootstrap?.spare_parts_catalog_by_machine ?? {},
     van_stock: normalizeVanStock(bootstrap?.van_stock),

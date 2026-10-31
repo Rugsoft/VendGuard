@@ -49,7 +49,11 @@ export const TechnicianMachineHistoryModal = {
       errorMessage: '',
       errorCode: '',
       machineInfo: null,
-      history: []
+      history: [],
+      /** Detalles ampliados por id de incidencia (EARS 04.1, T-TAXONOMY-18). */
+      details: {},
+      detailLoading: {},
+      detailErrors: {}
     };
   },
   watch: {
@@ -72,6 +76,9 @@ export const TechnicianMachineHistoryModal = {
       this.errorCode = '';
       this.machineInfo = null;
       this.history = [];
+      this.details = {};
+      this.detailLoading = {};
+      this.detailErrors = {};
     },
 
     /**
@@ -107,6 +114,83 @@ export const TechnicianMachineHistoryModal = {
       } finally {
         this.isLoading = false;
       }
+    },
+
+    /**
+     * Etiqueta de la clasificación congelada de un expediente (EARS 04.1).
+     *
+     * Sólo pinta código, categoría y nombre cuando los cinco snapshots están
+     * presentes; una avería histórica sin clasificar no inventa una etiqueta.
+     * @param {Object} entry
+     * @returns {string}
+     */
+    taxonomyLabel(entry) {
+      const cause = entry?.root_cause;
+      const solution = entry?.standard_solution;
+      if (!cause || !solution || !cause.name || !solution.name) {
+        return '';
+      }
+
+      const causeLabel = `${cause.code ? `[${cause.code}] ` : ''}${cause.name}`.trim();
+      const solutionLabel = `${solution.code ? `[${solution.code}] ` : ''}${solution.name}`.trim();
+
+      return `${causeLabel}${cause.category_label ? ` (${cause.category_label})` : ''} → ${solutionLabel}`;
+    },
+
+    /**
+     * Abre o cierra el detalle ampliado de un expediente (T-TAXONOMY-18).
+     * El primer despliegue pide el detalle al backend; los siguientes reutilizan
+     * la respuesta ya cargada en memoria.
+     * @param {Object} entry
+     */
+    async toggleDetail(entry) {
+      const incidentId = entry?.id;
+      if (!incidentId) return;
+
+      if (this.details[incidentId]) {
+        const remaining = { ...this.details };
+        delete remaining[incidentId];
+        this.details = remaining;
+        return;
+      }
+
+      await this.fetchDetail(entry);
+    },
+
+    /**
+     * Carga el detalle read-only del expediente (`GET /api/technician/incidents/{id}/detail`).
+     * @param {Object} entry
+     */
+    async fetchDetail(entry) {
+      const incidentId = entry?.id;
+      if (!incidentId) return;
+
+      this.detailLoading = { ...this.detailLoading, [incidentId]: true };
+      this.detailErrors = { ...this.detailErrors, [incidentId]: '' };
+
+      try {
+        const detail = await api.technician.getIncidentDetail(incidentId);
+        this.details = { ...this.details, [incidentId]: detail };
+      } catch (err) {
+        this.detailErrors = {
+          ...this.detailErrors,
+          [incidentId]: err?.message || 'No se pudo cargar el detalle del expediente.'
+        };
+      } finally {
+        this.detailLoading = { ...this.detailLoading, [incidentId]: false };
+      }
+    },
+
+    /**
+     * Etiqueta de un cierre anterior preservado (C1, EARS 04.1).
+     * @param {Object} classification
+     * @returns {string}
+     */
+    previousClassificationLabel(classification) {
+      return this.taxonomyLabel({
+        root_cause: classification?.root_cause,
+        standard_solution: classification?.standard_solution
+      });
     },
 
     /**
@@ -204,6 +288,89 @@ export const TechnicianMachineHistoryModal = {
 
             <div style="font-size: 13px; color: var(--color-ink, #000000); line-height: 1.35; margin-bottom: 6px;">
               {{ entry.description }}
+            </div>
+
+            <div
+              v-if="taxonomyLabel(entry)"
+              :data-testid="'machine-history-taxonomy-' + entry.id"
+              style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive, 4px); padding: 6px 8px; margin-bottom: 6px; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-slate); line-height: 1.45;"
+            >
+              {{ taxonomyLabel(entry) }}
+            </div>
+
+            <!-- Detalle ampliado read-only (T-TAXONOMY-18, EARS 04.1) -->
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              :data-testid="'btn-machine-history-detail-' + entry.id"
+              :aria-expanded="Boolean(details[entry.id])"
+              style="min-height: 44px; width: 100%; font-size: 12px; padding: 0 12px; margin-bottom: 6px; border-radius: var(--radius-interactive, 4px);"
+              @click="toggleDetail(entry)"
+            >
+              {{ details[entry.id] ? 'Ocultar detalle' : 'Ver detalle del expediente' }}
+            </button>
+
+            <div
+              v-if="detailLoading[entry.id]"
+              :data-testid="'machine-history-detail-loading-' + entry.id"
+              style="padding: 8px 0; font-size: 12px; color: var(--color-ink-muted);"
+            >
+              Cargando detalle del expediente...
+            </div>
+
+            <div
+              v-else-if="detailErrors[entry.id]"
+              :data-testid="'machine-history-detail-error-' + entry.id"
+              style="background-color: var(--color-error-bg); border: 1px solid var(--color-error); border-radius: var(--radius-interactive, 4px); padding: 8px 10px; margin-bottom: 6px; font-size: 12px; color: var(--color-error); line-height: 1.4;"
+            >
+              ⚠️ {{ detailErrors[entry.id] }}
+              <div style="margin-top: 8px;">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  :data-testid="'btn-retry-machine-history-detail-' + entry.id"
+                  style="min-height: 44px; font-size: 12px; padding: 0 12px; border-radius: var(--radius-interactive, 4px);"
+                  @click="fetchDetail(entry)"
+                >
+                  Reintentar
+                </button>
+              </div>
+            </div>
+
+            <div
+              v-else-if="details[entry.id]"
+              :data-testid="'machine-history-detail-' + entry.id"
+              style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive, 4px); padding: 10px; margin-bottom: 6px; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-slate); line-height: 1.5;"
+            >
+              <div v-if="details[entry.id].resolution.diagnosis">
+                <span style="font-weight: 700;">Diagnóstico:</span>
+                {{ details[entry.id].resolution.diagnosis }}
+              </div>
+              <div v-if="details[entry.id].resolution.corrective_action" style="margin-top: 6px;">
+                <span style="font-weight: 700;">Acción correctiva:</span>
+                {{ details[entry.id].resolution.corrective_action }}
+              </div>
+              <div v-if="!details[entry.id].resolution.diagnosis && !details[entry.id].resolution.corrective_action" style="color: var(--color-ink-muted);">
+                Este expediente no conserva diagnóstico ni acción correctiva.
+              </div>
+
+              <div v-if="details[entry.id].previous_classifications && details[entry.id].previous_classifications.length" style="margin-top: 10px;">
+                <div style="font-weight: 700; color: var(--color-slate);">
+                  Cierres anteriores preservados
+                </div>
+                <ul style="margin: 6px 0 0; padding-left: 18px;">
+                  <li
+                    v-for="(classification, index) in details[entry.id].previous_classifications"
+                    :key="index"
+                    style="margin-bottom: 4px;"
+                  >
+                    {{ previousClassificationLabel(classification) }}
+                    <span v-if="classification.preserved_at" style="color: var(--color-ink-muted);">
+                      · {{ formatDateTime(classification.preserved_at) }}
+                    </span>
+                  </li>
+                </ul>
+              </div>
             </div>
 
             <div style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d); line-height: 1.5;">

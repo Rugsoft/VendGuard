@@ -10,12 +10,18 @@ use VendGuard\Application\Service\CoordinatorIncidentDetailService;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
+use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Application\Service\SuggestedTechniciansService;
+use VendGuard\Application\Service\VanStockService;
 use VendGuard\Application\Service\VanStockReadinessCalculator;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
 use VendGuard\Core\Domain\Exception\InactivityThresholdNotReachedException;
 use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
+use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
+use VendGuard\Core\Domain\Exception\InvalidResolutionException;
+use VendGuard\Core\Domain\Exception\ServiceSheetPersistenceException;
+use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\SparePartRequestStatus;
 use VendGuard\Core\Domain\Model\User;
@@ -32,13 +38,16 @@ use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\ColdChainOverridePolicy;
+use VendGuard\Core\Service\ResolutionTaxonomyValidator;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentServiceSheetRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
@@ -114,6 +123,9 @@ class CoordinatorController
     /** Saldos de furgoneta para la insignia `van_stock_readiness` (Módulo 23). */
     private ?VanStockRepositoryInterface $vanStockRepo = null;
 
+    /** Cierre con trazabilidad de repuestos y taxonomía (Módulos 06 y 25); perezoso. */
+    private ?SparePartTraceabilityService $traceabilityService = null;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -131,7 +143,8 @@ class CoordinatorController
         ?ColdChainOverridePolicy $coldChainPolicy = null,
         ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null,
         ?SparePartRequestRepositoryInterface $sparePartRequestRepo = null,
-        ?VanStockRepositoryInterface $vanStockRepo = null
+        ?VanStockRepositoryInterface $vanStockRepo = null,
+        ?SparePartTraceabilityService $traceabilityService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
@@ -160,6 +173,26 @@ class CoordinatorController
         $this->serviceSheetRepo = $serviceSheetRepo;
         $this->sparePartRequestRepo = $sparePartRequestRepo;
         $this->vanStockRepo = $vanStockRepo;
+        $this->traceabilityService = $traceabilityService;
+    }
+
+    /**
+     * Servicio de cierre con trazabilidad de repuestos (Módulo 06) y taxonomía
+     * (Módulo 25), resuelto bajo demanda para no abrir conexión al construir.
+     */
+    private function traceability(): SparePartTraceabilityService
+    {
+        return $this->traceabilityService ??= new SparePartTraceabilityService(
+            requestRepo: new PdoSparePartRequestRepository(),
+            replacedPartRepo: new PdoIncidentReplacedPartRepository(),
+            sparePartRepo: new PdoSparePartRepository(),
+            incidentRepo: $this->incidentRepo,
+            machineRepo: $this->machineRepo,
+            vanStockService: new VanStockService(new PdoVanStockRepository()),
+            serviceSheetRepo: new PdoIncidentServiceSheetRepository(),
+            auditLogger: $this->auditLogger,
+            notificationEnqueuer: $this->notifications()
+        );
     }
 
     /**
@@ -1349,6 +1382,160 @@ class CoordinatorController
             ],
             'refunds_preserved' => true,
         ], 200, 'Avería cancelada por inactividad de sede: la máquina queda fuera de servicio y los reintegros se conservan para liquidación central.');
+    }
+
+    /**
+     * POST /api/coordinator/incidents/{id}/resolve
+     *
+     * Resolución administrativa manual desde Coordinación (Módulo 25, `QA 3`).
+     *
+     * La clasificación en causa raíz y solución estandarizada es obligatoria
+     * (`require_taxonomy = true`) y se congela en las siete columnas del
+     * expediente dentro de la misma transacción que el cierre. La validación es
+     * independiente del mínimo de 20 caracteres reales de diagnóstico y acción
+     * (Art. V.1): una taxonomía correcta no acorta ni rellena esos textos.
+     *
+     * El cierre lo firma la Coordinación en la auditoría, pero el expediente
+     * conserva como responsable al técnico asignado. Un ticket sin técnico no
+     * puede cerrarse por esta vía.
+     */
+    public function resolveIncident(Request $request): Response
+    {
+        $authFailure = $this->authorizeCoordinator($request);
+        if ($authFailure !== null) {
+            return $authFailure;
+        }
+
+        $rawId = $request->getRouteParam('id');
+        if ($rawId === null || !ctype_digit((string)$rawId) || (int)$rawId <= 0) {
+            return Response::error(
+                'INVALID_INCIDENT_ID',
+                'El ID de incidencia de la ruta no es válido.',
+                400
+            );
+        }
+        $incidentId = (int)$rawId;
+
+        $body = $request->getParsedBody();
+        $diagnosis = isset($body['resolution_diagnosis'])
+            ? trim((string)$body['resolution_diagnosis'])
+            : (isset($body['diagnosis']) ? trim((string)$body['diagnosis']) : '');
+        $action = isset($body['resolution_action'])
+            ? trim((string)$body['resolution_action'])
+            : (isset($body['action_taken']) ? trim((string)$body['action_taken']) : '');
+
+        $validationErrors = \VendGuard\Core\Service\ResolutionValidator::getValidationErrors($diagnosis, $action);
+        if ($validationErrors !== []) {
+            return Response::error(
+                'INVALID_RESOLUTION',
+                'Datos de resolución insuficientes: ' . implode(' ', $validationErrors),
+                422,
+                ['errors' => $validationErrors]
+            );
+        }
+
+        $incident = $this->incidentRepo->findById($incidentId);
+        if ($incident === null) {
+            return Response::error(
+                'INCIDENT_NOT_FOUND',
+                "No se encontró ninguna incidencia con ID {$incidentId}.",
+                404
+            );
+        }
+
+        if (!$incident->getStatus()->canTransitionTo(IncidentStatus::RESOLVED)) {
+            return Response::error(
+                'INVALID_STATUS_FOR_RESOLUTION',
+                "No se puede resolver una incidencia en estado {$incident->getStatus()->value}. La intervención debe estar previamente en curso (IN_PROGRESS).",
+                422
+            );
+        }
+
+        $assignedTechnicianId = $incident->getAssignedTechnicianId();
+        if ($assignedTechnicianId === null || $assignedTechnicianId <= 0) {
+            return Response::error(
+                'INCIDENT_NOT_ASSIGNED',
+                'La resolución administrativa exige que el expediente tenga un técnico responsable asignado.',
+                422
+            );
+        }
+
+        if (!array_key_exists('replaced_parts_declared', $body)
+            && !array_key_exists('replaced_parts', $body)) {
+            $body['replaced_parts_declared'] = false;
+        }
+
+        $body['require_taxonomy'] = true;
+        $body['is_offline_deferred_sync'] = false;
+
+        try {
+            $result = $this->traceability()->resolveIncidentWithParts(
+                $incidentId,
+                $assignedTechnicianId,
+                $body,
+                $this->extractActor($request)
+            );
+
+            return Response::json(
+                $result,
+                200,
+                'Incidencia resuelta desde Coordinación con clasificación de causa raíz y solución estandarizada.'
+            );
+        } catch (InvalidResolutionException $exception) {
+            return Response::error(
+                $this->taxonomyErrorCode($exception),
+                $exception->getMessage(),
+                422,
+                ['errors' => $exception->getErrors()]
+            );
+        } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $exception) {
+            return Response::error('INVALID_STATUS_FOR_RESOLUTION', $exception->getMessage(), 422);
+        } catch (ServiceSheetPersistenceException $exception) {
+            return Response::error($exception->getErrorCode(), $exception->getMessage(), $exception->getHttpStatusCode());
+        } catch (InvalidPartQuantityException $exception) {
+            return Response::error('INVALID_PART_QUANTITY', $exception->getMessage(), 422);
+        } catch (SparePartNotFoundException $exception) {
+            return Response::error('SPARE_PART_NOT_FOUND', $exception->getMessage(), 404);
+        } catch (\InvalidArgumentException $exception) {
+            return Response::error($this->taxonomyErrorCode($exception), $exception->getMessage(), 422);
+        } catch (\DomainException $exception) {
+            error_log('[vendguard] ' . $exception);
+
+            return Response::error(
+                'RESOLUTION_FAILED',
+                'No se pudo consolidar la resolución administrativa de la avería.',
+                500
+            );
+        } catch (Throwable $exception) {
+            error_log('[vendguard] ' . $exception);
+
+            return Response::error(
+                'INTERNAL_SERVER_ERROR',
+                'No se pudo consolidar la resolución administrativa de la avería.',
+                500
+            );
+        }
+    }
+
+    /**
+     * Traduce las causas de rechazo del validador de taxonomía a los códigos
+     * canónicos del contrato §8.
+     */
+    private function taxonomyErrorCode(\InvalidArgumentException $exception): string
+    {
+        if (!$exception instanceof InvalidResolutionException) {
+            return 'INVALID_RESOLUTION';
+        }
+
+        $first = $exception->getErrors()[0] ?? '';
+
+        return match ($first) {
+            ResolutionTaxonomyValidator::MISSING_ROOT_CAUSE_OR_SOLUTION => 'MISSING_ROOT_CAUSE_TAXONOMY',
+            ResolutionTaxonomyValidator::ROOT_CAUSE_OR_SOLUTION_NOT_FOUND => 'ROOT_CAUSE_NOT_FOUND',
+            ResolutionTaxonomyValidator::SOLUTION_DOES_NOT_BELONG_TO_ROOT_CAUSE => 'INCOMPATIBLE_STANDARD_SOLUTION',
+            ResolutionTaxonomyValidator::INACTIVE_ROOT_CAUSE_OR_SOLUTION => 'INACTIVE_ROOT_CAUSE_TAXONOMY',
+            default => 'INVALID_RESOLUTION',
+        };
     }
 
     // ────────────────────────────────────────────────────────────────────────

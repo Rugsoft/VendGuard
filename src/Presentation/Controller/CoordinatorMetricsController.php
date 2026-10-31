@@ -4,14 +4,21 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use InvalidArgumentException;
 use Throwable;
+use VendGuard\Application\DTO\ParetoFilterDto;
+use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\MetricsCalculationService;
 use VendGuard\Application\Service\MetricsExportService;
+use VendGuard\Application\Service\RootCauseParetoService;
 use VendGuard\Core\Domain\Model\MetricFilter;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SatisfactionSurveyRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoRootCauseParetoAnalyticsRepository;
 use VendGuard\Infrastructure\Repository\PdoSatisfactionSurveyRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -55,16 +62,21 @@ class CoordinatorMetricsController
     private AuditLogRepositoryInterface $auditRepo;
     private SatisfactionSurveyRepositoryInterface $surveyRepo;
 
+    /** Motor Pareto 80/20 (Módulo 25); se resuelve bajo demanda para no abrir conexión al construir. */
+    private ?RootCauseParetoService $paretoService;
+
     public function __construct(
         ?MetricsCalculationService $metricsService = null,
         ?MetricsExportService $exportService = null,
         ?AuditLogRepositoryInterface $auditRepo = null,
-        ?SatisfactionSurveyRepositoryInterface $surveyRepo = null
+        ?SatisfactionSurveyRepositoryInterface $surveyRepo = null,
+        ?RootCauseParetoService $paretoService = null
     ) {
         $this->metricsService = $metricsService ?? new MetricsCalculationService();
         $this->exportService = $exportService ?? new MetricsExportService();
         $this->auditRepo = $auditRepo ?? new PdoAuditLogRepository();
         $this->surveyRepo = $surveyRepo ?? new PdoSatisfactionSurveyRepository();
+        $this->paretoService = $paretoService;
     }
 
     /**
@@ -163,6 +175,223 @@ class CoordinatorMetricsController
 
             return Response::error('INTERNAL_SERVER_ERROR', 'Error al exportar métricas en CSV.', 500);
         }
+    }
+
+    /**
+     * GET /api/coordinator/metrics/root-causes-pareto
+     *
+     * Informe 80/20 del catálogo de causas raíz (Módulo 25, RF-05, D5, QA 2 y QA 4).
+     * La puerta de rol la impone `InternalAuthMiddleware(COORDINATOR)` en el router:
+     * técnico y sede reciben `403 FORBIDDEN` antes de llegar aquí (Art. V.4, QA 5).
+     */
+    public function getRootCausesPareto(Request $request): Response
+    {
+        try {
+            $filter = $this->buildParetoFilter($request);
+
+            return Response::json($this->pareto()->buildParetoReport($filter)->toArray());
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('INVALID_PARETO_FILTER', $exception->getMessage(), 400);
+        } catch (Throwable $exception) {
+            $this->logInternalFailure($exception);
+
+            return Response::error(
+                'INTERNAL_SERVER_ERROR',
+                'No se pudo calcular el análisis de Pareto de causas raíz.',
+                500
+            );
+        }
+    }
+
+    /**
+     * GET /api/coordinator/metrics/root-causes-pareto/export
+     *
+     * Descarga del CSV `UTF-8 BOM` en dos secciones del contrato §6.2 y deja el
+     * evento `EXPORT_ROOT_CAUSE_PARETO_CSV` en la auditoría inmutable (Art. III.3).
+     */
+    public function exportRootCausesParetoCsv(Request $request): Response
+    {
+        try {
+            $filter = $this->buildParetoFilter($request);
+            $csvContent = $this->pareto()->exportCsv($filter, $this->extractActor($request));
+
+            $filename = 'vendguard_pareto_garantias_' . date('Y-m-d') . '.csv';
+
+            return new Response($csvContent, 200, [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+                'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            ]);
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('INVALID_PARETO_FILTER', $exception->getMessage(), 400);
+        } catch (Throwable $exception) {
+            $this->logInternalFailure($exception);
+
+            return Response::error(
+                'INTERNAL_SERVER_ERROR',
+                'No se pudo exportar el análisis de Pareto de causas raíz.',
+                500
+            );
+        }
+    }
+
+    /**
+     * Resuelve el motor Pareto bajo demanda: su repositorio abre conexión PDO y
+     * este controlador también se construye en suites unitarias sin base de datos.
+     */
+    private function pareto(): RootCauseParetoService
+    {
+        return $this->paretoService ??= new RootCauseParetoService(
+            new PdoRootCauseParetoAnalyticsRepository(),
+            new AuditLogger(new PdoAuditLogRepository())
+        );
+    }
+
+    /**
+     * Construye el filtro validado del contrato §6.1.
+     *
+     * Acepta `period_days` (`30/90/180/365/all`), el par `from`/`to` y la clave
+     * `period` heredada del cuadro de mando. Sin parámetros, la ventana por
+     * defecto es de 90 días sobre `resolved_at`, no los 30 del panel general.
+     */
+    private function buildParetoFilter(Request $request): ParetoFilterDto
+    {
+        $query = $request->getQueryParams();
+        $timezone = new DateTimeZone('Europe/Madrid');
+        $today = new DateTimeImmutable('now', $timezone);
+
+        $periodDays = null;
+        $rawPeriodDays = $query['period_days'] ?? null;
+        if ($rawPeriodDays !== null && trim((string)$rawPeriodDays) !== '') {
+            $normalized = strtolower(trim((string)$rawPeriodDays));
+            $periodDays = $normalized === 'all' ? 'all' : (int)$normalized;
+            if ($normalized !== 'all' && !ctype_digit($normalized)) {
+                throw new InvalidArgumentException(
+                    'INVALID_PARETO_FILTER: period_days sólo admite 30, 90, 180, 365 o all.'
+                );
+            }
+        }
+
+        $from = $this->normalizeQueryDate($query['from'] ?? null);
+        $to = $this->normalizeQueryDate($query['to'] ?? null);
+
+        if (($from === null) !== ($to === null)) {
+            throw new InvalidArgumentException(
+                'INVALID_PARETO_FILTER: las fechas from y to deben declararse juntas.'
+            );
+        }
+
+        if ($from === null && $periodDays === null) {
+            $rawPeriod = $query['period'] ?? null;
+            if ($rawPeriod !== null && trim((string)$rawPeriod) !== '') {
+                $metricFilter = MetricFilter::fromQueryParams(
+                    ['period' => (string)$rawPeriod],
+                    $today
+                );
+                $from = $metricFilter->getFrom()->format('Y-m-d');
+                $to = $metricFilter->getTo()->format('Y-m-d');
+            }
+        }
+
+        if ($from === null) {
+            if ($periodDays === 'all') {
+                $from = '1970-01-01';
+                $to = $today->format('Y-m-d');
+            } else {
+                $days = $periodDays ?? 90;
+                $from = $today->modify('-' . ((int)$days - 1) . ' days')->format('Y-m-d');
+                $to = $today->format('Y-m-d');
+            }
+        }
+
+        $category = null;
+        $rawCategory = $query['category'] ?? null;
+        if ($rawCategory !== null && trim((string)$rawCategory) !== '') {
+            $category = IncidentCategory::fromString((string)$rawCategory);
+        }
+
+        $vitalFewOnly = false;
+        $rawVitalFew = $query['vital_few_only'] ?? false;
+        if ($rawVitalFew !== null && trim((string)$rawVitalFew) !== '') {
+            $parsed = filter_var($rawVitalFew, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($parsed === null) {
+                throw new InvalidArgumentException(
+                    'INVALID_PARETO_FILTER: vital_few_only debe ser un booleano.'
+                );
+            }
+            $vitalFewOnly = $parsed;
+        }
+
+        return new ParetoFilterDto(
+            startDate: (string)$from,
+            endDate: (string)$to,
+            periodDays: $periodDays,
+            manufacturer: $this->nullableQueryString($query['manufacturer'] ?? null),
+            machineModel: $this->nullableQueryString($query['machine_model'] ?? null),
+            category: $category,
+            locationId: $this->positiveQueryId($query['location_id'] ?? null, 'location_id'),
+            technicianId: $this->positiveQueryId($query['technician_id'] ?? null, 'technician_id'),
+            vitalFewOnly: $vitalFewOnly
+        );
+    }
+
+    private function normalizeQueryDate(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = substr(trim((string)$value), 0, 10);
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    private function nullableQueryString(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = trim((string)$value);
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    private function positiveQueryId(mixed $value, string $field): ?int
+    {
+        if ($value === null || trim((string)$value) === '') {
+            return null;
+        }
+
+        $normalized = trim((string)$value);
+        if (!ctype_digit($normalized) || (int)$normalized <= 0) {
+            throw new InvalidArgumentException(
+                'INVALID_PARETO_FILTER: ' . $field . ' debe ser un identificador positivo.'
+            );
+        }
+
+        return (int)$normalized;
+    }
+
+    /**
+     * @return array{id: int|null, role: string, name: string}
+     */
+    private function extractActor(Request $request): array
+    {
+        $user = $request->getAttribute('authenticated_user');
+        if ($user instanceof \VendGuard\Core\Domain\Model\User) {
+            return [
+                'id' => $user->getId(),
+                'role' => $user->getRole()->value,
+                'name' => $user->getName(),
+            ];
+        }
+
+        return [
+            'id' => is_numeric($request->getAttribute('user_id')) ? (int)$request->getAttribute('user_id') : null,
+            'role' => (string)$request->getAttribute('user_role', 'COORDINATOR'),
+            'name' => 'Coordinación de Servicio',
+        ];
     }
 
     /**
