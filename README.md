@@ -154,7 +154,14 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 
 ---
 
-### 16. Firma Digital del Responsable de Sede y Albarán de Servicio (Módulo 19)
+### 16. Stock de Repuestos en Furgoneta (Módulo 18)
+* **Inventario por técnico y pieza:** cada furgoneta mantiene su saldo en `technician_van_stocks` sobre la pareja única `(técnico, pieza)`, con cantidad disponible y umbral mínimo. Coordinación fija el saldo absoluto y cada ajuste deja el delta en auditoría; el técnico consulta su stock en solo lectura desde la ruta.
+* **Descuento automático al intervenir:** declarar una pieza del catálogo al resolver una avería —correctivo o preventivo— descuenta una unidad del saldo. La pieza fuera de catálogo no descuenta y el inventario **nunca** bloquea el cierre.
+* **Descuadres y alerta de bajo umbral:** el saldo negativo se admite y se marca como descuadre; la bandeja de Coordinación ordena las referencias por severidad para reponerlas. El albarán de reposición, el picking y la valoración monetaria pertenecen al Módulo 23.
+
+---
+
+### 17. Firma Digital del Responsable de Sede y Albarán de Servicio (Módulo 19)
 * **Dos Vías Excluyentes en el Cierre:** El modal de resolución exige la conformidad de la sede. O se recoge la firma manuscrita digitalizada —nombre del firmante, documento y trazo sobre lienzo— o se atestigua «No había responsable disponible en la sede» con un motivo de al menos 10 caracteres. Activar una vía vacía los datos de la otra, y un bloque incompleto bloquea el envío señalando el campo.
 * **Captura Táctil Real:** El trazo se sigue por eventos `pointer` con captura de puntero, de modo que el dedo puede salir del lienzo sin cortar la firma ni arrastrar la página (`touch-action: none`). El lienzo se pinta blanco opaco y se escala por `devicePixelRatio`, así que la firma no sale borrosa en pantallas de alta densidad. Borrar el trazo descarta el PNG y **no** toca el nombre ni el documento.
 * **Tinta Decidida en el Cliente:** Menos de 150 píxeles con luminancia inferior a 200 es un lienzo en blanco. Es la única comprobación de tinta del sistema: el servidor no decodifica píxeles. El servidor sí valida el PNG real (firma binaria, MIME con `finfo`, `IHDR`), con techo de 300 KiB y 2 Mpx.
@@ -165,7 +172,43 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 
 ---
 
-### 17. Taxonomía de Causas Raíz y Análisis Pareto 80/20 (Módulo 25)
+### 18. Encuesta de Satisfacción Post-Resolución (Módulo 20)
+* **Un voto por episodio:** `incident_satisfaction_surveys` se indexa por `(incident_id, resolution_at)`, de modo que una reapertura abre un episodio nuevo sin sobrescribir el anterior. La encuesta y su evento de auditoría se escriben en la misma transacción y la tabla no admite correcciones posteriores.
+* **Valoración en el Portal de Sede:** modal de 1–5 estrellas y comentario de hasta 500 caracteres, con aviso «Tiene N servicios por valorar» sobre el `pending_total` real y refresco tras cada envío. Un `409` retira el episodio ya valorado y un fallo de red conserva lo escrito.
+* **Lectura en el Cuadro de Mandos:** bloque CSAT con media, respuestas, distribución 5→1, tabla por sede, tabla por técnico con nombre congelado y tendencia mensual, siempre bajo el filtro temporal vigente. Sin filtro territorial ni exportación; el técnico solo ve su superficie de lectura.
+
+---
+
+### 19. Ausencias Temporales y Relevo de Fin de Turno (Módulo 21)
+* **Ausencias sin dar de baja la cuenta:** `technician_absences` registra vacaciones, bajas, formación o fuera de turno con ventana temporal, sin tocar `users.is_active`. El recomendador territorial marca al titular `NO_DISPONIBLE` y asciende al suplente de zona a recomendado.
+* **Jornada móvil con turno partido:** `technician_shifts` admite varias sesiones diarias y turno partido mediante el índice parcial de turnos abiertos; el técnico alterna `ON_SHIFT`, `MEAL_BREAK` y `OFF_SHIFT`, con cierre directo desde la comida.
+* **Traspaso atómico y salvaguarda sanitaria:** cerrar turno exige resolver las averías `IN_PROGRESS`; los tickets `ASSIGNED`, `PENDING_PARTS` y `PENDING_INFO` se transfieren en una transacción con `FOR UPDATE`, nota interna obligatoria y `409` ante colisión. Si una máquina perecedera se queda sin relevo manual, el protocolo escala a la guardia 24/7 o desasigna a `REGISTERED` con alarma crítica (Art. II). El cómputo de horas pertenece al Módulo 22.
+
+---
+
+### 20. Registro de Jornada y Horas Efectivas (Módulo 22)
+* **Bitácora inmutable:** `technician_shift_logs` registra `START_SHIFT`, `PAUSE_MEAL`, `RESUME_SHIFT`, `CLOSE_SHIFT`, `FORCE_CLOSE_SHIFT` y `ADJUST_SHIFT` sin `UPDATE` ni `DELETE`; las pausas se acumulan al segundo y se conservan los instantes originales aunque el turno se rectifique.
+* **Informe de horas:** por periodo, el cuadro publica horas brutas, comida, horas efectivas netas, intervención in situ, tiempo en ruta con suelo cero, intervenciones resueltas, turnos de más de 12 h y turnos abiertos huérfanos. El cierre forzado admite una hora efectiva de salida que fecha el protocolo sanitario con el instante real.
+* **Rectificación auditada y acceso propio:** la corrección exige validación cuádruple y motivo de 20 caracteres reales, la anulación deja el registro a `0s` sin borrarlo y el CSV sale en UTF-8 BOM con dos secciones en `Europe/Madrid`. La sub-pestaña «⏱️ Registro de Jornada y Horas» y «⏱️ Mis Horas» se aíslan por el `user_id` del token (Art. V.4).
+
+---
+
+### 21. Órdenes de Carga y Cruce de Stock en Triaje (Módulo 23)
+* **Ciclo de la orden:** `PENDING_PICKING` → `DISPATCHED` → `CONFIRMED_BY_TECH`, con `CANCELLED` como salida justificada; solo puede existir una orden abierta por técnico, las líneas se dan de baja lógicamente (Art. III.1) y la cancelación exige 20 caracteres reales (Art. V.1).
+* **Propuesta y picking:** la consola de stock propone reposición por umbral y por averías con solicitud de pieza, genera órdenes en lote excluyendo ausentes y órdenes abiertas, y emite el Albarán de Picking A4 sin importes (Art. V.4). La recepción móvil en un toque incrementa el stock de forma transaccional y deja el evento en auditoría.
+* **Cruce informativo en triaje:** el recomendador evalúa el stock en dos niveles —solicitudes pendientes del expediente o referencias compatibles con modelo y categoría— y publica `van_stock_match` con su insignia. Los saldos negativos valen cero y el bloque **no altera** la puntuación territorial ni la prioridad sanitaria (Art. II).
+
+---
+
+### 22. Modo Sin Conexión e Instalabilidad Móvil (Módulo 24)
+* **PWA instalable y app shell precacheado:** manifest e iconos SVG propios, Service Worker con precache del shell completo y **Network-Only estricto** para `/api/*` y métodos no GET: la API jamás se sirve desde caché (Art. V.4).
+* **Copia local con vigencia:** `IndexedDB` guarda el paquete de ruta aislado por `technician_id`, fresco hasta 4 h, con aviso ámbar hasta 12 h y solo lectura a partir de ahí.
+* **Cola idempotente y tiempo real:** las 9 operaciones de parada se encolan en FIFO con `client_mutation_id` y doble sello temporal; Δt se preserva aunque el reloj del móvil esté desajustado, y el precinto físico in situ es obligatorio ante riesgo sanitario (Art. II).
+* **Conflictos sin pérdida:** la cola admite 5 fotografías / 25 MB (la firma PNG queda exenta), el volcado en un toque se archiva como Nota Interna de Taller —incluidas averías canceladas, cerradas > 48 h y órdenes preventivas— y la retención de la cuarentena sanitaria a las 4 h es innegociable. El cierre de sesión se bloquea con cola viva, la re-autenticación exige el mismo técnico y la baja de cuenta vuelca y limpia el dispositivo.
+
+---
+
+### 23. Taxonomía de Causas Raíz y Análisis Pareto 80/20 (Módulo 25)
 * **Catálogo maestro gobernado por Coordinación:** 16 causas raíz y 34 soluciones estandarizadas repartidas en las cinco categorías técnicas, con código y categoría inmutables, baja lógica sin borrado físico y una única solución predeterminada activa por causa. El alta es atómica con su primera solución, las guardas impiden dejar una causa activa sin predeterminada y cada cambio registra en auditoría el estado anterior y el nuevo (Art. III.3).
 * **Captura en la resolución:** el selector está en la vista del técnico de ruta, en la avería oportunista y en el cierre desde Coordinación; prioriza las causas de la categoría del aviso, ofrece «Mostrar todas» y preselecciona la solución predeterminada. Es obligatorio en la interfaz y en toda llamada que envíe taxonomía o `require_taxonomy` —las llamadas históricas sin claves conservan la compatibilidad del contrato §4.3—, sin rellenar ni sumar caracteres a los dos textos libres de 20 caracteres (Art. V.1).
 * **Copia congelada y rastro de reaperturas:** el cierre guarda las referencias y cinco snapshots (código, categoría y nombre de la causa; código y nombre de la solución). La ficha y el historial técnico muestran esa etiqueta congelada; una reapertura en garantía (< 48 h) actualiza el cierre vigente conservando en la línea de tiempo la clasificación anterior. La retirada por 3.ª reincidencia crónica queda exenta y el volcado de una resolución sin conexión preserva la pareja declarada in situ.
