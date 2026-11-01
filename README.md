@@ -9,13 +9,14 @@
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
 
-El sistema erradica de raíz los problemas críticos del sector vending mediante seis pilares:
+El sistema erradica de raíz los problemas críticos del sector vending mediante siete pilares:
 1. **Preservación de la cadena de frío (Art. II Constitución):** Detección inmediata y forzado de prioridad máxima (**CRÍTICA / Innegociable**) en máquinas con alimentos perecederos con objetivo estricto de SLA < 4.0 horas.
 2. **Prevención atómica de duplicados:** Índice atómico en base de datos (`uq_machine_active_ticket`) que imposibilita la creación de tickets concurrentes para una misma máquina.
 3. **Justificación obligatoria de intervenciones (Art. V.1):** Prohibición terminante de resolver incidencias sin registrar diagnóstico técnico real ($\ge 20$ caracteres) y acción correctiva demostrable ($\ge 20$ caracteres).
 4. **Trazabilidad y auditoría permanente (Art. III):** Borrado físico estrictamente prohibido (*Soft Delete* obligatorio) y registro inmutable *Append-Only* (`audit_log`) con ventana de garantía de 48 horas y detección de averías crónicas.
 5. **Trazabilidad económica de repuestos (Módulo M2):** Catálogo maestro por modelo de máquina con *snapshot* inmutable de coste en cada intervención, clasificación cerrada de destino (`DESGUACE`/`TALLER`) y segregación estricta de datos de piezas y costes para el Responsable de Sede (Art. V.4).
 6. **Cartografía territorial y optimización de rutas (Módulo M4):** Proyección pura Web Mercator y secuenciación heurística en 4 fases sin librerías de terceros ni claves de API privadas (Dogma Vanilla), con visión unificada para Coordinación y navegación GPS móvil asistida para Técnicos de Campo, garantizando estricta segregación de datos frente a clientes (Art. V.4).
+7. **Análisis de causas raíz y Diagrama de Pareto (Módulo 25):** Catálogo maestro normalizado de causas y soluciones estandarizadas que convierte el diagnóstico libre en una clasificación medible; el Pareto 80/20 cruza frecuencia, tiempo de reparación y coste de repuestos por fabricante, modelo y categoría, y exporta un CSV de dos secciones para reclamaciones de garantía (Art. III.3 y V.4).
 
 ---
 
@@ -25,7 +26,7 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 
 * **Dogma Vanilla (Cero Bloatware):**
   * **Backend:** PHP 8.2+ moderno puro orientado a objetos (*Clean Architecture*), tipado estricto en el 100% de ficheros (`declare(strict_types=1);`), persistencia nativa con **PDO** y generación algorítmica de códigos QR en SVG sin extensiones externas (`imagick` no requerida). Cero dependencias externas (`composer.json` / `vendor/` ausentes en runtime).
-  * **Frontend:** Vue.js 3 estándar modularizado mediante **ES Modules** nativos (`type="module"`), consumiendo directamente la API REST con `fetch()`. Cero empaquetadores o dependencias pesadas (`node_modules/` ausente en runtime).
+  * **Frontend:** Vue.js 3 estándar modularizado mediante **ES Modules** nativos (`type="module"`), consumiendo directamente la API REST con `fetch()`. Cero empaquetadores o dependencias pesadas (`node_modules/` ausente en runtime). La única librería de terceros es **Chart.js 4.x**, copiada en `public/assets/js/vendor/` y precacheada por el Service Worker: sin CDN, sin `npm` y sin red externa (Art. IV.3).
 * **Dualismo Lingüístico Estricto:**
   * **Inglés:** Clases, métodos, variables, contratos de API, base de datos, suites de pruebas y commits (*Conventional Commits*).
   * **Castellano:** Documentación de negocio, análisis funcional, mensajes de validación y diálogo de cara al usuario final.
@@ -164,6 +165,16 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 
 ---
 
+### 17. Taxonomía de Causas Raíz y Análisis Pareto 80/20 (Módulo 25)
+* **Catálogo maestro gobernado por Coordinación:** 16 causas raíz y 34 soluciones estandarizadas repartidas en las cinco categorías técnicas, con código y categoría inmutables, baja lógica sin borrado físico y una única solución predeterminada activa por causa. El alta es atómica con su primera solución, las guardas impiden dejar una causa activa sin predeterminada y cada cambio registra en auditoría el estado anterior y el nuevo (Art. III.3).
+* **Captura en la resolución:** el selector está en la vista del técnico de ruta, en la avería oportunista y en el cierre desde Coordinación; prioriza las causas de la categoría del aviso, ofrece «Mostrar todas» y preselecciona la solución predeterminada. Es obligatorio en la interfaz y en toda llamada que envíe taxonomía o `require_taxonomy` —las llamadas históricas sin claves conservan la compatibilidad del contrato §4.3—, sin rellenar ni sumar caracteres a los dos textos libres de 20 caracteres (Art. V.1).
+* **Copia congelada y rastro de reaperturas:** el cierre guarda las referencias y cinco snapshots (código, categoría y nombre de la causa; código y nombre de la solución). La ficha y el historial técnico muestran esa etiqueta congelada; una reapertura en garantía (< 48 h) actualiza el cierre vigente conservando en la línea de tiempo la clasificación anterior. La retirada por 3.ª reincidencia crónica queda exenta y el volcado de una resolución sin conexión preserva la pareja declarada in situ.
+* **Diagrama de Pareto 80/20:** la pestaña **🔍 Pareto Causas Raíz** del cuadro de mando parte de las averías resueltas/cerradas por fecha de resolución vigente, cuenta un único voto por expediente y calcula porcentajes a dos decimales que cierran en `100,00 %`; la Zona Vital alcanza la primera causa que cruza el `80,00 %`. Cruza averías, MTTR en horas, unidades y coste de repuestos y solución más aplicada, con filtros por periodo, fabricante normalizado, modelo exacto y categoría, contador separado de históricas sin clasificar y estado vacío seguro. La exportación CSV (UTF-8 BOM, dos secciones) incluye el nombre vigente y el congelado, y queda auditada.
+* **Privacidad y mínimo privilegio (Art. V.4):** el catálogo, las etiquetas y el Pareto están vedados al Portal de Sede, al canal QR y al Albarán A4. Coordinación es el único rol que consulta el Pareto, exporta el CSV o gobierna el catálogo; el técnico solo lee el catálogo activo y las etiquetas de sus expedientes. Cualquier otro acceso responde `403`.
+* **Motor y rendimiento:** tablas 35 (`root_causes`) y 36 (`standard_solutions`), siete columnas de taxonomía en `incidents` con `CHECK` todo-o-nada, índice parcial único de predeterminada e índice `idx_incidents_pareto_resolved`; disparadores de inmutabilidad sobre código y categoría. El gráfico combinado usa Chart.js 4.x servido localmente y precacheado (Art. IV.3), y el Pareto queda certificado por debajo de 500 ms con 10.000 incidencias.
+
+---
+
 ## 👥 Actores del Sistema y Credenciales de Demostración
 
 La aplicación cuenta con un conmutador de perfiles en la barra superior para alternar de forma inmediata entre roles:
@@ -171,8 +182,8 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 | Perfil / Actor | Identificador / Email | Contraseña / Código | Función Principal |
 | :--- | :--- | :--- | :--- |
 | **🏢 1. Responsable de Sede** | `SEDE-BCN-01` *(Hospital del Mar)*<br>`SEDE-BCN-02` *(Torre Glòries)* | Código + `DEV-<site_code>` *(clave de desarrollo, ver nota)* | Supervisa máquinas del edificio, reporta averías (< 2 min), anexa evidencias y reabre en garantía. |
-| **📊 2. Coordinador de Operaciones** | `coordinacion@vendguard.internal` | `Password123!` | Triaje central, supervisión 24/7 de SLAs, administración del parque y personal, preventivos y certificados sanitarios, catálogo y analítica de repuestos, cuadro de mando de métricas y visor de auditoría. Supervisa además la pausa de espera de sede (reanudación manual y cancelación por inactividad) y la superficie operativa del barrido sanitario. |
-| **📱 3. Técnico de Ruta de Campo** | `jordi.ruta@vendguard.internal`<br>`marta.ruta@vendguard.internal` | `Password123!` | Interfaz vertical *mobile-first*, gestión de averías en ruta, inicio de intervención, pausa estructurada por repuestos o por falta de acceso al inmueble (pausa de sede), resolución justificada con piezas sustituidas, hilo de conversación del expediente, inspecciones preventivas, consulta del historial de la máquina y métricas individuales. |
+| **📊 2. Coordinador de Operaciones** | `coordinacion@vendguard.internal` | `Password123!` | Triaje central, supervisión 24/7 de SLAs, administración del parque y personal, preventivos y certificados sanitarios, catálogo y analítica de repuestos, cuadro de mando de métricas y visor de auditoría, gobierno del catálogo de causas raíz y análisis Pareto 80/20 de garantías. Supervisa además la pausa de espera de sede (reanudación manual y cancelación por inactividad) y la superficie operativa del barrido sanitario. |
+| **📱 3. Técnico de Ruta de Campo** | `jordi.ruta@vendguard.internal`<br>`marta.ruta@vendguard.internal` | `Password123!` | Interfaz vertical *mobile-first*, gestión de averías en ruta, inicio de intervención, pausa estructurada por repuestos o por falta de acceso al inmueble (pausa de sede), resolución justificada con piezas sustituidas y causa raíz, hilo de conversación del expediente, inspecciones preventivas, consulta del historial de la máquina y métricas individuales. |
 | **🤳 4. Usuario / Consumidor Final** | Enlace QR (`?code=VEND-0101`) | *Público / Sin registro* | Reporte inmediato in situ escaneando la pegatina de la máquina, con feedback de estado si ya estaba reportada. |
 
 > **Clave de centro de desarrollo (cierre de S-4).** En pruebas, las semillas emiten una clave determinista por sede; para el trabajo manual en local hay que pedirla de forma explícita (`VENDGUARD_DEV_SITE_KEYS=1 php bin/seed.php`). La regla es `DEV-<site_code>` (p. ej. `DEV-SEDE-BCN-01`). En producción el campo no se siembra jamás: cada sede recibe su clave aleatoria al alta o al reemitirse desde coordinación, se muestra una sola vez y solo se guarda su huella bcrypt. Sin clave emitida, el acceso de la sede falla en cerrado.
@@ -197,12 +208,12 @@ php bin/init_cloud_db.php
 # O ejecutar migraciones de forma independiente:
 php bin/migrate.php
 
-# Cargar el histórico de demostración portable (17 averías canónicas INC-DEMO-*):
+# Cargar el histórico de demostración portable (17 averías canónicas INC-DEMO-*; diez de ellas llegan clasificadas para el Pareto):
 php bin/seed_demo_history.php
 ```
 
 #### Entorno Cloud / Producción (Render + Supabase PostgreSQL):
-El script [`bin/init_cloud_db.php`](bin/init_cloud_db.php) es el único punto de convergencia del esquema y no es tolerante a medias: aplica el DDL base (`database/supabase_init.sql`), **todas las migraciones incrementales** de `database/supabase_migrations/` (hoy 001–009, de ahí que una base ya desplegada converja en cada arranque), el catálogo maestro (`database/supabase_seeds.sql`) y el histórico de demostración. Todo está declarado con `IF NOT EXISTS` y semillas «insertar si no existe», así que reejecutarlo no duplica nada. Si cualquier paso falla, el script reintenta con espera progresiva y, agotados los intentos, **sale con código distinto de cero**: con el `&&` del arranque, el contenedor no levanta y no se sirve tráfico contra un esquema sin verificar (EARS-02.5).
+El script [`bin/init_cloud_db.php`](bin/init_cloud_db.php) es el único punto de convergencia del esquema y no es tolerante a medias: aplica el DDL base (`database/supabase_init.sql`), **todas las migraciones incrementales** de `database/supabase_migrations/` (hoy 001–021, de ahí que una base ya desplegada converja en cada arranque), el catálogo maestro (`database/supabase_seeds.sql`) y el histórico de demostración. Todo está declarado con `IF NOT EXISTS` y semillas «insertar si no existe», así que reejecutarlo no duplica nada. Si cualquier paso falla, el script reintenta con espera progresiva y, agotados los intentos, **sale con código distinto de cero**: con el `&&` del arranque, el contenedor no levanta y no se sirve tráfico contra un esquema sin verificar (EARS-02.5).
 ```powershell
 DATABASE_URL="postgres://usuario:clave@aws-0-<region>.pooler.supabase.com:6543/postgres?sslmode=verify-full" php bin/init_cloud_db.php
 ```
@@ -314,7 +325,7 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/technician/machines/{id}/history` | `TECHNICIAN` | Historial de averías de la máquina de la ruta (solo lectura, Art. V.4). |
 | `PATCH`| `/api/technician/incidents/{id}/start` | `TECHNICIAN` | Inicio de intervención física in situ (`started_at`). |
 | `PATCH`| `/api/technician/incidents/{id}/pause` | `TECHNICIAN` | Pausa estructurada por repuestos (`PENDING_PARTS`) con selección compatible o pieza fuera de catálogo. |
-| `POST`| `/api/technician/incidents/{id}/resolve`| `TECHNICIAN` | Resolución técnica documentada ($\ge 20$ chars diagnóstico y acción). |
+| `POST`| `/api/technician/incidents/{id}/resolve`| `TECHNICIAN` | Resolución técnica documentada ($\ge 20$ chars diagnóstico y acción) con Causa Raíz y Solución Estandarizada (Módulo 25). |
 | `POST`| `/api/cron/auto-close` | Clave Cron | Cierre definitivo automático tras 48h de garantía. |
 | `POST`| `/api/cron/sanitary-clock-sweep` | Clave Cron | Barrido de fondo del Reloj Sanitario Biológico: activa la cuarentena sin intento de cierre (latencia ≤ 15 min). |
 | `POST`| `/api/cron/notifications-dispatch` | Clave Cron | Pasada del despachador de notificaciones: rescate de envíos en tránsito, vigilancia de SLA (2h/3h) y entrega con prioridad `CRITICAL_SANITARY`. |
@@ -445,9 +456,22 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/technician/incidents/{id}/service-sheet` | `TECHNICIAN` | Albarán de la resolución vigente con documento congelado, hoja, historial y vigencia. Autoriza el técnico asignado o quien firmó alguna hoja; `?sheet_id=` sirve una hoja histórica. |
 | `GET` | `/api/coordinator/incidents/{id}/service-sheet` | `COORDINATOR` | Mismo contrato de lectura para el panel de triaje: cualquier expediente, incluida la hoja histórica de una avería reabierta. |
 
+#### Taxonomía de Causas Raíz y Análisis Pareto (Módulo 25)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/technician/root-causes` | `TECHNICIAN` · `COORDINATOR` | Catálogo activo de causas y soluciones para el selector de resolución y la copia sin conexión (RF-02.3). |
+| `GET` | `/api/coordinator/root-causes` | `COORDINATOR` | Catálogo completo con sus soluciones y contadores para la administración. |
+| `POST` | `/api/coordinator/root-causes` | `COORDINATOR` | Alta atómica de causa raíz con su primera solución predeterminada (409 si el código ya existe). |
+| `PUT` | `/api/coordinator/root-causes/{id}` | `COORDINATOR` | Edición de nombre, descripción y vigencia; código y categoría permanecen inmutables. |
+| `POST` | `/api/coordinator/root-causes/{id}/solutions` | `COORDINATOR` | Alta de solución estandarizada; el cambio de predeterminada es atómico. |
+| `PUT` | `/api/coordinator/root-causes/{id}/solutions/{solutionId}` | `COORDINATOR` | Edición y baja/reactivación con guardas de predeterminada única. |
+| `GET` | `/api/coordinator/metrics/root-causes-pareto` | `COORDINATOR` | Pareto 80/20 con filtros de periodo, fabricante, modelo y categoría; incluye históricas sin clasificar, MTTR y costes. |
+| `GET` | `/api/coordinator/metrics/root-causes-pareto/export` | `COORDINATOR` | CSV UTF-8 BOM en dos secciones (resumen y detalle nominal) con nombres vigente y congelado; registra la exportación. |
+| `POST` | `/api/coordinator/incidents/{id}/resolve` | `COORDINATOR` | Cierre desde triaje con `require_taxonomy`: exige causa y solución para pasar a `RESOLVED`. |
+
 ---
 
-## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1, M2 y M4)
+## 🧪 Batería Completa de Pruebas Automatizadas (T-39)
 
 La integridad de VendGuard está certificada mediante un ejecutor de pruebas automatizado nativo, ejecutado en fases continuas (unitarias PHP, unitarias reactivas JS, integración HTTP real, guion E2E de los tres perfiles y guarda de coherencia entre las cifras documentadas y las ejecutadas):
 
@@ -501,6 +525,9 @@ Entre las suites de certificación destacan:
 * **`SuggestedTechniciansApiTest` / `ColdChainOverrideJustificationTest` (Módulo 17)** — ranking determinista con mediana inferior a 100 ms, salvaguarda del Art. V.1 con umbral de 20 caracteres reales y registro del descarte en `audit_log`.
 * **`OperationalZoneManagementTabTest.mjs` / `CoordinatorDashboardAssignPanelTest.mjs` (Módulo 17)** — consola territorial de administración, despacho del sugerido en dos toques, justificación sanitaria dinámica y filtro de zona del mapa de coordinación.
 * **`OpportunisticFrontendIntegrationTest.mjs` (Módulo 16)** — tarjeta temporal de 30 minutos, entrada oportunista desde la parada activa y desde la inspección preventiva, agrupación en Parada #1, KPI de desplazamientos evitados y alias constitucional del técnico en el portal de sede.
+* **`RootCauseTaxonomyIntegrationTest` / `RootCauseTaxonomyServiceTest` (Módulo 25)** — catálogo atómico e inmutable, guardas de baja/reactivación, captura obligatoria, snapshots congelados, reaperturas y `403` en Pareto, CSV y CRUD para técnicos y sedes.
+* **`RootCauseParetoServiceTest` / `ResolutionTaxonomyValidatorTest` (Módulo 25)** — 80/20 con cierre exacto en `100,00 %`, filtros y empates, CSV de dos secciones, independencia de los 20 caracteres y tolerancia a la sincronización diferida.
+* **`RootCauseTaxonomyFrontendAndPwaTest.mjs` (Módulo 25)** — selector en ruta, etiquetas en el detalle y el historial, pestaña Pareto con Chart.js local precacheado y opacidad total en sede, QR y albarán.
 
 > **Nota operativa:** las suites de integración incluyen pruebas de HTTP real contra `127.0.0.1:8000`. Si el puerto está ocupado por un servidor obsoleto, arránquelo antes con `php -S 127.0.0.1:8000 -t public public/index.php`.
 
@@ -514,15 +541,17 @@ php tests/run_new_engine.php                # las 32 suites del canal
 php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 ```
 
-El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla.
+El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla. La medición del pooler remoto sigue siendo la evidencia de RNF-01: si el enlace del proveedor incumple el presupuesto de 250 ms en alguna operación, el canal publica el fallo con su mediana y su p95, sin convertirlo en omisión.
+
+Corrida de certificación del 30 de octubre de 2026:
 
 ```text
 ======================================================================
  RESUMEN DEL CANAL new_engine
- Suites evaluadas    : 28
- Suites en verde     : 28
+ Suites evaluadas    : 32
+ Suites en verde     : 32
  No ejecutables      : 0
- Aserciones          : 842
+ Aserciones          : 963
  Fallos              : 0
  RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 ======================================================================
@@ -530,7 +559,7 @@ El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o c
 
 El canal incluye además `OfflineSyncLockBrowserTest`, única suite que exige **navegador real**: abre dos pestañas de Chromium sobre el mismo perfil, comparte `IndexedDB` entre ambas y comprueba con un servidor de pruebas que el cerrojo `vendguard-offline-sync` impide dos envíos en vuelo y que el control negativo sin cerrojo sí los detecta. La quinta sección oculta `navigator.locks` en las dos pestañas —lo que ve una PWA servida por HTTP plano— y verifica que el arriendo en `localStorage` sostiene la misma exclusión (16 aserciones en total).
 
-Entre las suites específicas de este canal se encuentran `PostgresTimeTrackingSchemaTest` (Módulo 22 · integridad relacional de `technician_shifts` y `technician_shift_logs`), `PostgresConstitutionalTest` (Art. III.1 en 33 tablas relacionales), `PostgresAbsenceShiftSchemaTest` (Módulo 21), `PostgresSatisfactionSurveySchemaTest` (Módulo 20), `PostgresServiceSheetSchemaTest` (Módulo 19), `PostgresVanRestockSchemaTest` (Módulo 23 · órdenes de carga y baja lógica), `PostgresVanStockSchemaTest` (Módulo 18) y `PostgresZoneSchemaTest` (Módulo 17).
+Entre las suites específicas de este canal se encuentran `PostgresTimeTrackingSchemaTest` (Módulo 22 · integridad relacional de `technician_shifts` y `technician_shift_logs`), `PostgresConstitutionalTest` (Art. III.1 en 33 tablas relacionales), `PostgresAbsenceShiftSchemaTest` (Módulo 21), `PostgresSatisfactionSurveySchemaTest` (Módulo 20), `PostgresServiceSheetSchemaTest` (Módulo 19), `PostgresVanRestockSchemaTest` (Módulo 23 · órdenes de carga y baja lógica), `PostgresVanStockSchemaTest` (Módulo 18), `PostgresZoneSchemaTest` (Módulo 17), `PostgresRootCauseTaxonomySchemaTest` (Módulo 25 · tablas 35/36, columnas congeladas, predeterminada única e inmutabilidad) y `RootCauseParetoPerformanceTest` (Módulo 25 · 10.000 averías bajo el umbral).
 
 ---
 
@@ -551,10 +580,10 @@ gestor-incidencias-vending/
 │   ├── sanitary_clock_sweep.php  # Barrido CLI del Reloj Sanitario Biológico (mismo reloj que el endpoint cron)
 │   └── send_notifications.php    # Worker CLI del despachador de notificaciones (mismo grafo que el endpoint cron)
 ├── database/
-│   ├── supabase_init.sql         # DDL canónico de PostgreSQL (20 tablas, 24 enumerados, disparadores)
+│   ├── supabase_init.sql         # DDL canónico de PostgreSQL (36 tablas, 30 enumerados, disparadores)
 │   ├── supabase_migrations/      # Migraciones incrementales canónicas del motor único
 │   ├── supabase_seeds.sql        # Catálogo maestro de semillas del motor único
-│   └── DemoHistorySeeder.php     # Histórico de demostración portable: 17 averías (13 cerradas y 4 en garantía, dos reabiertas), traza y auditoría
+│   └── DemoHistorySeeder.php     # Histórico de demostración portable: 17 averías (13 cerradas y 4 en garantía, dos reabiertas; diez clasificadas con causa raíz), traza y auditoría
 ├── deploy/
 │   ├── cron/                     # Crontab interno del contenedor (barrido sanitario y despachador de notificaciones)
 │   ├── cloudflare/               # Relé gratuito de Cloudflare Worker para el Webhook de Telegram y Cron opcional
@@ -588,6 +617,14 @@ gestor-incidencias-vending/
 │   ├── 15-telegram-technician-alerts/# Especificación de alertas directas a técnicos vía Bot de Telegram
 │   ├── 16-opportunistic-incident/# Especificación de atención y asunción oportunista de averías en ruta
 │   ├── 17-operational-zones/     # Especificación de zonificación operativa y asignación asistida por territorio
+│   ├── 18-van-stock/             # Especificación del stock de repuestos en furgoneta
+│   ├── 19-digital-signature/     # Especificación de firma digital en móvil y albarán de servicio
+│   ├── 20-csat-satisfaction-survey/# Especificación de la encuesta de satisfacción post-resolución
+│   ├── 21-absence-shift-handover/# Especificación de ausencias temporales y relevo de turno
+│   ├── 22-technician-time-tracking/# Especificación de registro de jornada y horas efectivas
+│   ├── 23-van-restock-stock-aware-triage/# Especificación de órdenes de carga y cruce de stock en triaje
+│   ├── 24-offline-pwa/           # Especificación del modo sin conexión e instalabilidad móvil
+│   ├── 25-root-cause-taxonomy/   # Especificación de taxonomía de causas raíz y análisis de Pareto
 │   ├── functional/               # Especificaciones funcionales EARS transversales
 │   └── technical/                # Contratos de API, DDL y esquemas de base de datos
 ├── src/
@@ -608,7 +645,7 @@ gestor-incidencias-vending/
 │           ├── app.js            # Montaje raíz Vue 3 con conmutador de perfiles
 │           ├── api.js            # Cliente HTTP nativo fetch con descargas autenticadas
 │           ├── store.js          # Almacén reactivo de sesión y alertas
-│           ├── vendor/           # Vue 3 ESM embebido (sin CDN ni npm)
+│           ├── vendor/           # Vue 3 ESM y Chart.js 4.x embebidos (sin CDN ni npm)
 │           ├── utils/            # Cartografía Web Mercator pura (Mercator.js) y gestos (MapZoomPan.js)
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
