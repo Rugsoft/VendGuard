@@ -499,6 +499,65 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/technician/incidents/{id}/service-sheet` | `TECHNICIAN` | Albarán de la resolución vigente con documento congelado, hoja, historial y vigencia. Autoriza el técnico asignado o quien firmó alguna hoja; `?sheet_id=` sirve una hoja histórica. |
 | `GET` | `/api/coordinator/incidents/{id}/service-sheet` | `COORDINATOR` | Mismo contrato de lectura para el panel de triaje: cualquier expediente, incluida la hoja histórica de una avería reabierta. |
 
+#### Stock de Repuestos en Furgoneta (Módulo 18)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/coordinator/van-stocks` | `COORDINATOR` | Inventario de furgonetas con saldo, umbral, descuadres y alerta ordenada por severidad. |
+| `PUT` | `/api/coordinator/van-stocks` | `COORDINATOR` | Fija el saldo absoluto de una pareja técnico-pieza y audita el delta. |
+| `GET` | `/api/technician/van-stock` | `TECHNICIAN` | Saldo de la furgoneta del técnico autenticado, en solo lectura. |
+
+#### Encuesta de Satisfacción Post-Resolución (Módulo 20)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/location/satisfaction-surveys/pending` | `LOCATION_MANAGER` | Episodios pendientes de valorar por la sede, con `pending_total` real. |
+| `POST` | `/api/location/incidents/{id}/satisfaction-survey` | `LOCATION_MANAGER` | Registra 1–5 estrellas y comentario ≤ 500; `409` si el episodio ya fue valorado e inmutable después. |
+| `GET` | `/api/coordinator/metrics/csat` | `COORDINATOR` | Media, respuestas, distribución 5→1, tablas por sede y técnico y tendencia bajo el filtro temporal. |
+| `GET` | `/api/technician/my-metrics/csat` | `TECHNICIAN` | CSAT de solo lectura del técnico autenticado (incremento 20.1). |
+
+#### Ausencias y Relevo de Turno (Módulo 21)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/coordinator/technicians/absences` | `COORDINATOR` | Ausencias activas y programadas de la plantilla técnica. |
+| `POST` | `/api/coordinator/technicians/{id}/absences` | `COORDINATOR` | Alta de vacaciones, baja, formación o fuera de turno con ventana temporal, sin desactivar la cuenta. |
+| `DELETE` | `/api/coordinator/absences/{id}` | `COORDINATOR` | Cancela la ausencia con motivo (≥ 5 caracteres) y deja rastro en auditoría. |
+| `GET` | `/api/coordinator/technicians/{id}/shift` | `COORDINATOR` | Estado de jornada vigente del técnico (`ON_SHIFT`, `MEAL_BREAK`, `OFF_SHIFT`). |
+| `POST` | `/api/coordinator/technicians/{id}/shifts/force-close` | `COORDINATOR` | Cierre forzado con traspaso asistido de la cola y salvaguarda sanitaria. |
+| `GET` | `/api/technician/handover-targets` | `TECHNICIAN` | Compañeros activos disponibles para el relevo, sin exponer el cuadrante interno. |
+| `GET` | `/api/technician/shift/status` | `TECHNICIAN` | Estado de la jornada propia y del turno abierto. |
+| `POST` | `/api/technician/shift/start` | `TECHNICIAN` | Inicia turno y abre una sesión de jornada. |
+| `POST` | `/api/technician/shift/pause-meal` | `TECHNICIAN` | Pausa de comida acumulable al segundo. |
+| `POST` | `/api/technician/shift/resume` | `TECHNICIAN` | Reanuda el turno tras la pausa. |
+| `POST` | `/api/technician/shift/close-handover` | `TECHNICIAN` | Cierra jornada y traspasa la cola con nota interna obligatoria; bloquea con averías `IN_PROGRESS`. |
+
+#### Registro de Jornada y Horas Efectivas (Módulo 22)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/coordinator/shifts/{id}/logs` | `COORDINATOR` | Bitácora inmutable del turno (`START_SHIFT`, pausas, cierre y ajustes). |
+| `PATCH` | `/api/coordinator/shifts/{id}/adjust` | `COORDINATOR` | Rectifica un turno cerrado con validación cuádruple y motivo ≥ 20 caracteres. |
+| `GET` | `/api/coordinator/metrics/work-hours` | `COORDINATOR` | Informe por periodo: horas brutas, comida, netas, ruta e intervenciones resueltas. |
+| `GET` | `/api/coordinator/metrics/work-hours/export` | `COORDINATOR` | CSV UTF-8 BOM con dos secciones en `Europe/Madrid`. |
+| `GET` | `/api/technician/shift/my-hours` | `TECHNICIAN` | Horas propias del técnico autenticado, aisladas por el `user_id` del token. |
+
+#### Órdenes de Carga y Cruce de Stock (Módulo 23)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/coordinator/van-restock-orders/proposals` | `COORDINATOR` | Propuesta de reposición por umbral, descuadre y averías con solicitud de pieza. |
+| `POST` | `/api/coordinator/van-restock-orders/generate-batch` | `COORDINATOR` | Genera órdenes en lote excluyendo ausentes y técnicos con orden abierta. |
+| `GET` | `/api/coordinator/van-restock-orders` | `COORDINATOR` | Listado de órdenes con estado, destinatario y líneas. |
+| `POST` | `/api/coordinator/van-restock-orders` | `COORDINATOR` | Alta manual de orden en `PENDING_PICKING`. |
+| `GET` | `/api/coordinator/van-restock-orders/{id}` | `COORDINATOR` | Detalle con cantidades solicitadas y despachadas. |
+| `PUT` | `/api/coordinator/van-restock-orders/{id}` | `COORDINATOR` | Edita líneas mientras la orden sigue en `PENDING_PICKING` (baja lógica, Art. III.1). |
+| `POST` | `/api/coordinator/van-restock-orders/{id}/dispatch` | `COORDINATOR` | Despacho con cantidades reales; pasa a `DISPATCHED`. |
+| `POST` | `/api/coordinator/van-restock-orders/{id}/cancel` | `COORDINATOR` | Cancelación justificada (≥ 20 caracteres) y auditada. |
+| `POST` | `/api/technician/van-stock/restock-orders/{id}/confirm` | `TECHNICIAN` | Recepción móvil en un toque; incrementa el stock de forma transaccional. |
+
+#### Modo Sin Conexión e Instalabilidad Móvil (Módulo 24)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/technician/offline/bootstrap` | `TECHNICIAN` | Paquete de ruta completo para `IndexedDB`: paradas, catálogo, taxonomía y contexto de sincronización. |
+| `POST` | `/api/technician/offline/conflicts/dump` | `TECHNICIAN` | Archiva la cola conflictiva como Nota Interna de Taller, incluidas cerradas > 48 h y preventivas. |
+| `POST` | `/api/technician/offline/deactivated-account-dump` | `TECHNICIAN` | Volcado de la cola de un técnico dado de baja; exige cuenta inactiva y el token del propio técnico. |
+
 #### Taxonomía de Causas Raíz y Análisis Pareto (Módulo 25)
 | Método | Endpoint | Rol | Descripción del Recurso |
 | :--- | :--- | :--- | :--- |
