@@ -340,6 +340,20 @@ final class ShiftHandoverService
         $technicianId = (int)$technician->getId();
         $targetTechnicianId = $targetTechnician?->getId();
 
+        // QA 3: un cierre forzado lo firma una persona, no el sistema. El motivo
+        // administrativo viaja con la reasignación para que el tramo abierto en
+        // `incident_assignments` explique por qué cambió de manos la avería.
+        $forcedReasonSuffix = ($isForceClosed && $closeReason !== null && trim($closeReason) !== '')
+            ? ' Motivo administrativo: ' . trim($closeReason) . '.'
+            : '';
+
+        // QA 3: un cierre forzado lo firma una persona, no el sistema. El motivo
+        // administrativo viaja con la reasignación para que el tramo abierto en
+        // `incident_assignments` explique por qué cambió de manos la avería.
+        $forcedReasonSuffix = ($isForceClosed && $closeReason !== null && trim($closeReason) !== '')
+            ? ' Motivo administrativo: ' . trim($closeReason) . '.'
+            : '';
+
         $this->pdo->beginTransaction();
 
         try {
@@ -394,10 +408,10 @@ final class ShiftHandoverService
                 $after = $this->incidentRepo->assign(
                     incidentId: $id,
                     technicianId: (int)$targetTechnicianId,
-                    coordinatorId: null,
+                    coordinatorId: $closedBy > 0 ? $closedBy : null,
                     urgencyOverride: null,
                     urgencyReason: null,
-                    reassignmentReason: $handoverNotes ?? 'Relevo de fin de turno'
+                    reassignmentReason: ($handoverNotes ?? 'Relevo de fin de turno') . $forcedReasonSuffix . $forcedReasonSuffix
                 );
 
                 $comment = new IncidentComment(
@@ -476,10 +490,10 @@ final class ShiftHandoverService
                     $after = $this->incidentRepo->assign(
                         incidentId: $remId,
                         technicianId: $guard->getId(),
-                        coordinatorId: null,
+                        coordinatorId: $closedBy > 0 ? $closedBy : null,
                         urgencyOverride: null,
                         urgencyReason: null,
-                        reassignmentReason: 'Protocolo sanitario Art. II: traspaso por fin de turno sin relevo a guardia de frío'
+                        reassignmentReason: 'Protocolo sanitario Art. II: traspaso por fin de turno sin relevo a guardia de frío' . $forcedReasonSuffix . $forcedReasonSuffix
                     );
 
                     $comment = new IncidentComment(

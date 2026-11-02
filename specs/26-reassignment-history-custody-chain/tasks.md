@@ -148,7 +148,7 @@
        * Motor de *Fallback* determinista en lectura (`synthesizeFallbackAssignments`) cuando `assignments === []` pero la incidencia tiene o tuvo técnico asignado, aplicando `"SIN-CODIGO"`, `"Coordinación / Sistema"` y `"Registro histórico previo"` (`D4`, `QA 5`).
   * **Hecho cuando:** `php -l src/Application/DTO/CoordinatorIncidentDetailDto.php && php -l src/Application/Service/CoordinatorIncidentDetailService.php` no reporta errores de sintaxis.
 
-- [ ] **T-CUSTODY-08 · Propagación de autoría y contexto de custodia en `ShiftHandoverService`, `OpportunisticIncidentService`, `SparePartTraceabilityService`, `IncidentPauseService` y `OfflineSyncService`**
+- [x] **T-CUSTODY-08 · Propagación de autoría y contexto de custodia en `ShiftHandoverService`, `OpportunisticIncidentService`, `SparePartTraceabilityService`, `IncidentPauseService` y `OfflineSyncService`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-CUSTODY-07`
   * **Ficheros a crear o modificar:**
