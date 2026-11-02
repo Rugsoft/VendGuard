@@ -27,7 +27,7 @@
 
 ## Fase 1: Esquema de Base de Datos PostgreSQL / Supabase y Guardas de Esquema
 
-- [ ] **T-CUSTODY-01 · Migración `022_incident_assignments_custody_chain.sql`, convergencia en `supabase_init.sql` y semillas**
+- [x] **T-CUSTODY-01 · Migración `022_incident_assignments_custody_chain.sql`, convergencia en `supabase_init.sql` y semillas**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** Ninguna
   * **Ficheros a crear o modificar:**

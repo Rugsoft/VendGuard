@@ -2162,6 +2162,84 @@ class SeedRunner
      * @param string $defaultPassword
      * @return array<string, int> Resumen de filas procesadas.
      */
+    /**
+     * Reconstruye la cadena de custodia de los expedientes que aún no tienen tramos.
+     *
+     * POR QUÉ EXISTE
+     *   La cadena de custodia (Módulo 26) no es un catálogo que se siembre con
+     *   literales: nace de las transiciones reales de cada avería. Pero un banco de
+     *   pruebas —o un despliegue que reejecuta el arranque— puede tener expedientes
+     *   anteriores al módulo sin ningún tramo, y entonces la ficha de Coordinación
+     *   mostraría una cadena vacía donde hubo trabajo real (EARS 05.3).
+     *
+     * QUÉ HACE Y QUÉ NO
+     *   Inserta un tramo base por cada incidencia con técnico asignado que carezca
+     *   de tramos, con los valores de respaldo deterministas de QA 5 (`SIN-CODIGO`,
+     *   `Coordinación / Sistema`, `Registro histórico previo`), y sella el tramo si
+     *   el expediente ya terminó, aplicando `GREATEST(assigned_at, desenlace)` para
+     *   que ningún fin quede antes de su inicio (QA 4). No toca un histórico ya
+     *   escrito: el `NOT EXISTS` es la idempotencia y, además, los disparadores del
+     *   motor rechazarían cualquier reescritura (Art. III.3).
+     *
+     * Sobre un parque sin incidencias devuelve `0` y no inventa nada: el arranque en
+     * limpio es estricto (EARS-02.1).
+     *
+     * @return int Tramos insertados en esta pasada.
+     */
+    public function seedIncidentAssignments(): int
+    {
+        $statement = $this->pdo->prepare(
+            "INSERT INTO incident_assignments (
+                incident_id, technician_id, technician_name_snapshot, technician_code_snapshot,
+                assigned_by, assigned_by_name_snapshot, assignment_source, assigned_at,
+                unassigned_by, unassigned_by_name_snapshot, unassignment_reason_type,
+                reassignment_reason, unassigned_at, created_at
+             )
+             SELECT i.id, u.id, u.name,
+                    COALESCE(NULLIF(btrim(u.operator_code), ''), 'SIN-CODIGO'),
+                    NULL, 'Coordinación / Sistema',
+                    CAST('COORDINATOR_ASSIGN' AS incident_assignment_source),
+                    COALESCE(i.assigned_at, i.created_at),
+                    NULL,
+                    CASE
+                        WHEN i.status IN ('RESOLVED', 'CLOSED', 'CANCELLED')
+                        THEN 'Coordinación / Sistema'
+                    END,
+                    CASE
+                        WHEN i.status = 'CANCELLED'
+                        THEN CAST('CANCELLED' AS incident_unassignment_reason_type)
+                        WHEN i.status IN ('RESOLVED', 'CLOSED')
+                        THEN CAST('RESOLVED' AS incident_unassignment_reason_type)
+                    END,
+                    CASE
+                        WHEN i.status = 'CANCELLED' THEN left(
+                            COALESCE(NULLIF(btrim(i.cancellation_reason), ''), 'Registro histórico previo'),
+                            1000
+                        )
+                        WHEN i.status IN ('RESOLVED', 'CLOSED') THEN left(
+                            COALESCE(NULLIF(btrim(i.resolution_diagnosis), ''), 'Registro histórico previo'),
+                            1000
+                        )
+                    END,
+                    CASE
+                        WHEN i.status IN ('RESOLVED', 'CLOSED', 'CANCELLED') THEN GREATEST(
+                            COALESCE(i.assigned_at, i.created_at),
+                            COALESCE(i.resolved_at, i.cancelled_at, i.closed_at, i.created_at)
+                        )
+                    END,
+                    COALESCE(i.assigned_at, i.created_at)
+               FROM incidents i
+               JOIN users u ON u.id = i.assigned_technician_id
+              WHERE i.assigned_technician_id IS NOT NULL
+                AND NOT EXISTS (
+                    SELECT 1 FROM incident_assignments a WHERE a.incident_id = i.id
+                )"
+        );
+
+        $statement->execute();
+
+        return $statement->rowCount();
+    }
     public function seedAll(string $defaultPassword = 'Password123!'): array
     {
         $this->pdo->beginTransaction();
@@ -2196,6 +2274,10 @@ class SeedRunner
             // El libro de idempotencia del Módulo 24 se apoya en las órdenes
             // preventivas ya sembradas: sin ellas no hay parada a la que apuntar.
             $offlineSyncMutationCount = $this->seedOfflineSyncMutations();
+            // La cadena de custodia del Módulo 26 no tiene literales propios: se
+            // reconstruye para los expedientes que ya existan sin tramos. Sobre un
+            // parque recién sembrado devuelve 0 y no inventa averías.
+            $custodyAssignmentCount = $this->seedIncidentAssignments();
 
             $this->pdo->commit();
 
@@ -2216,6 +2298,7 @@ class SeedRunner
                 'technician_van_stocks' => $vanStockCount,
                 'van_restock_orders' => $vanRestockOrderCount,
                 'offline_sync_mutations' => $offlineSyncMutationCount,
+                'incident_assignments' => $custodyAssignmentCount,
             ];
         } catch (PDOException $e) {
             if ($this->pdo->inTransaction()) {
