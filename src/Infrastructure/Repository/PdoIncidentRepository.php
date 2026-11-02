@@ -2635,7 +2635,20 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     "SELECT h.id, h.user_id, h.from_status, h.to_status, h.action_note, h.created_at,\r\n                            u.name AS user_name, u.role AS user_role\r\n                     FROM incident_history h\r\n                     LEFT JOIN users u ON h.user_id = u.id\r\n                     WHERE h.incident_id = :incident_id\r\n                     ORDER BY h.created_at ASC, h.id ASC",
                     [':incident_id' => $incidentId]
                 ),
-                'comments' => $this->fetchAllRows(
+                // Cadena de custodia (Módulo 26, RNF-01): una sola consulta indexada,
+                // ordenada por el motor, dentro de la misma transacción de lectura. No
+                // se resuelve nombre por fila: los snapshots ya vienen congelados.
+                'assignments' => $this->fetchAllRows(
+                    "SELECT a.id, a.incident_id, a.technician_id, a.technician_name_snapshot,
+                            a.technician_code_snapshot, a.assignment_source, a.assigned_by,
+                            a.assigned_by_name_snapshot, a.assigned_at, a.unassigned_at,
+                            a.unassigned_by, a.unassigned_by_name_snapshot,
+                            a.unassignment_reason_type, a.reassignment_reason, a.created_at
+                     FROM incident_assignments a
+                     WHERE a.incident_id = :incident_id
+                     ORDER BY a.assigned_at ASC, a.id ASC",
+                    [':incident_id' => $incidentId]
+                ),                'comments' => $this->fetchAllRows(
                     "SELECT c.id, c.author_type, c.user_id, c.author_name, c.comment_text,\r\n                            c.photo_path, c.is_internal, c.created_at\r\n                     FROM incident_comments c\r\n                     WHERE c.incident_id = :incident_id\r\n                     ORDER BY c.created_at ASC, c.id ASC",
                     [':incident_id' => $incidentId]
                 ),
@@ -3981,6 +3994,16 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 );
             }
 
+            // Custodia (Módulo 26): la reapertura desasigna al técnico, así que un tramo
+            // heredado que siguiera abierto se sella antes de soltar la titularidad; de
+            // lo contrario quedaría un custodio activo sobre una avería sin técnico
+            // (Art. V.3, QA 4).
+            $this->closeActiveCustodySegmentInTransaction(
+                $incidentId,
+                IncidentUnassignmentReasonType::WARRANTY_REOPENED,
+                null,
+                'Sellado defensivo del tramo heredado al reabrir la avería desde el portal de sede.'
+            );
             // 4. Actualizar registro: status = REOPENED, desasignar técnico, reiniciar reloj 48h (resolved_at = NULL)
             $sql = "
                 UPDATE incidents
@@ -4084,6 +4107,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
             $stmt->execute();
 
+            // Custodia (Módulo 26): descartar un aviso cierra su tramo activo con la
+            // causa CANCELLED y el motivo del coordinador, sin borrar la tenencia del
+            // histórico (Art. III.1, QA 3).
+            $this->closeActiveCustodySegmentInTransaction(
+                $incidentId,
+                IncidentUnassignmentReasonType::CANCELLED,
+                $coordinatorId,
+                $trimmedReason
+            );
             // 4. Registrar evento de auditoría inmutable en incident_history
             $this->insertHistory(
                 $incidentId,
@@ -4324,6 +4356,16 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
             $stmt->execute();
 
+            // Custodia (Módulo 26): la resolución cierra el tramo activo en la misma
+            // transacción, con el diagnóstico como explicación y el suelo temporal que
+            // impide una duración negativa ante relojes de cliente desajustados (QA 3,
+            // QA 4). Si no había tramo abierto (expediente legado), no escribe nada.
+            $this->closeActiveCustodySegmentInTransaction(
+                $incidentId,
+                IncidentUnassignmentReasonType::RESOLVED,
+                $technicianId,
+                trim($diagnosis)
+            );
             // 5. Registrar evento de resolución en el historial inmutable
             $this->insertHistory(
                 $incidentId,
@@ -4593,6 +4635,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $updateStmt->bindValue(':id', $id, PDO::PARAM_INT);
                 $updateStmt->execute();
 
+                // Custodia (Módulo 26): el cierre automático a las 48 h sella cualquier
+                // tramo que siguiera abierto por un camino legado. Normalmente ya cerró
+                // en la resolución y esta llamada no escribe nada (QA 4).
+                $this->closeActiveCustodySegmentInTransaction(
+                    $id,
+                    IncidentUnassignmentReasonType::RESOLVED,
+                    null,
+                    'Cierre automático tras vencer la ventana de garantía de 48 h sin reapertura.'
+                );
                 // Registrar en historial inmutable
                 $this->insertHistory(
                     $id,

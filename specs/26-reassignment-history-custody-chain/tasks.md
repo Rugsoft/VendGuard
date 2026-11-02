@@ -110,7 +110,7 @@
        * Relevo de fin de turno: cierra el tramo del técnico saliente con `SHIFT_HANDOVER` registrando la autoría humana real (`technicianUserId` en cierre manual vs. `coordinatorUserId` en cierre administrativo forzado, `QA 3`) y, cuando el modo es `REASSIGN_TO_COLLEAGUE`, abre el tramo del compañero receptor con `SHIFT_HANDOVER_RELEASE`.
   * **Hecho cuando:** `php -l src/Infrastructure/Repository/PdoIncidentRepository.php` no reporta errores de sintaxis.
 
-- [ ] **T-CUSTODY-06 · Integración en Protocolo Sanitario Art. II, Resolución, Cancelación, Sellado Defensivo y lectura sin N+1 en `findEnrichedDetailById()`**
+- [x] **T-CUSTODY-06 · Integración en Protocolo Sanitario Art. II, Resolución, Cancelación, Sellado Defensivo y lectura sin N+1 en `findEnrichedDetailById()`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-CUSTODY-05`
   * **Ficheros a crear o modificar:**
