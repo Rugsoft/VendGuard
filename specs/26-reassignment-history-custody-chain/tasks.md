@@ -96,7 +96,7 @@
 
 ## Fase 3: Capa de Infraestructura y Repositorio Transaccional (`PdoIncidentRepository`)
 
-- [ ] **T-CUSTODY-05 · Primitivas transaccionales de apertura/cierre de custodia e integración en Coordinación, Oportunista In Situ y Relevo de Turno en `PdoIncidentRepository`**
+- [x] **T-CUSTODY-05 · Primitivas transaccionales de apertura/cierre de custodia e integración en Coordinación, Oportunista In Situ y Relevo de Turno en `PdoIncidentRepository`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-CUSTODY-04`
   * **Ficheros a crear o modificar:**

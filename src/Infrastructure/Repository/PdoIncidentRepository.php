@@ -12,6 +12,8 @@ use PDOException;
 use PDOStatement;
 use RuntimeException;
 use Throwable;
+use VendGuard\Core\Domain\Enum\IncidentAssignmentSource;
+use VendGuard\Core\Domain\Enum\IncidentUnassignmentReasonType;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
@@ -1736,7 +1738,33 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             ));
         }
 
-        return $this->create($incident, $userId, $initialNote);
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $created = $this->create($incident, $userId, $initialNote);
+            if ($created->getAssignedTechnicianId() !== null && $created->getId() !== null) {
+                $this->openCustodySegmentInTransaction(
+                    (int)$created->getId(),
+                    (int)$created->getAssignedTechnicianId(),
+                    IncidentAssignmentSource::OPPORTUNISTIC_NEW,
+                    $userId,
+                    $created->getAssignedAt() !== null ? new DateTimeImmutable($created->getAssignedAt()) : null
+                );
+            }
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            return $created;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -1802,6 +1830,13 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 'Asunción Oportunista In Situ (Oportunista In Situ · Asumida). Intervención iniciada en el acto.'
             );
 
+            $this->openCustodySegmentInTransaction(
+                $incidentId,
+                $technicianId,
+                IncidentAssignmentSource::OPPORTUNISTIC_ASSUMED,
+                $technicianId,
+                $instant
+            );
             $claimed = $this->findById($incidentId);
             if ($claimed === null) {
                 throw new DomainException('Error al recuperar la incidencia asumida.');
@@ -1928,6 +1963,23 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 )
             );
 
+            $takeoverReason = $takeoverInternalNote !== null && trim($takeoverInternalNote) !== ''
+                ? trim($takeoverInternalNote)
+                : 'Asunción oportunista por presencia física del técnico en la sede.';
+
+            $this->closeActiveCustodySegmentInTransaction(
+                $incidentId,
+                IncidentUnassignmentReasonType::TAKEN_OVER_IN_SITU,
+                $technicianId,
+                $takeoverReason
+            );
+            $this->openCustodySegmentInTransaction(
+                $incidentId,
+                $technicianId,
+                IncidentAssignmentSource::OPPORTUNISTIC_TAKEOVER,
+                $technicianId,
+                $instant
+            );
             $taken = $this->findById($incidentId);
             if ($taken === null) {
                 throw new DomainException('Error al recuperar la incidencia traspasada.');
@@ -2055,6 +2107,20 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 'Asunción inmediata tras Reapertura Oportunista In Situ.'
             );
 
+            $this->closeActiveCustodySegmentInTransaction(
+                $incidentId,
+                IncidentUnassignmentReasonType::WARRANTY_REOPENED,
+                $technicianId,
+                'Sellado defensivo del tramo heredado al reabrir la avería en garantía in situ.'
+            );
+            $this->openCustodySegmentInTransaction(
+                $incidentId,
+                $technicianId,
+                IncidentAssignmentSource::OPPORTUNISTIC_WARRANTY_REOPEN,
+                $technicianId,
+                $instant
+            );
+
             $reopened = $this->findById($incidentId);
             if ($reopened === null) {
                 throw new DomainException('Error al recuperar la incidencia reabierta in situ.');
@@ -2176,6 +2242,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             // `create()` se une a esta transacción y vuelve a insertar el historial de
             // apertura del sucesor, de modo que el reemplazo entero queda en un solo acto.
+            $this->closeActiveCustodySegmentInTransaction(
+                $predecessorIncidentId,
+                IncidentUnassignmentReasonType::CHRONIC_REPLACEMENT_CLOSED,
+                $technicianId,
+                'Retirada del equipo tras la tercera reincidencia crónica; el expediente sucesor asume la custodia.'
+            );
             $created = $this->create(
                 $successor,
                 $technicianId,
@@ -2189,6 +2261,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $this->pdo->commit();
             }
 
+            if ($created->getId() !== null && $created->getAssignedTechnicianId() !== null) {
+                $this->openCustodySegmentInTransaction(
+                    (int)$created->getId(),
+                    (int)$created->getAssignedTechnicianId(),
+                    IncidentAssignmentSource::OPPORTUNISTIC_NEW,
+                    $technicianId,
+                    $instant
+                );
+            }
             return $created;
         } catch (Throwable $e) {
             if ($isOwnTransaction && $this->pdo->inTransaction()) {
@@ -3480,6 +3561,36 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 ? "assigned_technician_id = :technician_id,\n                    urgency = :urgency"
                 : "status = 'ASSIGNED',\n                    assigned_technician_id = :technician_id,\n                    assigned_at = CURRENT_TIMESTAMP,\n                    urgency = :urgency";
 
+            // ── Cadena de custodia (Módulo 26) ─────────────────────────────────────
+            // El cierre del tramo saliente y la apertura del entrante viajan en esta
+            // misma transacción PDO, antes de mover el titular y sin ventana en la que
+            // la avería tenga dos custodios activos o ninguno (Art. III.3, Art. V.3).
+            // Los snapshots los congela la propia primitiva desde `users`: un renombrado
+            // posterior no puede reescribir quién tenía la avería (D2).
+            if ($isReassignment) {
+                $this->closeActiveCustodySegmentInTransaction(
+                    $numericId,
+                    IncidentUnassignmentReasonType::REASSIGNED_BY_COORDINATOR,
+                    $coordinatorId,
+                    $cleanReassignmentReason
+                );
+            } else {
+                $this->closeActiveCustodySegmentInTransaction(
+                    $numericId,
+                    IncidentUnassignmentReasonType::WARRANTY_REOPENED,
+                    $coordinatorId,
+                    'Sellado defensivo de un tramo heredado sin cerrar antes de la asignación inicial.'
+                );
+            }
+
+            $this->openCustodySegmentInTransaction(
+                $numericId,
+                $technicianId,
+                $isReassignment
+                    ? IncidentAssignmentSource::COORDINATOR_REASSIGN
+                    : IncidentAssignmentSource::COORDINATOR_ASSIGN,
+                $coordinatorId
+            );
             // En PostgreSQL consolidamos el UPDATE de la incidencia y la inserción del
             // evento en incident_history en un único round-trip atómico con CTE (T-HYBRID-27).
             if ($this->dialect->isPostgres()) {
@@ -4616,6 +4727,127 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             static fn (array $row): Incident => Incident::fromDatabaseRow($row),
             $stmt->fetchAll(PDO::FETCH_ASSOC)
         );
+    }
+    /**
+     * Cierra el tramo de custodia activo de una avería dentro de la transacción en curso.
+     *
+     * Toma la fila con `SELECT ... FOR UPDATE` —el mismo cerrojo que protege el cambio de
+     * titular— y sella el cierre con el suelo temporal `GREATEST(assigned_at, closed_at)`:
+     * una resolución sincronizada desde la cola PWA puede llegar con la hora del cliente
+     * anterior a la apertura y el tramo nunca puede durar menos que cero (QA 4). El nombre
+     * del actor se congela desde `users` en este instante; un renombrado posterior no
+     * reescribe el pasado (D2, Art. III.3).
+     *
+     * No abre transacción: la unidad de trabajo pertenece al caso de uso que asigna,
+     * reasigna, releva, resuelve o cancela. Si no había tramo activo, no escribe nada.
+     *
+     * @return bool `true` si había un tramo abierto y se selló.
+     */
+    private function closeActiveCustodySegmentInTransaction(
+        int $incidentId,
+        IncidentUnassignmentReasonType $reasonType,
+        ?int $closedBy,
+        string $reason
+    ): bool {
+        $lock = $this->pdo->prepare(
+            'SELECT id FROM incident_assignments WHERE incident_id = :incident_id AND unassigned_at IS NULL FOR UPDATE'
+        );
+        $lock->execute([':incident_id' => $incidentId]);
+        if ($lock->fetchColumn() === false) {
+            return false;
+        }
+
+        $cleanReason = trim($reason);
+        if ($cleanReason === '') {
+            $cleanReason = 'Cierre de custodia registrado por el sistema.';
+        }
+        $cleanReason = mb_substr($cleanReason, 0, 1000);
+
+        $stmt = $this->pdo->prepare(
+            'UPDATE incident_assignments'
+            . ' SET unassigned_at = GREATEST(assigned_at, COALESCE(CAST(:closed_at AS timestamptz), CURRENT_TIMESTAMP)),'
+            . '     unassigned_by = :closed_by,'
+            . '     unassigned_by_name_snapshot = :closed_by_name,'
+            . '     unassignment_reason_type = CAST(:reason_type AS incident_unassignment_reason_type),'
+            . '     reassignment_reason = :reason'
+            . ' WHERE incident_id = :incident_id'
+            . '   AND unassigned_at IS NULL'
+            . ' RETURNING id'
+        );
+        $stmt->bindValue(':closed_at', null, PDO::PARAM_NULL);
+        $stmt->bindValue(':closed_by', $closedBy, $closedBy !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':closed_by_name', $this->userDisplayName($closedBy), PDO::PARAM_STR);
+        $stmt->bindValue(':reason_type', $reasonType->value, PDO::PARAM_STR);
+        $stmt->bindValue(':reason', $cleanReason, PDO::PARAM_STR);
+        $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Abre un tramo de custodia dentro de la transacción en curso.
+     *
+     * Congela los snapshots del técnico (nombre y código de operario, con el respaldo
+     * determinista `SIN-CODIGO`) y del autor de la apertura (`Coordinación / Sistema`
+     * cuando no hay usuario humano, como en el alta histórica o la guardia del sistema)
+     * en la misma sentencia que inserta, sin una lectura previa que pudiera leer un
+     * directorio ya cambiado (D2, QA 5). El índice único parcial del motor es la última
+     * garantía de que la avería no acumula dos custodios activos (Art. V.3).
+     */
+    private function openCustodySegmentInTransaction(
+        int $incidentId,
+        int $technicianId,
+        IncidentAssignmentSource $source,
+        ?int $assignedBy = null,
+        ?DateTimeImmutable $assignedAt = null
+    ): void {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO incident_assignments ('
+            . ' incident_id, technician_id, technician_name_snapshot, technician_code_snapshot,'
+            . ' assignment_source, assigned_by, assigned_by_name_snapshot, assigned_at'
+            . ')'
+            . ' SELECT :incident_id, u.id, u.name,'
+            . "        COALESCE(NULLIF(btrim(u.operator_code), ''), 'SIN-CODIGO'),"
+            . '        CAST(:source AS incident_assignment_source),'
+            . '        actor.id,'
+            . "        COALESCE(NULLIF(btrim(actor.name), ''), 'Coordinación / Sistema'),"
+            . '        COALESCE(CAST(:assigned_at AS timestamptz), CURRENT_TIMESTAMP)'
+            . '   FROM users u'
+            . '   LEFT JOIN users actor ON actor.id = CAST(:assigned_by AS bigint)'
+            . '  WHERE u.id = :technician_id'
+            . ' RETURNING id'
+        );
+        $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
+        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+        $stmt->bindValue(':source', $source->value, PDO::PARAM_STR);
+        $stmt->bindValue(':assigned_by', $assignedBy, $assignedBy !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(
+            ':assigned_at',
+            $assignedAt?->format('Y-m-d H:i:sP'),
+            $assignedAt !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+        );
+        $stmt->execute();
+
+        if ($stmt->fetchColumn() === false) {
+            throw new DomainException(
+                "No se pudo abrir el tramo de custodia: el técnico {$technicianId} no existe en el directorio."
+            );
+        }
+    }
+
+    /** Nombre legible del actor, o el respaldo determinista cuando no hay usuario humano. */
+    private function userDisplayName(?int $userId): string
+    {
+        if ($userId === null) {
+            return 'Coordinación / Sistema';
+        }
+
+        $stmt = $this->pdo->prepare('SELECT name FROM users WHERE id = :id');
+        $stmt->execute([':id' => $userId]);
+        $name = $stmt->fetchColumn();
+
+        return is_string($name) && trim($name) !== '' ? $name : 'Coordinación / Sistema';
     }
 }
 
