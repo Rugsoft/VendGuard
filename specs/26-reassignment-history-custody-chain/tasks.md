@@ -196,7 +196,7 @@
     3. Verificar que `custody_chain` se expone única y exclusivamente en `GET /api/coordinator/incidents/{id}/detail` y jamás se adjunta en endpoints de Técnico (`/api/technician/*`), Portal de Sede (`/api/location/*`), QR público ni Parte A4 (`Art. V.4`, `D3`, `QA 5`).
   * **Hecho cuando:** `php -l src/Presentation/Controller/CoordinatorController.php` no reporta errores de sintaxis.
 
-- [ ] **T-CUSTODY-11 · Creación de las suites de integración `CustodyChainApiTest` y `CustodyChainConstitutionalTest`**
+- [x] **T-CUSTODY-11 · Creación de las suites de integración `CustodyChainApiTest` y `CustodyChainConstitutionalTest`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-CUSTODY-10`
   * **Ficheros a crear o modificar:**
