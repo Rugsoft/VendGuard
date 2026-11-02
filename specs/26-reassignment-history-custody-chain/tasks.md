@@ -131,7 +131,7 @@
 
 ## Fase 4: Servicios de Aplicación, Proyección de Cadena de Custodia y Motor de Fallback
 
-- [ ] **T-CUSTODY-07 · Ampliación de `CoordinatorIncidentDetailDto` y motor de proyección `custody_chain` + Fallback en `CoordinatorIncidentDetailService`**
+- [x] **T-CUSTODY-07 · Ampliación de `CoordinatorIncidentDetailDto` y motor de proyección `custody_chain` + Fallback en `CoordinatorIncidentDetailService`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-CUSTODY-06`
   * **Ficheros a crear o modificar:**

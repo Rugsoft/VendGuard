@@ -189,7 +189,8 @@ final readonly class CoordinatorIncidentDetailDto
         public array $technicalIntervention,
         public array $comments,
         public array $refund,
-        public array $permissions
+        public array $permissions,
+        public array $custodyChain = []
     ) {
     }
 
@@ -218,7 +219,7 @@ final readonly class CoordinatorIncidentDetailDto
             }
         }
 
-        return [
+        $payload = [
             'incident' => $this->incident,
             'location' => $this->location,
             'machine' => $this->machine,
@@ -230,6 +231,12 @@ final readonly class CoordinatorIncidentDetailDto
             'refund' => $this->refund,
             'permissions' => $this->permissions,
         ];
+
+        if ($this->custodyChain !== []) {
+            $payload['custody_chain'] = $this->custodyChain;
+        }
+
+        return $payload;
     }
 
     /**
