@@ -219,7 +219,7 @@
 
 ## Fase 6: Interfaz Frontend en Modal de Coordinación (Vue 3 ESM)
 
-- [ ] **T-CUSTODY-12 · Renderizado de la sección «🔄 Cadena de Custodia y Reasignaciones» en `CoordinatorIncidentDetailModal.js` y etiquetas de auditoría**
+- [x] **T-CUSTODY-12 · Renderizado de la sección «🔄 Cadena de Custodia y Reasignaciones» en `CoordinatorIncidentDetailModal.js` y etiquetas de auditoría**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-CUSTODY-11`
   * **Ficheros a crear o modificar:**
