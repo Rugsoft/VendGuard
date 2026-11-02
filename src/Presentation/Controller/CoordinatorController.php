@@ -747,19 +747,16 @@ class CoordinatorController
         //    destino distinto: la incidencia conserva un único responsable activo
         //    (RF-07.3, Art. V.3) y no se registran eventos de reasignación ficticios (Art. III.3).
         if ($isReassignment) {
-            if ($reassignmentReason === '') {
-                return Response::error(
-                    'MISSING_REASSIGNMENT_REASON',
-                    'La reasignación técnica exige un motivo justificado (reassignment_reason obligatorio).',
-                    422
+            // Puerta única del motivo (R1, QA 1): normaliza espacios y exige diez
+            // caracteres con contenido real. No comparte regla ni mensaje con la
+            // salvaguarda sanitaria de 20 caracteres de `override_justification`
+            // (Art. II y Art. V.1), que se evalúa más abajo de forma independiente.
+            try {
+                $reassignmentReason = \VendGuard\Core\Domain\Service\ReassignmentReasonValidator::normalizeAndValidate(
+                    $rawReassignmentReason !== null ? (string)$rawReassignmentReason : null
                 );
-            }
-            if (mb_strlen($reassignmentReason, 'UTF-8') < self::MIN_REASSIGNMENT_REASON_LENGTH) {
-                return Response::error(
-                    'REASSIGNMENT_REASON_TOO_SHORT',
-                    'El motivo de la reasignación debe contener al menos 10 caracteres reales.',
-                    422
-                );
+            } catch (\InvalidArgumentException $e) {
+                return Response::error('REASSIGNMENT_REASON_REQUIRED', $e->getMessage(), 422);
             }
             if ($incident->getAssignedTechnicianId() === $technicianId) {
                 return Response::error(

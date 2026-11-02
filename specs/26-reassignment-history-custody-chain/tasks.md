@@ -184,7 +184,7 @@
 
 ## Fase 5: Controlador REST, Blindaje Constitucional de Privacidad y Suites de Integración HTTP
 
-- [ ] **T-CUSTODY-10 · Integración de `ReassignmentReasonValidator` en `CoordinatorController` y blindaje de opacidad (`Art. V.4`, `QA 5`)**
+- [x] **T-CUSTODY-10 · Integración de `ReassignmentReasonValidator` en `CoordinatorController` y blindaje de opacidad (`Art. V.4`, `QA 5`)**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-CUSTODY-09`
   * **Ficheros a crear o modificar:**
