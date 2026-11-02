@@ -165,7 +165,7 @@
     4. En `IncidentPauseService`, verificar que las transiciones a `WAITING_PARTS`, `PENDING_INFO` y `PAUSED` conserven intacto el tramo de custodia activo (`D4`).
   * **Hecho cuando:** `php -l src/Application/Service/ShiftHandoverService.php && php -l src/Application/Service/OpportunisticIncidentService.php && php -l src/Application/Service/SparePartTraceabilityService.php && php -l src/Application/Service/IncidentPauseService.php && php -l src/Application/Service/OfflineSyncService.php` no reporta errores de sintaxis.
 
-- [ ] **T-CUSTODY-09 · Ampliación de la suite unitaria `CoordinatorIncidentDetailServiceTest`**
+- [x] **T-CUSTODY-09 · Ampliación de la suite unitaria `CoordinatorIncidentDetailServiceTest`**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-CUSTODY-08`
   * **Ficheros a crear o modificar:**
