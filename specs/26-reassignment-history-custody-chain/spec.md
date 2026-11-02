@@ -3,7 +3,7 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** 26 · Historial Completo de Reasignaciones y Cadena de Custodia  
 **Versión:** 2.1 · Incorpora las 4 Decisiones Base (`D1`–`D4`), las 6 Decisiones de Casos Límite (`R1`–`R6`) y las 5 Resoluciones de Auditoría QA (14 hallazgos cerrados al 100 %)  
-**Estado:** Especificación Funcional Validada y Auditada por QA · Lista para Plan Técnico y Contratos (Fase 2 SDD)  
+**Estado:** Aprobada (Gate SDD Superado · Validada por Product Owner y Auditada por QA)  
 **Fecha:** Noviembre 2026  
 **Alineación Constitucional:** Art. I (supremacía de la especificación e inadmisibilidad de simulaciones), Art. II (prioridad sanitaria innegociable, justificación reforzada de 20 caracteres en emergencias de frío y trazabilidad de relevos), Art. III.1 y III.3 (prohibición absoluta de borrado, inmutabilidad de tramos cerrados y auditoría completa con custodio anterior y nuevo), Art. IV (minimalismo y sobriedad funcional), Art. V.1 (exigencia de justificaciones reales con contenido alfanumérico significativo), Art. V.3 (un único técnico responsable simultáneo por avería), Art. V.4 (segregación estricta de datos por rol: exclusividad para Coordinación y opacidad total frente a sedes y clientes), Art. V.6 (continuidad histórica tras reaperturas en ventana de garantía de 48 horas), Art. VI (delimitación estricta del alcance).
 

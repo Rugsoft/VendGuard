@@ -6,6 +6,7 @@
 **Especificación Funcional:** [`spec.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/26-reassignment-history-custody-chain/spec.md) (v2.1, Noviembre 2026) · [`../functional/reassignment_history_custody_chain_spec.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/functional/reassignment_history_custody_chain_spec.md)  
 **Contratos Técnicos:** [`../technical/reassignment_history_custody_chain_contracts.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/technical/reassignment_history_custody_chain_contracts.md)  
 **Plan Arquitectónico:** [`plan.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/26-reassignment-history-custody-chain/plan.md)  
+**Estado:** Aprobado (Gate SDD Superado · Pendiente de Ejecución `T-CUSTODY-01` a `T-CUSTODY-14`)  
 **Fecha:** 2026-11-02  
 
 ---

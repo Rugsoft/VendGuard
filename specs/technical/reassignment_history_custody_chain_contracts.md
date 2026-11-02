@@ -7,6 +7,7 @@
 **Referencia Funcional:** [`specs/26-reassignment-history-custody-chain/spec.md`](../26-reassignment-history-custody-chain/spec.md) y [`specs/functional/reassignment_history_custody_chain_spec.md`](../functional/reassignment_history_custody_chain_spec.md) (`RF-01` a `RF-05` de la Spec v2.1, `RNF-01` a `RNF-04`, Decisiones `D1`–`D4`, Resoluciones `R1`–`R6` y Resoluciones `QA 1`–`QA 5`)  
 **Protocolo:** HTTP/1.1 · JSON (`application/json; charset=utf-8`)  
 **Metodología:** SDD (Specification-Driven Development) · Contratos API-First  
+**Estado:** Aprobado (Gate SDD Superado)  
 **Conformidad Constitucional:**
 * **Artículo I:** La Especificación es la Única Fuente de Verdad. Cero código simulado en rutas de producción.
 * **Artículo II:** Prioridad Sanitaria Absoluta. Los traspasos automáticos a guardia 24/7 (Nivel 1) y las liberaciones a bandeja sin guardia (Nivel 2) al cerrar turno quedan tipificados e individualizados en `incident_assignments`. El umbral de 10 caracteres reales del motivo de reasignación ordinario **jamás** relaja ni sustituye el requisito de **20 caracteres reales** (`COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED`) cuando el Coordinador descarta al técnico sugerido de guardia sanitaria o zona (`QA 1`, `EARS 03.2`).
