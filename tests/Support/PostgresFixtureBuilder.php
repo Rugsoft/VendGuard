@@ -11,7 +11,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
  * Las suites de la categoría `new_engine` necesitan lo mismo antes de certificar nada: una
  * conexión al motor nuevo por su contrato de entorno (`PG_TEST_DSN`, sin valor por defecto), un
  * esquema aislado con el DDL del repositorio aplicado y la capacidad de escribir **una fila
- * válida en cada una de las 36 tablas** respetando el grafo de claves foráneas.
+ * válida en cada una de las 37 tablas** respetando el grafo de claves foráneas.
  *
  * Lo último no se puede improvisar tabla por tabla: serían veinte fixtures escritos a mano que
  * se desincronizarían del DDL a la primera columna nueva, y el día que dejaran de insertar
@@ -87,6 +87,12 @@ final class PostgresFixtureBuilder
         // genérico certifica el CRUD sobre una columna descriptiva mutable.
         'root_causes' => ['code'],
         'standard_solutions' => ['code'],
+        // Tramos de custodia (Módulo 26): los campos de cierre forman una rama
+        // todo-o-nada de `chk_incident_assignments_closure_coherence`, de modo
+        // que el `UPDATE` genérico los dejaría en un estado que el motor rechaza
+        // por diseño. La certificación de la transición legítima de cierre tiene
+        // su propio ayudante (`closeCustodySegment`).
+        'incident_assignments' => ['unassigned_at', 'unassignment_reason_type', 'unassigned_by_name_snapshot', 'reassignment_reason'],
     ];
 
     // ─────────────────────────────────────────────────────────────────────
@@ -559,6 +565,112 @@ final class PostgresFixtureBuilder
     // ─────────────────────────────────────────────────────────────────────
     // Interior
     // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Abre un tramo de custodia en `incident_assignments` (Tabla 37, Módulo 26).
+     *
+     * Escribe siempre el tramo **abierto**: fecha y campos de cierre nulos, que es la
+     * única rama que admite `chk_incident_assignments_closure_coherence`. El índice
+     * único parcial rechaza un segundo tramo abierto sobre la misma avería, así que
+     * una suite que encadene reasignaciones debe cerrar el anterior con
+     * `closeCustodySegment()` antes de abrir el siguiente (Art. V.3).
+     *
+     * @return array<string, mixed> la fila tal como quedó en el motor
+     */
+    public static function openCustodySegment(
+        PDO $pdo,
+        int $incidentId,
+        int $technicianId,
+        string $source = 'COORDINATOR_ASSIGN',
+        ?string $assignedAt = null
+    ): array {
+        $technician = $pdo->prepare('SELECT name, operator_code FROM users WHERE id = :id');
+        $technician->execute([':id' => $technicianId]);
+        $technicianRow = $technician->fetch();
+        if (!is_array($technicianRow)) {
+            throw new RuntimeException('El técnico del tramo de custodia no existe en el banco de pruebas.');
+        }
+
+        $code = trim((string)($technicianRow['operator_code'] ?? ''));
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO incident_assignments ('
+            . ' incident_id, technician_id, technician_name_snapshot, technician_code_snapshot,'
+            . ' assignment_source, assigned_by_name_snapshot, assigned_at'
+            . ') VALUES ('
+            . ' :incident_id, :technician_id, :name, :code,'
+            . ' :source, :assigned_by_name, COALESCE(:assigned_at::timestamptz, CURRENT_TIMESTAMP)'
+            . ') RETURNING *'
+        );
+        $stmt->execute([
+            ':incident_id' => $incidentId,
+            ':technician_id' => $technicianId,
+            ':name' => (string)$technicianRow['name'],
+            ':code' => $code !== '' ? $code : 'SIN-CODIGO',
+            ':source' => $source,
+            ':assigned_by_name' => 'Coordinación / Sistema',
+            ':assigned_at' => $assignedAt,
+        ]);
+
+        $row = $stmt->fetch();
+        if (!is_array($row)) {
+            throw new RuntimeException('El motor nuevo no devolvió el tramo de custodia insertado.');
+        }
+
+        return $row;
+    }
+
+    /**
+     * Sella el tramo de custodia abierto con su causa tipificada (Módulo 26).
+     *
+     * Aplica el suelo temporal `GREATEST(assigned_at, unassigned_at)` que exige QA 4:
+     * una resolución sincronizada desde la cola PWA puede llegar con una hora de
+     * cliente anterior a la apertura, y el tramo nunca puede durar menos que cero.
+     * Congela el nombre del actor de cierre tal como figura ahora (D2).
+     *
+     * @return array<string, mixed> la fila sellada
+     */
+    public static function closeCustodySegment(
+        PDO $pdo,
+        int $segmentId,
+        string $reasonType,
+        int $closedByUserId,
+        string $reason,
+        ?string $unassignedAt = null
+    ): array {
+        $actor = $pdo->prepare('SELECT name FROM users WHERE id = :id');
+        $actor->execute([':id' => $closedByUserId]);
+        $actorName = $actor->fetchColumn();
+        if (!is_string($actorName) || trim($actorName) === '') {
+            throw new RuntimeException('El actor de cierre del tramo no existe en el banco de pruebas.');
+        }
+
+        $stmt = $pdo->prepare(
+            'UPDATE incident_assignments'
+            . ' SET unassigned_at = GREATEST(assigned_at, COALESCE(:unassigned_at::timestamptz, CURRENT_TIMESTAMP)),'
+            . '     unassigned_by = :closed_by,'
+            . '     unassigned_by_name_snapshot = :closed_by_name,'
+            . '     unassignment_reason_type = :reason_type,'
+            . '     reassignment_reason = :reason'
+            . ' WHERE id = :id AND unassigned_at IS NULL'
+            . ' RETURNING *'
+        );
+        $stmt->execute([
+            ':unassigned_at' => $unassignedAt,
+            ':closed_by' => $closedByUserId,
+            ':closed_by_name' => $actorName,
+            ':reason_type' => $reasonType,
+            ':reason' => $reason,
+            ':id' => $segmentId,
+        ]);
+
+        $row = $stmt->fetch();
+        if (!is_array($row)) {
+            throw new RuntimeException('El tramo de custodia no estaba abierto o no existe: no se pudo sellar.');
+        }
+
+        return $row;
+    }
 
     /** Familias de tipo que el arnés sabe escribir solo, sin inventar contenido de negocio. */
     private static function assignableTypes(): array

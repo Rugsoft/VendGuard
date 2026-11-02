@@ -46,7 +46,7 @@
     5. Actualizar `specs/technical/database_schema.md` y `specs/technical/schema_correspondence_contract.md` (37 tablas relacionales y 24 tipos `ENUM`).
   * **Hecho cuando:** `php bin/init_cloud_db.php` aplica el esquema, disparadores y semillas sin errores sobre PostgreSQL.
 
-- [ ] **T-CUSTODY-02 · Actualización de arneses de prueba y suites de paridad de esquema (`SchemaConvergenceParityTest` y `PostgresSchemaTest`)**
+- [x] **T-CUSTODY-02 · Actualización de arneses de prueba y suites de paridad de esquema (`SchemaConvergenceParityTest` y `PostgresSchemaTest`)**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-CUSTODY-01`
   * **Ficheros a crear o modificar:**
