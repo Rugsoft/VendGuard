@@ -236,8 +236,8 @@ $assert(
 
 $detail = is_array($bodyById) ? ($bodyById['data'] ?? []) : [];
 $assert(
-    '2.5 Los diez bloques del contrato del modal, en su orden',
-    array_keys($detail) === ['incident', 'location', 'machine', 'technician', 'timeline', 'sla', 'technical_intervention', 'comments', 'refund', 'permissions'],
+    '2.5 Los once bloques del contrato del modal, en su orden',
+    array_keys($detail) === ['incident', 'location', 'machine', 'technician', 'timeline', 'sla', 'technical_intervention', 'comments', 'refund', 'permissions', 'custody_chain'],
     'Bloques obtenidos: ' . json_encode(array_keys($detail))
 );
 

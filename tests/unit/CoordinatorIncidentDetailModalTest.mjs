@@ -1143,8 +1143,12 @@ assert('16.4 Panel copy, filtered selector, counter and guarded confirmation are
   template.includes('v-for="technician in reassignableTechnicians"') &&
   template.includes('data-testid="assign-reason"') &&
   template.includes('data-testid="assign-reason-counter"') &&
-  template.includes('/ 10 caracteres') &&
+  template.includes('reassignReasonCounterLabel') &&
   template.includes(':disabled="isSubmittingAssign || !selectedTechnicianId || !isReassignReasonValid"'));
+
+assert('16.4.b A symbols-only motive never validates the reassignment',
+  computed(createInstance({ detail: reassignFixture, reassignReason: '----------' }), 'isReassignReasonValid') === false &&
+  computed(createInstance({ detail: reassignFixture, reassignReason: '     .     ' }), 'isReassignReasonValid') === false);
 
 let reassignArgs = null;
 let reassignRefreshes = 0;

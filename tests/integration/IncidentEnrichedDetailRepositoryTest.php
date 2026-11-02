@@ -225,6 +225,7 @@ $contractKeys = [
     'location',
     'technician',
     'history',
+    'assignments',
     'comments',
     'requested_parts',
     'replaced_parts',
@@ -233,7 +234,7 @@ $contractKeys = [
 
 $byId = $incidentRepo->findEnrichedDetailById($incidentId);
 $assert(
-    '1.1 Por ID entero devuelve los nueve bloques del expediente en orden',
+    '1.1 Por ID entero devuelve los diez bloques del expediente en orden',
     is_array($byId) && array_keys($byId) === $contractKeys,
     'Claves obtenidas: ' . (is_array($byId) ? implode(', ', array_keys($byId)) : 'null')
 );

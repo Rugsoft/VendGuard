@@ -243,25 +243,25 @@ $secondTechnicianId = $secondTechnician->getId();
 
 $reassignReason = 'Reasignación por proximidad geográfica al centro con riesgo de cadena de frío.';
 
-// 4.1 Reasignación sin motivo => 422 MISSING_REASSIGNMENT_REASON
+// 4.1 Reasignación sin motivo => 422 REASSIGNMENT_REASON_REQUIRED
 $req = new Request(method: 'PATCH', path: "/api/coordinator/incidents/{$incB->getId()}/assign", parsedBody: ['technician_id' => $secondTechnicianId], headers: $authHdr);
 $res = $router->dispatch($req);
 $assert("4.1 Reasignación sin motivo => 422", $res->getStatusCode() === 422, "Código: {$res->getStatusCode()}");
-$assert("4.1 Reasignación sin motivo => MISSING_REASSIGNMENT_REASON", ($res->getDecodedBody()['error']['code'] ?? '') === 'MISSING_REASSIGNMENT_REASON');
+$assert("4.1 Reasignación sin motivo => REASSIGNMENT_REASON_REQUIRED", ($res->getDecodedBody()['error']['code'] ?? '') === 'REASSIGNMENT_REASON_REQUIRED');
 
-// 4.2 Motivo por debajo del umbral => 422 REASSIGNMENT_REASON_TOO_SHORT (multibyte-safe)
+// 4.2 Motivo por debajo del umbral => 422 REASSIGNMENT_REASON_REQUIRED (multibyte-safe)
 $shortReason = 'Cobertura'; // 9 caracteres reales exactos
 $assert("4.2 Fixture: motivo de 9 caracteres reales", mb_strlen($shortReason, 'UTF-8') === 9, 'Longitud: ' . mb_strlen($shortReason, 'UTF-8'));
 $req = new Request(method: 'PATCH', path: "/api/coordinator/incidents/{$incB->getId()}/assign", parsedBody: ['technician_id' => $secondTechnicianId, 'reassignment_reason' => $shortReason], headers: $authHdr);
 $res = $router->dispatch($req);
 $assert("4.2 Motivo de 9 caracteres => 422", $res->getStatusCode() === 422);
-$assert("4.2 Motivo de 9 caracteres => REASSIGNMENT_REASON_TOO_SHORT", ($res->getDecodedBody()['error']['code'] ?? '') === 'REASSIGNMENT_REASON_TOO_SHORT');
+$assert("4.2 Motivo de 9 caracteres => REASSIGNMENT_REASON_REQUIRED", ($res->getDecodedBody()['error']['code'] ?? '') === 'REASSIGNMENT_REASON_REQUIRED');
 
 $multibyteShort = str_repeat('á', 9); // 9 caracteres reales en 18 bytes
 $assert("4.2 Fixture multibyte: 9 caracteres reales en 18 bytes", mb_strlen($multibyteShort, 'UTF-8') === 9 && strlen($multibyteShort) === 18);
 $req = new Request(method: 'PATCH', path: "/api/coordinator/incidents/{$incB->getId()}/assign", parsedBody: ['technician_id' => $secondTechnicianId, 'reassignment_reason' => $multibyteShort], headers: $authHdr);
 $res = $router->dispatch($req);
-$assert("4.2 Motivo multibyte de 9 caracteres => REASSIGNMENT_REASON_TOO_SHORT", $res->getStatusCode() === 422 && ($res->getDecodedBody()['error']['code'] ?? '') === 'REASSIGNMENT_REASON_TOO_SHORT');
+$assert("4.2 Motivo multibyte de 9 caracteres => REASSIGNMENT_REASON_REQUIRED", $res->getStatusCode() === 422 && ($res->getDecodedBody()['error']['code'] ?? '') === 'REASSIGNMENT_REASON_REQUIRED');
 
 // 4.3 El responsable vigente no es destino válido => 422 TECHNICIAN_ALREADY_ASSIGNED (Art. V.3)
 $req = new Request(method: 'PATCH', path: "/api/coordinator/incidents/{$incB->getId()}/assign", parsedBody: ['technician_id' => $technicianId, 'reassignment_reason' => $reassignReason], headers: $authHdr);

@@ -249,7 +249,7 @@
 
 ## Fase 7: Certificación Integral, Matriz de Trazabilidad, Regresión Global y Cierre Documental
 
-- [ ] **T-CUSTODY-14 · Matriz de trazabilidad, regresión completa (`run_all.php`) y cierre documental en `docs/features_pendientes.md`**
+- [x] **T-CUSTODY-14 · Matriz de trazabilidad, regresión completa (`run_all.php`) y cierre documental en `docs/features_pendientes.md`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-CUSTODY-13`
   * **Ficheros a crear o modificar:**
