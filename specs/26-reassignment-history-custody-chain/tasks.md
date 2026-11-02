@@ -80,7 +80,7 @@
     4. Crear `ReassignmentReasonValidator::normalizeAndValidate(?string $rawReason): string` que recorta extremos, colapsa secuencias internas de espacios en blanco (`preg_replace('/\s+/u', ' ', trim(...))`), exige `mb_strlen($normalized, 'UTF-8') >= 10` y verifica `preg_match('/[\p{L}\p{N}]/u', $normalized) === 1`, lanzando `InvalidArgumentException` si no cumple (`R1`, `QA 1`).
   * **Hecho cuando:** `php -l src/Core/Domain/Enum/IncidentAssignmentSource.php && php -l src/Core/Domain/Enum/IncidentUnassignmentReasonType.php && php -l src/Core/Domain/Model/IncidentAssignment.php && php -l src/Core/Domain/Service/ReassignmentReasonValidator.php` no reporta errores de sintaxis.
 
-- [ ] **T-CUSTODY-04 · Suites unitarias `ReassignmentReasonValidatorTest` e `IncidentAssignmentTest`**
+- [x] **T-CUSTODY-04 · Suites unitarias `ReassignmentReasonValidatorTest` e `IncidentAssignmentTest`**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-CUSTODY-03`
   * **Ficheros a crear o modificar:**
