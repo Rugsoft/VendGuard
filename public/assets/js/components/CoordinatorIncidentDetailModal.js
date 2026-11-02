@@ -585,9 +585,27 @@ export const CoordinatorIncidentDetailModal = {
       return this.technicians.filter((technician) => technician.id !== currentId);
     },
 
-    /** Contador de caracteres reales (puntos de código Unicode) del motivo de reasignación. */
+    /**
+     * Motivo normalizado tal y como lo medirá el servidor: extremos recortados y
+     * secuencias internas de espacios colapsadas a uno solo (R1, QA 1).
+     */
+    reassignReasonNormalized() {
+      return String(this.reassignReason || '').trim().replace(/\s+/g, ' ');
+    },
+
+    /** Longitud efectiva del motivo tras normalizar espacios. */
     reassignReasonLength() {
-      return Array.from(String(this.reassignReason || '').trim()).length;
+      return Array.from(this.reassignReasonNormalized).length;
+    },
+
+    /** El motivo debe contener al menos una letra o un dígito, no sólo símbolos. */
+    reassignReasonHasAlphanumeric() {
+      return /[a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ]/.test(this.reassignReasonNormalized);
+    },
+
+    /** Indicador reactivo del mínimo legal, visible sólo al reasignar (R1). */
+    reassignReasonCounterLabel() {
+      return `${this.reassignReasonLength} / 10 mín.`;
     },
 
     /** Primer puesto del ranking del expediente abierto (RF-04.3). */
@@ -622,9 +640,14 @@ export const CoordinatorIncidentDetailModal = {
       return !this.detailRequiresOverrideJustification || this.detailOverrideJustificationLength >= 20;
     },
 
-    /** La reasignación exige un motivo justificado de al menos 10 caracteres reales (RF-07.3). */
+    /**
+     * La reasignación exige diez caracteres efectivos y al menos una letra o un
+     * dígito: diez guiones o diez espacios no explican un cambio de custodio
+     * (RF-07.3, R1, QA 1).
+     */
     isReassignReasonValid() {
-      return !this.isReassign || this.reassignReasonLength >= 10;
+      return !this.isReassign
+        || (this.reassignReasonLength >= 10 && this.reassignReasonHasAlphanumeric);
     },
 
     /** Existe un comentario en redacción sin enviar (RF-08.1, plan §3.3). */
@@ -847,7 +870,10 @@ export const CoordinatorIncidentDetailModal = {
     /**
      * Carga la ficha enriquecida del expediente desde la API de Coordinación (RNF-01).
      */
-    async fetchDetail() {
+    async fetchDetail(options = {}) {
+      // Una recarga en segundo plano tras una colisión no debe descartar lo que el
+      // coordinador ya había redactado (R4).
+      const preserveAssignDrafts = options?.preserveAssignDrafts === true;
       if (this.incidentId === null || this.incidentId === '') {
         return;
       }
@@ -862,6 +888,9 @@ export const CoordinatorIncidentDetailModal = {
         // llega directamente el DTO de detalle enriquecido.
         const response = await api.coordinator.getIncidentDetail(this.incidentId);
         this.detail = response && typeof response === 'object' ? response : null;
+        if (!preserveAssignDrafts) {
+          this.assignErrorMessage = '';
+        }
         this.scrollCommentsToLatest();
       } catch (err) {
         this.detail = null;
@@ -1490,6 +1519,11 @@ export const CoordinatorIncidentDetailModal = {
         this.notifyIncidentUpdated({ reason: 'assign' });
       } catch (err) {
         this.assignErrorMessage = err?.message || 'No se pudo registrar la asignación técnica.';
+        // R4: una colisión o un estado ya cambiado no borra el texto escrito; se
+        // recarga la ficha en segundo plano para enseñar el custodio vigente.
+        if (err?.status === 409 || err?.status === 422) {
+          await this.fetchDetail({ preserveAssignDrafts: true });
+        }
       } finally {
         this.isSubmittingAssign = false;
       }
@@ -2598,7 +2632,7 @@ export const CoordinatorIncidentDetailModal = {
                     data-testid="assign-reason-counter"
                     :style="{ fontFamily: 'var(--font-body, Inter, sans-serif)', fontSize: '12px', fontWeight: '600', color: isReassignReasonValid ? 'var(--color-success-text, #065f46)' : 'var(--color-ink-muted, #6c7e9d)' }"
                   >
-                    {{ reassignReasonLength }} / 10 caracteres
+                    {{ reassignReasonCounterLabel }}
                   </span>
                 </div>
                 <div v-if="detailRequiresOverrideJustification" data-testid="detail-assign-override-block" style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-top: 12px;">

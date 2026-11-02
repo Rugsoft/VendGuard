@@ -233,7 +233,7 @@
        * Cuando `total_assignments >= 1`: mostrar las 4 tarjetas KPI de resumen (*Custodio Actual / Estado*, *Reasignaciones*, *Tiempo Total en Custodia* y *Tiempo en Bandeja Sin Asignar*) y la lista vertical intercalada `timeline_items` diferenciando visualmente `CUSTODY_SEGMENT` (activo en azul eléctrico `--color-accent-primary` `#2560ff` vs. cerrado en gris neutro con bloque de cierre, autor, causa y `reassignment_reason`) y `UNASSIGNED_GAP` ($> 60\text{ s}$ en ámbar `--color-warning` `#f8b60f`), empleando bordes `4px`/`8px` y cero literales hexadecimales fuera de tokens (`docs/design.md`).
   * **Hecho cuando:** `php tests/integration/DesignTokenDebtRatchetTest.php` pasa en verde sin detectar deuda de tokens ni literales hexadecimales prohibidos en `CoordinatorIncidentDetailModal.js`.
 
-- [ ] **T-CUSTODY-13 · Validación reactiva en cliente del motivo de reasignación, refresco inmediato y preservación de borrador ante colisiones (`R1`, `R4`, `QA 1`)**
+- [x] **T-CUSTODY-13 · Validación reactiva en cliente del motivo de reasignación, refresco inmediato y preservación de borrador ante colisiones (`R1`, `R4`, `QA 1`)**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-CUSTODY-12`
   * **Ficheros a crear o modificar:**
