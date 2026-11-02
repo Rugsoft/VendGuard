@@ -64,7 +64,7 @@
 
 ## Fase 2: Modelos de Dominio, Enumerados y Validador de Motivo de Reasignación
 
-- [ ] **T-CUSTODY-03 · Enumerados `IncidentAssignmentSource` e `IncidentUnassignmentReasonType`, entidad `IncidentAssignment` y validador `ReassignmentReasonValidator`**
+- [x] **T-CUSTODY-03 · Enumerados `IncidentAssignmentSource` e `IncidentUnassignmentReasonType`, entidad `IncidentAssignment` y validador `ReassignmentReasonValidator`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-CUSTODY-02`
   * **Ficheros a crear o modificar:**
