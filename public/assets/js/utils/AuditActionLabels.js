@@ -72,7 +72,11 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   VAN_RESTOCK_ORDER: 'Orden de Carga de Furgoneta',
   // Entidad del Módulo 25: el catálogo maestro y su exportación Pareto se
   // auditan con tipo propio para que el filtro del visor no pierda esas filas.
-  ROOT_CAUSE_TAXONOMY: 'Taxonomía de Causas Raíz'
+  ROOT_CAUSE_TAXONOMY: 'Taxonomía de Causas Raíz',
+  // Entidad del Módulo 27: la bandeja de taller tiene espacio de identificadores
+  // propio y el enumerado `audit_entity_type` ya la incluye; sin etiqueta el
+  // filtro del visor perdería las filas del ciclo de reacondicionamiento.
+  WORKSHOP_REPAIR_ITEM: 'Expediente de Taller'
 });
 
 /**
@@ -171,6 +175,9 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'REFUND_DETACHED_BY_INACTIVITY', label: 'Reintegro Desvinculado por Inactividad', tone: 'warning', group: 'refund' },
   { code: 'EXPORT_SPARE_PARTS_CSV', label: 'Exportación CSV de Repuestos', tone: 'neutral', group: 'spare_parts' },
   { code: 'VAN_STOCK_ADJUSTED', label: 'Ajuste de Stock de Furgoneta', tone: 'primary', group: 'spare_parts' },
+  // Módulo 27: cada unidad abierta desde una extracción con destino taller deja
+  // su propio evento; sin etiqueta el visor mostraría el código crudo.
+  { code: 'WORKSHOP_ITEM_CREATED_FROM_EXTRACTION', label: 'Unidad Abierta desde Extracción', tone: 'primary', group: 'spare_parts' },
   // Módulo 25: el catálogo maestro se audita con entidad propia
   // (`ROOT_CAUSE_TAXONOMY`) y estas cuatro acciones son las que escribe el
   // servicio; sin etiqueta el visor mostraría el código crudo.

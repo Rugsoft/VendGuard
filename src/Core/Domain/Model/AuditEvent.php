@@ -85,6 +85,16 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_ROOT_CAUSE_TAXONOMY = 'ROOT_CAUSE_TAXONOMY';
 
     /**
+     * Expediente unitario de la bandeja de taller central (Módulo 27, Tabla 38).
+     *
+     * La unidad tiene espacio de identificadores propio: auditarla como `MACHINE`
+     * o `TICKET` apuntaría a otra entidad y rompería la trazabilidad del ciclo
+     * (Art. III.3). El valor existe en el ENUM `audit_entity_type` desde la
+     * migración 023; aquí sólo se declara para que el dominio pueda emitirlo.
+     */
+    public const ENTITY_WORKSHOP_REPAIR_ITEM = 'WORKSHOP_REPAIR_ITEM';
+
+    /**
      * Orden de carga de furgoneta (Módulo 23, RF-01 a RF-05).
      *
      * El enumerado `audit_log.entity_type` admite este valor desde la migración
@@ -119,6 +129,7 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_TECHNICIAN_VAN_STOCK,
         self::ENTITY_VAN_RESTOCK_ORDER,
         self::ENTITY_ROOT_CAUSE_TAXONOMY,
+        self::ENTITY_WORKSHOP_REPAIR_ITEM,
     ];
 
     /**

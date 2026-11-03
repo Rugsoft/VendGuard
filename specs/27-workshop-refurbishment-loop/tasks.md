@@ -173,7 +173,7 @@ flowchart LR
 
 ## Fase 4: Capa de Aplicación, Enganche en Sustitución de Piezas, Sincronización Offline y Exportación CSV
 
-- [ ] **T-WORKSHOP-08 · Conectar la apertura automática y desglose unitario `1..N` en `SparePartTraceabilityService` (averías, preventivos y Offline PWA)**
+- [x] **T-WORKSHOP-08 · Conectar la apertura automática y desglose unitario `1..N` en `SparePartTraceabilityService` (averías, preventivos y Offline PWA)**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-WORKSHOP-07`
   - **Archivos exactos a crear o modificar:**
