@@ -8,8 +8,11 @@ use InvalidArgumentException;
 use PDO;
 use PDOException;
 use RuntimeException;
+use VendGuard\Application\DTO\WorkshopTrayQueryDTO;
+use VendGuard\Core\Domain\Entity\WorkshopRepairItem;
 use VendGuard\Core\Domain\Repository\WorkshopRepairItemRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\WorkshopRepairStatus;
+use VendGuard\Core\Domain\ValueObject\WorkshopRestockDestination;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
@@ -92,7 +95,11 @@ final class PdoWorkshopRepairItemRepository implements WorkshopRepairItemReposit
             wri.resolved_at,
             wri.resolved_by_user_id,
             wri.created_at,
-            wri.updated_at
+            wri.updated_at,
+            ROUND(
+                EXTRACT(EPOCH FROM (COALESCE(wri.resolved_at, CURRENT_TIMESTAMP) - wri.created_at)) / 3600.0,
+                2
+            ) AS age_hours
         FROM workshop_repair_items wri
         LEFT JOIN incidents i ON i.id = wri.incident_id
         LEFT JOIN preventive_orders po ON po.id = wri.preventive_order_id
@@ -370,9 +377,243 @@ final class PdoWorkshopRepairItemRepository implements WorkshopRepairItemReposit
         );
     }
 
+    /**
+     * {@inheritdoc}
+     */
+    public function paginateWorkshopTray(WorkshopTrayQueryDTO $query): array
+    {
+        [$where, $params] = $this->buildTrayWhere($query, true);
+
+        $countStmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM workshop_repair_items wri'
+            . ' LEFT JOIN incidents i ON i.id = wri.incident_id ' . $where
+        );
+        $countStmt->execute($params);
+        $total = (int)$countStmt->fetchColumn();
+
+        $sql = self::SUMMARY_SELECT . ' ' . $where . ' ' . self::TRAY_ORDER
+            . ' LIMIT ' . $query->perPage . ' OFFSET ' . $query->offset();
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $totalPages = $total === 0 ? 0 : (int)ceil($total / $query->perPage);
+
+        return [
+            'items' => array_map(static fn (array $row): array => self::normalizeRow($row), $rows),
+            'total' => $total,
+            'page' => $query->page,
+            'per_page' => $query->perPage,
+            'total_pages' => $totalPages,
+        ];
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function computeTrayKpis(WorkshopTrayQueryDTO $query): array
+    {
+        // El filtro de estado se omite a propósito: los totales son de toda la
+        // bandeja filtrada y no de la pestaña activa (QA 2).
+        [$where, $params] = $this->buildTrayWhere($query, false);
+
+        $sql = <<<'SQL'
+            SELECT
+                COUNT(*) FILTER (WHERE wri.status = 'PENDING_DELIVERY') AS pending_delivery_count,
+                COUNT(*) FILTER (WHERE wri.status = 'RECEIVED_IN_WORKSHOP') AS received_in_workshop_count,
+                COUNT(*) FILTER (WHERE wri.status = 'IN_BENCH_TEST') AS in_bench_test_count,
+                COUNT(*) FILTER (WHERE wri.status IN ('RECEIVED_IN_WORKSHOP', 'IN_BENCH_TEST')) AS in_workshop_count,
+                COUNT(*) FILTER (WHERE wri.status = 'REFURBISHED_RESTORED') AS refurbished_count,
+                COUNT(*) FILTER (
+                    WHERE wri.status = 'SCRAPPED_IRREPARABLE' AND wri.bench_started_at IS NOT NULL
+                ) AS scrapped_in_bench_count,
+                COUNT(*) FILTER (
+                    WHERE wri.status = 'SCRAPPED_IRREPARABLE' AND wri.bench_started_at IS NULL
+                ) AS scrapped_unreceived_count,
+                COUNT(*) FILTER (WHERE wri.status = 'SCRAPPED_IRREPARABLE') AS scrapped_count,
+                COALESCE(
+                    SUM(wri.unit_cost_snapshot) FILTER (WHERE wri.status = 'REFURBISHED_RESTORED'),
+                    0
+                ) AS total_reference_value_eur,
+                COALESCE(
+                    SUM(wri.refurbishment_cost_eur) FILTER (WHERE wri.status = 'REFURBISHED_RESTORED'),
+                    0
+                ) AS total_refurbishment_cost_eur,
+                COALESCE(
+                    SUM(wri.net_savings_eur) FILTER (WHERE wri.status = 'REFURBISHED_RESTORED'),
+                    0
+                ) AS total_net_savings_eur
+            FROM workshop_repair_items wri
+            LEFT JOIN incidents i ON i.id = wri.incident_id
+            SQL;
+
+        $stmt = $this->pdo->prepare($sql . ' ' . $where);
+        $stmt->execute($params);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $row = is_array($row) ? $row : [];
+
+        $pending = (int)($row['pending_delivery_count'] ?? 0);
+        $received = (int)($row['received_in_workshop_count'] ?? 0);
+        $inBench = (int)($row['in_bench_test_count'] ?? 0);
+        $refurbished = (int)($row['refurbished_count'] ?? 0);
+        $scrappedInBench = (int)($row['scrapped_in_bench_count'] ?? 0);
+        $scrappedUnreceived = (int)($row['scrapped_unreceived_count'] ?? 0);
+        $scrapped = (int)($row['scrapped_count'] ?? 0);
+
+        $referenceValue = round((float)($row['total_reference_value_eur'] ?? 0), 2);
+        $refurbishmentCost = round((float)($row['total_refurbishment_cost_eur'] ?? 0), 2);
+        $netSavings = round((float)($row['total_net_savings_eur'] ?? 0), 2);
+
+        return [
+            'pending_delivery_count' => $pending,
+            'received_in_workshop_count' => $received,
+            'in_bench_test_count' => $inBench,
+            'in_workshop_count' => $received + $inBench,
+            'refurbished_count' => $refurbished,
+            'scrapped_in_bench_count' => $scrappedInBench,
+            'scrapped_unreceived_count' => $scrappedUnreceived,
+            'scrapped_count' => $scrapped,
+            'evaluated_in_workshop_count' => $refurbished + $scrappedInBench,
+            'resolved_total_count' => $refurbished + $scrapped,
+            'recovery_rate_pct' => WorkshopRepairItem::calculateRecoveryRate($refurbished, $scrappedInBench),
+            'total_reference_value_eur' => $referenceValue,
+            'total_refurbishment_cost_eur' => $refurbishmentCost,
+            'total_net_savings_eur' => $netSavings,
+            // Alias del vocabulario de la bandeja (RF-04.4): mismo valor con el
+            // nombre que usan la cabecera de KPIs y la sección 1 del CSV.
+            'gross_recovered_value_eur' => $referenceValue,
+            'net_refurbished_savings_eur' => $netSavings,
+        ];
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function findAllForExport(WorkshopTrayQueryDTO $query): array
+    {
+        [$where, $params] = $this->buildTrayWhere($query, true);
+
+        $stmt = $this->pdo->prepare(self::SUMMARY_SELECT . ' ' . $where . ' ' . self::TRAY_ORDER);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(
+            static fn (array $row): array => self::formatForExport(self::normalizeRow($row)),
+            $rows
+        );
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Interno
     // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Orden determinista de la bandeja (`QA 2`): primero lo que espera acción, de
+     * más antiguo a más reciente; después lo dictaminado, de más reciente a más
+     * antiguo. El `id` final desempata siempre.
+     */
+    private const TRAY_ORDER = <<<'SQL'
+        ORDER BY
+            CASE wri.status
+                WHEN 'PENDING_DELIVERY' THEN 1
+                WHEN 'RECEIVED_IN_WORKSHOP' THEN 2
+                WHEN 'IN_BENCH_TEST' THEN 3
+                WHEN 'REFURBISHED_RESTORED' THEN 4
+                WHEN 'SCRAPPED_IRREPARABLE' THEN 5
+                ELSE 6
+            END ASC,
+            CASE
+                WHEN wri.status IN ('REFURBISHED_RESTORED', 'SCRAPPED_IRREPARABLE')
+                THEN wri.resolved_at
+            END DESC NULLS LAST,
+            CASE
+                WHEN wri.status NOT IN ('REFURBISHED_RESTORED', 'SCRAPPED_IRREPARABLE')
+                THEN wri.created_at
+            END ASC NULLS LAST,
+            wri.id ASC
+        SQL;
+
+    /** Sellos temporales que el CSV publica en hora peninsular (`QA 5`). */
+    private const EXPORT_TIMESTAMPS = ['received_at', 'bench_started_at', 'resolved_at', 'created_at', 'updated_at'];
+
+    /**
+     * Predicado común de bandeja, KPIs y exportación.
+     *
+     * La búsqueda se escapa con `!` como carácter de escape para que un `%` tecleado
+     * por el Coordinador busque un porcentaje y no «todo».
+     *
+     * @return array{0: string, 1: array<string, mixed>}
+     */
+    private function buildTrayWhere(WorkshopTrayQueryDTO $query, bool $includeStatus): array
+    {
+        $conditions = [];
+        $params = [];
+
+        if ($includeStatus && ($status = $query->statusFilter()) !== null) {
+            $conditions[] = 'wri.status = :status';
+            $params[':status'] = $status->value;
+        }
+
+        if ($query->technicianId !== null) {
+            $conditions[] = 'wri.extracted_by_technician_id = :technician_id';
+            $params[':technician_id'] = $query->technicianId;
+        }
+
+        if (($category = $query->categoryFilter()) !== null) {
+            $conditions[] = 'wri.part_category_snapshot = :category';
+            $params[':category'] = $category;
+        }
+
+        if ($query->search !== null) {
+            $pattern = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $query->search) . '%';
+            $conditions[] = "(wri.part_code_snapshot ILIKE :search_code ESCAPE '!'
+                OR wri.part_name_snapshot ILIKE :search_name ESCAPE '!'
+                OR wri.machine_code_snapshot ILIKE :search_machine ESCAPE '!'
+                OR wri.technician_name_snapshot ILIKE :search_technician ESCAPE '!'
+                OR i.ticket_code ILIKE :search_ticket ESCAPE '!'
+                OR CAST(wri.incident_id AS VARCHAR) = :search_incident_id)";
+            $params[':search_code'] = $pattern;
+            $params[':search_name'] = $pattern;
+            $params[':search_machine'] = $pattern;
+            $params[':search_technician'] = $pattern;
+            $params[':search_ticket'] = $pattern;
+            $params[':search_incident_id'] = $query->search;
+        }
+
+        return [
+            $conditions === [] ? '' : 'WHERE ' . implode(' AND ', $conditions),
+            $params,
+        ];
+    }
+
+    /**
+     * Convierte los sellos temporales a `Europe/Madrid` (`YYYY-MM-DD HH:MM:SS`).
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private static function formatForExport(array $row): array
+    {
+        $timezone = new \DateTimeZone('Europe/Madrid');
+
+        foreach (self::EXPORT_TIMESTAMPS as $key) {
+            if (!array_key_exists($key, $row) || $row[$key] === null) {
+                continue;
+            }
+
+            try {
+                $row[$key] = (new \DateTimeImmutable((string)$row[$key]))
+                    ->setTimezone($timezone)
+                    ->format('Y-m-d H:i:s');
+            } catch (\Exception) {
+                // Un sello ilegible se deja tal cual: el CSV lo muestra y la
+                // anomalía queda visible en lugar de silenciarse como fecha vacía.
+            }
+        }
+
+        return $row;
+    }
 
     /**
      * Ejecuta una escritura condicionada y devuelve la fila recargada, o `[]` si
@@ -441,9 +682,20 @@ final class PdoWorkshopRepairItemRepository implements WorkshopRepairItemReposit
             $row['is_out_of_catalog'] = in_array($row['is_out_of_catalog'], [true, 't', '1', 1], true);
         }
 
+        if (array_key_exists('age_hours', $row) && $row['age_hours'] !== null) {
+            $row['age_hours'] = round((float)$row['age_hours'], 2);
+        }
+
         $status = isset($row['status']) ? WorkshopRepairStatus::tryFrom((string)$row['status']) : null;
         if ($status !== null) {
             $row['status_label'] = $status->label();
+        }
+
+        $destination = isset($row['restock_destination'])
+            ? WorkshopRestockDestination::tryFrom((string)$row['restock_destination'])
+            : null;
+        if ($destination !== null) {
+            $row['restock_destination_label'] = $destination->label();
         }
 
         if (isset($row['unit_index'], $row['total_units_in_line'])) {

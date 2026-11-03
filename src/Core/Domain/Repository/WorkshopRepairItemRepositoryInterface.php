@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace VendGuard\Core\Domain\Repository;
 
+use VendGuard\Application\DTO\WorkshopTrayQueryDTO;
+
 /**
  * WorkshopRepairItemRepositoryInterface — contrato de persistencia de la bandeja
  * de taller central (Módulo 27, Tabla 38).
@@ -111,4 +113,41 @@ interface WorkshopRepairItemRepositoryInterface
      * @return array<int, array<string, mixed>>
      */
     public function findPendingDeliveriesForTechnician(int $technicianId): array;
+
+    /**
+     * Página de la bandeja con el orden determinista del contrato (`QA 2`).
+     *
+     * Primero las unidades vivas —`PENDING_DELIVERY`, `RECEIVED_IN_WORKSHOP` e
+     * `IN_BENCH_TEST`— de más antigua a más reciente, porque son las que esperan
+     * una acción; después las dictaminadas, de más reciente a más antigua, porque
+     * son historia. El desempate final por `id` garantiza que dos páginas
+     * consecutivas no repitan ni pierdan filas aunque compartan marca temporal.
+     *
+     * @return array{items: array<int, array<string, mixed>>, total: int, page: int, per_page: int, total_pages: int}
+     */
+    public function paginateWorkshopTray(WorkshopTrayQueryDTO $query): array;
+
+    /**
+     * Indicadores de la bandeja.
+     *
+     * Aplica los filtros de técnico, categoría y búsqueda, pero **ignora el filtro
+     * de estado**: cambiar de pestaña no puede cambiar los totales de la cabecera
+     * (`QA 2`). La tasa de recuperación usa como denominador las unidades
+     * evaluadas en banco, de modo que las bajas sin recepción no la diluyen
+     * (`QA 1`).
+     *
+     * @return array<string, int|float> Conteos enteros, importes y tasa a dos decimales.
+     */
+    public function computeTrayKpis(WorkshopTrayQueryDTO $query): array;
+
+    /**
+     * Filas planas de la vista actual para el CSV de Coordinación (`QA 5`).
+     *
+     * Mismo predicado y mismo orden que la bandeja —aquí sí con el filtro de
+     * estado— y sellos temporales convertidos a `Europe/Madrid` en formato
+     * `YYYY-MM-DD HH:MM:SS`.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function findAllForExport(WorkshopTrayQueryDTO $query): array;
 }

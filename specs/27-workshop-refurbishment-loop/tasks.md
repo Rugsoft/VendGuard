@@ -153,7 +153,7 @@ flowchart LR
     2. Implementar los métodos en `PdoWorkshopRepairItemRepository` con enriquecimiento de joins hacia `users` (técnico extractor y actores de taller), `incidents`, `preventive_orders`, `machines` y `locations` para devolver la estructura exacta del contrato `WorkshopRepairItemSummary`.
   - **Hecho cuando:** `php -l src/Core/Domain/Repository/WorkshopRepairItemRepositoryInterface.php && php -l src/Infrastructure/Persistence/PdoWorkshopRepairItemRepository.php`
 
-- [ ] **T-WORKSHOP-07 · Implementar consultas de Bandeja de Taller, KPIs inmunes a `status`, ordenación determinista y listado para exportación CSV en `PdoWorkshopRepairItemRepository`**
+- [x] **T-WORKSHOP-07 · Implementar consultas de Bandeja de Taller, KPIs inmunes a `status`, ordenación determinista y listado para exportación CSV en `PdoWorkshopRepairItemRepository`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-WORKSHOP-06`
   - **Archivos exactos a crear o modificar:**
