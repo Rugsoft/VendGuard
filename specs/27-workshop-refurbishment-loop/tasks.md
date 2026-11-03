@@ -188,7 +188,7 @@ flowchart LR
     3. Garantizar que las reaperturas en garantía (`< 48h`, `C4`) no alteren ni dupliquen los expedientes de taller de la visita anterior, y que los volcados de conflicto offline (`conflict_dump`, `C6`) no disparen `recordReplacedPartsWithinTransaction()` ni creen filas huérfanas en `workshop_repair_items`.
   - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SparePartCatalogAndPreventiveTraceabilityTest.php tests/integration/OfflinePwaSyncIntegrationTest.php`
 
-- [ ] **T-WORKSHOP-09 · Implementar `WorkshopRefurbishmentService` (recepción física, inicio de banco, dictamen con reintegro atómico `FOR UPDATE` y exportación CSV)**
+- [x] **T-WORKSHOP-09 · Implementar `WorkshopRefurbishmentService` (recepción física, inicio de banco, dictamen con reintegro atómico `FOR UPDATE` y exportación CSV)**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-WORKSHOP-08`
   - **Archivos exactos a crear o modificar:**

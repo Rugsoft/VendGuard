@@ -178,6 +178,13 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   // Módulo 27: cada unidad abierta desde una extracción con destino taller deja
   // su propio evento; sin etiqueta el visor mostraría el código crudo.
   { code: 'WORKSHOP_ITEM_CREATED_FROM_EXTRACTION', label: 'Unidad Abierta desde Extracción', tone: 'primary', group: 'spare_parts' },
+  // Ciclo de taller (Módulo 27): cada transición de la bandeja deja su evento.
+  { code: 'WORKSHOP_ITEM_RECEIVED', label: 'Recepción de Unidad en Taller', tone: 'info', group: 'spare_parts' },
+  { code: 'WORKSHOP_ITEM_BENCH_STARTED', label: 'Inicio de Banco de Pruebas', tone: 'info', group: 'spare_parts' },
+  { code: 'WORKSHOP_ITEM_REFURBISHED_TO_CENTRAL', label: 'Reacondicionada a Almacén Central', tone: 'success', group: 'spare_parts' },
+  { code: 'WORKSHOP_ITEM_REFURBISHED_TO_VAN', label: 'Reacondicionada a Furgoneta', tone: 'success', group: 'spare_parts' },
+  { code: 'WORKSHOP_ITEM_SCRAPPED_IN_BENCH', label: 'Baja Irreparable en Banco', tone: 'danger', group: 'spare_parts' },
+  { code: 'WORKSHOP_ITEM_SCRAPPED_UNRECEIVED', label: 'Baja por Extravío sin Recepción', tone: 'danger', group: 'spare_parts' },
   // Módulo 25: el catálogo maestro se audita con entidad propia
   // (`ROOT_CAUSE_TAXONOMY`) y estas cuatro acciones son las que escribe el
   // servicio; sin etiqueta el visor mostraría el código crudo.
