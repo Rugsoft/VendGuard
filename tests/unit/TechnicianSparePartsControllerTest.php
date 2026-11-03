@@ -21,6 +21,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/autoload.php';
 require_once __DIR__ . '/../Support/RecordingVanStockRepository.php';
 require_once __DIR__ . '/../Support/NullServiceSheetRepository.php';
+require_once __DIR__ . '/../Support/NullWorkshopRepairItemRepository.php';
 
 use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
@@ -617,7 +618,8 @@ function createTechTestEnvironment(): array
         incidentRepo: $incidentRepo,
         machineRepo: $machineRepo,
         vanStockService: new VanStockService(new RecordingVanStockRepository()),
-        serviceSheetRepo: new NullServiceSheetRepository()
+        serviceSheetRepo: new NullServiceSheetRepository(),
+        workshopRepo: new \VendGuard\Tests\Support\NullWorkshopRepairItemRepository()
     );
 
     $techSparePartsController = new TechnicianSparePartsController(

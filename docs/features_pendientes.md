@@ -1,7 +1,7 @@
 # VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro**Documento:** `docs/features_pendientes.md`  
 **Fecha de Actualización:** Noviembre 2026
   
-**Estado del Proyecto:** batería global: 387 suites · 14.527 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
+**Estado del Proyecto:** batería global: 389 suites · 14.620 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---
@@ -209,6 +209,7 @@ Refinamiento del análisis de averías, economía circular de taller, asistencia
 * **Complejidad:** Media (2 días).
 
 #### 14. 🛠️ Bandeja de Taller Central para Piezas Recuperadas (*Workshop Refurbishment Loop*)
+* **Estado:** ✅ **100% COMPLETADO (Módulo 27: `27-workshop-refurbishment-loop`)** — Tabla `workshop_repair_items` con desglose unitario `1..N` y snapshots inmutables, máquina de estados de cinco etapas con bloqueo pesimista, dictamen terminal inmutable (`409 WORKSHOP_ITEM_ALREADY_RESOLVED`), reintegro atómico `+1` a furgoneta con guardas de catálogo/actividad/tope 9999, ahorro neto con suelo cero y aviso `zero_net_savings_warning`, baja por extravío sin recepción, bandeja de Coordinación con KPIs y filtros, exportación CSV de dos secciones y bloque de solo lectura de entregas pendientes en la furgoneta del técnico.
 * **Propósito:** Cerrar el ciclo de economía circular iniciado en el Módulo M2 (`06-spare-parts`) cuando un técnico retira un componente averiado de alto valor (selectores MDB, lectores de billetes, placas electrónicas, grupos de café) y declara `OldPartDestination::WORKSHOP` (`TALLER`), evitando que dichas piezas queden en un limbo sin seguimiento tras cerrar la avería.
 * **Componentes Técnicos:**
   * Tabla `workshop_repair_items` generada automáticamente al registrar un consumo en `incident_spare_parts` con `old_part_destination = 'WORKSHOP'`, con máquina de estados (`PENDING_DELIVERY`, `RECEIVED_IN_WORKSHOP`, `IN_BENCH_TEST`, `REFURBISHED_RESTORED`, `SCRAPPED_IRREPARABLE`).
@@ -300,7 +301,7 @@ FASE DE TRAZABILIDAD AVANZADA, TALLER Y EFICIENCIA OPERATIVA:
  11. Taxonomía de Causas Raíz y Análisis de Pareto [✅ IMPLEMENTADO - Módulo 25]
  12. Historial Detallado de Reasignaciones de Técnicos [✅ IMPLEMENTADO - Módulo 26]
  13. Fusión de Tickets Duplicados (Expediente Matriz)
- 14. Bandeja de Taller Central para Piezas Recuperadas (Economía Circular M2 -> Taller -> Stock)
+ 14. Bandeja de Taller Central para Piezas Recuperadas (Economía Circular M2 -> Taller -> Stock) [✅ IMPLEMENTADO - Módulo 27]
  15. Guías Rápidas de Diagnóstico por Modelo (Playbooks In Situ para Reducir Reaperturas 48h)
  16. Acta de Merma y Destrucción de Lotes por Cuarentena Sanitaria (Trazabilidad APPCC Art. II)
  17. Perfiles de SLA Diferenciados por Tipo de Sede (Contratos Standard / Priority / 24x7)

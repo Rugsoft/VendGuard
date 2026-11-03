@@ -593,6 +593,16 @@ $assert(
 // Resultado
 // ─────────────────────────────────────────────────────────────────────────
 
+// El escenario no se queda en el banco: la guarda de residuo del arnés exige que
+// cada suite restituya el estado que encontró (contrato de limpieza §8.3).
+TestDataCleaner::purge($pdo);
+// La máquina del escenario es una maestra propia: la purga transitoria no la
+// toca y la guarda de residuo la detectaría al cierre.
+TestDataCleaner::withPurgeWindow(
+    $pdo,
+    static fn(): int => (int)$pdo->exec('DELETE FROM machines WHERE id = ' . $machineId)
+);
+
 echo "\n======================================================================\n";
 echo " VENDGUARD · T-WORKSHOP-12 · RESULTADO\n";
 echo sprintf(" Aserciones: %d · Fallos: %d\n", $assertions, $failures);

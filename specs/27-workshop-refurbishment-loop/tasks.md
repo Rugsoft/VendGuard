@@ -309,7 +309,7 @@ flowchart LR
 
 ## Fase 7: Verificación Integral, Regresión Cero y Documentación
 
-- [ ] **T-WORKSHOP-15 · Ejecutar suite completa (`composer test`), verificar paridad documental y actualizar `docs/features_pendientes.md`**
+- [x] **T-WORKSHOP-15 · Ejecutar suite completa (`composer test`), verificar paridad documental y actualizar `docs/features_pendientes.md`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-WORKSHOP-01` a `T-WORKSHOP-14`
   - **Archivos exactos a crear o modificar:**
