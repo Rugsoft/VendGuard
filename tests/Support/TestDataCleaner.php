@@ -110,6 +110,11 @@ final class TestDataCleaner
     private const KNOWN_OPERATIONAL = [
         'incident_comments',
         'incident_history',
+        // Tramos de custodia del Módulo 26: cuelgan de `incidents` y su FK
+        // RESTRICT los pone en el plan antes que ella. Su disparador de
+        // inmutabilidad sólo admite el cierre de un tramo abierto; el borrado
+        // pasa por la ventana de purga del arnés (Art. III.1).
+        'incident_assignments',
         'incident_replaced_parts',
         'refund_requests',
         'spare_part_requests',

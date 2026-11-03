@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace VendGuard\Application\Service;
 
+use VendGuard\Core\Domain\Repository\IncidentCustodyReleaseInterface;
+use VendGuard\Core\Domain\Enum\IncidentUnassignmentReasonType;
+use VendGuard\Core\Domain\Enum\IncidentAssignmentSource;
 use DateTimeImmutable;
 use PDO;
 use VendGuard\Application\DTO\ShiftHandoverResultDto;
@@ -340,6 +343,22 @@ final class ShiftHandoverService
         $technicianId = (int)$technician->getId();
         $targetTechnicianId = $targetTechnician?->getId();
 
+        // QA 3: un cierre forzado lo firma una persona, no el sistema. El motivo
+        // administrativo viaja con la reasignación para que el tramo abierto en
+        // `incident_assignments` explique por qué cambió de manos la avería.
+        $forcedReasonSuffix = ($isForceClosed && $closeReason !== null && trim($closeReason) !== '')
+            ? ' Motivo administrativo: ' . trim($closeReason) . '.'
+            : '';
+
+        // QA 3 / F-05: el tramo congela a quien ejecuta el cierre —el técnico en
+        // cierres manuales y el coordinador en los forzados—, distinguiendo la vía
+        // administrativa en el nombre para que la cadena no la confunda con una
+        // reasignación ordinaria de Coordinación.
+        $custodyActorId = $closedBy > 0 ? $closedBy : $technicianId;
+        $custodyActorName = $isForceClosed
+            ? (($actorName ?? 'Coordinación') . ' (Cierre forzado)')
+            : $technician->getName();
+
         $this->pdo->beginTransaction();
 
         try {
@@ -394,10 +413,13 @@ final class ShiftHandoverService
                 $after = $this->incidentRepo->assign(
                     incidentId: $id,
                     technicianId: (int)$targetTechnicianId,
-                    coordinatorId: null,
+                    coordinatorId: $custodyActorId,
                     urgencyOverride: null,
                     urgencyReason: null,
-                    reassignmentReason: $handoverNotes ?? 'Relevo de fin de turno'
+                    reassignmentReason: ($handoverNotes ?? 'Relevo de fin de turno') . $forcedReasonSuffix,
+                    assignmentSource: IncidentAssignmentSource::SHIFT_HANDOVER,
+                    unassignmentReason: IncidentUnassignmentReasonType::SHIFT_HANDOVER,
+                    actorNameSnapshot: $custodyActorName
                 );
 
                 $comment = new IncidentComment(
@@ -476,10 +498,13 @@ final class ShiftHandoverService
                     $after = $this->incidentRepo->assign(
                         incidentId: $remId,
                         technicianId: $guard->getId(),
-                        coordinatorId: null,
+                        coordinatorId: $custodyActorId,
                         urgencyOverride: null,
                         urgencyReason: null,
-                        reassignmentReason: 'Protocolo sanitario Art. II: traspaso por fin de turno sin relevo a guardia de frío'
+                        reassignmentReason: 'Protocolo sanitario Art. II: traspaso por fin de turno sin relevo a guardia de frío.' . $forcedReasonSuffix,
+                        assignmentSource: IncidentAssignmentSource::SANITARY_FAILSAFE_GUARD,
+                        unassignmentReason: IncidentUnassignmentReasonType::SANITARY_FAILSAFE_GUARD,
+                        actorNameSnapshot: $custodyActorName
                     );
 
                     $comment = new IncidentComment(
@@ -527,15 +552,26 @@ final class ShiftHandoverService
                     continue;
                 }
 
-                // Nivel 2: desasignación a REGISTERED con alarma crítica a Coordinación.
-                $stmtUnassign = $this->pdo->prepare("
-                    UPDATE incidents
-                       SET status = 'REGISTERED',
-                           assigned_technician_id = NULL,
-                           assigned_at = NULL
-                     WHERE id = :id
-                ");
-                $stmtUnassign->execute([':id' => $remId]);
+                // Nivel 2: liberación a bandeja con el cierre del tramo en el mismo
+                // acto. Sin ese cierre la cadena mostraría un custodio activo sobre
+                // una avería ya sin técnico (EARS 01.1, EARS 02.4.3).
+                $releaseNote = 'Liberación automática a bandeja por fin de turno sin técnico de guardia disponible (Protocolo Sanitario Art. II).' . $forcedReasonSuffix;
+                if ($this->incidentRepo instanceof IncidentCustodyReleaseInterface) {
+                    $this->incidentRepo->releaseCustodyToInbox(
+                        incidentId: $remId,
+                        reasonType: IncidentUnassignmentReasonType::SANITARY_FAILSAFE_UNASSIGNED,
+                        reason: $releaseNote,
+                        actorUserId: $custodyActorId,
+                        actorNameSnapshot: $custodyActorName
+                    );
+                } else {
+                    // Doble sin soporte de custodia: se conserva el cambio de estado
+                    // para no alterar el contrato del servicio fuera del motor real.
+                    $stmtUnassign = $this->pdo->prepare(
+                        "UPDATE incidents SET status = 'REGISTERED', assigned_technician_id = NULL, assigned_at = NULL WHERE id = :id"
+                    );
+                    $stmtUnassign->execute([':id' => $remId]);
+                }
 
                 $this->incidentRepo->insertHistory(
                     $remId,

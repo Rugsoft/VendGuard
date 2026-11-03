@@ -1992,6 +1992,7 @@ class TechnicianController
                     $request,
                     $body,
                     $sanitaryRequired,
+                    $metadata,
                     &$failure
                 ): array {
                     // 8. Dictamen de saldo (RF-REF-04, RF-REF-05).
@@ -2051,11 +2052,20 @@ class TechnicianController
                     // contrato §4.3.
                     $payloadBody['is_offline_deferred_sync'] = (bool)($context['is_offline_deferred_sync'] ?? false);
 
+                    // La resolución diferida conserva el instante efectivo del cierre:
+                    // `resolved_at` y el tramo de custodia no deben sellarse con la hora
+                    // de llegada del lote (RF-04.3, QA 4). La llamada online mantiene el
+                    // reloj del servidor.
+                    $effectiveResolvedAt = $metadata !== null
+                        ? ($context['effective_occurred_at'] ?? null)
+                        : null;
+
                     $outcome = $this->traceability()->resolveIncidentWithParts(
                         $incidentId,
                         $techId,
                         $payloadBody,
-                        $this->extractActor($request)
+                        $this->extractActor($request),
+                        $effectiveResolvedAt instanceof \DateTimeImmutable ? $effectiveResolvedAt : null
                     );
 
                     // RF-06.1.1 / RF-06.1.2: la reparación in situ devuelve la máquina

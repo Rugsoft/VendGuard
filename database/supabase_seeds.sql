@@ -1197,6 +1197,91 @@ SELECT rc.id, seed.code, seed.name, seed.is_default, TRUE
 ON CONFLICT (code) DO NOTHING;
 
 -- ============================================================================
+-- ============================================================================
+-- SECCIÓN 18 · incident_assignments — reconstrucción histórica (Módulo 26)
+-- ----------------------------------------------------------------------------
+-- POR QUÉ ESTA SECCIÓN NO ES UN CATÁLOGO
+--   La cadena de custodia no es una maestra: es el rastro de quién tuvo cada
+--   avería. El arranque en limpio no inventa incidencias (EARS-02.1), así que
+--   aquí no hay tramos que sembrar por defecto y esta sección inserta **0 filas**
+--   sobre una base vacía, que es exactamente lo que se busca.
+--
+-- QUÉ HACE ENTONCES
+--   Deja la reconstrucción determinista de los expedientes que ya existan sin
+--   ningún tramo: el mismo backfill de la migración 022, aquí como renderizado
+--   idempotente. Es lo que permite que una base que ya tenía averías —el banco
+--   del arnés o un despliegue que reejecuta el arranque tras el histórico de
+--   demostración— presente su Cadena de Custodia poblada en vez de vacía
+--   (EARS 05.3, D4, QA 5).
+--
+-- REGLAS QUE RESPETA
+--   · Valores de respaldo deterministas: `SIN-CODIGO` si el técnico no tiene
+--     código de operario, `Coordinación / Sistema` como autor no registrado y
+--     `Registro histórico previo` cuando el expediente antiguo no dejó texto.
+--   · `unassigned_at = GREATEST(assigned_at, desenlace)`: ningún tramo de un
+--     expediente terminado queda abierto ni con fin anterior a su inicio (QA 4).
+--   · Solo inserta donde no hay tramos: reejecutarlo no duplica ni reescribe un
+--     histórico ya sellado (Art. III.3).
+-- ============================================================================
+INSERT INTO incident_assignments (
+    incident_id,
+    technician_id,
+    technician_name_snapshot,
+    technician_code_snapshot,
+    assigned_by,
+    assigned_by_name_snapshot,
+    assignment_source,
+    assigned_at,
+    unassigned_by,
+    unassigned_by_name_snapshot,
+    unassignment_reason_type,
+    reassignment_reason,
+    unassigned_at,
+    created_at
+)
+SELECT
+    i.id,
+    u.id,
+    u.name,
+    COALESCE(NULLIF(btrim(u.operator_code), ''), 'SIN-CODIGO'),
+    NULL,
+    'Coordinación / Sistema',
+    'COORDINATOR_ASSIGN'::incident_assignment_source,
+    COALESCE(i.assigned_at, i.created_at),
+    NULL,
+    CASE
+        WHEN i.status IN ('RESOLVED', 'CLOSED', 'CANCELLED') THEN 'Coordinación / Sistema'
+    END,
+    CASE
+        WHEN i.status = 'CANCELLED' THEN 'CANCELLED'::incident_unassignment_reason_type
+        WHEN i.status IN ('RESOLVED', 'CLOSED') THEN 'RESOLVED'::incident_unassignment_reason_type
+    END,
+    CASE
+        WHEN i.status = 'CANCELLED' THEN left(
+            COALESCE(NULLIF(btrim(i.cancellation_reason), ''), 'Registro histórico previo'),
+            1000
+        )
+        WHEN i.status IN ('RESOLVED', 'CLOSED') THEN left(
+            COALESCE(NULLIF(btrim(i.resolution_diagnosis), ''), 'Registro histórico previo'),
+            1000
+        )
+    END,
+    CASE
+        WHEN i.status IN ('RESOLVED', 'CLOSED', 'CANCELLED') THEN GREATEST(
+            COALESCE(i.assigned_at, i.created_at),
+            COALESCE(i.resolved_at, i.cancelled_at, i.closed_at, i.created_at)
+        )
+    END,
+    COALESCE(i.assigned_at, i.created_at)
+FROM incidents i
+JOIN users u ON u.id = i.assigned_technician_id
+WHERE i.assigned_technician_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1
+        FROM incident_assignments a
+       WHERE a.incident_id = i.id
+  );
+
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante · 5 saldos de stock de furgoneta · 1 configuración de ruta ·
 --       13 máquinas · 6 usuarios internos · 5 frecuencias normativas · 13 repuestos ·
@@ -1208,5 +1293,7 @@ ON CONFLICT (code) DO NOTHING;
 --       evento de auditoría de sincronización **cuando el catálogo preventivo ya
 --       existe** (`SeedRunner`); en el arranque en limpio la Sección 16 no inserta
 --       nada porque no hay orden preventiva a la que apuntar.
---       0 incidencias · 0 histórico de averías (arranque en limpio estricto).
+--       0 incidencias · 0 histórico de averías (arranque en limpio estricto) ·
+--       0 tramos de custodia en el arranque limpio (Módulo 26): la Sección 18
+--       solo reconstruye expedientes que ya existan.
 -- =============================================================================

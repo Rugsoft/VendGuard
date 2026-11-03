@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Application\Service;
 
+use DateTimeImmutable;
 use DomainException;
 use InvalidArgumentException;
 use VendGuard\Application\DTO\ServiceSheetDto;
@@ -323,6 +324,7 @@ class SparePartTraceabilityService
      * @param int $technicianId Identificador del técnico autenticado responsable.
      * @param array<string, mixed> $data Datos de resolución (diagnóstico, acción, replaced_parts_declared, replaced_parts, sanitary_declarations).
      * @param array{id: int|null, role: string, name: string}|null $actor Metadatos del usuario actuante.
+     * @param DateTimeImmutable|null $resolvedAt Instante efectivo del cierre; `null` usa el reloj del servidor.
      * @return array<string, mixed>
      * 
      * @throws DomainException Si la incidencia no existe o no está asignada al técnico.
@@ -336,7 +338,8 @@ class SparePartTraceabilityService
         int $incidentId,
         int $technicianId,
         array $data,
-        ?array $actor = null
+        ?array $actor = null,
+        ?DateTimeImmutable $resolvedAt = null
     ): array {
         // 1. Validar existencia y asignación de la incidencia
         $incident = $this->incidentRepo->findById($incidentId);
@@ -546,6 +549,7 @@ class SparePartTraceabilityService
                 $sheetData,
                 $enqueuer,
                 $taxonomy,
+                $resolvedAt,
                 &$insertedParts,
                 &$insertedSheet
             ): Incident {
@@ -565,7 +569,13 @@ class SparePartTraceabilityService
                     $this->requestRepo->markCancelledByIncident($incidentId);
                 }
 
-                $resolved = $this->incidentRepo->resolve($incidentId, $technicianId, $diagnosis, $action);
+                $resolved = $this->incidentRepo->resolve(
+                    $incidentId,
+                    $technicianId,
+                    $diagnosis,
+                    $action,
+                    $resolvedAt
+                );
 
                 // 5.a La clasificación se congela en la MISMA transacción que el
                 //     cierre. `update()` persiste las siete columnas y, si el

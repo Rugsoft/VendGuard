@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
+use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
+use VendGuard\Core\Domain\Service\CustodyChannelResolver;
 use VendGuard\Application\DTO\IncidentPauseRequestDto;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\CoordinatorIncidentDetailService;
@@ -105,6 +108,9 @@ class CoordinatorController
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
     private ?TransactionManagerInterface $transactionManager;
 
+    /** Ausencias vigentes del saliente para derivar el canal de cobertura (F-04). */
+    private ?TechnicianAbsenceRepositoryInterface $absenceRepo;
+
     /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
     private ?FileStorageCompensator $fileCompensator;
 
@@ -144,9 +150,11 @@ class CoordinatorController
         ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null,
         ?SparePartRequestRepositoryInterface $sparePartRequestRepo = null,
         ?VanStockRepositoryInterface $vanStockRepo = null,
-        ?SparePartTraceabilityService $traceabilityService = null
+        ?SparePartTraceabilityService $traceabilityService = null,
+        ?TechnicianAbsenceRepositoryInterface $absenceRepo = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
+        $this->absenceRepo = $absenceRepo;
         $this->userRepo = $userRepo ?? new PdoUserRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
@@ -682,8 +690,9 @@ class CoordinatorController
      * reasignación carece de motivo válido; 422 `TECHNICIAN_ALREADY_ASSIGNED` si el
      * destino es el responsable actual; 422 `COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED`
      * si una avería de frío descarta al técnico de guardia sugerido sin justificación de
-     * 20 caracteres reales (Art. II y Art. V.1); 500 `ASSIGNMENT_FAILED` ante un fallo
-     * inesperado.
+     * 20 caracteres reales (Art. II y Art. V.1); 409 `ASSIGNMENT_STATE_CHANGED` si la
+     * avería cambió de estado o de titular en paralelo mientras el formulario estaba
+     * abierto (EARS 03.4, R4); 500 `ASSIGNMENT_FAILED` ante un fallo inesperado.
      */
     public function assignTechnician(Request $request): Response
     {
@@ -747,19 +756,16 @@ class CoordinatorController
         //    destino distinto: la incidencia conserva un único responsable activo
         //    (RF-07.3, Art. V.3) y no se registran eventos de reasignación ficticios (Art. III.3).
         if ($isReassignment) {
-            if ($reassignmentReason === '') {
-                return Response::error(
-                    'MISSING_REASSIGNMENT_REASON',
-                    'La reasignación técnica exige un motivo justificado (reassignment_reason obligatorio).',
-                    422
+            // Puerta única del motivo (R1, QA 1): normaliza espacios y exige diez
+            // caracteres con contenido real. No comparte regla ni mensaje con la
+            // salvaguarda sanitaria de 20 caracteres de `override_justification`
+            // (Art. II y Art. V.1), que se evalúa más abajo de forma independiente.
+            try {
+                $reassignmentReason = \VendGuard\Core\Domain\Service\ReassignmentReasonValidator::normalizeAndValidate(
+                    $rawReassignmentReason !== null ? (string)$rawReassignmentReason : null
                 );
-            }
-            if (mb_strlen($reassignmentReason, 'UTF-8') < self::MIN_REASSIGNMENT_REASON_LENGTH) {
-                return Response::error(
-                    'REASSIGNMENT_REASON_TOO_SHORT',
-                    'El motivo de la reasignación debe contener al menos 10 caracteres reales.',
-                    422
-                );
+            } catch (\InvalidArgumentException $e) {
+                return Response::error('REASSIGNMENT_REASON_REQUIRED', $e->getMessage(), 422);
             }
             if ($incident->getAssignedTechnicianId() === $technicianId) {
                 return Response::error(
@@ -798,6 +804,21 @@ class CoordinatorController
         // 8. ID del coordinador autenticado (para auditoría)
         $coordinatorId = $request->getAttribute('user_id');
         $actor = $this->extractActor($request);
+
+        // F-04: la cobertura de ausencia no se declara, se verifica. Si el técnico
+        // que pierde la custodia tiene una ausencia vigente, el tramo se cierra y
+        // se abre con el canal de ausencia (EARS 02.1 / 02.2); en cualquier otro
+        // caso el repositorio aplica la reasignación ordinaria de Coordinación.
+        $custodySource = null;
+        $custodyReason = null;
+        if ($isReassignment && $incident->getAssignedTechnicianId() !== null) {
+            $outgoingAbsence = ($this->absenceRepo ??= new PdoTechnicianAbsenceRepository())
+                ->findActiveAbsenceForTechnician((int)$incident->getAssignedTechnicianId());
+            [$custodySource, $custodyReason] = CustodyChannelResolver::resolve(
+                true,
+                $outgoingAbsence !== null
+            );
+        }
 
         // 8.bis El evento se compone antes del cambio. Si el repositorio ofrece la
         // puerta fusionada, la auditoría viaja en la misma sentencia que la
@@ -844,6 +865,8 @@ class CoordinatorController
                     urgencyReason: ($urgencyReason !== null && $urgencyReason !== '') ? $urgencyReason : null,
                     reassignmentReason: $isReassignment ? $reassignmentReason : null,
                     auditEvent: $assignmentAudit,
+                    assignmentSource: $custodySource,
+                    unassignmentReason: $custodyReason,
                 )
                 : $this->incidentRepo->assign(
                     incidentId: $incident,
@@ -852,6 +875,8 @@ class CoordinatorController
                     urgencyOverride: ($urgencyOverride !== null && $urgencyOverride !== '') ? $urgencyOverride : null,
                     urgencyReason: ($urgencyReason !== null && $urgencyReason !== '') ? $urgencyReason : null,
                     reassignmentReason: $isReassignment ? $reassignmentReason : null,
+                    assignmentSource: $custodySource,
+                    unassignmentReason: $custodyReason,
                 );
 
             $assigned = $enqueuer === null
@@ -862,6 +887,16 @@ class CoordinatorController
 
                     return $assigned;
                 });
+        } catch (\VendGuard\Core\Domain\Exception\AssignmentStateChangedException $e) {
+            // EARS 03.4 / R4: la foto del formulario quedó obsoleta. Se responde 409
+            // con el estado y el custodio vigentes para que el cliente refresque la
+            // ficha sin perder el texto redactado.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                $e->getDetails()
+            );
         } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
             return Response::error('INVALID_STATUS_FOR_ASSIGNMENT', $e->getMessage(), 422);
         } catch (\DomainException $e) {

@@ -22,7 +22,7 @@
 'use strict';
 
 /** Nombre de caché versionado (contratos §2.2). Subirlo es lo que invalida el shell. */
-const CACHE_NAME = 'vendguard-app-shell-v3';
+const CACHE_NAME = 'vendguard-app-shell-v4';
 
 /** Prefijo de la superficie HTTP que jamás entra en caché (Art. V.4). */
 const API_PATH_PREFIX = '/api/';
@@ -51,7 +51,7 @@ const APP_SHELL_ASSETS = [
   '/assets/css/service-sheet.css',
   '/assets/css/styles.css',
   // Núcleo de la aplicación
-  '/assets/js/app.js',
+  '/assets/js/app.js?v=26',
   '/assets/js/api.js',
   '/assets/js/store.js',
   '/assets/js/vendor/vue.esm-browser.prod.js',
@@ -68,7 +68,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/utils/PreventiveLabels.js',
   '/assets/js/utils/SuggestionFormat.js',
   // Vistas
-  '/assets/js/views/CoordinatorDashboardView.js',
+  '/assets/js/views/CoordinatorDashboardView.js?v=26',
   '/assets/js/views/CoordinatorMetricsView.js',
   '/assets/js/views/LocationPortalView.js',
   '/assets/js/views/PublicRefundTrackingView.js',
@@ -86,7 +86,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/components/ConnectionStateBanner.js',
   '/assets/js/components/CoordinatorAbsencesTab.js',
   '/assets/js/components/CoordinatorFleetTab.js',
-  '/assets/js/components/CoordinatorIncidentDetailModal.js',
+  '/assets/js/components/CoordinatorIncidentDetailModal.js?v=26',
   '/assets/js/components/CoordinatorNotificationCenterModal.js',
   '/assets/js/components/CoordinatorPreventiveDashboard.js',
   '/assets/js/components/CoordinatorPreventiveOrderDetailModal.js',
@@ -152,7 +152,7 @@ self.addEventListener('install', (event) => {
 
     await Promise.all(APP_SHELL_ASSETS.map(async (asset) => {
       try {
-        await cache.add(asset);
+        await cache.add(new Request(asset, { cache: 'reload' }));
       } catch (error) {
         console.warn(`VendGuard · No se pudo precachear ${asset}:`, error);
       }

@@ -247,6 +247,11 @@ export const CoordinatorIncidentDetailModal = {
       return this.detail?.sla || null;
     },
 
+    /** Cadena de custodia del expediente (Módulo 26, RF-04, D3). */
+    custodyChain() {
+      return this.detail?.custody_chain || null;
+    },
+
     /** Asignación técnica vigente y motivo de reasignación (RF-04.1, Art. V.3). */
     technician() {
       return this.detail?.technician || null;
@@ -580,9 +585,27 @@ export const CoordinatorIncidentDetailModal = {
       return this.technicians.filter((technician) => technician.id !== currentId);
     },
 
-    /** Contador de caracteres reales (puntos de código Unicode) del motivo de reasignación. */
+    /**
+     * Motivo normalizado tal y como lo medirá el servidor: extremos recortados y
+     * secuencias internas de espacios colapsadas a uno solo (R1, QA 1).
+     */
+    reassignReasonNormalized() {
+      return String(this.reassignReason || '').trim().replace(/\s+/g, ' ');
+    },
+
+    /** Longitud efectiva del motivo tras normalizar espacios. */
     reassignReasonLength() {
-      return Array.from(String(this.reassignReason || '').trim()).length;
+      return Array.from(this.reassignReasonNormalized).length;
+    },
+
+    /** El motivo debe contener al menos una letra o un dígito, no sólo símbolos. */
+    reassignReasonHasAlphanumeric() {
+      return /[a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ]/.test(this.reassignReasonNormalized);
+    },
+
+    /** Indicador reactivo del mínimo legal, visible sólo al reasignar (R1). */
+    reassignReasonCounterLabel() {
+      return `${this.reassignReasonLength} / 10 mín.`;
     },
 
     /** Primer puesto del ranking del expediente abierto (RF-04.3). */
@@ -617,9 +640,14 @@ export const CoordinatorIncidentDetailModal = {
       return !this.detailRequiresOverrideJustification || this.detailOverrideJustificationLength >= 20;
     },
 
-    /** La reasignación exige un motivo justificado de al menos 10 caracteres reales (RF-07.3). */
+    /**
+     * La reasignación exige diez caracteres efectivos y al menos una letra o un
+     * dígito: diez guiones o diez espacios no explican un cambio de custodio
+     * (RF-07.3, R1, QA 1).
+     */
     isReassignReasonValid() {
-      return !this.isReassign || this.reassignReasonLength >= 10;
+      return !this.isReassign
+        || (this.reassignReasonLength >= 10 && this.reassignReasonHasAlphanumeric);
     },
 
     /** Existe un comentario en redacción sin enviar (RF-08.1, plan §3.3). */
@@ -842,7 +870,10 @@ export const CoordinatorIncidentDetailModal = {
     /**
      * Carga la ficha enriquecida del expediente desde la API de Coordinación (RNF-01).
      */
-    async fetchDetail() {
+    async fetchDetail(options = {}) {
+      // Una recarga en segundo plano tras una colisión no debe descartar lo que el
+      // coordinador ya había redactado (R4).
+      const preserveAssignDrafts = options?.preserveAssignDrafts === true;
       if (this.incidentId === null || this.incidentId === '') {
         return;
       }
@@ -857,6 +888,9 @@ export const CoordinatorIncidentDetailModal = {
         // llega directamente el DTO de detalle enriquecido.
         const response = await api.coordinator.getIncidentDetail(this.incidentId);
         this.detail = response && typeof response === 'object' ? response : null;
+        if (!preserveAssignDrafts) {
+          this.assignErrorMessage = '';
+        }
         this.scrollCommentsToLatest();
       } catch (err) {
         this.detail = null;
@@ -1485,6 +1519,11 @@ export const CoordinatorIncidentDetailModal = {
         this.notifyIncidentUpdated({ reason: 'assign' });
       } catch (err) {
         this.assignErrorMessage = err?.message || 'No se pudo registrar la asignación técnica.';
+        // R4: una colisión o un estado ya cambiado no borra el texto escrito; se
+        // recarga la ficha en segundo plano para enseñar el custodio vigente.
+        if (err?.status === 409 || err?.status === 422) {
+          await this.fetchDetail({ preserveAssignDrafts: true });
+        }
       } finally {
         this.isSubmittingAssign = false;
       }
@@ -1936,6 +1975,108 @@ export const CoordinatorIncidentDetailModal = {
                 </div>
               </section>
 
+              <!-- 5. Cadena de Custodia y Reasignaciones (Módulo 26, RF-04, D3, R6).
+                   Se renderiza siempre: un expediente sin tramos lo declara en lugar de
+                   ocultar la sección, y las etiquetas vienen del servidor. -->
+              <section
+                class="info-card detail-section"
+                data-testid="incident-custody-chain-section"
+                style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 20px; margin-bottom: 16px;"
+              >
+                <h3 style="font-family: var(--font-display); font-size: 16px; font-weight: 500; color: var(--color-slate); margin: 0 0 12px;">
+                  🔄 Cadena de Custodia y Reasignaciones
+                </h3>
+
+                <template v-if="custodyChain">
+                  <div
+                    v-if="custodyChain.summary.is_empty"
+                    data-testid="custody-empty-state"
+                    style="background-color: var(--color-canvas); border: 1px dashed var(--color-hairline); border-radius: var(--radius-interactive); padding: 14px 16px;"
+                  >
+                    <p style="margin: 0 0 6px; font-family: var(--font-body); font-size: 13px; color: var(--color-slate); line-height: 1.5;">
+                      {{ custodyChain.summary.empty_message }}
+                    </p>
+                    <p style="margin: 0; font-family: var(--font-body); font-size: 12px; color: var(--color-ink-muted);">
+                      Tiempo acumulado en bandeja: <strong>{{ custodyChain.summary.total_unassigned_label }}</strong>
+                    </p>
+                  </div>
+
+                  <template v-else>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px;">
+                      <div data-testid="custody-kpi-current" style="background-color: var(--color-canvas); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px 12px;">
+                        <span style="display: block; font-family: var(--font-body); font-size: 11px; font-weight: 600; color: var(--color-ink-muted); text-transform: uppercase;">Custodio actual</span>
+                        <strong style="display: block; font-family: var(--font-display); font-size: 16px; font-weight: 500; color: var(--color-slate); margin-top: 4px;">
+                          {{ custodyChain.summary.has_active_custodian ? custodyChain.segments[custodyChain.segments.length - 1].technician_name : 'Sin custodio' }}
+                        </strong>
+                      </div>
+                      <div data-testid="custody-kpi-reassignments" style="background-color: var(--color-canvas); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px 12px;">
+                        <span style="display: block; font-family: var(--font-body); font-size: 11px; font-weight: 600; color: var(--color-ink-muted); text-transform: uppercase;">Reasignaciones</span>
+                        <strong style="display: block; font-family: var(--font-display); font-size: 20px; font-weight: 500; color: var(--color-slate); margin-top: 4px;">{{ custodyChain.summary.reassignments_count }}</strong>
+                      </div>
+                      <div data-testid="custody-kpi-custody-time" style="background-color: var(--color-canvas); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px 12px;">
+                        <span style="display: block; font-family: var(--font-body); font-size: 11px; font-weight: 600; color: var(--color-ink-muted); text-transform: uppercase;">Tiempo total en custodia</span>
+                        <strong style="display: block; font-family: var(--font-display); font-size: 16px; font-weight: 500; color: var(--color-slate); margin-top: 4px;">{{ custodyChain.summary.total_custody_label }}</strong>
+                      </div>
+                      <div data-testid="custody-kpi-unassigned-time" style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-radius: var(--radius-card); padding: 10px 12px;">
+                        <span style="display: block; font-family: var(--font-body); font-size: 11px; font-weight: 600; color: var(--color-warning-text); text-transform: uppercase;">Tiempo en bandeja sin asignar</span>
+                        <strong style="display: block; font-family: var(--font-display); font-size: 16px; font-weight: 500; color: var(--color-warning-text); margin-top: 4px;">{{ custodyChain.summary.total_unassigned_label }}</strong>
+                      </div>
+                    </div>
+
+                    <ul data-testid="custody-timeline" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px;">
+                      <li
+                        v-for="(item, index) in custodyChain.timeline_items"
+                        :key="index"
+                        :data-testid="'custody-item-' + item.item_type.toLowerCase()"
+                        :style="item.item_type === 'UNASSIGNED_GAP'
+                          ? 'background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-left: 4px solid var(--color-warning); border-radius: var(--radius-interactive); padding: 10px 12px;'
+                          : (item.payload.is_active
+                            ? 'background-color: var(--color-surface-card); border: 1px solid var(--color-primary); border-left: 4px solid var(--color-primary); border-radius: var(--radius-interactive); padding: 10px 12px;'
+                            : 'background-color: var(--color-canvas); border: 1px solid var(--color-hairline); border-left: 4px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 10px 12px;')"
+                      >
+                        <template v-if="item.item_type === 'CUSTODY_SEGMENT'">
+                          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                            <strong style="font-family: var(--font-body); font-size: 13px; color: var(--color-slate);">
+                              Tramo {{ item.payload.segment_number }} · {{ item.payload.technician_name }}
+                              <span v-if="item.payload.technician_code" style="font-family: ui-monospace, monospace; font-size: 11px; color: var(--color-ink-muted);">({{ item.payload.technician_code }})</span>
+                            </strong>
+                            <span
+                              :style="item.payload.is_active
+                                ? 'font-family: var(--font-body); font-size: 11px; font-weight: 700; background-color: var(--color-primary); color: var(--color-surface-card); border-radius: var(--radius-interactive); padding: 2px 8px;'
+                                : 'font-family: var(--font-body); font-size: 11px; font-weight: 600; background-color: var(--color-canvas); color: var(--color-ink-muted); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 2px 8px;'"
+                            >
+                              {{ item.payload.is_active ? 'Custodio activo' : 'Tramo cerrado' }}
+                            </span>
+                          </div>
+                          <p style="margin: 6px 0 0; font-family: var(--font-body); font-size: 12px; color: var(--color-ink-muted);">
+                            Desde {{ formatDateTime(item.payload.assigned_at) }} · {{ item.payload.retention_label }}
+                            <span v-if="item.payload.assigned_by_name"> · abierto por {{ item.payload.assigned_by_name }}</span>
+                            <span v-if="item.payload.assignment_source_label"> · {{ item.payload.assignment_source_label }}</span>
+                          </p>
+                          <div v-if="!item.payload.is_active" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--color-hairline);">
+                            <p style="margin: 0; font-family: var(--font-body); font-size: 12px; color: var(--color-slate);">
+                              <strong>Cierre:</strong> {{ formatDateTime(item.payload.unassigned_at) }}
+                              <span v-if="item.payload.unassigned_by_name"> · {{ item.payload.unassigned_by_name }}</span>
+                              <span v-if="item.payload.unassignment_reason_label"> · {{ item.payload.unassignment_reason_label }}</span>
+                            </p>
+                            <p v-if="item.payload.reassignment_reason" style="margin: 4px 0 0; font-family: var(--font-body); font-size: 12px; color: var(--color-ink-secondary); line-height: 1.45;">
+                              {{ item.payload.reassignment_reason }}
+                            </p>
+                          </div>
+                        </template>
+                        <template v-else>
+                          <p style="margin: 0; font-family: var(--font-body); font-size: 12px; font-weight: 600; color: var(--color-warning-text);">
+                            ⏳ {{ item.payload.gap_reason_label }} · {{ item.payload.gap_label }}
+                          </p>
+                          <p style="margin: 4px 0 0; font-family: var(--font-body); font-size: 12px; color: var(--color-warning-text);">
+                            Desde {{ formatDateTime(item.payload.started_at) }}<span v-if="item.payload.ended_at"> hasta {{ formatDateTime(item.payload.ended_at) }}</span>
+                          </p>
+                        </template>
+                      </li>
+                    </ul>
+                  </template>
+                </template>
+              </section>
               <!-- 5. Intervención Técnica, Repuestos y Descarte (RF-04) -->
               <section
                 class="info-card detail-section"
@@ -2491,7 +2632,7 @@ export const CoordinatorIncidentDetailModal = {
                     data-testid="assign-reason-counter"
                     :style="{ fontFamily: 'var(--font-body, Inter, sans-serif)', fontSize: '12px', fontWeight: '600', color: isReassignReasonValid ? 'var(--color-success-text, #065f46)' : 'var(--color-ink-muted, #6c7e9d)' }"
                   >
-                    {{ reassignReasonLength }} / 10 caracteres
+                    {{ reassignReasonCounterLabel }}
                   </span>
                 </div>
                 <div v-if="detailRequiresOverrideJustification" data-testid="detail-assign-override-block" style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-top: 12px;">

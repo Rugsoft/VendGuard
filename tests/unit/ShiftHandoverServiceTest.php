@@ -151,7 +151,7 @@ $incidentRepo = new class($incidents, $addedComments, $assignedTickets) implemen
         }
         return $res;
     }
-    public function assign(int $incidentId, int $technicianId, ?int $coordinatorId = null, ?string $urgencyOverride = null, ?string $urgencyReason = null, ?string $reassignmentReason = null): Incident {
+    public function assign(int $incidentId, int $technicianId, ?int $coordinatorId = null, ?string $urgencyOverride = null, ?string $urgencyReason = null, ?string $reassignmentReason = null, $assignmentSource = null, $unassignmentReason = null, ?string $actorNameSnapshot = null): Incident {
         $this->assigned[$incidentId] = $technicianId;
         return $this->incidents[$incidentId];
     }

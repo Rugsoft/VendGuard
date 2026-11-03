@@ -273,7 +273,7 @@ $repo->fixture = $fixture;
 $repo->identifiers = [];
 $dto = $service->buildDetail(142, $at1115);
 
-$assert('5.1 buildDetail devuelve el DTO con los diez bloques en orden contractual', $dto instanceof CoordinatorIncidentDetailDto && array_keys($dto->toArray()) === ['incident', 'location', 'machine', 'technician', 'timeline', 'sla', 'technical_intervention', 'comments', 'refund', 'permissions']);
+$assert('5.1 buildDetail devuelve el DTO con los once bloques en orden contractual', $dto instanceof CoordinatorIncidentDetailDto && array_keys($dto->toArray()) === ['incident', 'location', 'machine', 'technician', 'timeline', 'sla', 'technical_intervention', 'comments', 'refund', 'permissions', 'custody_chain']);
 $assert('5.2 El identificador recibido se delega al repositorio', $repo->identifiers === [142]);
 
 $blocks = $dto->toArray();
@@ -657,6 +657,238 @@ $assert(
         && ($twoEpisodes[1]['root_cause']['category_label'] ?? '') === 'Máquina apagada / Sin corriente'
 );
 
+// =====================================================================
+// GRUPO 9: Cadena de custodia, huecos y motor de fallback (T-CUSTODY-09 / RF-03, D4, QA 2, QA 5)
+// =====================================================================
+echo "\n--- Grupo 9: Cadena de custodia, huecos y fallback ---\n";
+
+$custodyFixture = $fixture;
+$custodyFixture['incident'] = array_merge($fixture['incident'], ['reopened_at' => null]);
+$custodyFixture['assignments'] = [
+    ['id' => 1, 'technician_id' => 4, 'technician_name_snapshot' => 'Jordi Cruz', 'technician_code_snapshot' => 'OP-BCN-04',
+        'assigned_by' => 2, 'assigned_by_name_snapshot' => 'Coordinación Central', 'assignment_source' => 'COORDINATOR_ASSIGN',
+        'assigned_at' => '2026-10-01 08:20:00', 'unassigned_at' => '2026-10-01 09:00:00', 'unassigned_by' => 2,
+        'unassigned_by_name_snapshot' => 'Coordinación Central', 'unassignment_reason_type' => 'REASSIGNED_BY_COORDINATOR',
+        'reassignment_reason' => 'Proximidad geográfica al centro sanitario.'],
+    ['id' => 2, 'technician_id' => 9, 'technician_name_snapshot' => 'Marta Ruta', 'technician_code_snapshot' => 'OP-BCN-09',
+        'assigned_by' => 2, 'assigned_by_name_snapshot' => 'Coordinación Central', 'assignment_source' => 'SHIFT_HANDOVER',
+        'assigned_at' => '2026-10-01 09:10:00', 'unassigned_at' => '2026-10-01 10:00:00', 'unassigned_by' => 2,
+        'unassigned_by_name_snapshot' => 'Coordinación Central', 'unassignment_reason_type' => 'SHIFT_HANDOVER',
+        'reassignment_reason' => 'Relevo de fin de turno con nota de traspaso.'],
+    ['id' => 3, 'technician_id' => 4, 'technician_name_snapshot' => 'Jordi Cruz', 'technician_code_snapshot' => 'OP-BCN-04',
+        'assigned_by' => 2, 'assigned_by_name_snapshot' => 'Coordinación Central', 'assignment_source' => 'COORDINATOR_REASSIGN',
+        'assigned_at' => '2026-10-01 10:00:30', 'unassigned_at' => '2026-10-01 11:00:00', 'unassigned_by' => 4,
+        'unassigned_by_name_snapshot' => 'Jordi Cruz', 'unassignment_reason_type' => 'RESOLVED',
+        'reassignment_reason' => 'Compresor sustituido y cadena de frío verificada.'],
+    ['id' => 4, 'technician_id' => 9, 'technician_name_snapshot' => 'Marta Ruta', 'technician_code_snapshot' => 'OP-BCN-09',
+        'assigned_by' => 2, 'assigned_by_name_snapshot' => 'Coordinación Central', 'assignment_source' => 'COORDINATOR_REASSIGN',
+        'assigned_at' => '2026-10-01 11:00:00', 'unassigned_at' => null, 'unassigned_by' => null,
+        'unassigned_by_name_snapshot' => null, 'unassignment_reason_type' => null, 'reassignment_reason' => null],
+];
+$repo->fixture = $custodyFixture;
+$custody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+
+$assert(
+    '9.1 Resumen: cuatro tramos, dos reasignaciones sin resolver y dos técnicos distintos',
+    $custody['summary']['total_assignments_count'] === 4
+        && $custody['summary']['reassignments_count'] === 2
+        && $custody['summary']['distinct_technicians_count'] === 2
+        && $custody['summary']['has_active_custodian'] === true
+        && $custody['summary']['has_multiple_custodians'] === true
+        && $custody['summary']['is_empty'] === false,
+    json_encode($custody['summary'])
+);
+
+$assert(
+    '9.2 Retención continua por tramo: 40 min cerrados y 15 min del custodio activo (D4)',
+    $custody['segments'][0]['retention_seconds'] === 2400
+        && $custody['segments'][0]['retention_label'] === '40 min'
+        && $custody['segments'][3]['retention_seconds'] === 900
+        && $custody['segments'][3]['retention_label'] === '15 min'
+        && $custody['segments'][3]['is_active'] === true,
+    json_encode($custody['segments'])
+);
+
+$assert(
+    '9.3 Totales acumulados: 2 h 44 min de custodia y 15 min en bandeja',
+    $custody['summary']['total_custody_seconds'] === 9870
+        && $custody['summary']['total_custody_label'] === '2 h 44 min'
+        && $custody['summary']['total_unassigned_seconds'] === 900
+        && $custody['summary']['total_unassigned_label'] === '15 min'
+);
+
+$assert(
+    '9.4 Huecos > 60 s: triaje inicial y relevo; el micro-hueco de 30 s no se publica',
+    count($custody['unassigned_gaps']) === 2
+        && $custody['unassigned_gaps'][0]['gap_type'] === 'INITIAL_TRIAGE_WAIT'
+        && $custody['unassigned_gaps'][0]['gap_seconds'] === 300
+        && $custody['unassigned_gaps'][1]['gap_type'] === 'BETWEEN_SEGMENTS'
+        && $custody['unassigned_gaps'][1]['gap_seconds'] === 600
+);
+
+$assert(
+    '9.5 El hilo temporal intercala tramos y huecos en orden cronológico',
+    count($custody['timeline_items']) === 6
+        && $custody['timeline_items'][0]['item_type'] === 'UNASSIGNED_GAP'
+        && $custody['timeline_items'][1]['item_type'] === 'CUSTODY_SEGMENT'
+        && $custody['timeline_items'][2]['item_type'] === 'UNASSIGNED_GAP'
+);
+
+$assert(
+    '9.6 Canal y causa del relevo se publican con su etiqueta castellana',
+    $custody['segments'][1]['assignment_source'] === 'SHIFT_HANDOVER'
+        && $custody['segments'][1]['assignment_source_label'] === 'Relevo de Fin de Turno'
+        && $custody['segments'][1]['unassignment_reason_label'] === 'Relevo de Fin de Turno'
+        && $custody['segments'][2]['unassignment_reason_label'] === 'Resuelta'
+        && $custody['segments'][2]['is_unresolved_transfer'] === false
+);
+
+// Reapertura en garantía: el periodo RESOLVED previo (10:00 -> 10:40) no es bandeja.
+$reopenedCustodyFixture = $custodyFixture;
+$reopenedCustodyFixture['incident'] = array_merge(
+    $custodyFixture['incident'],
+    ['reopened_at' => '2026-10-01 10:40:00']
+);
+$reopenedCustodyFixture['assignments'][2]['unassigned_at'] = '2026-10-01 10:00:00';
+$reopenedCustodyFixture['assignments'][3]['assigned_at'] = '2026-10-01 10:50:00';
+$repo->fixture = $reopenedCustodyFixture;
+$reopenedCustody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+$reopenedGap = [];
+foreach ($reopenedCustody['unassigned_gaps'] as $candidate) {
+    if (($candidate['preceding_segment_number'] ?? null) === 3) {
+        $reopenedGap = $candidate;
+        break;
+    }
+}
+
+$assert(
+    '9.7 La reapertura recorta el hueco al instante de reapertura: 10 min, no 50 (D4, QA 2)',
+    $reopenedGap['gap_seconds'] === 600
+        && $reopenedGap['gap_label'] === '10 min'
+        && $reopenedGap['gap_type'] === 'WARRANTY_REOPEN_WAIT'
+        && $reopenedGap['gap_reason_label'] === 'En bandeja tras reapertura en garantía'
+        && $reopenedGap['following_segment_number'] === 4,
+    json_encode($reopenedGap)
+);
+
+// Liberación sanitaria N2: el hueco entre tramos conserva su causa contextual (EARS 04.2).
+$sanitaryFixture = $custodyFixture;
+$sanitaryFixture['assignments'][0]['unassignment_reason_type'] = 'SANITARY_FAILSAFE_UNASSIGNED';
+$sanitaryFixture['assignments'][0]['reassignment_reason'] = 'Liberación a bandeja por protocolo sanitario sin guardia.';
+$repo->fixture = $sanitaryFixture;
+$sanitaryCustody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+$sanitaryGap = [];
+foreach ($sanitaryCustody['unassigned_gaps'] as $candidate) {
+    if (($candidate['preceding_segment_number'] ?? null) === 1) {
+        $sanitaryGap = $candidate;
+        break;
+    }
+}
+$assert(
+    '9.7.b El hueco tras una liberación sanitaria se etiqueta con su causa (EARS 04.2)',
+    ($sanitaryGap['gap_type'] ?? '') === 'SANITARY_RELEASE_WAIT'
+        && ($sanitaryGap['gap_reason_label'] ?? '') === 'En bandeja tras liberación sanitaria sin guardia'
+        && ($sanitaryGap['gap_seconds'] ?? 0) === 600,
+    json_encode($sanitaryGap)
+);
+
+// Reapertura sin asignación: el hueco activo no cuenta el tiempo en RESOLVED (EARS 04.2, §6.4).
+$activeReopenFixture = $fixture;
+$activeReopenFixture['incident'] = array_merge($fixture['incident'], [
+    'status' => 'REOPENED',
+    'assigned_technician_id' => null,
+    'reopened_at' => '2026-10-01 10:40:00',
+]);
+$activeReopenFixture['assignments'] = array_slice($custodyFixture['assignments'], 0, 2);
+$repo->fixture = $activeReopenFixture;
+$activeReopenCustody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+$activeReopenGap = [];
+foreach ($activeReopenCustody['unassigned_gaps'] as $candidate) {
+    if (($candidate['is_active_gap'] ?? false) === true) {
+        $activeReopenGap = $candidate;
+        break;
+    }
+}
+$assert(
+    '9.7.c La espera activa tras reapertura empieza en reopened_at y no en el cierre (EARS 04.2, §6.4)',
+    ($activeReopenGap['gap_type'] ?? '') === 'WARRANTY_REOPEN_WAIT'
+        && ($activeReopenGap['gap_reason_label'] ?? '') === 'En bandeja tras reapertura en garantía'
+        && ($activeReopenGap['gap_seconds'] ?? 0) === 2100,
+    json_encode($activeReopenGap)
+);
+
+// Liberación sanitaria sin asignación posterior: el hueco activo conserva su causa.
+$activeSanitaryFixture = $fixture;
+$activeSanitaryFixture['incident'] = array_merge($fixture['incident'], [
+    'status' => 'REGISTERED',
+    'assigned_technician_id' => null,
+    'reopened_at' => null,
+]);
+$activeSanitaryFixture['assignments'] = array_slice($custodyFixture['assignments'], 0, 1);
+$activeSanitaryFixture['assignments'][0]['unassignment_reason_type'] = 'SANITARY_FAILSAFE_UNASSIGNED';
+$activeSanitaryFixture['assignments'][0]['reassignment_reason'] = 'Liberación a bandeja por protocolo sanitario sin guardia.';
+$repo->fixture = $activeSanitaryFixture;
+$activeSanitaryCustody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+$activeSanitaryGap = [];
+foreach ($activeSanitaryCustody['unassigned_gaps'] as $candidate) {
+    if (($candidate['is_active_gap'] ?? false) === true) {
+        $activeSanitaryGap = $candidate;
+        break;
+    }
+}
+$assert(
+    '9.7.d La espera activa tras liberación sanitaria conserva su causa (EARS 04.2)',
+    ($activeSanitaryGap['gap_type'] ?? '') === 'SANITARY_RELEASE_WAIT'
+        && ($activeSanitaryGap['gap_reason_label'] ?? '') === 'En bandeja tras liberación sanitaria sin guardia'
+        && ($activeSanitaryGap['gap_seconds'] ?? 0) === 8100,
+    json_encode($activeSanitaryGap)
+);
+
+// Cancelación sin técnico: no hay tramos y la cadena lo declara explícitamente (R6).
+$cancelledCustodyFixture = $fixture;
+$cancelledCustodyFixture['incident'] = array_merge(
+    $fixture['incident'],
+    ['assigned_technician_id' => null, 'status' => 'CANCELLED', 'cancelled_at' => '2026-10-01 11:00:00']
+);
+$cancelledCustodyFixture['assignments'] = [];
+$repo->fixture = $cancelledCustodyFixture;
+$cancelledCustody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+$cancelledGap = $cancelledCustody['unassigned_gaps'][0] ?? [];
+
+$assert(
+    '9.8 Expediente cancelado sin custodio: conserva el hueco de triaje hasta cancelled_at (R6, D4)',
+    $cancelledCustody['segments'] === []
+        && count($cancelledCustody['unassigned_gaps']) === 1
+        && ($cancelledGap['gap_type'] ?? '') === 'INITIAL_TRIAGE_WAIT'
+        && ($cancelledGap['is_active_gap'] ?? true) === false
+        && ($cancelledGap['gap_seconds'] ?? 0) > 0
+        && ($cancelledCustody['summary']['total_unassigned_seconds'] ?? 0) >= ($cancelledGap['gap_seconds'] ?? 0)
+);
+
+// Motor de fallback: expediente histórico con técnico pero sin filas en la tabla (QA 5).
+$fallbackCustodyFixture = $fixture;
+unset($fallbackCustodyFixture['assignments']);
+$fallbackCustodyFixture['technician'] = null;
+$repo->fixture = $fallbackCustodyFixture;
+$fallbackCustody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+$fallbackSegment = $fallbackCustody['segments'][0] ?? [];
+
+$assert(
+    '9.9 Fallback determinista: SIN-CODIGO, Coordinación / Sistema y Registro histórico previo (QA 5)',
+    count($fallbackCustody['segments']) === 1
+        && $fallbackSegment['technician_code'] === 'SIN-CODIGO'
+        && $fallbackSegment['technician_name'] === 'Registro histórico previo'
+        && $fallbackSegment['assigned_by_name'] === 'Coordinación / Sistema'
+        && $fallbackSegment['is_synthesized_fallback'] === true
+        && $fallbackSegment['is_active'] === true,
+    json_encode($fallbackSegment)
+);
+
+$assert(
+    '9.10 El fallback conserva la retención del tramo reconstruido hasta el instante de lectura',
+    $fallbackSegment['retention_seconds'] === 9900
+        && $fallbackSegment['retention_label'] === '2 h 45 min'
+);
 // =====================================================================
 // RESUMEN DE EJECUCIÓN
 // =====================================================================

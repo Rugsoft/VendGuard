@@ -14,7 +14,7 @@ import { store, restoreSession } from './store.js';
 import { AppNavbar } from './components/AppNavbar.js';
 import { ConnectionStateBanner } from './components/ConnectionStateBanner.js';
 import { LocationPortalView } from './views/LocationPortalView.js';
-import { CoordinatorDashboardView } from './views/CoordinatorDashboardView.js';
+import { CoordinatorDashboardView } from './views/CoordinatorDashboardView.js?v=26';
 import { TechnicianRouteView } from './views/TechnicianRouteView.js';
 import { QrReportView } from './views/QrReportView.js';
 import { PublicRefundTrackingView } from './views/PublicRefundTrackingView.js';

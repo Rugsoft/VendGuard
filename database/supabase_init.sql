@@ -2627,29 +2627,255 @@ CREATE OR REPLACE TRIGGER trg_no_delete_offline_sync_mutations
     FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
 
 -- =============================================================================
+-- Módulo 26 · Historial Completo de Reasignaciones y Cadena de Custodia
+-- ----------------------------------------------------------------------------
+-- POR QUÉ
+--   El expediente solo conservaba al técnico actual: quién tuvo la avería, en
+--   qué orden, cuánto tiempo la retuvo y por qué salió de su cartera se perdía
+--   en las notas. La Tabla 37 conserva cada tramo de custodia con los snapshots
+--   congelados de los actores (D2, Art. III.3) y el motor —no solo el servicio—
+--   garantiza que jamás exista más de un custodio activo simultáneo (Art. V.3).
+--
+-- QUÉ DECLARA
+--   1. Los tipos `incident_assignment_source` e `incident_unassignment_reason_type`.
+--   2. La Tabla 37 `incident_assignments` con coherencia todo-o-nada entre tramo
+--      abierto y cerrado y suelo temporal `unassigned_at >= assigned_at` (QA 4).
+--   3. El índice único parcial `uq_incident_assignments_active_custody` (Art. V.3).
+--   4. `trg_no_delete_incident_assignments` (Art. III.1) y
+--      `trg_immutable_incident_assignments` (Art. III.3, EARS 01.3).
+--   5. El backfill idempotente de expedientes anteriores (D4, QA 5).
+-- La declaración es la misma que la migración `022_incident_assignments_custody_chain.sql`.
+-- ----------------------------------------------------------------------------
+
+DO $do$
+BEGIN
+    CREATE TYPE incident_assignment_source AS ENUM (
+        'COORDINATOR_ASSIGN',
+        'COORDINATOR_REASSIGN',
+        'ABSENCE_COVERAGE_REASSIGN',
+        'OPPORTUNISTIC_NEW',
+        'OPPORTUNISTIC_ASSUMED',
+        'OPPORTUNISTIC_TAKEOVER',
+        'OPPORTUNISTIC_WARRANTY_REOPEN',
+        'SHIFT_HANDOVER',
+        'SANITARY_FAILSAFE_GUARD'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE incident_unassignment_reason_type AS ENUM (
+        'REASSIGNED_BY_COORDINATOR',
+        'ABSENCE_COVERAGE_REASSIGN',
+        'TAKEN_OVER_IN_SITU',
+        'SHIFT_HANDOVER',
+        'SANITARY_FAILSAFE_GUARD',
+        'SANITARY_FAILSAFE_UNASSIGNED',
+        'RESOLVED',
+        'CHRONIC_REPLACEMENT_CLOSED',
+        'WARRANTY_REOPENED',
+        'CANCELLED'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+CREATE TABLE IF NOT EXISTS incident_assignments (
+    id                          BIGINT GENERATED ALWAYS AS IDENTITY,
+    incident_id                 BIGINT NOT NULL,
+    technician_id               BIGINT NOT NULL,
+    technician_name_snapshot    VARCHAR(150) NOT NULL,
+    technician_code_snapshot    VARCHAR(32) NOT NULL DEFAULT 'SIN-CODIGO',
+    assigned_by                 BIGINT,
+    assigned_by_name_snapshot   VARCHAR(150) NOT NULL DEFAULT 'Coordinación / Sistema',
+    assignment_source           incident_assignment_source NOT NULL,
+    assigned_at                 TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    unassigned_by               BIGINT,
+    unassigned_by_name_snapshot VARCHAR(150),
+    unassignment_reason_type    incident_unassignment_reason_type,
+    reassignment_reason         TEXT,
+    unassigned_at               TIMESTAMPTZ,
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_incident_assignments PRIMARY KEY (id),
+    CONSTRAINT fk_incident_assignments_incident FOREIGN KEY (incident_id)
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_incident_assignments_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_incident_assignments_assigned_by FOREIGN KEY (assigned_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_incident_assignments_unassigned_by FOREIGN KEY (unassigned_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    -- Un tramo sin nombre legible no es auditable y dejaría un hueco mudo (R5).
+    CONSTRAINT chk_incident_assignments_snapshots_not_empty CHECK (
+        char_length(btrim(technician_name_snapshot)) BETWEEN 1 AND 150
+        AND char_length(btrim(technician_code_snapshot)) BETWEEN 1 AND 32
+        AND char_length(btrim(assigned_by_name_snapshot)) BETWEEN 1 AND 150
+        AND (
+            unassigned_by_name_snapshot IS NULL
+            OR char_length(btrim(unassigned_by_name_snapshot)) BETWEEN 1 AND 150
+        )
+    ),
+    -- O están todos los datos de salida, o no está ninguno (EARS 01.2, R5, QA 4).
+    CONSTRAINT chk_incident_assignments_closure_coherence CHECK (
+        (
+            unassigned_at IS NULL
+            AND unassignment_reason_type IS NULL
+            AND unassigned_by IS NULL
+            AND unassigned_by_name_snapshot IS NULL
+            AND reassignment_reason IS NULL
+        )
+        OR (
+            unassigned_at IS NOT NULL
+            AND unassignment_reason_type IS NOT NULL
+            AND unassigned_by_name_snapshot IS NOT NULL
+            AND reassignment_reason IS NOT NULL
+            AND char_length(btrim(reassignment_reason)) BETWEEN 1 AND 1000
+            AND unassigned_at >= assigned_at
+        )
+    )
+);
+
+-- Art. V.3 y EARS 01.1: a lo sumo un único tramo abierto por incidencia.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_incident_assignments_active_custody
+    ON incident_assignments (incident_id)
+    WHERE unassigned_at IS NULL;
+
+-- RNF-01: la línea de tiempo se lee ordenada sin ordenar en memoria.
+CREATE INDEX IF NOT EXISTS idx_incident_assignments_incident_timeline
+    ON incident_assignments (incident_id, assigned_at ASC, id ASC);
+
+CREATE INDEX IF NOT EXISTS idx_incident_assignments_technician
+    ON incident_assignments (technician_id, assigned_at DESC);
+
+-- Art. III.1: prohibición absoluta de borrado físico.
+CREATE OR REPLACE TRIGGER trg_no_delete_incident_assignments
+    BEFORE DELETE ON incident_assignments
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+-- Art. III.3 y EARS 01.3: apertura y snapshots inmutables; un tramo cerrado no
+-- admite ningún cambio posterior.
+CREATE OR REPLACE FUNCTION enforce_incident_assignments_immutability()
+RETURNS TRIGGER AS $fn$
+BEGIN
+    IF OLD.unassigned_at IS NOT NULL THEN
+        RAISE EXCEPTION 'ART_III_3_VIOLATION: Un tramo de custodia ya cerrado en incident_assignments es inmutable y no admite modificaciones (EARS 01.3).'
+            USING ERRCODE = '45000';
+    END IF;
+
+    IF NEW.id IS DISTINCT FROM OLD.id
+        OR NEW.incident_id IS DISTINCT FROM OLD.incident_id
+        OR NEW.technician_id IS DISTINCT FROM OLD.technician_id
+        OR NEW.technician_name_snapshot IS DISTINCT FROM OLD.technician_name_snapshot
+        OR NEW.technician_code_snapshot IS DISTINCT FROM OLD.technician_code_snapshot
+        OR NEW.assigned_by IS DISTINCT FROM OLD.assigned_by
+        OR NEW.assigned_by_name_snapshot IS DISTINCT FROM OLD.assigned_by_name_snapshot
+        OR NEW.assignment_source IS DISTINCT FROM OLD.assignment_source
+        OR NEW.assigned_at IS DISTINCT FROM OLD.assigned_at
+        OR NEW.created_at IS DISTINCT FROM OLD.created_at
+    THEN
+        RAISE EXCEPTION 'ART_III_3_VIOLATION: Los datos de apertura y snapshots de un tramo en incident_assignments son inmutables tras su creación (EARS 01.3).'
+            USING ERRCODE = '45000';
+    END IF;
+
+    RETURN NEW;
+END;
+$fn$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER trg_immutable_incident_assignments
+    BEFORE UPDATE ON incident_assignments
+    FOR EACH ROW EXECUTE FUNCTION enforce_incident_assignments_immutability();
+
+-- Backfill idempotente de expedientes anteriores al módulo (D4, QA 5): solo
+-- incidencias con técnico y sin ningún tramo. Un expediente ya terminado se
+-- sella con su desenlace para que ningún cierre deje custodia abierta.
+INSERT INTO incident_assignments (
+    incident_id,
+    technician_id,
+    technician_name_snapshot,
+    technician_code_snapshot,
+    assigned_by,
+    assigned_by_name_snapshot,
+    assignment_source,
+    assigned_at,
+    unassigned_by,
+    unassigned_by_name_snapshot,
+    unassignment_reason_type,
+    reassignment_reason,
+    unassigned_at,
+    created_at
+)
+SELECT
+    i.id,
+    u.id,
+    u.name,
+    COALESCE(NULLIF(btrim(u.operator_code), ''), 'SIN-CODIGO'),
+    NULL,
+    'Coordinación / Sistema',
+    'COORDINATOR_ASSIGN'::incident_assignment_source,
+    COALESCE(i.assigned_at, i.created_at),
+    NULL,
+    CASE
+        WHEN i.status IN ('RESOLVED', 'CLOSED', 'CANCELLED') THEN 'Coordinación / Sistema'
+    END,
+    CASE
+        WHEN i.status = 'CANCELLED' THEN 'CANCELLED'::incident_unassignment_reason_type
+        WHEN i.status IN ('RESOLVED', 'CLOSED') THEN 'RESOLVED'::incident_unassignment_reason_type
+    END,
+    CASE
+        WHEN i.status = 'CANCELLED' THEN left(
+            COALESCE(NULLIF(btrim(i.cancellation_reason), ''), 'Registro histórico previo'),
+            1000
+        )
+        WHEN i.status IN ('RESOLVED', 'CLOSED') THEN left(
+            COALESCE(NULLIF(btrim(i.resolution_diagnosis), ''), 'Registro histórico previo'),
+            1000
+        )
+    END,
+    CASE
+        WHEN i.status IN ('RESOLVED', 'CLOSED', 'CANCELLED') THEN GREATEST(
+            COALESCE(i.assigned_at, i.created_at),
+            COALESCE(i.resolved_at, i.cancelled_at, i.closed_at, i.created_at)
+        )
+    END,
+    COALESCE(i.assigned_at, i.created_at)
+FROM incidents i
+JOIN users u ON u.id = i.assigned_technician_id
+WHERE i.assigned_technician_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1
+        FROM incident_assignments a
+       WHERE a.incident_id = i.id
+  );
+
+-- =============================================================================
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 34 tablas (las 34 del contrato de correspondencia) · 24 tipos del dominio en sus
--- 25 columnas `ENUM` · 5 funciones de blindaje: `prevent_hard_delete()`,
+-- 37 tablas (las 37 del contrato de correspondencia) · 32 tipos del dominio en sus
+-- 35 columnas `ENUM` · 6 funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
--- `prevent_satisfaction_survey_rewrite()` y `prevent_service_sheet_update()`
--- (las tres últimas de bloqueo de `UPDATE` comparten forma)
--- 55 disparadores: 34 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 18
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 3 `BEFORE UPDATE` de
+-- `prevent_satisfaction_survey_rewrite()`, `prevent_service_sheet_update()`
+-- (las tres últimas de bloqueo de `UPDATE` comparten forma) y
+-- `enforce_incident_assignments_immutability()` (Módulo 26)
+-- 63 disparadores: 37 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 20
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 6 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
--- `trg_no_update_technician_shift_logs`)
--- 55 restricciones nombradas: 34 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 21 únicas
--- 49 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- `trg_no_update_technician_shift_logs`, `trg_immutable_root_causes`,
+-- `trg_immutable_standard_solutions` y `trg_immutable_incident_assignments`)
+-- 60 restricciones nombradas: 37 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 23 únicas
+-- 51 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
 -- en la bitácora), las 12 del Módulo 23 (5 en órdenes y 7 en líneas) y las 4 del
--- Módulo 24 (formato del identificador, tipo de parada, operación y resultado)
--- · 69 claves foráneas con las reglas declaradas en el contrato §2.4
+-- Módulo 24 (formato del identificador, tipo de parada, operación y resultado) y
+-- las 2 del Módulo 26 (snapshots no vacíos y coherencia de cierre del tramo)
+-- · 76 claves foráneas con las reglas declaradas en el contrato §2.4
 -- 85 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
 -- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2), el Módulo 23 (5) y el
--- Módulo 24 (2)— y siete índices únicos parciales: `uq_machine_active_ticket` (D-6),
+-- Módulo 24 (2) y el Módulo 26 (3)— y ocho índices únicos parciales:
+-- `uq_incident_assignments_active_custody` (M26, Art. V.3), `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
 -- `uq_users_telegram_chat_id` (M16), `uq_zone_postal_codes_live` (M17),
 -- `uq_tech_shifts_single_active` (M21, Resolución R3) y

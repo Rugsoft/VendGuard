@@ -25,11 +25,22 @@ const storageMock = (() => {
 })();
 globalThis.localStorage = storageMock;
 
+import { readFileSync } from 'node:fs';
 import { api } from '../../public/assets/js/api.js';
 import { App } from '../../public/assets/js/app.js';
 import { ModalDialog } from '../../public/assets/js/components/ModalDialog.js';
 import { CoordinatorRefundsTab } from '../../public/assets/js/components/CoordinatorRefundsTab.js';
-import { CoordinatorDashboardView } from '../../public/assets/js/views/CoordinatorDashboardView.js';
+
+// Resolve the dashboard through the same specifier used by app.js. A cache-busted
+// URL is a different module instance in Node, so importing the bare file would
+// compare the root against a duplicate instead of the component it really mounts.
+const APP_URL = new URL('../../public/assets/js/app.js', import.meta.url);
+const APP_SOURCE = readFileSync(APP_URL, 'utf8');
+const DASHBOARD_IMPORT = APP_SOURCE.match(/from\s+['"](.\/views\/CoordinatorDashboardView\.js(?:\?[^'"]+)?)['"]/)?.[1];
+if (!DASHBOARD_IMPORT) {
+  throw new Error('app.js does not import CoordinatorDashboardView');
+}
+const { CoordinatorDashboardView } = await import(new URL(DASHBOARD_IMPORT, APP_URL).href);
 
 let assertions = 0;
 let failures = 0;

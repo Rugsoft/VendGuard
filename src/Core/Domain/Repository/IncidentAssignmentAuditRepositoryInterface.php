@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace VendGuard\Core\Domain\Repository;
 
+use VendGuard\Core\Domain\Enum\IncidentUnassignmentReasonType;
+
+use VendGuard\Core\Domain\Enum\IncidentAssignmentSource;
+
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\Incident;
 
@@ -30,6 +34,9 @@ interface IncidentAssignmentAuditRepositoryInterface
         ?string $urgencyOverride,
         ?string $urgencyReason,
         ?string $reassignmentReason,
-        AuditEvent $auditEvent
+        AuditEvent $auditEvent,
+        ?IncidentAssignmentSource $assignmentSource = null,
+        ?IncidentUnassignmentReasonType $unassignmentReason = null,
+        ?string $actorNameSnapshot = null
     ): Incident;
 }

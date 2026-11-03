@@ -573,7 +573,7 @@ assert('7.7 La aplicación se monta en el contenedor que declara el documento',
 
 const INDEX_HTML = readFileSync(fileURLToPath(new URL('../../public/index.html', import.meta.url)), 'utf8');
 assert('7.8 El documento declara ese contenedor y carga la raíz como módulo ES',
-  INDEX_HTML.includes('id="app"') && /<script[^>]+type="module"[^>]+src="\/assets\/js\/app\.js"/.test(INDEX_HTML));
+  INDEX_HTML.includes('id="app"') && /<script[^>]+type="module"[^>]+src="\/assets\/js\/app\.js(?:\?v=\d+)?"/.test(INDEX_HTML));
 
 // El aviso ámbar se pinta con tokens del sistema. Si el documento del banner dejara de servir la
 // hoja que los declara, el componente seguiría «funcionando» y se vería transparente: un fallo

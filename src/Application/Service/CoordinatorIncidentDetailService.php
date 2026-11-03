@@ -6,6 +6,9 @@ namespace VendGuard\Application\Service;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use VendGuard\Core\Domain\Enum\IncidentAssignmentSource;
+use VendGuard\Core\Domain\Enum\IncidentUnassignmentReasonType;
+
 use VendGuard\Application\DTO\CoordinatorIncidentDetailDto;
 use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Core\Domain\Model\MachineType;
@@ -173,7 +176,8 @@ final class CoordinatorIncidentDetailService
             ),
             comments: $this->buildCommentsBlock($raw['comments']),
             refund: $this->buildRefundBlock($raw['refund']),
-            permissions: $this->computePermissions($incident, $now)
+            permissions: $this->computePermissions($incident, $now),
+            custodyChain: $this->buildCustodyChain($incident, $raw, $timeline, $now)
         );
     }
 
@@ -1031,5 +1035,370 @@ final class CoordinatorIncidentDetailService
     private function siteWall(?DateTimeImmutable $moment): ?string
     {
         return $moment?->setTimezone($this->operationalTimezone())->format('Y-m-d H:i:s');
+    }
+    /**
+     * Cadena de custodia del expediente (Módulo 26, RF-03): resumen, tramos, huecos
+     * sin custodio e hilo temporal intercalado.
+     *
+     * La proyección **sólo lee**: los snapshots vienen congelados de la tabla y aquí
+     * no se resuelve ningún nombre contra el directorio vigente (D2, Art. III.3). La
+     * retención se mide en tiempo natural continuo —pausas, esperas de repuesto y
+     * `PENDING_INFO` no la interrumpen— y los huecos `UNASSIGNED_GAP` sólo se publican
+     * por encima de 60 s, excluyendo el periodo en `RESOLVED` previo a una reapertura
+     * (D4, QA 2).
+     *
+     * @param array<string, mixed> $incident
+     * @param array<string, mixed> $raw
+     * @param array<string, mixed> $timeline
+     * @return array{summary: array<string, mixed>, segments: list<array<string, mixed>>, unassigned_gaps: list<array<string, mixed>>, timeline_items: list<array<string, mixed>>}
+     */
+    private function buildCustodyChain(
+        array $incident,
+        array $raw,
+        array $timeline,
+        DateTimeImmutable $now
+    ): array {
+        $rows = is_array($raw['assignments'] ?? null) ? $raw['assignments'] : [];
+        if ($rows === []) {
+            $rows = $this->synthesizeFallbackAssignments($incident, $raw);
+        }
+
+        $segments = [];
+        $totalCustody = 0;
+        $reassignments = 0;
+        $technicians = [];
+        $hasActive = false;
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $assignedAt = $this->parseDateTime($row['assigned_at'] ?? null);
+            if ($assignedAt === null) {
+                continue;
+            }
+
+            $unassignedAt = $this->parseDateTime($row['unassigned_at'] ?? null);
+            $isActive = $unassignedAt === null;
+            $source = IncidentAssignmentSource::tryFrom((string)($row['assignment_source'] ?? ''));
+            $reason = IncidentUnassignmentReasonType::tryFrom((string)($row['unassignment_reason_type'] ?? ''));
+            $seconds = max(0, ($unassignedAt ?? $now)->getTimestamp() - $assignedAt->getTimestamp());
+            $unresolved = $reason !== null && $reason->isUnresolvedTransferOrRelease();
+
+            $totalCustody += $seconds;
+            if ($unresolved && !$isActive) {
+                $reassignments++;
+            }
+            $technicians[(int)($row['technician_id'] ?? 0)] = true;
+            $hasActive = $hasActive || $isActive;
+
+            $segments[] = [
+                'segment_number' => count($segments) + 1,
+                'id' => isset($row['id']) ? (int)$row['id'] : null,
+                'technician_id' => (int)($row['technician_id'] ?? 0),
+                'technician_name' => (string)($row['technician_name_snapshot'] ?? ''),
+                'technician_code' => (string)($row['technician_code_snapshot'] ?? 'SIN-CODIGO'),
+                'assigned_by_id' => isset($row['assigned_by']) ? (int)$row['assigned_by'] : null,
+                'assigned_by_name' => (string)($row['assigned_by_name_snapshot'] ?? 'Coordinación / Sistema'),
+                'assignment_source' => $source?->value,
+                'assignment_source_label' => $source?->label(),
+                // RNF-04: la marca se publica en el huso operativo, no con el offset
+                // del motor. El instante es el mismo; cambia la forma de leerlo.
+                'assigned_at' => $assignedAt->setTimezone($this->operationalTimezone())->format(DATE_ATOM),
+                'is_active' => $isActive,
+                'unassigned_at' => $unassignedAt?->setTimezone($this->operationalTimezone())->format(DATE_ATOM),
+                'unassigned_by_id' => isset($row['unassigned_by']) ? (int)$row['unassigned_by'] : null,
+                'unassigned_by_name' => $row['unassigned_by_name_snapshot'] ?? null,
+                'unassignment_reason_type' => $reason?->value,
+                'unassignment_reason_label' => $reason?->label(),
+                'reassignment_reason' => $row['reassignment_reason'] ?? null,
+                'is_unresolved_transfer' => $unresolved,
+                'retention_seconds' => $seconds,
+                'retention_label' => $this->formatCustodyDuration($seconds),
+                'is_synthesized_fallback' => (bool)($row['is_synthesized_fallback'] ?? false),
+            ];
+        }
+
+        $gaps = $this->buildUnassignedGaps($incident, $segments, $now);
+        $unassignedSeconds = (int)array_sum(array_column($gaps, 'gap_seconds'));
+        $empty = $segments === [];
+
+        $timelineItems = [];
+        foreach ($segments as $segment) {
+            $timelineItems[] = [
+                'item_type' => 'CUSTODY_SEGMENT',
+                'started_at' => $segment['assigned_at'],
+                'payload' => $segment,
+            ];
+        }
+        foreach ($gaps as $gap) {
+            $timelineItems[] = [
+                'item_type' => 'UNASSIGNED_GAP',
+                'started_at' => $gap['started_at'],
+                'payload' => $gap,
+            ];
+        }
+        usort(
+            $timelineItems,
+            static fn(array $left, array $right): int => strcmp($left['started_at'], $right['started_at'])
+        );
+
+        return [
+            'summary' => [
+                'total_assignments_count' => count($segments),
+                'reassignments_count' => $reassignments,
+                'distinct_technicians_count' => count($technicians),
+                'has_active_custodian' => $hasActive,
+                'has_multiple_custodians' => count($technicians) > 1,
+                'is_empty' => $empty,
+                'empty_message' => $empty
+                    ? 'Sin asignaciones técnicas registradas — La incidencia permanece o finalizó sin custodio técnico asignado'
+                    : null,
+                'total_custody_seconds' => $totalCustody,
+                'total_custody_label' => $this->formatCustodyDuration($totalCustody),
+                'total_unassigned_seconds' => $unassignedSeconds,
+                'total_unassigned_label' => $this->formatCustodyDuration($unassignedSeconds),
+            ],
+            'segments' => $segments,
+            'unassigned_gaps' => $gaps,
+            'timeline_items' => $timelineItems,
+        ];
+    }
+
+    /**
+     * Huecos sin custodio mayores de 60 s (D4, QA 2).
+     *
+     * Un hueco nace al crear la avería y muere en la primera asignación
+     * (`INITIAL_TRIAGE_WAIT`), tras una liberación sanitaria sin guardia
+     * (`SANITARY_RELEASE_WAIT`), tras una reapertura en garantía
+     * (`WARRANTY_REOPEN_WAIT`), entre el cierre de un tramo y la apertura del
+     * siguiente (`BETWEEN_SEGMENTS`), o al final del expediente activo sin técnico
+     * (`PENDING_ASSIGNMENT`). El periodo en que el aviso estuvo `RESOLVED` antes de
+     * reabrirse no es un hueco de bandeja y se recorta por `reopened_at`.
+     *
+     * @param array<string, mixed> $incident
+     * @param list<array<string, mixed>> $segments
+     * @return list<array<string, mixed>>
+     */
+    private function buildUnassignedGaps(array $incident, array $segments, DateTimeImmutable $now): array
+    {
+        $gaps = [];
+        $previousEnd = $this->parseDateTime($incident['created_at'] ?? null);
+        $previousNumber = null;
+        $previousReason = null;
+        $lastActive = false;
+        $reopenedAt = $this->parseDateTime($incident['reopened_at'] ?? null);
+
+        foreach ($segments as $segment) {
+            $start = $this->parseDateTime($segment['assigned_at']);
+            $lastActive = (bool)$segment['is_active'];
+            $end = $this->parseDateTime($segment['unassigned_at']) ?? $now;
+
+            if ($start !== null && $previousEnd !== null && $start->getTimestamp() - $previousEnd->getTimestamp() > 60) {
+                $gapStart = $previousEnd;
+                if ($reopenedAt !== null && $reopenedAt > $gapStart && $reopenedAt < $start) {
+                    $gapStart = $reopenedAt;
+                }
+
+                if ($start->getTimestamp() - $gapStart->getTimestamp() > 60) {
+                    $gaps[] = $this->custodyGap(
+                        $this->contextualGapType(
+                            $previousNumber,
+                            $previousReason,
+                            $reopenedAt,
+                            $gapStart
+                        ),
+                        $gapStart,
+                        $start,
+                        false,
+                        $previousNumber,
+                        $segment['segment_number']
+                    );
+                }
+            }
+
+            $previousEnd = $end;
+            $previousNumber = $segment['segment_number'];
+            $previousReason = $segment['unassignment_reason_type'] ?? null;
+        }
+
+        $status = (string)($incident['status'] ?? '');
+
+        // Una incidencia cancelada sin técnico nunca abrió un tramo: su espera en
+        // bandeja termina en `cancelled_at`, no en el instante de la consulta. Sin
+        // este cierre el tiempo de triaje desaparece del resumen y de la línea
+        // temporal (D4, QA 2).
+        if ($segments === [] && $status === 'CANCELLED') {
+            $cancelledAt = $this->parseDateTime($incident['cancelled_at'] ?? null);
+            if ($cancelledAt !== null && $previousEnd !== null) {
+                $finalStart = $previousEnd;
+                if ($reopenedAt !== null && $reopenedAt > $finalStart && $reopenedAt < $cancelledAt) {
+                    $finalStart = $reopenedAt;
+                }
+
+                if ($cancelledAt->getTimestamp() - $finalStart->getTimestamp() > 60) {
+                    $gaps[] = $this->custodyGap(
+                        $this->contextualGapType(null, null, $reopenedAt, $finalStart, $status),
+                        $finalStart,
+                        $cancelledAt,
+                        false,
+                        null,
+                        null
+                    );
+                }
+            }
+        }
+
+        if (!$lastActive && $previousEnd !== null && in_array($status, ['REGISTERED', 'REOPENED'], true)) {
+            // El hueco activo tampoco puede contar el tiempo en RESOLVED previo a una
+            // reapertura: arranca en `reopened_at` cuando ese instante es posterior.
+            $finalStart = $previousEnd;
+            if ($reopenedAt !== null && $reopenedAt > $finalStart) {
+                $finalStart = $reopenedAt;
+            }
+
+            if ($now->getTimestamp() - $finalStart->getTimestamp() > 60) {
+                $gaps[] = $this->custodyGap(
+                    $this->contextualGapType($previousNumber, $previousReason, $reopenedAt, $finalStart, $status),
+                    $finalStart,
+                    $now,
+                    true,
+                    $previousNumber,
+                    null
+                );
+            }
+        }
+
+        return $gaps;
+    }
+
+    /**
+     * Causa contextual del hueco (EARS 04.2): primera espera, liberación
+     * sanitaria sin guardia, reapertura en garantía o simple relevo entre tramos.
+     * El orden importa: la liberación sanitaria manda sobre el relevo genérico, y
+     * una reapertura solo se reconoce cuando el hueco arranca en `reopened_at`.
+     */
+    private function contextualGapType(
+        ?int $previousNumber,
+        ?string $previousReason,
+        ?DateTimeImmutable $reopenedAt,
+        DateTimeImmutable $gapStart,
+        ?string $status = null
+    ): string {
+        if ($previousNumber === null) {
+            return 'INITIAL_TRIAGE_WAIT';
+        }
+
+        if ($previousReason === 'SANITARY_FAILSAFE_UNASSIGNED'
+            && ($status === null || $status !== 'REOPENED')
+        ) {
+            return 'SANITARY_RELEASE_WAIT';
+        }
+
+        if ($status === 'REOPENED'
+            || ($reopenedAt !== null && $gapStart->getTimestamp() === $reopenedAt->getTimestamp())
+        ) {
+            return 'WARRANTY_REOPEN_WAIT';
+        }
+
+        return 'BETWEEN_SEGMENTS';
+    }
+
+    /** @return array<string, mixed> */
+    private function custodyGap(
+        string $type,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+        bool $isActive,
+        ?int $preceding,
+        ?int $following
+    ): array {
+        $seconds = max(0, $end->getTimestamp() - $start->getTimestamp());
+
+        return [
+            'gap_type' => $type,
+            'gap_reason_label' => match ($type) {
+                'INITIAL_TRIAGE_WAIT' => 'En bandeja pendiente de primera asignación',
+                'SANITARY_RELEASE_WAIT' => 'En bandeja tras liberación sanitaria sin guardia',
+                'WARRANTY_REOPEN_WAIT' => 'En bandeja tras reapertura en garantía',
+                'BETWEEN_SEGMENTS' => 'Sin custodio entre tramos',
+                default => 'En bandeja sin técnico asignado',
+            },
+            'started_at' => $start->setTimezone($this->operationalTimezone())->format(DATE_ATOM),
+            'ended_at' => $isActive ? null : $end->setTimezone($this->operationalTimezone())->format(DATE_ATOM),
+            'is_active_gap' => $isActive,
+            'gap_seconds' => $seconds,
+            'gap_label' => $this->formatCustodyDuration($seconds),
+            'preceding_segment_number' => $preceding,
+            'following_segment_number' => $following,
+        ];
+    }
+
+    /**
+     * Motor de respaldo determinista (D4, QA 5): una incidencia histórica con técnico
+     * pero sin filas en `incident_assignments` se lee como un único tramo reconstruido.
+     * Los valores `SIN-CODIGO`, `Coordinación / Sistema` y `Registro histórico previo`
+     * son deliberadamente fijos: la UI debe poder distinguir un dato real de un hueco.
+     *
+     * @param array<string, mixed> $incident
+     * @param array<string, mixed> $raw
+     * @return list<array<string, mixed>>
+     */
+    private function synthesizeFallbackAssignments(array $incident, array $raw): array
+    {
+        if (($incident['assigned_technician_id'] ?? null) === null) {
+            return [];
+        }
+
+        $closedAt = $this->parseDateTime(
+            $incident['resolved_at'] ?? $incident['cancelled_at'] ?? $incident['closed_at'] ?? null
+        );
+        $reason = $incident['cancelled_at'] ?? null ? 'CANCELLED' : ($closedAt !== null ? 'RESOLVED' : null);
+        $technician = is_array($raw['technician'] ?? null) ? $raw['technician'] : [];
+
+        return [[
+            'id' => null,
+            'technician_id' => (int)$incident['assigned_technician_id'],
+            'technician_name_snapshot' => (string)($technician['name'] ?? $incident['technician_name'] ?? 'Registro histórico previo'),
+            'technician_code_snapshot' => (string)($technician['operator_code'] ?? 'SIN-CODIGO'),
+            'assigned_by' => null,
+            'assigned_by_name_snapshot' => 'Coordinación / Sistema',
+            'assignment_source' => 'COORDINATOR_ASSIGN',
+            'assigned_at' => $incident['assigned_at'] ?? $incident['created_at'] ?? null,
+            'unassigned_at' => $closedAt?->format('Y-m-d H:i:sP'),
+            'unassigned_by' => null,
+            'unassigned_by_name_snapshot' => $closedAt !== null ? 'Coordinación / Sistema' : null,
+            'unassignment_reason_type' => $reason,
+            'reassignment_reason' => $closedAt !== null
+                ? (string)($incident['resolution_diagnosis'] ?? $incident['cancellation_reason'] ?? 'Registro histórico previo')
+                : null,
+            'is_synthesized_fallback' => true,
+        ]];
+    }
+
+    /** Duración legible del contrato: `0 s` se publica como `< 1 s` (QA 4). */
+    private function formatCustodyDuration(int $seconds): string
+    {
+        if ($seconds <= 0) {
+            return '< 1 s';
+        }
+        if ($seconds < 60) {
+            return $seconds . ' s';
+        }
+        if ($seconds < 3600) {
+            return intdiv($seconds, 60) . ' min';
+        }
+        if ($seconds < 86400) {
+            $hours = intdiv($seconds, 3600);
+            $minutes = intdiv($seconds % 3600, 60);
+
+            return $minutes > 0 ? "{$hours} h {$minutes} min" : "{$hours} h";
+        }
+
+        $days = intdiv($seconds, 86400);
+        $hours = intdiv($seconds % 86400, 3600);
+
+        return $hours > 0 ? "{$days} d {$hours} h" : "{$days} d";
     }
 }
