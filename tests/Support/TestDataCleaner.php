@@ -115,6 +115,9 @@ final class TestDataCleaner
         // inmutabilidad sólo admite el cierre de un tramo abierto; el borrado
         // pasa por la ventana de purga del arnés (Art. III.1).
         'incident_assignments',
+        // Bandeja de taller del Módulo 27: cuelga de `incident_replaced_parts` con FK
+        // RESTRICT, de modo que el plan la coloca antes que su línea padre.
+        'workshop_repair_items',
         'incident_replaced_parts',
         'refund_requests',
         'spare_part_requests',

@@ -425,6 +425,11 @@ try {
     );
 
     $assert(
+        'workshop_repair_items declara sus 34 columnas canónicas',
+        count($pgColumns['workshop_repair_items'] ?? []) === 34,
+        'columnas: ' . count($pgColumns['workshop_repair_items'] ?? [])
+    );
+    $assert(
         'incident_assignments declara sus 15 columnas canónicas',
         count($pgColumns['incident_assignments'] ?? []) === 15,
         'columnas: ' . count($pgColumns['incident_assignments'] ?? [])
@@ -453,6 +458,17 @@ try {
         )
     );
 
+    $assert(
+        'El ciclo de taller declara sus cinco estados y sus dos destinos de reintegro',
+        ($pgEnums['workshop_repair_items.status'] ?? []) === [
+            'PENDING_DELIVERY',
+            'RECEIVED_IN_WORKSHOP',
+            'IN_BENCH_TEST',
+            'REFURBISHED_RESTORED',
+            'SCRAPPED_IRREPARABLE',
+        ]
+        && ($pgEnums['workshop_repair_items.restock_destination'] ?? []) === ['CENTRAL_WAREHOUSE', 'TECHNICIAN_VAN']
+    );
     $assert(
         'El esquema declara los 38 conjuntos ENUM nativos del dominio (34 tipos)',
         count($pgEnums) === 38,

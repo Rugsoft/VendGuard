@@ -67,7 +67,7 @@ flowchart LR
     2. Garantizar que la ejecución repetida de `SeedRunner` sea 100% idempotente (`ON CONFLICT (incident_replaced_part_id, unit_index) DO UPDATE ...`).
   - **Hecho cuando:** `php database/run_seeds.php && vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php`
 
-- [ ] **T-WORKSHOP-03 · Actualizar contratos de esquema (`38 tablas`, `34 ENUMs`), utilidades de test y crear `PostgresWorkshopRepairSchemaTest.php`**
+- [x] **T-WORKSHOP-03 · Actualizar contratos de esquema (`38 tablas`, `34 ENUMs`), utilidades de test y crear `PostgresWorkshopRepairSchemaTest.php`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-WORKSHOP-01`, `T-WORKSHOP-02`
   - **Archivos exactos a crear o modificar:**

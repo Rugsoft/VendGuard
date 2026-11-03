@@ -19,7 +19,7 @@ Queda completamente retirado el camino dual de persistencia (MariaDB/MySQL).
 
 ---
 
-## 2. Inventario de las 37 Tablas del Dominio
+## 2. Inventario de las 38 Tablas del Dominio
 
 Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_delete_*` vinculado a `prevent_hard_delete()` (Art. III.1). `incident_service_sheets` e `incident_satisfaction_surveys` son además **de solo inserción**: `trg_no_update_incident_service_sheets` (`prevent_service_sheet_rewrite()`) e `trg_no_update_incident_satisfaction_surveys` (`prevent_satisfaction_survey_rewrite()`) rechazan cualquier `UPDATE` con `45000`, porque la hoja firmada es prueba documental y la valoración de la sede no se rectifica (RD-01 y RD-06 del Módulo 20). La clave primaria es `id BIGINT GENERATED ALWAYS AS IDENTITY` salvo en `operational_zone_postal_codes`, donde la identidad de la fila es el propio código postal: es la forma de garantizar que un CP pertenezca a una sola zona en todo su ciclo de vida (RF-01.2, Resolución QA 7).
 
@@ -60,10 +60,28 @@ Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_
 35. `root_causes` (8 columnas)
 36. `standard_solutions` (8 columnas)
 37. `incident_assignments` (15 columnas)
+38. `workshop_repair_items` (34 columnas)
 
 Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de las migraciones incrementales.
 
 ---
+
+- **Bandeja de taller central (Módulo 27, RF-01 a RF-05):** `workshop_repair_items` (Tabla 38)
+  cuelga de `incident_replaced_parts` (`ON DELETE RESTRICT`) y no de la avería: una línea con
+  `quantity = N` genera N expedientes unitarios sellados por
+  `uq_workshop_repair_replaced_part_unit (incident_replaced_part_id, unit_index)` (D1, C4, C6,
+  QA 4). Congela en el instante de la extracción el código, nombre y categoría del repuesto, el
+  código y modelo de la máquina, la sede, el técnico y el coste unitario (Art. III.3), y declara
+  diez claves foráneas `ON DELETE RESTRICT`, los seis índices de la bandeja,
+  `trg_no_delete_workshop_repair_items` (`prevent_hard_delete()`) y
+  `trg_touch_workshop_repair_items` (`touch_updated_at()`). La coherencia terminal se impone con
+  `chk_workshop_repair_terminal_coherence`: `REFURBISHED_RESTORED` exige recepción, banco,
+  diagnóstico de 20 a 1000 caracteres, actor de cierre y destino de reintegro —con técnico sólo
+  hacia `TECHNICIAN_VAN`, y nunca para una pieza fuera de catálogo—, mientras
+  `SCRAPPED_IRREPARABLE` exige diagnóstico y actor de cierre, admite la baja por extravío sin
+  recepción (C1) y prohíbe destino de stock, coste de reparación y ahorro (C2, C5). Los
+  enumerados `workshop_repair_status` (5 estados) y `workshop_restock_destination` (2 destinos)
+  llegan con la migración `023_workshop_repair_items.sql`.
 
 ## 3. Integridad y Blindaje en Base de Datos
 

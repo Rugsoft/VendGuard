@@ -11,7 +11,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
  * Las suites de la categoría `new_engine` necesitan lo mismo antes de certificar nada: una
  * conexión al motor nuevo por su contrato de entorno (`PG_TEST_DSN`, sin valor por defecto), un
  * esquema aislado con el DDL del repositorio aplicado y la capacidad de escribir **una fila
- * válida en cada una de las 37 tablas** respetando el grafo de claves foráneas.
+ * válida en cada una de las 38 tablas** respetando el grafo de claves foráneas.
  *
  * Lo último no se puede improvisar tabla por tabla: serían veinte fixtures escritos a mano que
  * se desincronizarían del DDL a la primera columna nueva, y el día que dejaran de insertar
@@ -839,4 +839,163 @@ final class PostgresFixtureBuilder
 
         return in_array($normalized, ['1', 't', 'true', 'y', 'yes', 'on'], true);
     }
+    /**
+     * Línea de sustitución con destino `TALLER` para las suites del Módulo 27.
+     *
+     * El alta genérica elegiría `DESGUACE` (primer valor del enumerado) y la bandeja
+     * de taller se quedaría sin padre que certificar. Aquí se declara explícitamente
+     * la extracción hacia taller, con la cantidad pedida, para que el backfill pueda
+     * demostrar el desglose `1..N`.
+     *
+     * @param array<string, array<string, mixed>> $parents Filas padre por tabla.
+     * @return array<string, mixed> La fila insertada.
+     */
+    public static function insertWorkshopReplacedPart(PDO $pdo, array $parents, string $suffix = '01', int $quantity = 1): array
+    {
+        $stmt = $pdo->prepare(
+            "INSERT INTO incident_replaced_parts (
+                intervention_type, incident_id, machine_id, location_id, technician_id,
+                spare_part_id, quantity, unit_cost_snapshot, old_part_destination, notes, installed_at
+             ) VALUES (
+                'INCIDENT', :incident_id, :machine_id, :location_id, :technician_id,
+                :spare_part_id, :quantity, 24.50, 'TALLER', :notes, '2026-10-02 09:00:00+00'
+             ) RETURNING *"
+        );
+        $stmt->execute([
+            ':incident_id' => $parents['incidents']['id'] ?? null,
+            ':machine_id' => $parents['machines']['id'],
+            ':location_id' => $parents['locations']['id'],
+            ':technician_id' => $parents['users']['id'],
+            ':spare_part_id' => $parents['spare_parts']['id'] ?? null,
+            ':quantity' => $quantity,
+            ':notes' => 'Sustitución de taller ' . $suffix . ' para certificación del Módulo 27.',
+        ]);
+        $row = $stmt->fetch();
+        if (!is_array($row)) {
+            throw new RuntimeException('El motor no devolvió la sustitución de taller insertada.');
+        }
+
+        return $row;
+    }
+
+    /**
+     * Expediente unitario de la bandeja de taller con sus snapshots resueltos.
+     *
+     * Los snapshots se leen de la línea padre en el instante del alta, que es lo que
+     * congela el contrato (Art. III.3): la suite no los inventa a mano. `$overrides`
+     * permite declarar el estado y sus sellos para las pruebas de coherencia.
+     *
+     * @param array<string, mixed> $overrides Columnas a sobrescribir del valor por defecto.
+     * @return array<string, mixed> La fila insertada.
+     */
+    public static function insertWorkshopUnit(
+        PDO $pdo,
+        int $replacedPartId,
+        int $unitIndex,
+        int $totalUnits,
+        string $status = 'PENDING_DELIVERY',
+        array $overrides = []
+    ): array {
+        $sourceStmt = $pdo->prepare(
+            "SELECT p.id, p.intervention_type, p.incident_id, p.preventive_order_id,
+                    p.machine_id, p.location_id, p.technician_id, p.spare_part_id,
+                    p.is_out_of_catalog, p.unit_cost_snapshot,
+                    m.code AS machine_code, m.model AS machine_model,
+                    l.name AS location_name, u.name AS technician_name,
+                    sp.part_code, sp.name AS part_name,
+                    COALESCE(sp.category::text, 'OTHER') AS part_category
+               FROM incident_replaced_parts p
+               JOIN machines m ON m.id = p.machine_id
+               JOIN locations l ON l.id = p.location_id
+               JOIN users u ON u.id = p.technician_id
+               LEFT JOIN spare_parts sp ON sp.id = p.spare_part_id
+              WHERE p.id = :id"
+        );
+        $sourceStmt->execute([':id' => $replacedPartId]);
+        $source = $sourceStmt->fetch();
+        if (!is_array($source)) {
+            throw new RuntimeException('La sustitución padre no existe: no hay snapshots que congelar.');
+        }
+
+        $data = array_merge([
+            'status' => $status,
+            'received_at' => null,
+            'received_by_user_id' => null,
+            'reception_notes' => null,
+            'bench_started_at' => null,
+            'bench_diagnosis' => null,
+            'refurbishment_cost_eur' => '0.00',
+            'net_savings_eur' => '0.00',
+            'restock_destination' => null,
+            'restocked_to_technician_id' => null,
+            'resolved_at' => null,
+            'resolved_by_user_id' => null,
+        ], $overrides);
+
+        $stmt = $pdo->prepare(
+            "INSERT INTO workshop_repair_items (
+                incident_replaced_part_id, unit_index, total_units_in_line,
+                intervention_type, incident_id, preventive_order_id, machine_id, location_id,
+                extracted_by_technician_id, spare_part_id, is_out_of_catalog,
+                part_code_snapshot, part_name_snapshot, part_category_snapshot,
+                machine_code_snapshot, machine_model_snapshot, location_name_snapshot,
+                technician_name_snapshot, unit_cost_snapshot, status,
+                received_at, received_by_user_id, reception_notes,
+                bench_started_at, bench_diagnosis, refurbishment_cost_eur, net_savings_eur,
+                restock_destination, restocked_to_technician_id,
+                resolved_at, resolved_by_user_id
+             ) VALUES (
+                :part_id, :unit_index, :total_units,
+                :intervention_type, :incident_id, :preventive_order_id, :machine_id, :location_id,
+                :technician_id, :spare_part_id, :is_out_of_catalog,
+                :part_code, :part_name, :part_category,
+                :machine_code, :machine_model, :location_name,
+                :technician_name, :unit_cost, :status,
+                :received_at, :received_by_user_id, :reception_notes,
+                :bench_started_at, :bench_diagnosis, :refurbishment_cost, :net_savings,
+                :restock_destination, :restocked_to_technician_id,
+                :resolved_at, :resolved_by_user_id
+             ) RETURNING *"
+        );
+        $stmt->execute([
+            ':part_id' => $replacedPartId,
+            ':unit_index' => $unitIndex,
+            ':total_units' => $totalUnits,
+            ':intervention_type' => $source['intervention_type'],
+            ':incident_id' => $source['incident_id'],
+            ':preventive_order_id' => $source['preventive_order_id'],
+            ':machine_id' => $source['machine_id'],
+            ':location_id' => $source['location_id'],
+            ':technician_id' => $source['technician_id'],
+            ':spare_part_id' => $source['spare_part_id'],
+            ':is_out_of_catalog' => $source['is_out_of_catalog'],
+            ':part_code' => $source['part_code'],
+            ':part_name' => $source['part_name'] ?? 'Pieza extraída sin catálogo',
+            ':part_category' => $source['part_category'],
+            ':machine_code' => $source['machine_code'],
+            ':machine_model' => $source['machine_model'],
+            ':location_name' => $source['location_name'],
+            ':technician_name' => $source['technician_name'],
+            ':unit_cost' => $source['unit_cost_snapshot'],
+            ':status' => $data['status'],
+            ':received_at' => $data['received_at'],
+            ':received_by_user_id' => $data['received_by_user_id'],
+            ':reception_notes' => $data['reception_notes'],
+            ':bench_started_at' => $data['bench_started_at'],
+            ':bench_diagnosis' => $data['bench_diagnosis'],
+            ':refurbishment_cost' => $data['refurbishment_cost_eur'],
+            ':net_savings' => $data['net_savings_eur'],
+            ':restock_destination' => $data['restock_destination'],
+            ':restocked_to_technician_id' => $data['restocked_to_technician_id'],
+            ':resolved_at' => $data['resolved_at'],
+            ':resolved_by_user_id' => $data['resolved_by_user_id'],
+        ]);
+        $row = $stmt->fetch();
+        if (!is_array($row)) {
+            throw new RuntimeException('El motor no devolvió el expediente de taller insertado.');
+        }
+
+        return $row;
+    }
+
 }
