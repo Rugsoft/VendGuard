@@ -185,6 +185,7 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'WORKSHOP_ITEM_REFURBISHED_TO_VAN', label: 'Reacondicionada a Furgoneta', tone: 'success', group: 'spare_parts' },
   { code: 'WORKSHOP_ITEM_SCRAPPED_IN_BENCH', label: 'Baja Irreparable en Banco', tone: 'danger', group: 'spare_parts' },
   { code: 'WORKSHOP_ITEM_SCRAPPED_UNRECEIVED', label: 'Baja por Extravío sin Recepción', tone: 'danger', group: 'spare_parts' },
+  { code: 'EXPORT_WORKSHOP_ITEMS_CSV', label: 'Exportación de Bandeja de Taller (CSV)', tone: 'info', group: 'spare_parts' },
   // Módulo 25: el catálogo maestro se audita con entidad propia
   // (`ROOT_CAUSE_TAXONOMY`) y estas cuatro acciones son las que escribe el
   // servicio; sin etiqueta el visor mostraría el código crudo.

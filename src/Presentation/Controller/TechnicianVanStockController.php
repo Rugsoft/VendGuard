@@ -8,6 +8,8 @@ use VendGuard\Application\Service\VanRestockOrderService;
 use VendGuard\Application\Service\VanStockService;
 use VendGuard\Core\Domain\Exception\VanRestockOrderValidationException;
 use VendGuard\Core\Domain\Repository\VanRestockOrderRepositoryInterface;
+use VendGuard\Core\Domain\Repository\WorkshopRepairItemRepositoryInterface;
+use VendGuard\Infrastructure\Persistence\PdoWorkshopRepairItemRepository;
 use VendGuard\Infrastructure\Repository\PdoVanRestockOrderRepository;
 use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
 use VendGuard\Presentation\Http\Request;
@@ -43,14 +45,18 @@ class TechnicianVanStockController
 
     private ?VanRestockOrderService $restockService;
 
+    private ?WorkshopRepairItemRepositoryInterface $workshopItems;
+
     public function __construct(
         ?VanStockService $vanStockService = null,
         ?VanRestockOrderRepositoryInterface $restockRepository = null,
-        ?VanRestockOrderService $restockService = null
+        ?VanRestockOrderService $restockService = null,
+        ?WorkshopRepairItemRepositoryInterface $workshopItems = null
     ) {
         $this->vanStockService = $vanStockService ?? new VanStockService(new PdoVanStockRepository());
         $this->restockRepository = $restockRepository;
         $this->restockService = $restockService;
+        $this->workshopItems = $workshopItems;
     }
 
     /**
@@ -65,6 +71,15 @@ class TechnicianVanStockController
     private function restockOrderService(): VanRestockOrderService
     {
         return $this->restockService ??= new VanRestockOrderService($this->restockOrders());
+    }
+
+    /**
+     * Puerto de taller central, resuelto bajo demanda por el mismo motivo: la
+     * lectura de stock no debe abrir dos conexiones en una suite unitaria.
+     */
+    private function workshopItemsRepository(): WorkshopRepairItemRepositoryInterface
+    {
+        return $this->workshopItems ??= new PdoWorkshopRepairItemRepository();
     }
 
     /**
@@ -88,6 +103,11 @@ class TechnicianVanStockController
 
         $activeDispatchedOrder = $this->restockOrders()->findActiveDispatchedForTechnician($ownerId);
         $lastConfirmedOrder = $this->restockOrders()->findLastConfirmedForTechnician($ownerId);
+        // Piezas que el técnico debe entregar físicamente en el Taller Central
+        // (Módulo 27, RF-04.4). La consulta filtra por el `user_id` del token y no
+        // selecciona ninguna columna monetaria (Art. V.4).
+        $pendingWorkshopDeliveries = $this->workshopItemsRepository()
+            ->findPendingDeliveriesForTechnician($ownerId);
 
         return Response::json([
             'technician_id' => $ownerId,
@@ -100,6 +120,9 @@ class TechnicianVanStockController
             'active_dispatched_order' => $activeDispatchedOrder?->toTechnicianActiveArray(),
             // Comprobante de solo lectura de la última carga confirmada (QA 5).
             'last_confirmed_order' => $lastConfirmedOrder?->toTechnicianConfirmedSummaryArray(),
+            // Entregas pendientes en taller: contador y detalle sin importes.
+            'pending_workshop_deliveries_count' => count($pendingWorkshopDeliveries),
+            'pending_workshop_deliveries' => $pendingWorkshopDeliveries,
         ], 200);
     }
 

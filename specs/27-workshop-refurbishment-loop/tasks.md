@@ -236,7 +236,7 @@ flowchart LR
 
 ## Fase 5: Capa de Presentación REST, Enriquecimiento de Stock de Furgoneta y Router
 
-- [ ] **T-WORKSHOP-11 · Implementar `WorkshopRefurbishmentController`, enriquecer `TechnicianVanStockController` y registrar rutas en `AppRouter.php`**
+- [x] **T-WORKSHOP-11 · Implementar `WorkshopRefurbishmentController`, enriquecer `TechnicianVanStockController` y registrar rutas en `AppRouter.php`**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-WORKSHOP-10`
   - **Archivos exactos a crear o modificar:**

@@ -291,6 +291,16 @@ class AppRouter
         $router->get('/api/coordinator/van-stocks', [\VendGuard\Presentation\Controller\CoordinatorVanStockController::class, 'getInventory'], [$coordinatorAuth]);
         $router->put('/api/coordinator/van-stocks', [\VendGuard\Presentation\Controller\CoordinatorVanStockController::class, 'upsertStock'], [$coordinatorAuth]);
 
+        // Bandeja de taller central y economía circular (Módulo 27, T-WORKSHOP-11).
+        // Los cinco puertos exigen COORDINATOR en el middleware y el controlador
+        // vuelve a comprobar sesión y rol. La descarga se registra antes que la
+        // bandeja porque el Router resuelve por orden de declaración.
+        $router->get('/api/coordinator/workshop-items/export', [\VendGuard\Presentation\Controller\WorkshopRefurbishmentController::class, 'exportCsv'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/workshop-items', [\VendGuard\Presentation\Controller\WorkshopRefurbishmentController::class, 'getTray'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/workshop-items/{id}/receive', [\VendGuard\Presentation\Controller\WorkshopRefurbishmentController::class, 'receive'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/workshop-items/{id}/start-bench', [\VendGuard\Presentation\Controller\WorkshopRefurbishmentController::class, 'startBench'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/workshop-items/{id}/resolve', [\VendGuard\Presentation\Controller\WorkshopRefurbishmentController::class, 'resolve'], [$coordinatorAuth]);
+
         // Órdenes de carga de furgoneta (Módulo 23, T-RESTOCK-10, contrato §5.2 a §5.9).
         // Las rutas estáticas se registran antes de los segmentos dinámicos `{id}` para
         // que «proposals» y «generate-batch» no se interpreten como identificadores.
