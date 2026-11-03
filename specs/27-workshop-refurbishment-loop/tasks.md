@@ -255,7 +255,7 @@ flowchart LR
     3. Registrar las 5 rutas de `/api/coordinator/workshop-items*` en `AppRouter.php` e inyectar `WorkshopRepairItemRepositoryInterface` en `TechnicianVanStockController`.
   - **Hecho cuando:** `php -l src/Presentation/Controller/WorkshopRefurbishmentController.php && php -l src/Presentation/Controller/TechnicianVanStockController.php && php -l src/Presentation/Routing/AppRouter.php`
 
-- [ ] **T-WORKSHOP-12 · Crear suite de integración de contratos HTTP y RBAC (`WorkshopRefurbishmentApiIntegrationTest.php`)**
+- [x] **T-WORKSHOP-12 · Crear suite de integración de contratos HTTP y RBAC (`WorkshopRefurbishmentApiIntegrationTest.php`)**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-WORKSHOP-11`
   - **Archivos exactos a crear o modificar:**

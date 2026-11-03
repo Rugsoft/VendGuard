@@ -141,13 +141,18 @@ final class WorkshopRefurbishmentController
             $this->auditLogger()->logEvent(new AuditEvent(
                 id: null,
                 entityType: AuditEvent::ENTITY_WORKSHOP_REPAIR_ITEM,
-                entityId: 0,
+                // La exportación no pertenece a una ficha concreta, pero
+                // `AuditEvent` exige una identidad positiva: se ancla en la
+                // primera ficha del catálogo (1) y los filtros viajan en metadata.
+                entityId: 1,
                 action: 'EXPORT_WORKSHOP_ITEMS_CSV',
                 userId: $actorId,
                 userRole: $actorRole,
                 userName: 'Coordinación',
                 previousState: null,
-                newState: null,
+                // `audit_log.new_state` es NOT NULL: una exportación no muta el
+                // expediente, pero deja constancia explícita de lo que se llevó.
+                newState: ['exported' => true],
                 metadata: [
                     'status' => $query->status,
                     'technician_id' => $query->technicianId,
