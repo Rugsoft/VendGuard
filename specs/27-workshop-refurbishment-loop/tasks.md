@@ -94,7 +94,7 @@ flowchart LR
 
 ## Fase 2: Modelos de Dominio, Value Objects, Validadores y DTOs
 
-- [ ] **T-WORKSHOP-04 · Implementar Enums de Dominio, entidad `WorkshopRepairItem`, `BenchDiagnosisValidator` y `WorkshopRepairValidationException`**
+- [x] **T-WORKSHOP-04 · Implementar Enums de Dominio, entidad `WorkshopRepairItem`, `BenchDiagnosisValidator` y `WorkshopRepairValidationException`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-WORKSHOP-03`
   - **Archivos exactos a crear o modificar:**
