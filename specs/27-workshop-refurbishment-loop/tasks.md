@@ -273,7 +273,7 @@ flowchart LR
 
 ## Fase 6: Frontend Vue 3 (`CoordinatorWorkshopTrayTab`, `CoordinatorSparePartsView`, `TechnicianVanStockModal`), `api.js` y `sw.js`
 
-- [ ] **T-WORKSHOP-13 · Añadir métodos cliente en `api.js` y construir el componente `CoordinatorWorkshopTrayTab.js` e integrarlo en `CoordinatorSparePartsView.js`**
+- [x] **T-WORKSHOP-13 · Añadir métodos cliente en `api.js` y construir el componente `CoordinatorWorkshopTrayTab.js` e integrarlo en `CoordinatorSparePartsView.js`**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-WORKSHOP-12`
   - **Archivos exactos a crear o modificar:**

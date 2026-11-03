@@ -52,6 +52,7 @@ import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
 import { CoordinatorRootCauseParetoTab } from '../components/CoordinatorRootCauseParetoTab.js';
 import { CoordinatorVanStockTab } from '../components/CoordinatorVanStockTab.js';
+import { CoordinatorWorkshopTrayTab } from '../components/CoordinatorWorkshopTrayTab.js';
 import { CoordinatorAbsencesTab } from '../components/CoordinatorAbsencesTab.js';
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
 import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
@@ -88,6 +89,7 @@ export const CoordinatorDashboardView = {
     CoordinatorSparePartsAnalyticsTab,
     CoordinatorRootCauseParetoTab,
     CoordinatorVanStockTab,
+    CoordinatorWorkshopTrayTab,
     CoordinatorAbsencesTab,
     CoordinatorTerritorialMapTab,
     CoordinatorRefundsTab,
@@ -102,6 +104,8 @@ export const CoordinatorDashboardView = {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
       activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'pareto-causas' | 'stock-furgonetas' | 'refunds' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'zones' | 'machines' | 'users'
+      sparePartsSubTab: 'catalog', // 'catalog' | 'workshop'
+      workshopActiveUnits: null, // badge de la sub-pestaña de taller (QA 2)
       activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders' | 'sweep'
       showPreventiveSettingsModal: false,
 
@@ -2622,11 +2626,54 @@ export const CoordinatorDashboardView = {
         <AdminUsersTab v-else-if="activeAdminSubTab === 'users'" />
       </div>
 
-      <!-- CONTENIDO PESTAÑA: CATÁLOGO Y GESTIÓN DE REPUESTOS (RF-REP-01, RF-REP-08 / T-SPARE-14, T-SPARE-17) -->
-      <CoordinatorSparePartsTab
-        v-else-if="activeTab === 'repuestos'"
-        @open-analytics="activeTab = 'analitica-repuestos'"
-      />
+      <!-- CONTENIDO PESTAÑA: REPUESTOS · Catálogo Maestro y Bandeja de Taller
+           (Módulo 06 y Módulo 27). La sub-pestaña de taller publica el total de
+           unidades activas (pendientes + en taller/banco) para el badge. -->
+      <div v-else-if="activeTab === 'repuestos'">
+        <div class="vg-action-group" role="tablist" aria-label="Vistas de repuestos" style="margin-bottom: 12px;">
+          <button
+            type="button"
+            class="vg-btn vg-btn-tab"
+            :class="{ 'vg-btn-tab-active': sparePartsSubTab === 'catalog' }"
+            data-testid="subtab-spare-parts-catalog"
+            @click="sparePartsSubTab = 'catalog'"
+          >
+            📦 Catálogo Maestro
+          </button>
+          <button
+            type="button"
+            class="vg-btn vg-btn-tab"
+            :class="{ 'vg-btn-tab-active': sparePartsSubTab === 'workshop' }"
+            data-testid="subtab-spare-parts-workshop"
+            @click="sparePartsSubTab = 'workshop'"
+          >
+            🛠️ Bandeja de Taller
+            <span
+              v-if="workshopActiveUnits !== null"
+              class="vg-chip"
+              data-testid="subtab-spare-parts-workshop-badge"
+            >{{ workshopActiveUnits }}</span>
+          </button>
+          <button
+            type="button"
+            class="vg-btn vg-btn-tab"
+            data-testid="subtab-spare-parts-van-stock"
+            @click="activeTab = 'stock-furgonetas'"
+          >
+            🚚 Stock en Furgonetas
+          </button>
+        </div>
+
+        <CoordinatorSparePartsTab
+          v-if="sparePartsSubTab === 'catalog'"
+          @open-analytics="activeTab = 'analitica-repuestos'"
+        />
+        <CoordinatorWorkshopTrayTab
+          v-else
+          :active="sparePartsSubTab === 'workshop'"
+          @summary-changed="workshopActiveUnits = $event"
+        />
+      </div>
 
       <!-- CONTENIDO PESTAÑA: ANALÍTICA Y PREDICCIÓN DE REPUESTOS (RF-REP-09 / T-SPARE-15, T-SPARE-17) -->
       <CoordinatorSparePartsAnalyticsTab

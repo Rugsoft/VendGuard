@@ -1633,6 +1633,32 @@ export class ApiClient {
       return this.get('/coordinator/spare-parts/requests/pending-review');
     },
 
+    // Bandeja de taller central (Módulo 27, RF-02 a RF-05).
+    //
+    // Cinco puertos y un solo recurso: la bandeja pagina y filtra en servidor, el
+    // ciclo se mueve con tres mutaciones y la descarga conserva el token en la
+    // cabecera. El componente no compone rutas ni serializa filtros.
+    fetchCoordinatorWorkshopItems: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/workshop-items${q ? `?${q}` : ''}`);
+    },
+    receiveCoordinatorWorkshopItem: (id, payload = {}) => {
+      return this.post(`/coordinator/workshop-items/${encodeURIComponent(id)}/receive`, payload);
+    },
+    startBenchCoordinatorWorkshopItem: (id) => {
+      return this.post(`/coordinator/workshop-items/${encodeURIComponent(id)}/start-bench`, {});
+    },
+    resolveCoordinatorWorkshopItem: (id, payload) => {
+      return this.post(`/coordinator/workshop-items/${encodeURIComponent(id)}/resolve`, payload);
+    },
+    exportCoordinatorWorkshopItemsCsv: (params = {}) => {
+      return this.downloadFile(
+        '/coordinator/workshop-items/export',
+        'taller_piezas_recuperadas.csv',
+        params
+      );
+    },
+
     // Stock de repuestos de las furgonetas (Módulo 18 - RF-03, RF-04.2)
     getVanStocks: (params = {}) => {
       const q = new URLSearchParams(params).toString();
