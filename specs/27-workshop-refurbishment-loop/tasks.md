@@ -291,7 +291,7 @@ flowchart LR
     3. Integrar la sub-pestaña **"Bandeja de Taller"** junto a *"Catálogo Maestro"* y *"Stock en Furgonetas"* en `CoordinatorSparePartsView.js`, mostrando el badge con el total de unidades activas pendientes (`pending_delivery_count + in_workshop_active_count`).
   - **Hecho cuando:** `node --check public/assets/js/api.js && node --check public/assets/js/components/CoordinatorWorkshopTrayTab.js && node --check public/assets/js/components/CoordinatorSparePartsView.js`
 
-- [ ] **T-WORKSHOP-14 · Añadir bloque informativo de entregas pendientes a taller en `TechnicianVanStockModal.js` y registrar `CoordinatorWorkshopTrayTab.js` en `public/sw.js`**
+- [x] **T-WORKSHOP-14 · Añadir bloque informativo de entregas pendientes a taller en `TechnicianVanStockModal.js` y registrar `CoordinatorWorkshopTrayTab.js` en `public/sw.js`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-WORKSHOP-13`
   - **Archivos exactos a crear o modificar:**

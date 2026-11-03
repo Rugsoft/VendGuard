@@ -69,6 +69,9 @@ export const TechnicianVanStockPanel = {
       items: [],
       activeDispatchedOrder: null,
       lastConfirmedOrder: null,
+      // Entregas pendientes en taller (Módulo 27, RF-04.4): solo lectura y sin importes.
+      pendingWorkshopDeliveries: [],
+      pendingWorkshopDeliveriesCount: 0,
       isLoading: false,
       errorMessage: '',
       receptionNote: '',
@@ -96,6 +99,11 @@ export const TechnicianVanStockPanel = {
 
     isEmpty() {
       return !this.isLoading && this.items.length === 0;
+    },
+
+    /** ¿El técnico lleva encima piezas que debe entregar en el taller? (RF-04.4) */
+    hasPendingWorkshopDeliveries() {
+      return this.pendingWorkshopDeliveriesCount > 0;
     },
 
     /** La orden despachada pendiente de recepción (QA 5). */
@@ -150,11 +158,20 @@ export const TechnicianVanStockPanel = {
         this.items = Array.isArray(data.items) ? data.items : [];
         this.activeDispatchedOrder = data.active_dispatched_order || null;
         this.lastConfirmedOrder = data.last_confirmed_order || null;
+        // El servidor ya omite todo campo monetario; aquí solo se pinta lo que llega.
+        this.pendingWorkshopDeliveries = Array.isArray(data.pending_workshop_deliveries)
+          ? data.pending_workshop_deliveries
+          : [];
+        this.pendingWorkshopDeliveriesCount = Number(
+          data.pending_workshop_deliveries_count ?? this.pendingWorkshopDeliveries.length
+        );
       } catch (error) {
         this.errorMessage = error.message || 'No se pudo cargar el stock de tu furgoneta.';
         this.items = [];
         this.activeDispatchedOrder = null;
         this.lastConfirmedOrder = null;
+        this.pendingWorkshopDeliveries = [];
+        this.pendingWorkshopDeliveriesCount = 0;
       } finally {
         this.isLoading = false;
       }
@@ -220,6 +237,32 @@ export const TechnicianVanStockPanel = {
       return formatDateTime(value);
     },
 
+    /** Referencia de la intervención de origen, con el prefijo del contrato. */
+    originReference(item) {
+      if (String(item?.intervention_type || '').toUpperCase() === 'PREVENTIVE') {
+        return item?.preventive_order_code
+          ? ('#PREV-' + item.preventive_order_code)
+          : ('#PREV-' + (item?.preventive_order_id ?? '—'));
+      }
+
+      return item?.ticket_code ? ('#INC-' + item.ticket_code) : ('#INC-' + (item?.incident_id ?? '—'));
+    },
+
+    /** Antigüedad en horas; el servidor la publica y el cliente sólo la redondea. */
+    formatAge(item) {
+      const provided = Number(item?.age_hours);
+      if (Number.isFinite(provided) && provided >= 0) {
+        return provided.toFixed(1) + ' h';
+      }
+
+      const createdAt = item?.created_at ? new Date(item.created_at) : null;
+      if (!createdAt || Number.isNaN(createdAt.getTime())) {
+        return '—';
+      }
+
+      return (Math.max(0, (Date.now() - createdAt.getTime()) / 3600000)).toFixed(1) + ' h';
+    },
+
     /**
      * Concordancia del comprobante de recepción: una unidad no es «1 unidades».
      * El número lo pinta la plantilla; aquí solo vive la palabra que lo acompaña.
@@ -281,6 +324,51 @@ export const TechnicianVanStockPanel = {
             </div>
           </div>
         </div>
+
+        <!-- Piezas extraídas pendientes de entregar a Taller (Módulo 27, RF-04.4).
+             Solo lectura: el técnico ve qué debe llevar y desde cuándo, sin importes
+             ni botones de transición —el ciclo lo mueve Coordinación (Art. V.4). -->
+        <section
+          v-if="hasPendingWorkshopDeliveries"
+          data-testid="tech-van-stock-pending-workshop"
+          style="padding: 12px 14px; background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card);"
+        >
+          <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px;">
+            <div style="font-family: var(--font-body); font-size: var(--font-size-caption); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-ink-muted);">
+              🛠️ Piezas extraídas pendientes de entregar a Taller
+            </div>
+            <span class="vg-chip" data-testid="tech-van-stock-pending-workshop-count">
+              {{ pendingWorkshopDeliveriesCount }}
+            </span>
+          </div>
+
+          <ul
+            data-testid="tech-van-stock-pending-workshop-list"
+            style="list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px;"
+          >
+            <li
+              v-for="delivery in pendingWorkshopDeliveries"
+              :key="delivery.id"
+              :data-testid="'tech-van-stock-pending-workshop-' + delivery.id"
+              style="padding: 8px 10px; background-color: var(--color-surface-2); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: var(--font-size-body-sm); color: var(--color-ink-secondary);"
+            >
+              <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px;">
+                <span style="min-width: 0; color: var(--color-ink);">
+                  <strong style="font-family: monospace; font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ delivery.part_code }}</strong>
+                  <span style="margin-left: 4px;">{{ delivery.part_name }}</span>
+                </span>
+                <span style="font-family: var(--font-display); font-variant-numeric: tabular-nums; color: var(--color-ink); white-space: nowrap;">
+                  Unidad {{ delivery.unit_index }} de {{ delivery.total_units_in_line }}
+                </span>
+              </div>
+              <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 12px; font-size: var(--font-size-caption); color: var(--color-ink-muted);">
+                <span>{{ delivery.machine_code }} · {{ delivery.location_name }}</span>
+                <span style="font-family: monospace;">{{ originReference(delivery) }}</span>
+                <span style="font-variant-numeric: tabular-nums;">En tu furgoneta desde hace {{ formatAge(delivery) }}</span>
+              </div>
+            </li>
+          </ul>
+        </section>
 
         <!-- Carga expedida pendiente de recepción: la tarjeta que el técnico ve al llegar a almacén -->
         <section
