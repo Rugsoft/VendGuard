@@ -218,7 +218,7 @@ flowchart LR
     5. Implementar `exportWorkshopCsv(WorkshopTrayQueryDTO $query): string` generando el CSV con BOM UTF-8 (`\xEF\xBB\xBF`), delimitador `;`, **Sección 1** (`Indicador;Valor`, 11 filas de KPIs), línea en blanco y **Sección 2** (24 columnas de detalle con fechas en `Europe/Madrid`, `QA 5`), más protección contra CSV Injection (`=`, `+`, `-`, `@`).
   - **Hecho cuando:** `php -l src/Application/Service/WorkshopRefurbishmentService.php`
 
-- [ ] **T-WORKSHOP-10 · Crear suite de integración de servicio, concurrencia, reaperturas y sincronización offline (`WorkshopRefurbishmentServiceIntegrationTest.php`)**
+- [x] **T-WORKSHOP-10 · Crear suite de integración de servicio, concurrencia, reaperturas y sincronización offline (`WorkshopRefurbishmentServiceIntegrationTest.php`)**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-WORKSHOP-09`
   - **Archivos exactos a crear o modificar:**

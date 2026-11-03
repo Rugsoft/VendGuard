@@ -380,6 +380,11 @@ final class WorkshopRefurbishmentService
             ));
         }
 
+        // C2: el ahorro tiene suelo cero; si el coste iguala o supera el valor de
+        // catálogo la respuesta lo advierte sin romper el dictamen.
+        $updated['zero_net_savings_warning'] = $unitCost > 0.0
+            && $dto->refurbishmentCostEur >= $unitCost;
+
         return $updated;
     }
 
