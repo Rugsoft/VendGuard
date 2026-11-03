@@ -135,7 +135,7 @@ flowchart LR
 
 ## Fase 3: Capa de Infraestructura y Repositorio PDO (`PdoWorkshopRepairItemRepository`)
 
-- [ ] **T-WORKSHOP-06 · Definir `WorkshopRepairItemRepositoryInterface` e implementar `PdoWorkshopRepairItemRepository` (escritura, bloqueo `FOR UPDATE` y recordatorio móvil)**
+- [x] **T-WORKSHOP-06 · Definir `WorkshopRepairItemRepositoryInterface` e implementar `PdoWorkshopRepairItemRepository` (escritura, bloqueo `FOR UPDATE` y recordatorio móvil)**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-WORKSHOP-05`
   - **Archivos exactos a crear o modificar:**
