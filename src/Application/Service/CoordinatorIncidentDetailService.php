@@ -1170,8 +1170,10 @@ final class CoordinatorIncidentDetailService
      * Huecos sin custodio mayores de 60 s (D4, QA 2).
      *
      * Un hueco nace al crear la avería y muere en la primera asignación
-     * (`INITIAL_TRIAGE_WAIT`), entre el cierre de un tramo y la apertura del siguiente
-     * (`BETWEEN_SEGMENTS`), o al final del expediente activo sin técnico
+     * (`INITIAL_TRIAGE_WAIT`), tras una liberación sanitaria sin guardia
+     * (`SANITARY_RELEASE_WAIT`), tras una reapertura en garantía
+     * (`WARRANTY_REOPEN_WAIT`), entre el cierre de un tramo y la apertura del
+     * siguiente (`BETWEEN_SEGMENTS`), o al final del expediente activo sin técnico
      * (`PENDING_ASSIGNMENT`). El periodo en que el aviso estuvo `RESOLVED` antes de
      * reabrirse no es un hueco de bandeja y se recorta por `reopened_at`.
      *
@@ -1184,7 +1186,9 @@ final class CoordinatorIncidentDetailService
         $gaps = [];
         $previousEnd = $this->parseDateTime($incident['created_at'] ?? null);
         $previousNumber = null;
+        $previousReason = null;
         $lastActive = false;
+        $reopenedAt = $this->parseDateTime($incident['reopened_at'] ?? null);
 
         foreach ($segments as $segment) {
             $start = $this->parseDateTime($segment['assigned_at']);
@@ -1193,14 +1197,18 @@ final class CoordinatorIncidentDetailService
 
             if ($start !== null && $previousEnd !== null && $start->getTimestamp() - $previousEnd->getTimestamp() > 60) {
                 $gapStart = $previousEnd;
-                $reopenedAt = $this->parseDateTime($incident['reopened_at'] ?? null);
                 if ($reopenedAt !== null && $reopenedAt > $gapStart && $reopenedAt < $start) {
                     $gapStart = $reopenedAt;
                 }
 
                 if ($start->getTimestamp() - $gapStart->getTimestamp() > 60) {
                     $gaps[] = $this->custodyGap(
-                        $previousNumber === null ? 'INITIAL_TRIAGE_WAIT' : 'BETWEEN_SEGMENTS',
+                        $this->contextualGapType(
+                            $previousNumber,
+                            $previousReason,
+                            $reopenedAt,
+                            $gapStart
+                        ),
                         $gapStart,
                         $start,
                         false,
@@ -1212,16 +1220,63 @@ final class CoordinatorIncidentDetailService
 
             $previousEnd = $end;
             $previousNumber = $segment['segment_number'];
+            $previousReason = $segment['unassignment_reason_type'] ?? null;
         }
 
         $status = (string)($incident['status'] ?? '');
-        if (!$lastActive && $previousEnd !== null
-            && in_array($status, ['REGISTERED', 'REOPENED'], true)
-            && $now->getTimestamp() - $previousEnd->getTimestamp() > 60) {
-            $gaps[] = $this->custodyGap('PENDING_ASSIGNMENT', $previousEnd, $now, true, $previousNumber, null);
+        if (!$lastActive && $previousEnd !== null && in_array($status, ['REGISTERED', 'REOPENED'], true)) {
+            // El hueco activo tampoco puede contar el tiempo en RESOLVED previo a una
+            // reapertura: arranca en `reopened_at` cuando ese instante es posterior.
+            $finalStart = $previousEnd;
+            if ($reopenedAt !== null && $reopenedAt > $finalStart) {
+                $finalStart = $reopenedAt;
+            }
+
+            if ($now->getTimestamp() - $finalStart->getTimestamp() > 60) {
+                $gaps[] = $this->custodyGap(
+                    $this->contextualGapType($previousNumber, $previousReason, $reopenedAt, $finalStart, $status),
+                    $finalStart,
+                    $now,
+                    true,
+                    $previousNumber,
+                    null
+                );
+            }
         }
 
         return $gaps;
+    }
+
+    /**
+     * Causa contextual del hueco (EARS 04.2): primera espera, liberación
+     * sanitaria sin guardia, reapertura en garantía o simple relevo entre tramos.
+     * El orden importa: la liberación sanitaria manda sobre el relevo genérico, y
+     * una reapertura solo se reconoce cuando el hueco arranca en `reopened_at`.
+     */
+    private function contextualGapType(
+        ?int $previousNumber,
+        ?string $previousReason,
+        ?DateTimeImmutable $reopenedAt,
+        DateTimeImmutable $gapStart,
+        ?string $status = null
+    ): string {
+        if ($previousNumber === null) {
+            return 'INITIAL_TRIAGE_WAIT';
+        }
+
+        if ($previousReason === 'SANITARY_FAILSAFE_UNASSIGNED'
+            && ($status === null || $status !== 'REOPENED')
+        ) {
+            return 'SANITARY_RELEASE_WAIT';
+        }
+
+        if ($status === 'REOPENED'
+            || ($reopenedAt !== null && $gapStart->getTimestamp() === $reopenedAt->getTimestamp())
+        ) {
+            return 'WARRANTY_REOPEN_WAIT';
+        }
+
+        return 'BETWEEN_SEGMENTS';
     }
 
     /** @return array<string, mixed> */
@@ -1239,6 +1294,8 @@ final class CoordinatorIncidentDetailService
             'gap_type' => $type,
             'gap_reason_label' => match ($type) {
                 'INITIAL_TRIAGE_WAIT' => 'En bandeja pendiente de primera asignación',
+                'SANITARY_RELEASE_WAIT' => 'En bandeja tras liberación sanitaria sin guardia',
+                'WARRANTY_REOPEN_WAIT' => 'En bandeja tras reapertura en garantía',
                 'BETWEEN_SEGMENTS' => 'Sin custodio entre tramos',
                 default => 'En bandeja sin técnico asignado',
             },

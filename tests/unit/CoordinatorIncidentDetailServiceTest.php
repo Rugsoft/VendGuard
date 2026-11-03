@@ -765,8 +765,83 @@ $assert(
     '9.7 La reapertura recorta el hueco al instante de reapertura: 10 min, no 50 (D4, QA 2)',
     $reopenedGap['gap_seconds'] === 600
         && $reopenedGap['gap_label'] === '10 min'
+        && $reopenedGap['gap_type'] === 'WARRANTY_REOPEN_WAIT'
+        && $reopenedGap['gap_reason_label'] === 'En bandeja tras reapertura en garantía'
         && $reopenedGap['following_segment_number'] === 4,
     json_encode($reopenedGap)
+);
+
+// Liberación sanitaria N2: el hueco entre tramos conserva su causa contextual (EARS 04.2).
+$sanitaryFixture = $custodyFixture;
+$sanitaryFixture['assignments'][0]['unassignment_reason_type'] = 'SANITARY_FAILSAFE_UNASSIGNED';
+$sanitaryFixture['assignments'][0]['reassignment_reason'] = 'Liberación a bandeja por protocolo sanitario sin guardia.';
+$repo->fixture = $sanitaryFixture;
+$sanitaryCustody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+$sanitaryGap = [];
+foreach ($sanitaryCustody['unassigned_gaps'] as $candidate) {
+    if (($candidate['preceding_segment_number'] ?? null) === 1) {
+        $sanitaryGap = $candidate;
+        break;
+    }
+}
+$assert(
+    '9.7.b El hueco tras una liberación sanitaria se etiqueta con su causa (EARS 04.2)',
+    ($sanitaryGap['gap_type'] ?? '') === 'SANITARY_RELEASE_WAIT'
+        && ($sanitaryGap['gap_reason_label'] ?? '') === 'En bandeja tras liberación sanitaria sin guardia'
+        && ($sanitaryGap['gap_seconds'] ?? 0) === 600,
+    json_encode($sanitaryGap)
+);
+
+// Reapertura sin asignación: el hueco activo no cuenta el tiempo en RESOLVED (EARS 04.2, §6.4).
+$activeReopenFixture = $fixture;
+$activeReopenFixture['incident'] = array_merge($fixture['incident'], [
+    'status' => 'REOPENED',
+    'assigned_technician_id' => null,
+    'reopened_at' => '2026-10-01 10:40:00',
+]);
+$activeReopenFixture['assignments'] = array_slice($custodyFixture['assignments'], 0, 2);
+$repo->fixture = $activeReopenFixture;
+$activeReopenCustody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+$activeReopenGap = [];
+foreach ($activeReopenCustody['unassigned_gaps'] as $candidate) {
+    if (($candidate['is_active_gap'] ?? false) === true) {
+        $activeReopenGap = $candidate;
+        break;
+    }
+}
+$assert(
+    '9.7.c La espera activa tras reapertura empieza en reopened_at y no en el cierre (EARS 04.2, §6.4)',
+    ($activeReopenGap['gap_type'] ?? '') === 'WARRANTY_REOPEN_WAIT'
+        && ($activeReopenGap['gap_reason_label'] ?? '') === 'En bandeja tras reapertura en garantía'
+        && ($activeReopenGap['gap_seconds'] ?? 0) === 2100,
+    json_encode($activeReopenGap)
+);
+
+// Liberación sanitaria sin asignación posterior: el hueco activo conserva su causa.
+$activeSanitaryFixture = $fixture;
+$activeSanitaryFixture['incident'] = array_merge($fixture['incident'], [
+    'status' => 'REGISTERED',
+    'assigned_technician_id' => null,
+    'reopened_at' => null,
+]);
+$activeSanitaryFixture['assignments'] = array_slice($custodyFixture['assignments'], 0, 1);
+$activeSanitaryFixture['assignments'][0]['unassignment_reason_type'] = 'SANITARY_FAILSAFE_UNASSIGNED';
+$activeSanitaryFixture['assignments'][0]['reassignment_reason'] = 'Liberación a bandeja por protocolo sanitario sin guardia.';
+$repo->fixture = $activeSanitaryFixture;
+$activeSanitaryCustody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+$activeSanitaryGap = [];
+foreach ($activeSanitaryCustody['unassigned_gaps'] as $candidate) {
+    if (($candidate['is_active_gap'] ?? false) === true) {
+        $activeSanitaryGap = $candidate;
+        break;
+    }
+}
+$assert(
+    '9.7.d La espera activa tras liberación sanitaria conserva su causa (EARS 04.2)',
+    ($activeSanitaryGap['gap_type'] ?? '') === 'SANITARY_RELEASE_WAIT'
+        && ($activeSanitaryGap['gap_reason_label'] ?? '') === 'En bandeja tras liberación sanitaria sin guardia'
+        && ($activeSanitaryGap['gap_seconds'] ?? 0) === 8100,
+    json_encode($activeSanitaryGap)
 );
 
 // Cancelación sin técnico: no hay tramos y la cadena lo declara explícitamente (R6).

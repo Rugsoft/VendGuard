@@ -22,14 +22,14 @@
 | **02.2** Independencia de la salvaguarda sanitaria de 20 | `ColdChainOverridePolicy`; `CoordinatorController` (dos puertas y dos códigos) | `CustodyChainApiTest.php` 3.5; `ColdChainOverrideJustificationTest.php` | ✅ |
 | **02.3** Rechazo de auto-reasignación | `CoordinatorController` (`TECHNICIAN_ALREADY_ASSIGNED`); `PdoIncidentRepository::assign` | `CustodyChainApiTest.php` 3.4 | ✅ |
 | **02.4** Conservación del borrador ante colisión | `CoordinatorIncidentDetailModal.js` (`fetchDetail({ preserveAssignDrafts })`) | `FrontendTemplateCompileTest.mjs`; revisión de plantilla | ✅ |
-| **03.1** Retención continua por tramo | `CoordinatorIncidentDetailService::buildCustodyChain` | `CoordinatorIncidentDetailServiceTest.php` 9.2 (89/89) | ✅ |
+| **03.1** Retención continua por tramo | `CoordinatorIncidentDetailService::buildCustodyChain` | `CoordinatorIncidentDetailServiceTest.php` 9.2 (92/92) | ✅ |
 | **03.2** Reasignaciones solo por cierres sin resolver | `IncidentUnassignmentReasonType::isUnresolvedTransferOrRelease` | `IncidentAssignmentTest.php`; `CoordinatorIncidentDetailServiceTest.php` 9.1, 5.2 | ✅ |
-| **03.3** Huecos `UNASSIGNED_GAP` > 60 s | `buildUnassignedGaps` | `CoordinatorIncidentDetailServiceTest.php` 9.4–9.7 | ✅ |
-| **03.4** Exclusión del intervalo `RESOLVED` previo a reapertura | `buildUnassignedGaps` (recorte por `reopened_at`) | `CoordinatorIncidentDetailServiceTest.php` 9.7 | ✅ |
+| **03.3** Huecos `UNASSIGNED_GAP` > 60 s | `buildUnassignedGaps` | `CoordinatorIncidentDetailServiceTest.php` 9.4–9.7.d | ✅ |
+| **03.4** Exclusión del intervalo `RESOLVED` previo a reapertura | `buildUnassignedGaps` (recorte por `reopened_at`, también en el hueco activo) | `CoordinatorIncidentDetailServiceTest.php` 9.7, 9.7.c | ✅ |
 | **03.5** Fallback determinista de expedientes históricos | `synthesizeFallbackAssignments` | `CoordinatorIncidentDetailServiceTest.php` 9.9–9.10; `CustodyChainApiTest.php` 6.1 | ✅ |
 | **03.6** Cierre por cancelación sin técnico | `buildCustodyChain` (`is_empty`, `empty_message`) | `CoordinatorIncidentDetailServiceTest.php` 9.8; `CustodyChainApiTest.php` 1.1–1.2 | ✅ |
 | **04.1** Sección permanente en la ficha de Coordinación | `CoordinatorIncidentDetailModal.js` (`incident-custody-chain-section`) | `DesignTokenDebtRatchetTest.mjs`; `FrontendTemplateCompileTest.mjs` | ✅ |
-| **04.2** KPIs de resumen e hilo intercalado | `CoordinatorIncidentDetailModal.js` (`custody-kpi-*`, `custody-timeline`) | Revisión de plantilla; `DesignTokenDebtRatchetTest.mjs` | ✅ |
+| **04.2** Huecos > 60 s con causa contextual | `buildUnassignedGaps` + `contextualGapType` | `CoordinatorIncidentDetailServiceTest.php` 9.4, 9.7.b–9.7.d | ✅ |
 | **04.3** Etiquetas de auditoría de custodia | `AuditActionLabels.js` (`INCIDENT_CUSTODY_ASSIGNED`, `INCIDENT_CUSTODY_REASSIGNED`) | `AuditActionCatalogTest.php`; `DesignTokenDebtRatchetTest.mjs` | ✅ |
 | **05.1** Cierre en resolución, cancelación y reapertura | `PdoIncidentRepository::resolve` / `cancel` / `reopen` | `CustodyChainApiTest.php` 5.1; `PdoIncidentRepositoryTest.php` | ✅ |
 | **05.2** Relevo de turno con autoría humana | `ShiftHandoverService::executeClose` (`$closedBy`) + canales `SHIFT_HANDOVER` | `ShiftHandoverCustodyChainTest.php` (casos 1 y 2); `ShiftHandoverSanitaryTest.php` | ✅ |

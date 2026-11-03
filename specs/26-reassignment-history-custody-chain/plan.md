@@ -788,8 +788,8 @@ La verificación se estructura en tres niveles complementarios que deben ejecuta
 
 ### 6.3. Suites de Gobernanza Arquitectónica y Diseño
 * **[`tests/integration/SchemaConvergenceParityTest.php`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/tests/integration/SchemaConvergenceParityTest.php):** Actualizado a 37 tablas canónicas (`incident_assignments`) y 24 tipos `ENUM` (`incident_assignment_source`, `incident_unassignment_reason_type`), validando paridad 1:1 entre `database/supabase_init.sql`, migraciones `001`–`022` y contratos técnicos.
-* **[`tests/integration/SingleEngineDialectContractTest.php`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/tests/integration/SingleEngineDialectContractTest.php):** Certifica el uso exclusivo de SQL PostgreSQL estándar y `pdo_pgsql`.
-* **[`tests/integration/DesignTokenDebtRatchetTest.php`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/tests/integration/DesignTokenDebtRatchetTest.php):** Certifica que los cambios en [`CoordinatorIncidentDetailModal.js`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/public/assets/js/components/CoordinatorIncidentDetailModal.js) no introducen literales hexadecimales fuera de tokens ni bordes prohibidos.
+* **[`tests/unit/SqlDialectPortabilityTest.php`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/tests/unit/SqlDialectPortabilityTest.php) y [`tests/integration/SeedRunnerSingleEngineTest.php`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/tests/integration/SeedRunnerSingleEngineTest.php):** Certifican el uso exclusivo de SQL PostgreSQL estándar y `pdo_pgsql`.
+* **[`tests/unit/DesignTokenDebtRatchetTest.mjs`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/tests/unit/DesignTokenDebtRatchetTest.mjs):** Certifica que los cambios en [`CoordinatorIncidentDetailModal.js`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/public/assets/js/components/CoordinatorIncidentDetailModal.js) no introducen literales hexadecimales fuera de tokens ni bordes prohibidos.
 
 ---
 
@@ -805,7 +805,7 @@ La verificación se estructura en tres niveles complementarios que deben ejecuta
 | **`RNF-01`** | Rendimiento $< 300\text{ ms}$ p95 sin consultas $N+1$ | `PdoIncidentRepository::findEnrichedDetailById` + índice `idx_incident_assignments_incident_timeline` | `CustodyChainApiTest` |
 | **`RNF-02`** | Inmutabilidad de tramos cerrados, prohibición de `DELETE` e índice único parcial de custodia activa | `trg_no_delete_incident_assignments`, `trg_immutable_incident_assignments`, `uq_incident_assignments_active_custody` | `CustodyChainConstitutionalTest`, `SchemaConvergenceParityTest` |
 | **`RNF-03`** | Fidelidad al Sistema de Diseño (`#2560ff`, `#f8b60f`, bordes `4px`/`8px`) | `CoordinatorIncidentDetailModal.js` | `DesignTokenDebtRatchetTest` |
-| **`RNF-04`** | Dogma Vanilla (PHP 8.2+ POO puro y Vue 3 ES Modules sin librerías externas) | Todos los archivos del módulo | `SingleEngineDialectContractTest` |
+| **`RNF-04`** | Dogma Vanilla (PHP 8.2+ POO puro y Vue 3 ES Modules sin librerías externas) | Todos los archivos del módulo | `SqlDialectPortabilityTest` + `SeedRunnerSingleEngineTest` |
 | **`QA 3`** | Autoría humana real en relevos manuales/forzados, `resolution_diagnosis` al cerrar en `RESOLVED` y cierre en cancelación por 72 h | `ShiftHandoverService`, `SparePartTraceabilityService`, `PdoIncidentRepository` | `CustodyChainApiTest` |
 | **`QA 4`** | Suelo temporal `GREATEST(assigned_at, resolved_at)` (sincronización PWA) y sellado defensivo en 3.ª reincidencia crónica y 48 h | `PdoIncidentRepository`, `OfflineSyncService` | `CustodyChainApiTest` |
 

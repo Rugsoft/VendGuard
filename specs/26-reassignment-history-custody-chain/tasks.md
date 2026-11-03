@@ -21,7 +21,7 @@
 | **Fase 4: Servicios de Aplicación, Proyección de Cadena de Custodia y Motor de Fallback** | `T-CUSTODY-07`, `T-CUSTODY-08`, `T-CUSTODY-09` | 65–75 min | Ampliación de `CoordinatorIncidentDetailDto` y `CoordinatorIncidentDetailService` con la proyección de `custody_chain` (`summary`, `segments`, `unassigned_gaps`, `timeline_items`), retención continua (`D4`), huecos `UNASSIGNED_GAP` ($> 60\text{ s}$) excluyendo intervalos en `RESOLVED` previos a reapertura (`D4`, `QA 2`), motor de *Fallback* determinista (`"SIN-CODIGO"`, `"Coordinación / Sistema"`, `"Registro histórico previo"`, `QA 5`), autoría humana real en `ShiftHandoverService` (`QA 3`), `OpportunisticIncidentService`, `SparePartTraceabilityService`, `IncidentPauseService` y `OfflineSyncService` (`QA 4`) + ampliación de `CoordinatorIncidentDetailServiceTest`. |
 | **Fase 5: Controlador REST, Blindaje Constitucional de Privacidad y Suites de Integración HTTP** | `T-CUSTODY-10`, `T-CUSTODY-11` | 50–55 min | Integración de `ReassignmentReasonValidator` en `CoordinatorController::assignTechnician()` preservando independiente la salvaguarda sanitaria de 20 caracteres (`COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED`, `Art. II`, `Art. V.1`, `QA 1`) y `TECHNICIAN_ALREADY_ASSIGNED` (`422`, `R4`); opacidad estricta en endpoints móviles de Técnico, Portal de Sede, QR público y Parte A4 (`Art. V.4`, `D3`, `QA 5`) + suites `CustodyChainApiTest` y `CustodyChainConstitutionalTest`. |
 | **Fase 6: Interfaz Frontend en Modal de Coordinación (Vue 3 ESM)** | `T-CUSTODY-12`, `T-CUSTODY-13` | 45–50 min | Modificación de `CoordinatorIncidentDetailModal.js` y `AuditActionLabels.js`: renderizado permanente de **«🔄 Cadena de Custodia y Reasignaciones»** (`R6`), KPIs de resumen, línea de tiempo intercalada (`CUSTODY_SEGMENT` / `UNASSIGNED_GAP`), validación reactiva en cliente del motivo de reasignación, refresco inmediato tras asignar/reasignar/cancelar y preservación de borrador con recarga automática ante colisión concurrente (`R4`) bajo tokens de `docs/design.md`. |
-| **Fase 7: Certificación Integral, Matriz de Trazabilidad, Regresión Global y Cierre Documental** | `T-CUSTODY-14` | 25–30 min | Creación de `specs/26-reassignment-history-custody-chain/traceability-matrix.md`, ejecución de `php tests/run_all.php`, verificación de `DesignTokenDebtRatchetTest`, `SchemaConvergenceParityTest` y `SingleEngineDialectContractTest`, actualización de `docs/features_pendientes.md` y cierre del módulo. |
+| **Fase 7: Certificación Integral, Matriz de Trazabilidad, Regresión Global y Cierre Documental** | `T-CUSTODY-14` | 25–30 min | Creación de `specs/26-reassignment-history-custody-chain/traceability-matrix.md`, ejecución de `php tests/run_all.php`, verificación de `DesignTokenDebtRatchetTest.mjs`, `SchemaConvergenceParityTest.php`, `SqlDialectPortabilityTest.php` y `SeedRunnerSingleEngineTest.php`, actualización de `docs/features_pendientes.md` y cierre del módulo. |
 
 ---
 
@@ -176,6 +176,7 @@
        * Proyección completa de `custody_chain` con múltiples tramos (`INITIAL_ASSIGNMENT` $\rightarrow$ `REASSIGNED_BY_COORDINATOR` $\rightarrow$ `SHIFT_HANDOVER` $\rightarrow$ `RESOLVED`) y comprobación de que `reassignments_count` cuenta únicamente transferencias/liberaciones sin resolver (`QA 2`).
        * Intercalación cronológica de `UNASSIGNED_GAP` ($> 60\text{ s}$) y omisión de micro-huecos $\le 60\text{ s}$.
        * Exclusión del tiempo en estado `RESOLVED` cuando una incidencia resuelta es posteriormente reabierta en garantía (`D4`, `QA 2`).
+       * Etiquetado de la causa contextual del hueco: primera asignación, liberación sanitaria sin guardia y reapertura en garantía (`EARS 04.2`).
        * Acotación exacta hasta `cancelled_at` cuando una incidencia sin técnico (`0` asignaciones) es cancelada desde la bandeja (`R6`, `QA 2`).
        * Motor de *Fallback* determinista en lectura aplicando `"SIN-CODIGO"`, `"Coordinación / Sistema"`, `"Registro histórico previo"` e `is_synthesized_fallback = true` (`QA 5`).
   * **Hecho cuando:** `php tests/unit/CoordinatorIncidentDetailServiceTest.php` pasa al 100 % en verde con código de salida `0`.
@@ -231,7 +232,7 @@
     2. En `CoordinatorIncidentDetailModal.js`, renderizar de forma permanente la sección **«🔄 Cadena de Custodia y Reasignaciones»** (`data-testid="incident-custody-chain-section"`) en la columna izquierda debajo de «Línea de Tiempo de Estados»:
        * Cuando `custody_chain.summary.total_assignments === 0` (`R6`): mostrar el estado informativo *«Sin asignaciones técnicas registradas — La incidencia permanece o finalizó sin custodio técnico asignado»* junto con el tiempo acumulado en bandeja (`total_unassigned_formatted`).
        * Cuando `total_assignments >= 1`: mostrar las 4 tarjetas KPI de resumen (*Custodio Actual / Estado*, *Reasignaciones*, *Tiempo Total en Custodia* y *Tiempo en Bandeja Sin Asignar*) y la lista vertical intercalada `timeline_items` diferenciando visualmente `CUSTODY_SEGMENT` (activo en azul eléctrico `--color-accent-primary` `#2560ff` vs. cerrado en gris neutro con bloque de cierre, autor, causa y `reassignment_reason`) y `UNASSIGNED_GAP` ($> 60\text{ s}$ en ámbar `--color-warning` `#f8b60f`), empleando bordes `4px`/`8px` y cero literales hexadecimales fuera de tokens (`docs/design.md`).
-  * **Hecho cuando:** `php tests/integration/DesignTokenDebtRatchetTest.php` pasa en verde sin detectar deuda de tokens ni literales hexadecimales prohibidos en `CoordinatorIncidentDetailModal.js`.
+  * **Hecho cuando:** `node tests/unit/DesignTokenDebtRatchetTest.mjs` pasa en verde sin detectar deuda de tokens ni literales hexadecimales prohibidos en `CoordinatorIncidentDetailModal.js`.
 
 - [x] **T-CUSTODY-13 · Validación reactiva en cliente del motivo de reasignación, refresco inmediato y preservación de borrador ante colisiones (`R1`, `R4`, `QA 1`)**
   * **Tiempo estimado:** 20 min
@@ -243,7 +244,7 @@
     1. Actualizar el computed `canSubmitAssign` en `CoordinatorIncidentDetailModal.js` para normalizar espacios (`reassignmentReasonDraft.trim().replace(/\s+/g, ' ')`), exigir longitud $\ge 10$ caracteres reales y al menos un carácter alfanumérico (`/[a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ]/`), mostrando un indicador reactivo de caracteres válidos (`X / 10 mín.`) cuando la incidencia ya tiene técnico asignado (`R1`, `QA 1`).
     2. Garantizar que tras un `PATCH /api/coordinator/incidents/{id}/assign` o `PATCH /cancel` exitoso (`200 OK`), el modal invoque `await fetchIncidentDetail()` y actualice reactivamente la sección **«🔄 Cadena de Custodia y Reasignaciones»** sin cerrar el modal.
     3. Si `PATCH /api/coordinator/incidents/{id}/assign` devuelve un error de colisión o estado (`409` o `422`), preservar intacto `reassignmentReasonDraft` y `urgencyOverrideReasonDraft` mientras se recarga automáticamente en segundo plano `fetchIncidentDetail({ preserveAssignDrafts: true })` para mostrar al coordinador el nuevo estado y custodio de la incidencia sin perder el texto escrito (`R4`).
-  * **Hecho cuando:** `php tests/integration/DesignTokenDebtRatchetTest.php` pasa en verde con código de salida `0`.
+  * **Hecho cuando:** `node tests/unit/DesignTokenDebtRatchetTest.mjs` pasa en verde con código de salida `0`.
 
 ---
 
@@ -261,7 +262,7 @@
     1. Redactar `specs/26-reassignment-history-custody-chain/traceability-matrix.md` mapeando 1:1 cada requisito EARS (`RF-01`–`RF-05`, `RNF-01`–`RNF-04`), decisiones (`D1`–`D4`), resoluciones (`R1`–`R6`, `QA 1`–`QA 5`) y artículos constitucionales con su archivo de código y test verificador.
     2. Ejecutar las suites de gobernanza y la batería completa de pruebas del repositorio (`php tests/run_all.php`) asegurando 0 fallos y 0 regresiones.
     3. Actualizar el estado de la **Feature 12 (`🔄 Historial Completo de Reasignaciones y Cadena de Custodia`)** en `docs/features_pendientes.md` como implementada y certificada en el Módulo 26.
-  * **Hecho cuando:** `php tests/integration/SchemaConvergenceParityTest.php && php tests/integration/SingleEngineDialectContractTest.php && php tests/integration/DesignTokenDebtRatchetTest.php && php tests/run_all.php` finalizan al 100 % en verde con código de salida `0`.
+  * **Hecho cuando:** `php tests/integration/SchemaConvergenceParityTest.php && php tests/unit/SqlDialectPortabilityTest.php && php tests/integration/SeedRunnerSingleEngineTest.php && node tests/unit/DesignTokenDebtRatchetTest.mjs && php tests/run_all.php` finalizan al 100 % en verde con código de salida `0`.
 
 ---
 
