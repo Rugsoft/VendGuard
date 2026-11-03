@@ -50,7 +50,7 @@
   <script src="/assets/js/vendor/chart.umd.min.js"></script>
 
   <!-- Vanilla Vue 3 Application Root (ES Module) -->
-  <script type="module" src="/assets/js/app.js"></script>
+  <script type="module" src="/assets/js/app.js?v=26"></script>
 
   <!-- Service Worker (Módulo 24 · RF-01.2): precachea el App Shell para que la
        interfaz abra sin red. El registro es opcional por diseño: si el navegador no
@@ -59,7 +59,7 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function (error) {
+        navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).catch(function (error) {
           console.warn('VendGuard · No se pudo registrar el Service Worker:', error);
         });
       });

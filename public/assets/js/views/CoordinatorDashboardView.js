@@ -55,7 +55,7 @@ import { CoordinatorVanStockTab } from '../components/CoordinatorVanStockTab.js'
 import { CoordinatorAbsencesTab } from '../components/CoordinatorAbsencesTab.js';
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
 import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
-import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js';
+import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js?v=26';
 import { CoordinatorNotificationCenterModal } from '../components/CoordinatorNotificationCenterModal.js';
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
 import { AssignSuggestionPanel } from '../components/AssignSuggestionPanel.js';

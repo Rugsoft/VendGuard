@@ -49,7 +49,7 @@ function assert(description, condition, details = '') {
 }
 
 function publicFile(relativePath) {
-  return join(PUBLIC_ROOT, relativePath.replace(/^\//, ''));
+  return join(PUBLIC_ROOT, relativePath.replace(/^\//, '').split('?')[0]);
 }
 
 function readPublic(relativePath) {
@@ -128,7 +128,7 @@ const shellMatch = /const APP_SHELL_ASSETS = \[([\s\S]*?)\n\];/.exec(swSource);
 const shellAssets = shellMatch
   ? [...shellMatch[1].matchAll(/'([^']+)'/g)].map((match) => match[1])
   : [];
-const shellSet = new Set(shellAssets);
+const shellSet = new Set(shellAssets.map((asset) => asset.split('?')[0]));
 
 assert('2.1 El Service Worker declara la lista explícita del App Shell', shellAssets.length > 50, `entradas=${shellAssets.length}`);
 assert(
@@ -165,21 +165,22 @@ assert(
 );
 
 const unresolvedImports = [];
-for (const asset of shellAssets.filter((entry) => entry.endsWith('.js'))) {
+for (const asset of shellAssets.filter((entry) => entry.split('?')[0].endsWith('.js'))) {
   if (!existsSync(publicFile(asset))) {
     continue;
   }
 
+  const assetPath = asset.split('?')[0];
   const moduleSource = readPublic(asset);
   for (const match of moduleSource.matchAll(/import\s+(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]/g)) {
-    const specifier = match[1];
+    const specifier = match[1].split('?')[0];
     if (!specifier.startsWith('.')) {
       continue;
     }
 
-    const resolved = posix.normalize(posix.join(posix.dirname(asset), specifier));
+    const resolved = posix.normalize(posix.join(posix.dirname(assetPath), specifier));
     if (!shellSet.has(resolved)) {
-      unresolvedImports.push(`${resolved} (importado por ${asset.replace('/assets/js/', '')})`);
+      unresolvedImports.push(`${resolved} (importado por ${assetPath.replace('/assets/js/', '')})`);
     }
   }
 }
