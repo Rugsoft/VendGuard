@@ -853,14 +853,16 @@ $cancelledCustodyFixture['incident'] = array_merge(
 $cancelledCustodyFixture['assignments'] = [];
 $repo->fixture = $cancelledCustodyFixture;
 $cancelledCustody = $service->buildDetail(142, $at1115)->toArray()['custody_chain'];
+$cancelledGap = $cancelledCustody['unassigned_gaps'][0] ?? [];
 
 $assert(
-    '9.8 Expediente cancelado sin custodio: cadena vacía con mensaje, sin inventar tramos (R6)',
-    $cancelledCustody['summary']['is_empty'] === true
-        && $cancelledCustody['summary']['empty_message'] !== null
-        && $cancelledCustody['segments'] === []
-        && $cancelledCustody['unassigned_gaps'] === []
-        && $cancelledCustody['timeline_items'] === []
+    '9.8 Expediente cancelado sin custodio: conserva el hueco de triaje hasta cancelled_at (R6, D4)',
+    $cancelledCustody['segments'] === []
+        && count($cancelledCustody['unassigned_gaps']) === 1
+        && ($cancelledGap['gap_type'] ?? '') === 'INITIAL_TRIAGE_WAIT'
+        && ($cancelledGap['is_active_gap'] ?? true) === false
+        && ($cancelledGap['gap_seconds'] ?? 0) > 0
+        && ($cancelledCustody['summary']['total_unassigned_seconds'] ?? 0) >= ($cancelledGap['gap_seconds'] ?? 0)
 );
 
 // Motor de fallback: expediente histórico con técnico pero sin filas en la tabla (QA 5).

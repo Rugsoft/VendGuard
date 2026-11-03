@@ -2,7 +2,7 @@
 
 **Documento:** `docs/features_pendientes.md`  
 **Fecha de Actualización:** Octubre 2026  
-**Estado del Proyecto:** batería global: 387 suites · 14.523 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados.  
+**Estado del Proyecto:** batería global: 387 suites · 14.527 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---

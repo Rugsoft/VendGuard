@@ -1224,6 +1224,32 @@ final class CoordinatorIncidentDetailService
         }
 
         $status = (string)($incident['status'] ?? '');
+
+        // Una incidencia cancelada sin técnico nunca abrió un tramo: su espera en
+        // bandeja termina en `cancelled_at`, no en el instante de la consulta. Sin
+        // este cierre el tiempo de triaje desaparece del resumen y de la línea
+        // temporal (D4, QA 2).
+        if ($segments === [] && $status === 'CANCELLED') {
+            $cancelledAt = $this->parseDateTime($incident['cancelled_at'] ?? null);
+            if ($cancelledAt !== null && $previousEnd !== null) {
+                $finalStart = $previousEnd;
+                if ($reopenedAt !== null && $reopenedAt > $finalStart && $reopenedAt < $cancelledAt) {
+                    $finalStart = $reopenedAt;
+                }
+
+                if ($cancelledAt->getTimestamp() - $finalStart->getTimestamp() > 60) {
+                    $gaps[] = $this->custodyGap(
+                        $this->contextualGapType(null, null, $reopenedAt, $finalStart, $status),
+                        $finalStart,
+                        $cancelledAt,
+                        false,
+                        null,
+                        null
+                    );
+                }
+            }
+        }
+
         if (!$lastActive && $previousEnd !== null && in_array($status, ['REGISTERED', 'REOPENED'], true)) {
             // El hueco activo tampoco puede contar el tiempo en RESOLVED previo a una
             // reapertura: arranca en `reopened_at` cuando ese instante es posterior.

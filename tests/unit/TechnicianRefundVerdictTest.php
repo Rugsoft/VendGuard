@@ -753,7 +753,7 @@ final class StubTraceabilityService extends SparePartTraceabilityService
     {
     }
 
-    public function resolveIncidentWithParts(int $incidentId, int $technicianId, array $data, ?array $actor = null): array
+    public function resolveIncidentWithParts(int $incidentId, int $technicianId, array $data, ?array $actor = null, ?\DateTimeImmutable $resolvedAt = null): array
     {
         $this->calls++;
 

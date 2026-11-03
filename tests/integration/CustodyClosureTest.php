@@ -11,6 +11,8 @@ declare(strict_types=1);
  *   3. El cierre automático a las 48 h sella un tramo legado con RESOLVED (QA 4).
  *   4. El suelo temporal `GREATEST(assigned_at, now)` deja retención 0 cuando el
  *      reloj del sistema va por detrás del inicio del tramo (QA 4, caso límite 8).
+ *   5. La resolución con hora efectiva sella `resolved_at` y el tramo en ese
+ *      instante, no en el de llegada del lote offline (RF-04.3, QA 4).
  *
  * Dogma Vanilla: PHP 8.2 estricto, PDO nativo, sin dependencias externas.
  */
@@ -185,6 +187,46 @@ $assert('4.1 El tramo abierto en el futuro queda cerrado', is_array($floor) && $
 $assert(
     '4.2 El cierre nunca queda antes del inicio (retención 0)',
     is_array($floor) && (float)$floor['diff'] === 0.0 && $floor['unassigned_at'] === $floor['assigned_at']
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Caso 5 · Resolución con la hora efectiva del evento
+// ─────────────────────────────────────────────────────────────────────────────
+echo "\n--- Caso 5: resolución con hora efectiva ---\n";
+TestDataCleaner::purgeIncidentsByMachine($pdo, (int)$machineA->getId());
+$deferred = $makeRegistered($machineA);
+$deferredId = (int)$deferred->getId();
+$incidentRepo->assign($deferredId, (int)$jordi->getId());
+$incidentRepo->startIntervention($deferredId, (int)$jordi->getId());
+// El trigger de inmutabilidad impide retrasar `assigned_at`; se adelanta el
+// cierre 5 min para comprobar que la hora efectiva manda sobre el reloj actual.
+$effectiveResolvedAt = new DateTimeImmutable('+5 minutes');
+$incidentRepo->resolve(
+    $deferredId,
+    (int)$jordi->getId(),
+    'Diagnóstico verificado en la prueba de hora efectiva.',
+    'Sustitución completada y verificada en la prueba de hora efectiva.',
+    $effectiveResolvedAt
+);
+
+$deferredRow = $pdo->query(
+    "SELECT resolved_at FROM incidents WHERE id = {$deferredId}"
+)->fetch(PDO::FETCH_ASSOC);
+$deferredCustody = $custodyRows($deferredId)[0] ?? [];
+
+$assert(
+    '5.1 La resolución conserva la hora efectiva del cierre',
+    is_array($deferredRow)
+        && abs(strtotime((string)$deferredRow['resolved_at']) - $effectiveResolvedAt->getTimestamp()) <= 1
+);
+$assert(
+    '5.2 El tramo se sella en la hora efectiva y no en la de llegada del lote',
+    ($deferredCustody['unassigned_at'] ?? null) !== null
+        && abs(strtotime((string)$deferredCustody['unassigned_at']) - $effectiveResolvedAt->getTimestamp()) <= 1
+        && abs(
+            strtotime((string)$deferredCustody['unassigned_at'])
+            - strtotime((string)$deferredCustody['assigned_at'])
+        ) >= 295
 );
 
 echo "\n======================================================================\n";

@@ -1973,7 +1973,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $incidentId,
                 IncidentUnassignmentReasonType::TAKEN_OVER_IN_SITU,
                 $technicianId,
-                $takeoverReason
+                $takeoverReason,
+                null,
+                $instant
             );
             $this->openCustodySegmentInTransaction(
                 $incidentId,
@@ -2113,7 +2115,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $incidentId,
                 IncidentUnassignmentReasonType::WARRANTY_REOPENED,
                 $technicianId,
-                'Sellado defensivo del tramo heredado al reabrir la avería en garantía in situ.'
+                'Sellado defensivo del tramo heredado al reabrir la avería en garantía in situ.',
+                null,
+                $instant
             );
             $this->openCustodySegmentInTransaction(
                 $incidentId,
@@ -2248,7 +2252,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $predecessorIncidentId,
                 IncidentUnassignmentReasonType::CHRONIC_REPLACEMENT_CLOSED,
                 $technicianId,
-                'Retirada del equipo tras la tercera reincidencia crónica; el expediente sucesor asume la custodia.'
+                'Retirada del equipo tras la tercera reincidencia crónica; el expediente sucesor asume la custodia.',
+                null,
+                $instant
             );
             $created = $this->create(
                 $successor,
@@ -4355,7 +4361,13 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
      * Exige diagnóstico y acción técnica de al menos 20 caracteres descriptivos cada uno.
      * Transiciona el estado a RESOLVED, registra resolved_at e inserta el evento de auditoría.
      */
-    public function resolve(int $incidentId, int $technicianId, string $diagnosis, string $action): Incident
+    public function resolve(
+        int $incidentId,
+        int $technicianId,
+        string $diagnosis,
+        string $action,
+        ?DateTimeImmutable $resolvedAt = null
+    ): Incident
     {
         $isOwnTransaction = !$this->pdo->inTransaction();
         if ($isOwnTransaction) {
@@ -4391,7 +4403,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 SET status = 'RESOLVED',
                     resolution_diagnosis = :diagnosis,
                     resolution_action = :action,
-                    resolved_at = CURRENT_TIMESTAMP
+                    resolved_at = COALESCE(CAST(:resolved_at AS timestamptz), CURRENT_TIMESTAMP)
                 WHERE id = :id
                   AND deleted_at IS NULL
             ";
@@ -4399,6 +4411,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $stmt = $this->pdo->prepare($sql);
             $stmt->bindValue(':diagnosis', trim($diagnosis), PDO::PARAM_STR);
             $stmt->bindValue(':action', trim($action), PDO::PARAM_STR);
+            $stmt->bindValue(
+                ':resolved_at',
+                $resolvedAt?->format('Y-m-d H:i:sP'),
+                $resolvedAt !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+            );
             $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
             $stmt->execute();
 
@@ -4410,7 +4427,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $incidentId,
                 IncidentUnassignmentReasonType::RESOLVED,
                 $technicianId,
-                trim($diagnosis)
+                trim($diagnosis),
+                null,
+                $resolvedAt
             );
             // 5. Registrar evento de resolución en el historial inmutable
             $this->insertHistory(
@@ -4845,7 +4864,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         IncidentUnassignmentReasonType $reasonType,
         ?int $closedBy,
         string $reason,
-        ?string $closedByNameSnapshot = null
+        ?string $closedByNameSnapshot = null,
+        ?DateTimeImmutable $closedAt = null
     ): bool {
         $lock = $this->pdo->prepare(
             'SELECT id FROM incident_assignments WHERE incident_id = :incident_id AND unassigned_at IS NULL FOR UPDATE'
@@ -4872,7 +4892,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             . '   AND unassigned_at IS NULL'
             . ' RETURNING id'
         );
-        $stmt->bindValue(':closed_at', null, PDO::PARAM_NULL);
+        $stmt->bindValue(
+            ':closed_at',
+            $closedAt?->format('Y-m-d H:i:sP'),
+            $closedAt !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+        );
         $stmt->bindValue(':closed_by', $closedBy, $closedBy !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
         $stmt->bindValue(
             ':closed_by_name',

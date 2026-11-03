@@ -5,11 +5,13 @@ declare(strict_types=1);
 /**
  * VendGuard - CustodyChainEdgeCasesTest (Módulo 26)
  *
- * Cubre los dos criterios que faltaban en la certificación HTTP:
+ * Cubre los criterios que faltaban en la certificación HTTP:
  *   1. Ida y vuelta A -> B -> A: tres tramos, dos reasignaciones y A como
  *      custodio activo, con la fórmula del resumen sin doble conteo (D4, caso 2).
  *   2. Huso horario operativo: las marcas de la cadena se publican con el offset
  *      vigente de Europe/Madrid, no con el UTC del motor (RNF-04).
+ *   3. Cancelación sin técnico: la espera en bandeja se cierra en `cancelled_at`
+ *      y no desaparece del resumen (D4, QA 2).
  *
  * Dogma Vanilla: PHP 8.2 estricto, PDO nativo, sin dependencias externas.
  */
@@ -57,8 +59,12 @@ $coordinator = $userRepo->findByEmail('coordinacion@vendguard.internal');
 $techA       = $userRepo->findByEmail('jordi.ruta@vendguard.internal');
 $techB       = $userRepo->findByEmail('marta.ruta@vendguard.internal');
 $machine     = $machineRepo->findByCode('VEND-0301');
-$assert('0.1 Semillas suficientes', $coordinator !== null && $techA !== null && $techB !== null && $machine !== null);
-if ($coordinator === null || $techA === null || $techB === null || $machine === null) {
+$machineB    = $machineRepo->findByCode('VEND-0302');
+$assert(
+    '0.1 Semillas suficientes',
+    $coordinator !== null && $techA !== null && $techB !== null && $machine !== null && $machineB !== null
+);
+if ($coordinator === null || $techA === null || $techB === null || $machine === null || $machineB === null) {
     echo "ERROR FATAL: sin semillas no se puede certificar.\n";
     exit(1);
 }
@@ -149,6 +155,49 @@ $assert(
     '2.2 La primera marca no se publica en UTC',
     isset($chain['segments'][0]['assigned_at'])
         && !str_ends_with((string)$chain['segments'][0]['assigned_at'], '+00:00')
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cancelación sin técnico: el hueco muere en cancelled_at
+// ─────────────────────────────────────────────────────────────────────────────
+echo "\n--- Caso 3: cancelada sin técnico ---\n";
+TestDataCleaner::purgeIncidentsByMachine($pdo, (int)$machineB->getId());
+$cancelledNoTech = $incidentRepo->create(new Incident(
+    id: null,
+    ticketCode: 'T26C-' . strtoupper(uniqid()),
+    machineId: $machineB->getId(),
+    locationId: $machineB->getLocationId(),
+    category: IncidentCategory::PRODUCT_JAM,
+    description: 'Fixture de cancelación sin técnico.',
+    urgency: UrgencyLevel::MEDIUM,
+    status: IncidentStatus::REGISTERED,
+    assignedTechnicianId: null,
+    createdAt: null
+));
+$cancelledNoTechId = (int)$cancelledNoTech->getId();
+$pdo->prepare(
+    "UPDATE incidents SET created_at = NOW() - INTERVAL '10 minutes' WHERE id = ?"
+)->execute([$cancelledNoTechId]);
+$incidentRepo->cancel(
+    $cancelledNoTechId,
+    'Cancelación de la prueba sin asignación de técnico.',
+    (int)$coordinator->getId()
+);
+
+$cancelledDetail = $detailService->buildDetail($cancelledNoTechId);
+$cancelledChain = $cancelledDetail?->toArray()['custody_chain'] ?? [];
+$cancelledGap = $cancelledChain['unassigned_gaps'][0] ?? [];
+$cancelledSummary = $cancelledChain['summary'] ?? [];
+
+$assert(
+    '3.1 El hueco de triaje se cierra en cancelled_at y deja de estar activo',
+    ($cancelledGap['gap_type'] ?? '') === 'INITIAL_TRIAGE_WAIT'
+        && ($cancelledGap['is_active_gap'] ?? true) === false
+        && ($cancelledGap['gap_seconds'] ?? 0) >= 590
+);
+$assert(
+    '3.2 El resumen conserva el tiempo en bandeja de la incidencia cancelada',
+    (int)($cancelledSummary['total_unassigned_seconds'] ?? 0) >= 590
 );
 
 echo "\n======================================================================\n";
