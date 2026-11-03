@@ -2240,6 +2240,312 @@ class SeedRunner
 
         return $statement->rowCount();
     }
+    /**
+     * Bandeja de taller central (Módulo 27): sustituciones demo repartidas por el ciclo.
+     *
+     * POR QUÉ EL SEMBRADOR CREA LAS SUSTITUCIONES
+     *   `workshop_repair_items` no cuelga del catálogo maestro sino de una línea de
+     *   `incident_replaced_parts`, y el arranque en limpio no inventa incidencias
+     *   (EARS-02.1). Sin una sustitución previa no hay expediente que sembrar, así que
+     *   este método crea las líneas demo sobre la orden preventiva ya sembrada
+     *   (`ORD-PREV-2026-0001`, intervención `PREVENTIVE`) y las reparte por los cinco
+     *   estados del ciclo (D1): pendiente de entrega, recepcionada, en banco,
+     *   reacondicionada —hacia almacén central y hacia furgoneta— y baja definitiva,
+     *   tanto por fallo en banco como por extravío previo a la recepción (C1).
+     *
+     * POR QUÉ UNA LÍNEA LLEVA DOS UNIDADES
+     *   El desglose `1..N` solo se demuestra con una línea de cantidad mayor que uno:
+     *   la primera unidad sigue pendiente de entrega y la segunda ya volvió al
+     *   almacén, de modo que el sembrador certifica que dos unidades de la misma
+     *   extracción son dos expedientes y no una fila con la cantidad agregada.
+     *
+     * IDEMPOTENCIA Y TRAZABILIDAD
+     *   La línea se reconoce por (orden preventiva, repuesto, instante de extracción) y
+     *   la unidad por (línea, `unit_index`). Reejecutar el sembrador no duplica filas,
+     *   no reescribe un dictamen terminal y no toca un expediente que ya exista: el
+     *   `NOT EXISTS` es la idempotencia y los disparadores del motor rechazarían
+     *   cualquier reescritura del histórico (Art. III.3).
+     *
+     * @return int Unidades insertadas en esta pasada.
+     */
+    public function seedWorkshopRepairItems(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+        $coordinatorEmail = 'coordinacion@vendguard.internal';
+        $technicianEmail = 'jordi.ruta@vendguard.internal';
+        $orderCode = 'ORD-PREV-2026-0001';
+
+        $orderStmt = $this->pdo->prepare(
+            "SELECT id, machine_id, location_id,
+                    COALESCE(assigned_technician_id, (SELECT id FROM users WHERE {$identityColumn} = :fallback_technician)) AS technician_id
+               FROM preventive_orders
+              WHERE order_code = :order_code
+              LIMIT 1"
+        );
+        $orderStmt->execute([
+            ':order_code' => $orderCode,
+            ':fallback_technician' => $technicianEmail,
+        ]);
+        $order = $orderStmt->fetch();
+        $orderStmt->closeCursor();
+
+        if (!is_array($order) || $order['technician_id'] === null) {
+            // Sin orden preventiva ni técnico no hay sustitución que colgar: el
+            // arranque en limpio devuelve 0 y no inventa averías (EARS-02.1).
+            return 0;
+        }
+
+        $coordinatorStmt = $this->pdo->prepare(
+            "SELECT id FROM users WHERE {$identityColumn} = :coordinator_email LIMIT 1"
+        );
+        $coordinatorStmt->execute([':coordinator_email' => $coordinatorEmail]);
+        $coordinatorId = (int)$coordinatorStmt->fetchColumn();
+        $coordinatorStmt->closeCursor();
+
+        $insertPart = $this->pdo->prepare(
+            "INSERT INTO incident_replaced_parts (
+                intervention_type, preventive_order_id, machine_id, location_id,
+                technician_id, spare_part_id, quantity, unit_cost_snapshot,
+                old_part_destination, notes, installed_at
+             )
+             SELECT 'PREVENTIVE', po.id, po.machine_id, po.location_id,
+                    :technician_id, spare_part.id, :quantity, :unit_cost,
+                    'TALLER', :notes, :installed_at
+               FROM preventive_orders po
+               JOIN spare_parts spare_part ON spare_part.part_code = :part_code
+              WHERE po.order_code = :order_code
+                AND NOT EXISTS (
+                    SELECT 1 FROM incident_replaced_parts p
+                     WHERE p.preventive_order_id = po.id
+                       AND p.spare_part_id = spare_part.id
+                       AND p.installed_at = :installed_at_lookup
+                )"
+        );
+
+        $findPart = $this->pdo->prepare(
+            "SELECT p.id
+               FROM incident_replaced_parts p
+               JOIN preventive_orders po ON po.id = p.preventive_order_id
+               JOIN spare_parts sp ON sp.id = p.spare_part_id
+              WHERE po.order_code = :order_code
+                AND sp.part_code = :part_code
+                AND p.installed_at = :installed_at
+              ORDER BY p.id ASC
+              LIMIT 1"
+        );
+
+        $insertUnit = $this->pdo->prepare(
+            "INSERT INTO workshop_repair_items (
+                incident_replaced_part_id, unit_index, total_units_in_line,
+                intervention_type, preventive_order_id, machine_id, location_id,
+                extracted_by_technician_id, spare_part_id, is_out_of_catalog,
+                part_code_snapshot, part_name_snapshot, part_category_snapshot,
+                machine_code_snapshot, machine_model_snapshot, location_name_snapshot,
+                technician_name_snapshot, unit_cost_snapshot, status,
+                received_at, received_by_user_id, reception_notes,
+                bench_started_at, bench_diagnosis,
+                refurbishment_cost_eur, net_savings_eur,
+                restock_destination, restocked_to_technician_id,
+                resolved_at, resolved_by_user_id, created_at
+             )
+             SELECT p.id, :unit_index, :total_units,
+                    p.intervention_type, p.preventive_order_id, p.machine_id, p.location_id,
+                    p.technician_id, p.spare_part_id, p.is_out_of_catalog,
+                    sp.part_code,
+                    COALESCE(NULLIF(btrim(sp.name), ''), 'Pieza extraída sin catálogo'),
+                    COALESCE(sp.category::text, 'OTHER'),
+                    m.code, m.model, l.name, u.name, p.unit_cost_snapshot,
+                    CAST(:status AS workshop_repair_status),
+                    :received_at, :received_by_user_id, :reception_notes,
+                    :bench_started_at, :bench_diagnosis,
+                    :refurbishment_cost, :net_savings,
+                    CAST(:restock_destination AS workshop_restock_destination), :restocked_to_technician,
+                    :resolved_at, :resolved_by_user_id, p.installed_at
+               FROM incident_replaced_parts p
+               JOIN machines m ON m.id = p.machine_id
+               JOIN locations l ON l.id = p.location_id
+               JOIN users u ON u.id = p.technician_id
+               LEFT JOIN spare_parts sp ON sp.id = p.spare_part_id
+              WHERE p.id = :part_id_lookup
+                AND NOT EXISTS (
+                    SELECT 1 FROM workshop_repair_items w
+                     WHERE w.incident_replaced_part_id = p.id
+                       AND w.unit_index = :unit_index_lookup
+                )"
+        );
+
+        $inserted = 0;
+
+        foreach (self::workshopRepairSeedBlueprints() as $line) {
+            $insertPart->execute([
+                ':technician_id' => $order['technician_id'],
+                ':quantity' => $line['quantity'],
+                ':unit_cost' => $line['unit_cost'],
+                ':notes' => $line['notes'],
+                ':installed_at' => $line['installed_at'],
+                ':part_code' => $line['part_code'],
+                ':order_code' => $orderCode,
+                ':installed_at_lookup' => $line['installed_at'],
+            ]);
+
+            $findPart->execute([
+                ':order_code' => $orderCode,
+                ':part_code' => $line['part_code'],
+                ':installed_at' => $line['installed_at'],
+            ]);
+            $partId = (int)$findPart->fetchColumn();
+            $findPart->closeCursor();
+
+            if ($partId <= 0) {
+                continue;
+            }
+
+            foreach ($line['units'] as $unitIndex => $unit) {
+                $insertUnit->execute([
+                    ':unit_index' => $unitIndex,
+                    ':total_units' => $line['quantity'],
+                    ':status' => $unit['status'],
+                    ':received_at' => $unit['received_at'] ?? null,
+                    ':reception_notes' => $unit['reception_notes'] ?? null,
+                    ':bench_started_at' => $unit['bench_started_at'] ?? null,
+                    ':bench_diagnosis' => $unit['bench_diagnosis'] ?? null,
+                    ':refurbishment_cost' => $unit['refurbishment_cost_eur'] ?? '0.00',
+                    ':net_savings' => $unit['net_savings_eur'] ?? '0.00',
+                    ':restock_destination' => $unit['restock_destination'] ?? null,
+                    ':restocked_to_technician' => ($unit['restock_destination'] ?? null) === 'TECHNICIAN_VAN'
+                        ? $order['technician_id']
+                        : null,
+                    ':resolved_at' => $unit['resolved_at'] ?? null,
+                    ':received_by_user_id' => ($unit['received_at'] ?? null) !== null ? $coordinatorId : null,
+                    ':resolved_by_user_id' => ($unit['resolved_at'] ?? null) !== null ? $coordinatorId : null,
+                    ':part_id_lookup' => $partId,
+                    ':unit_index_lookup' => $unitIndex,
+                ]);
+
+                $inserted += $insertUnit->rowCount();
+            }
+        }
+
+        return $inserted;
+    }
+
+    /**
+     * Líneas demo del ciclo de taller: una por caso del contrato, con sus unidades.
+     *
+     * Los importes respetan el suelo cero de `net_savings_eur` (C2): la unidad
+     * reacondicionada ahorra la diferencia entre el valor de catálogo y el coste real
+     * de la reparación, y la baja no ahorra nada —el motor exige coste y ahorro a cero
+     * en `SCRAPPED_IRREPARABLE`—.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function workshopRepairSeedBlueprints(): array
+    {
+        return [
+            [
+                'part_code' => 'GRUP-ESPR-01',
+                'quantity' => 2,
+                'unit_cost' => '145.00',
+                'installed_at' => '2026-10-02 09:15:00+00',
+                'notes' => 'Ciclo de taller demo · grupo infusor retirado en la revisión preventiva.',
+                'units' => [
+                    1 => [
+                        'status' => 'PENDING_DELIVERY',
+                    ],
+                    2 => [
+                        'status' => 'REFURBISHED_RESTORED',
+                        'received_at' => '2026-10-06 08:30:00+00',
+                        'reception_notes' => 'Unidad recibida en taller central con embalaje íntegro.',
+                        'bench_started_at' => '2026-10-07 09:00:00+00',
+                        'bench_diagnosis' => 'Grupo infusor descalcificado y junta de pistón sustituida en banco.',
+                        'refurbishment_cost_eur' => '22.00',
+                        'net_savings_eur' => '123.00',
+                        'restock_destination' => 'CENTRAL_WAREHOUSE',
+                        'resolved_at' => '2026-10-09 12:00:00+00',
+                    ],
+                ],
+            ],
+            [
+                'part_code' => 'MON-CASH-01',
+                'quantity' => 1,
+                'unit_cost' => '185.00',
+                'installed_at' => '2026-10-08 11:40:00+00',
+                'notes' => 'Ciclo de taller demo · monedero retirado para revisión de aceptación.',
+                'units' => [
+                    1 => [
+                        'status' => 'RECEIVED_IN_WORKSHOP',
+                        'received_at' => '2026-10-12 10:15:00+00',
+                        'reception_notes' => 'Recibido en taller central pendiente de entrada en banco.',
+                    ],
+                ],
+            ],
+            [
+                'part_code' => 'VENT-EVAP-01',
+                'quantity' => 1,
+                'unit_cost' => '46.50',
+                'installed_at' => '2026-10-13 08:05:00+00',
+                'notes' => 'Ciclo de taller demo · ventilador de evaporador con ruido en giro.',
+                'units' => [
+                    1 => [
+                        'status' => 'IN_BENCH_TEST',
+                        'received_at' => '2026-10-15 09:20:00+00',
+                        'bench_started_at' => '2026-10-16 07:45:00+00',
+                        'bench_diagnosis' => 'Turbina con rodamientos nuevos, verificada a 230 V durante veinte minutos.',
+                    ],
+                ],
+            ],
+            [
+                'part_code' => 'DISP-LCD-01',
+                'quantity' => 1,
+                'unit_cost' => '42.00',
+                'installed_at' => '2026-10-16 16:20:00+00',
+                'notes' => 'Ciclo de taller demo · pantalla frontal con retroiluminación intermitente.',
+                'units' => [
+                    1 => [
+                        'status' => 'REFURBISHED_RESTORED',
+                        'received_at' => '2026-10-19 08:10:00+00',
+                        'bench_started_at' => '2026-10-20 09:30:00+00',
+                        'bench_diagnosis' => 'Pantalla con retroiluminación reparada y contraste ajustado en banco.',
+                        'refurbishment_cost_eur' => '6.50',
+                        'net_savings_eur' => '35.50',
+                        'restock_destination' => 'TECHNICIAN_VAN',
+                        'resolved_at' => '2026-10-21 11:00:00+00',
+                    ],
+                ],
+            ],
+            [
+                'part_code' => 'SOND-NTC-01',
+                'quantity' => 1,
+                'unit_cost' => '15.20',
+                'installed_at' => '2026-10-20 10:00:00+00',
+                'notes' => 'Ciclo de taller demo · sonda térmica con lectura errática.',
+                'units' => [
+                    1 => [
+                        'status' => 'SCRAPPED_IRREPARABLE',
+                        'received_at' => '2026-10-22 09:00:00+00',
+                        'bench_started_at' => '2026-10-23 08:30:00+00',
+                        'bench_diagnosis' => 'Sonda con hilo interno roto sin reparación posible; se envía a reciclaje.',
+                        'resolved_at' => '2026-10-23 10:00:00+00',
+                    ],
+                ],
+            ],
+            [
+                'part_code' => 'FILT-AGUA-01',
+                'quantity' => 1,
+                'unit_cost' => '58.00',
+                'installed_at' => '2026-10-24 07:45:00+00',
+                'notes' => 'Ciclo de taller demo · cartucho retirado que no llegó al taller.',
+                'units' => [
+                    1 => [
+                        'status' => 'SCRAPPED_IRREPARABLE',
+                        'bench_diagnosis' => 'Pieza extraviada antes de la entrega en taller; baja dictaminada por coordinación.',
+                        'resolved_at' => '2026-10-27 16:40:00+00',
+                    ],
+                ],
+            ],
+        ];
+    }
+
     public function seedAll(string $defaultPassword = 'Password123!'): array
     {
         $this->pdo->beginTransaction();
@@ -2278,6 +2584,11 @@ class SeedRunner
             // reconstruye para los expedientes que ya existan sin tramos. Sobre un
             // parque recién sembrado devuelve 0 y no inventa averías.
             $custodyAssignmentCount = $this->seedIncidentAssignments();
+            // La bandeja de taller del Módulo 27 cuelga de sustituciones reales: el
+            // sembrador crea sus líneas demo sobre la orden preventiva ya sembrada y
+            // las reparte por los cinco estados del ciclo (D1). Reejecutarlo no
+            // duplica unidades ni reescribe un dictamen (Art. III.3).
+            $workshopRepairItemCount = $this->seedWorkshopRepairItems();
 
             $this->pdo->commit();
 
@@ -2299,6 +2610,7 @@ class SeedRunner
                 'van_restock_orders' => $vanRestockOrderCount,
                 'offline_sync_mutations' => $offlineSyncMutationCount,
                 'incident_assignments' => $custodyAssignmentCount,
+                'workshop_repair_items' => $workshopRepairItemCount,
             ];
         } catch (PDOException $e) {
             if ($this->pdo->inTransaction()) {

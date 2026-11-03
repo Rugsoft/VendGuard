@@ -55,7 +55,7 @@ flowchart LR
     6. Reflejar exactamente las mismas definiciones en `database/supabase_init.sql`.
   - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php`
 
-- [ ] **T-WORKSHOP-02 · Poblar semillas representativas en `supabase_seeds.sql` y `SeedRunner.php` en los 5 estados del ciclo de taller**
+- [x] **T-WORKSHOP-02 · Poblar semillas representativas en `supabase_seeds.sql` y `SeedRunner.php` en los 5 estados del ciclo de taller**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-WORKSHOP-01`
   - **Archivos exactos a crear o modificar:**

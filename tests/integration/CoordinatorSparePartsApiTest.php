@@ -595,6 +595,9 @@ $assert("8.3 La solicitud pendiente contiene la justificación técnica exacta d
 // solicitudes y sustituciones en cada corrida.
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $customDesc, $machineId): void {
     $pdo->exec("DELETE FROM spare_part_requests WHERE custom_part_description = '{$customDesc}'");
+    // El expediente de taller (Módulo 27) es hijo de la sustitución y su clave
+    // foránea es ON DELETE RESTRICT (Art. III.3): se retira antes que la línea padre.
+    $pdo->exec("DELETE FROM workshop_repair_items WHERE machine_id = {$machineId}");
     $pdo->exec("DELETE FROM incident_replaced_parts WHERE machine_id = {$machineId}");
 });
 

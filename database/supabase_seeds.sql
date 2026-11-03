@@ -1223,6 +1223,102 @@ ON CONFLICT (code) DO NOTHING;
 --   · Solo inserta donde no hay tramos: reejecutarlo no duplica ni reescribe un
 --     histórico ya sellado (Art. III.3).
 -- ============================================================================
+-- SECCIÓN 19 · workshop_repair_items — reconstrucción del desglose unitario (Módulo 27)
+-- ----------------------------------------------------------------------------
+-- POR QUÉ ESTA SECCIÓN NO ES UN CATÁLOGO
+--   La bandeja de taller no es una maestra: es el rastro físico de la pieza que
+--   salió de una máquina con destino `TALLER`. El arranque en limpio no inventa
+--   incidencias ni sustituciones (EARS-02.1), así que aquí no hay expedientes que
+--   sembrar y esta sección inserta **0 filas** sobre una base vacía, que es
+--   exactamente lo que se busca.
+--
+-- QUÉ HACE ENTONCES
+--   Deja la reconstrucción determinista de las sustituciones que ya existan sin su
+--   desglose unitario: el mismo backfill de la migración 023, aquí como renderizado
+--   idempotente. Una línea con `quantity = 3` genera tres expedientes `PENDING_DELIVERY`,
+--   uno por unidad física (D1, C4, C6, QA 4), y no una fila con la cantidad agregada.
+--   Es lo que permite que una base que ya tenía averías —el banco del arnés o un
+--   despliegue que reejecuta el arranque tras el histórico de demostración— presente
+--   su bandeja poblada en vez de vacía.
+--
+-- REGLAS QUE RESPETA
+--   · El técnico extractor es el custodio declarado en el expediente: el asignado a
+--     la incidencia, el asignado a la orden preventiva y, en su defecto, el técnico
+--     que registró la sustitución (`incident_replaced_parts.technician_id`).
+--   · Snapshots congelados en el instante de la extracción: código, nombre y
+--     categoría del repuesto, código y modelo de la máquina, nombre de la sede y
+--     nombre del técnico (Art. III.3).
+--   · `created_at = irp.created_at`: la antigüedad del recordatorio móvil cuenta
+--     desde el hecho real y no desde la migración.
+--   · Solo inserta las unidades que aún no existen: reejecutarlo no duplica filas
+--     ni reescribe un dictamen ya sellado (Art. III.3).
+--
+-- LOS CINCO ESTADOS DEL CICLO NO VIVEN AQUÍ
+--   El reparto demo por los cinco estados (pendiente de entrega, recepcionada, en
+--   banco, reacondicionada hacia almacén central o furgoneta y baja definitiva) es
+--   *fixture* de arnés y se siembra desde `SeedRunner::seedWorkshopRepairItems()`,
+--   que crea sus propias líneas de sustitución sobre una orden preventiva ya
+--   sembrada. Una base de producción no hereda piezas «en banco» inventadas.
+-- ============================================================================
+INSERT INTO workshop_repair_items (
+    incident_replaced_part_id,
+    unit_index,
+    total_units_in_line,
+    intervention_type,
+    incident_id,
+    preventive_order_id,
+    machine_id,
+    location_id,
+    extracted_by_technician_id,
+    spare_part_id,
+    is_out_of_catalog,
+    part_code_snapshot,
+    part_name_snapshot,
+    part_category_snapshot,
+    machine_code_snapshot,
+    machine_model_snapshot,
+    location_name_snapshot,
+    technician_name_snapshot,
+    unit_cost_snapshot,
+    created_at
+)
+SELECT
+    irp.id,
+    gs.unit_idx,
+    GREATEST(irp.quantity, 1),
+    irp.intervention_type,
+    irp.incident_id,
+    irp.preventive_order_id,
+    irp.machine_id,
+    irp.location_id,
+    COALESCE(i.assigned_technician_id, po.assigned_technician_id, irp.technician_id),
+    irp.spare_part_id,
+    irp.is_out_of_catalog,
+    sp.part_code,
+    COALESCE(
+        NULLIF(btrim(sp.name), ''),
+        NULLIF(btrim(irp.custom_part_name), ''),
+        'Pieza extraída sin catálogo'
+    ),
+    COALESCE(sp.category::text, 'OTHER'),
+    m.code,
+    m.model,
+    l.name,
+    u.name,
+    irp.unit_cost_snapshot,
+    irp.created_at
+FROM incident_replaced_parts irp
+JOIN machines m ON m.id = irp.machine_id
+JOIN locations l ON l.id = irp.location_id
+LEFT JOIN incidents i ON i.id = irp.incident_id
+LEFT JOIN preventive_orders po ON po.id = irp.preventive_order_id
+LEFT JOIN spare_parts sp ON sp.id = irp.spare_part_id
+JOIN users u ON u.id = COALESCE(i.assigned_technician_id, po.assigned_technician_id, irp.technician_id)
+CROSS JOIN LATERAL generate_series(1, GREATEST(irp.quantity, 1)) AS gs(unit_idx)
+WHERE irp.old_part_destination = 'TALLER'
+ON CONFLICT (incident_replaced_part_id, unit_index) DO NOTHING;
+
+-- ============================================================================
 INSERT INTO incident_assignments (
     incident_id,
     technician_id,
@@ -1296,4 +1392,7 @@ WHERE i.assigned_technician_id IS NOT NULL
 --       0 incidencias · 0 histórico de averías (arranque en limpio estricto) ·
 --       0 tramos de custodia en el arranque limpio (Módulo 26): la Sección 18
 --       solo reconstruye expedientes que ya existan.
+--       0 unidades de taller en el arranque limpio (Módulo 27): la Sección 19
+--       solo reconstruye sustituciones con destino `TALLER` que ya existan; el
+--       reparto demo por los cinco estados vive en `SeedRunner`.
 -- =============================================================================
