@@ -286,3 +286,50 @@
   * **Requisitos que cubre:** `RF-02` (`EARS 02.1`, `EARS 02.2`).
   * **Detalle:** `CustodyChannelResolver` decide el canal comprobando la ausencia vigente del técnico saliente; `CoordinatorController` lo aplica sin cambios de contrato HTTP.
   * **Hecho cuando:** `CustodyChannelResolverTest` y `CustodyChainApiTest` caso 7 certifican la derivación y la reasignación ordinaria intacta.
+
+- [x] **T-CUSTODY-19 · Detectar la colisión concurrente con 409 (`F-26-05`)**
+  * **Requisitos que cubre:** `RF-03` (`EARS 03.4`), `R4`.
+  * **Detalle:** `PdoIncidentRepository::assign` toma el bloqueo de fila con `findByIdForUpdate` y revalida estado y titular contra la foto de entrada; `AssignmentStateChangedException` mapea a `409 ASSIGNMENT_STATE_CHANGED` con `expected_*`/`current_*`.
+  * **Hecho cuando:** `AssignmentCollisionTest` certifica los tres escenarios de carrera y el mapeo HTTP a 409.
+
+## Tareas de cierre de la auditoría (F-26-01 … F-26-11)
+
+- [x] **T-CUSTODY-20 · Certificar los cuatro canales oportunistas (`F-26-01`)**
+  * **Requisitos:** `RF-02` (`EARS 02.3`).
+  * **Hecho cuando:** `OpportunisticCustodyChainTest` verifica alta, asunción, traspaso y reapertura contra `incident_assignments`.
+
+- [x] **T-CUSTODY-21 · Continuidad del tramo durante la pausa (`F-26-02`)**
+  * **Requisitos:** `RF-02` (`EARS 02.5`).
+  * **Hecho cuando:** `CustodyClosureTest` caso 1 conserva el mismo `id` y `assigned_at` tras pausar.
+
+- [x] **T-CUSTODY-22 · Cierre por cancelación (`F-26-03`)**
+  * **Requisitos:** `RF-02` (`EARS 02.6.2`).
+  * **Hecho cuando:** `CustodyClosureTest` caso 2 sella el tramo con `CANCELLED`.
+
+- [x] **T-CUSTODY-23 · Sellado defensivo (`F-26-04`)**
+  * **Requisitos:** `RF-02` (`EARS 02.6.3`), `QA 4`.
+  * **Hecho cuando:** `CustodyClosureTest` caso 3 (48 h), `OpportunisticCustodyChainTest` casos 4 y 5 (reapertura y crónica) sellan el tramo legado.
+
+- [x] **T-CUSTODY-24 · UI de la cadena y borrador ante 409 (`F-26-06`)**
+  * **Requisitos:** `RF-05` (`EARS 05.1`, `05.2`), `RNF-02`.
+  * **Hecho cuando:** el grupo 22 de `CoordinatorIncidentDetailModalTest.mjs` verifica sección, KPIs, tokens y preservación del borrador.
+
+- [x] **T-CUSTODY-25 · Medición de RNF-01 (`F-26-07`)**
+  * **Requisitos:** `RNF-01`.
+  * **Hecho cuando:** `CustodyChainPerformanceTest` mide p95 < 300 ms (17,6 ms observados).
+
+- [x] **T-CUSTODY-26 · Suelo temporal (`F-26-08`)**
+  * **Requisitos:** `QA 4`, caso límite 8.
+  * **Hecho cuando:** `CustodyClosureTest` caso 4 deja retención 0 con reloj atrasado.
+
+- [x] **T-CUSTODY-27 · Ida y vuelta A→B→A (`F-26-09`)**
+  * **Requisitos:** caso límite 2.
+  * **Hecho cuando:** `CustodyChainEdgeCasesTest` cuenta tres tramos y dos reasignaciones.
+
+- [x] **T-CUSTODY-28 · Traspaso sin nota y reapertura in situ (`F-26-10`)**
+  * **Requisitos:** `R5`, casos límite 5 y 6.
+  * **Hecho cuando:** `OpportunisticCustodyChainTest` casos 3 y 4 verifican la leyenda y el canal de reapertura.
+
+- [x] **T-CUSTODY-29 · Huso horario operativo (`F-26-11`)**
+  * **Requisitos:** `RNF-04`.
+  * **Hecho cuando:** la proyección normaliza a `Europe/Madrid` y `CustodyChainEdgeCasesTest` lo verifica.
