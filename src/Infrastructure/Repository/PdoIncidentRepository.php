@@ -30,6 +30,7 @@ use VendGuard\Core\Domain\Repository\IncidentAssignmentAuditRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentNotificationCycleRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentPauseTransitionRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentReopenNotificationInterface;
+use VendGuard\Core\Domain\Repository\IncidentCustodyReleaseInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OpportunisticIncidentRepositoryInterface;
@@ -60,7 +61,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * El orden del triaje no es una diferencia de dialecto —tiene forma común—, pero tampoco se
  * escribe a mano dos veces: se deriva del rango de prioridad que declara el dominio.
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface, OpportunisticIncidentRepositoryInterface, IncidentAssignmentAuditRepositoryInterface, IncidentPauseTransitionRepositoryInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface, OpportunisticIncidentRepositoryInterface, IncidentAssignmentAuditRepositoryInterface, IncidentPauseTransitionRepositoryInterface, IncidentCustodyReleaseInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -3513,7 +3514,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         ?string $urgencyOverride = null,
         ?string $urgencyReason = null,
         ?string $reassignmentReason = null,
-        ?AuditEvent $auditEvent = null
+        ?AuditEvent $auditEvent = null,
+        ?IncidentAssignmentSource $assignmentSource = null,
+        ?IncidentUnassignmentReasonType $unassignmentReason = null,
+        ?string $actorNameSnapshot = null
     ): Incident {
         $isOwnTransaction = !$this->pdo->inTransaction();
         if ($isOwnTransaction) {
@@ -3581,11 +3585,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             // Los snapshots los congela la propia primitiva desde `users`: un renombrado
             // posterior no puede reescribir quién tenía la avería (D2).
             if ($isReassignment) {
+                // El canal lo decide quien ejecuta el cambio: Coordinación por
+                // defecto, cobertura de ausencia cuando el saliente está ausente o
+                // relevo/guardia cuando el cierre viene del fin de turno.
                 $this->closeActiveCustodySegmentInTransaction(
                     $numericId,
-                    IncidentUnassignmentReasonType::REASSIGNED_BY_COORDINATOR,
+                    $unassignmentReason ?? IncidentUnassignmentReasonType::REASSIGNED_BY_COORDINATOR,
                     $coordinatorId,
-                    $cleanReassignmentReason
+                    $cleanReassignmentReason,
+                    $actorNameSnapshot
                 );
             } else {
                 $this->closeActiveCustodySegmentInTransaction(
@@ -3599,10 +3607,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $this->openCustodySegmentInTransaction(
                 $numericId,
                 $technicianId,
-                $isReassignment
+                $assignmentSource ?? ($isReassignment
                     ? IncidentAssignmentSource::COORDINATOR_REASSIGN
-                    : IncidentAssignmentSource::COORDINATOR_ASSIGN,
-                $coordinatorId
+                    : IncidentAssignmentSource::COORDINATOR_ASSIGN),
+                $coordinatorId,
+                null,
+                $actorNameSnapshot
             );
             // En PostgreSQL consolidamos el UPDATE de la incidencia y la inserción del
             // evento en incident_history en un único round-trip atómico con CTE (T-HYBRID-27).
@@ -3913,7 +3923,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         ?string $urgencyOverride,
         ?string $urgencyReason,
         ?string $reassignmentReason,
-        AuditEvent $auditEvent
+        AuditEvent $auditEvent,
+        ?IncidentAssignmentSource $assignmentSource = null,
+        ?IncidentUnassignmentReasonType $unassignmentReason = null,
+        ?string $actorNameSnapshot = null
     ): Incident {
         return $this->assign(
             $incidentId,
@@ -3922,7 +3935,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $urgencyOverride,
             $urgencyReason,
             $reassignmentReason,
-            $auditEvent
+            $auditEvent,
+            $assignmentSource,
+            $unassignmentReason,
+            $actorNameSnapshot
         );
     }
 
@@ -4798,7 +4814,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         int $incidentId,
         IncidentUnassignmentReasonType $reasonType,
         ?int $closedBy,
-        string $reason
+        string $reason,
+        ?string $closedByNameSnapshot = null
     ): bool {
         $lock = $this->pdo->prepare(
             'SELECT id FROM incident_assignments WHERE incident_id = :incident_id AND unassigned_at IS NULL FOR UPDATE'
@@ -4827,7 +4844,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         );
         $stmt->bindValue(':closed_at', null, PDO::PARAM_NULL);
         $stmt->bindValue(':closed_by', $closedBy, $closedBy !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
-        $stmt->bindValue(':closed_by_name', $this->userDisplayName($closedBy), PDO::PARAM_STR);
+        $stmt->bindValue(
+            ':closed_by_name',
+            $closedByNameSnapshot ?? $this->userDisplayName($closedBy),
+            PDO::PARAM_STR
+        );
         $stmt->bindValue(':reason_type', $reasonType->value, PDO::PARAM_STR);
         $stmt->bindValue(':reason', $cleanReason, PDO::PARAM_STR);
         $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
@@ -4851,7 +4872,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         int $technicianId,
         IncidentAssignmentSource $source,
         ?int $assignedBy = null,
-        ?DateTimeImmutable $assignedAt = null
+        ?DateTimeImmutable $assignedAt = null,
+        ?string $assignedByNameSnapshot = null
     ): void {
         $stmt = $this->pdo->prepare(
             'INSERT INTO incident_assignments ('
@@ -4862,7 +4884,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             . "        COALESCE(NULLIF(btrim(u.operator_code), ''), 'SIN-CODIGO'),"
             . '        CAST(:source AS incident_assignment_source),'
             . '        actor.id,'
-            . "        COALESCE(NULLIF(btrim(actor.name), ''), 'Coordinación / Sistema'),"
+            . "        COALESCE(CAST(:assigned_by_name AS text), NULLIF(btrim(actor.name), ''), 'Coordinación / Sistema'),"
             . '        COALESCE(CAST(:assigned_at AS timestamptz), CURRENT_TIMESTAMP)'
             . '   FROM users u'
             . '   LEFT JOIN users actor ON actor.id = CAST(:assigned_by AS bigint)'
@@ -4874,6 +4896,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         $stmt->bindValue(':source', $source->value, PDO::PARAM_STR);
         $stmt->bindValue(':assigned_by', $assignedBy, $assignedBy !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
         $stmt->bindValue(
+            ':assigned_by_name',
+            $assignedByNameSnapshot,
+            $assignedByNameSnapshot !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+        );
+        $stmt->bindValue(
             ':assigned_at',
             $assignedAt?->format('Y-m-d H:i:sP'),
             $assignedAt !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
@@ -4884,6 +4911,71 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             throw new DomainException(
                 "No se pudo abrir el tramo de custodia: el técnico {$technicianId} no existe en el directorio."
             );
+        }
+    }
+
+    /**
+     * Libera la avería a la bandeja general cerrando su tramo en el mismo acto.
+     *
+     * Es la única vía de salida sin custodio entrante (Protocolo Sanitario Art. II,
+     * Nivel 2): sin este cierre, la cadena mostraría un custodio activo sobre una
+     * avería que ya no tiene técnico y el tramo nunca computaría en el contador de
+     * reasignaciones ni en los huecos de bandeja (`EARS 01.1`, `EARS 02.4.3`).
+     */
+    public function releaseCustodyToInbox(
+        int $incidentId,
+        IncidentUnassignmentReasonType $reasonType,
+        string $reason,
+        ?int $actorUserId = null,
+        ?string $actorNameSnapshot = null
+    ): ?Incident {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $lock = $this->pdo->prepare(
+                'SELECT id FROM incidents WHERE id = :id AND deleted_at IS NULL FOR UPDATE'
+            );
+            $lock->execute([':id' => $incidentId]);
+            if ($lock->fetchColumn() === false) {
+                if ($isOwnTransaction) {
+                    $this->pdo->rollBack();
+                }
+
+                return null;
+            }
+
+            $this->closeActiveCustodySegmentInTransaction(
+                $incidentId,
+                $reasonType,
+                $actorUserId,
+                $reason,
+                $actorNameSnapshot
+            );
+
+            $stmt = $this->pdo->prepare(
+                "UPDATE incidents
+                    SET status = 'REGISTERED',
+                        assigned_technician_id = NULL,
+                        assigned_at = NULL
+                  WHERE id = :id
+                    AND deleted_at IS NULL"
+            );
+            $stmt->execute([':id' => $incidentId]);
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            return $this->findById($incidentId);
+        } catch (\Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $e;
         }
     }
 

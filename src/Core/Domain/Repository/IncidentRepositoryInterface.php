@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace VendGuard\Core\Domain\Repository;
 
+
+
 use DateTimeImmutable;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;

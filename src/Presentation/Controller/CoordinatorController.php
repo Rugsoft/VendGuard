@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
+use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
+use VendGuard\Core\Domain\Service\CustodyChannelResolver;
 use VendGuard\Application\DTO\IncidentPauseRequestDto;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\CoordinatorIncidentDetailService;
@@ -105,6 +108,9 @@ class CoordinatorController
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
     private ?TransactionManagerInterface $transactionManager;
 
+    /** Ausencias vigentes del saliente para derivar el canal de cobertura (F-04). */
+    private ?TechnicianAbsenceRepositoryInterface $absenceRepo;
+
     /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
     private ?FileStorageCompensator $fileCompensator;
 
@@ -144,9 +150,11 @@ class CoordinatorController
         ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null,
         ?SparePartRequestRepositoryInterface $sparePartRequestRepo = null,
         ?VanStockRepositoryInterface $vanStockRepo = null,
-        ?SparePartTraceabilityService $traceabilityService = null
+        ?SparePartTraceabilityService $traceabilityService = null,
+        ?TechnicianAbsenceRepositoryInterface $absenceRepo = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
+        $this->absenceRepo = $absenceRepo;
         $this->userRepo = $userRepo ?? new PdoUserRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
@@ -796,6 +804,21 @@ class CoordinatorController
         $coordinatorId = $request->getAttribute('user_id');
         $actor = $this->extractActor($request);
 
+        // F-04: la cobertura de ausencia no se declara, se verifica. Si el técnico
+        // que pierde la custodia tiene una ausencia vigente, el tramo se cierra y
+        // se abre con el canal de ausencia (EARS 02.1 / 02.2); en cualquier otro
+        // caso el repositorio aplica la reasignación ordinaria de Coordinación.
+        $custodySource = null;
+        $custodyReason = null;
+        if ($isReassignment && $incident->getAssignedTechnicianId() !== null) {
+            $outgoingAbsence = ($this->absenceRepo ??= new PdoTechnicianAbsenceRepository())
+                ->findActiveAbsenceForTechnician((int)$incident->getAssignedTechnicianId());
+            [$custodySource, $custodyReason] = CustodyChannelResolver::resolve(
+                true,
+                $outgoingAbsence !== null
+            );
+        }
+
         // 8.bis El evento se compone antes del cambio. Si el repositorio ofrece la
         // puerta fusionada, la auditoría viaja en la misma sentencia que la
         // asignación: un viaje menos sobre el agrupador y ninguna ventana en la
@@ -841,6 +864,8 @@ class CoordinatorController
                     urgencyReason: ($urgencyReason !== null && $urgencyReason !== '') ? $urgencyReason : null,
                     reassignmentReason: $isReassignment ? $reassignmentReason : null,
                     auditEvent: $assignmentAudit,
+                    assignmentSource: $custodySource,
+                    unassignmentReason: $custodyReason,
                 )
                 : $this->incidentRepo->assign(
                     incidentId: $incident,
@@ -849,6 +874,8 @@ class CoordinatorController
                     urgencyOverride: ($urgencyOverride !== null && $urgencyOverride !== '') ? $urgencyOverride : null,
                     urgencyReason: ($urgencyReason !== null && $urgencyReason !== '') ? $urgencyReason : null,
                     reassignmentReason: $isReassignment ? $reassignmentReason : null,
+                    assignmentSource: $custodySource,
+                    unassignmentReason: $custodyReason,
                 );
 
             $assigned = $enqueuer === null

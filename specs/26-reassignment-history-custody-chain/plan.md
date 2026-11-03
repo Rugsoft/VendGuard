@@ -414,7 +414,8 @@ private function openCustodySegmentInTransaction(
 #### Reglas Específicas por Canal Operativo (`D1`, `QA 3`, `QA 4`)
 1. **Coordinación (`assignTechnician` / cobertura por ausencia):**
    * Si no había técnico previo (`assigned_technician_id IS NULL`): abre tramo con `INITIAL_ASSIGNMENT` (o `ABSENCE_COVERAGE` si proviene del flujo de cobertura de ausencia).
-   * Si había técnico previo (`assigned_technician_id IS NOT NULL`): cierra el tramo activo con `REASSIGNED_BY_COORDINATOR` (o `ABSENCE_COVERAGE_REASSIGN`) y el `reassignment_reason` validado, y abre inmediatamente el nuevo tramo con `COORDINATOR_REASSIGN` (o `ABSENCE_COVERAGE`).
+   * Si había técnico previo (`assigned_technician_id IS NOT NULL`): cierra el tramo activo con `REASSIGNED_BY_COORDINATOR` (o `ABSENCE_COVERAGE_REASSIGN`) y el `reassignment_reason` validado, y abre inmediatamente el nuevo tramo con `COORDINATOR_REASSIGN` (o `ABSENCE_COVERAGE_REASSIGN`).
+   * **Cobertura de ausencia (F-04):** el canal se deriva automáticamente comprobando si el técnico saliente tiene una ausencia vigente (`TechnicianAbsenceRepositoryInterface::findActiveAbsenceForTechnician`) en el instante de la reasignación. No requiere marca manual en la petición ni cambio de contrato HTTP.
    * Registra en `audit_log` la acción `'INCIDENT_CUSTODY_ASSIGNED'` o `'INCIDENT_CUSTODY_REASSIGNED'` con `previous_state` y `new_state` completos (`Art. III.3`, `QA 1`).
 2. **Intervención Oportunista In Situ (`OpportunisticIncidentService`):**
    * `NEW`: abre tramo con `OPPORTUNISTIC_NEW` y `assigned_by = $technicianUserId`.
@@ -422,12 +423,12 @@ private function openCustodySegmentInTransaction(
    * `TAKEOVER`: cierra tramo del compañero previo con `TAKEN_OVER_IN_SITU` (`unassigned_by = $technicianUserId`, `reassignment_reason = $takeoverJustification`) y abre tramo del técnico presencial con `OPPORTUNISTIC_TAKEOVER`.
    * Reapertura en garantía in situ: si existiera un tramo previo sin sellar, lo cierra defensivamente con `WARRANTY_REOPENED`; abre el nuevo tramo con `OPPORTUNISTIC_ASSUMED`.
 3. **Relevo de Fin de Turno (`ShiftHandoverService`, `QA 3`):**
-   * En cierre manual desde el móvil del técnico: `actorUserId = $technicianUserId`, `actorNameSnapshot = "$techName ($techCode)"`.
+   * En cierre manual desde el móvil del técnico: `actorUserId = $technicianUserId`, `actorNameSnapshot = $techName` (el código de operario no se duplica en el actor: ya queda congelado en `technician_code_snapshot` del tramo).
    * En cierre administrativo forzado por Coordinación: `actorUserId = $coordinatorUserId`, `actorNameSnapshot = "$coordinatorName (Cierre forzado)"`, concatenando la nota de relevo y el motivo administrativo de cierre forzado en `reassignment_reason`.
-   * Cierra el tramo del técnico saliente con `SHIFT_HANDOVER`. Si el modo es `REASSIGN_TO_COLLEAGUE`, abre en la misma transacción el tramo del compañero receptor con `SHIFT_HANDOVER_RELEASE` y `assigned_by = $actorUserId`.
+   * Cierra el tramo del técnico saliente con `SHIFT_HANDOVER`. Si el modo es `REASSIGN_TO_COLLEAGUE`, abre en la misma transacción el tramo del compañero receptor con `SHIFT_HANDOVER` y `assigned_by = $actorUserId`.
 4. **Protocolo Sanitario Art. II (`enforceColdChainFailSafe`):**
-   * **Nivel 1 (Guardia 24/7 disponible):** Si tenía técnico previo, cierra su tramo con `SANITARY_FAILSAFE_GUARD` (`unassigned_by = NULL`, `unassigned_by_name_snapshot = 'Protocolo Sanitario Art. II'`, motivo automático). Abre el tramo del técnico de guardia con `SANITARY_FAILSAFE_GUARD`.
-   * **Nivel 2 (Sin guardia disponible — liberación a bandeja + cuarentena):** Si tenía técnico previo, cierra su tramo con `SANITARY_FAILSAFE_UNASSIGNED` y motivo automático de liberación por alerta sanitaria sin guardia.
+   * **Nivel 1 (Guardia 24/7 disponible):** Si tenía técnico previo, cierra su tramo con `SANITARY_FAILSAFE_GUARD` (`unassigned_by = $closedBy`: el Técnico en cierre manual y el Coordinador en cierre forzado, `QA 3`, con motivo automático). Abre el tramo del técnico de guardia con `SANITARY_FAILSAFE_GUARD`.
+   * **Nivel 2 (Sin guardia disponible — liberación a bandeja + cuarentena):** Si tenía técnico previo, cierra su tramo con `SANITARY_FAILSAFE_UNASSIGNED`, `unassigned_by = $closedBy` y motivo automático de liberación por alerta sanitaria sin guardia. La incidencia pasa a `REGISTERED` sin técnico en la MISMA transacción del cierre (`PdoIncidentRepository::releaseCustodyToInbox`), de modo que nunca queda un tramo abierto sobre una avería sin custodio.
 5. **Resolución, Cancelación y Sellado Defensivo (`QA 3`, `QA 4`):**
    * **Resolución (`RESOLVED` online o sincronización diferida PWA):** Cierra el tramo activo con `unassignment_reason_type = 'RESOLVED'`, `unassigned_at = GREATEST(assigned_at, resolved_at)` y `reassignment_reason = $resolutionDiagnosis`.
    * **Cancelación ordinaria o por $> 72\text{ h}$ hábiles en `PENDING_INFO`:** Si tenía técnico asignado, cierra el tramo activo con `unassignment_reason_type = 'CANCELLED'` y el motivo de cancelación del coordinador (`QA 3`).

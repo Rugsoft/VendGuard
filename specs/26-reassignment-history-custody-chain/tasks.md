@@ -262,3 +262,27 @@
     2. Ejecutar las suites de gobernanza y la batería completa de pruebas del repositorio (`php tests/run_all.php`) asegurando 0 fallos y 0 regresiones.
     3. Actualizar el estado de la **Feature 12 (`🔄 Historial Completo de Reasignaciones y Cadena de Custodia`)** en `docs/features_pendientes.md` como implementada y certificada en el Módulo 26.
   * **Hecho cuando:** `php tests/integration/SchemaConvergenceParityTest.php && php tests/integration/SingleEngineDialectContractTest.php && php tests/integration/DesignTokenDebtRatchetTest.php && php tests/run_all.php` finalizan al 100 % en verde con código de salida `0`.
+
+---
+
+## Tareas de corrección del lote F-01…F-05
+
+- [x] **T-CUSTODY-15 · Tipificar el relevo manual de fin de turno (`F-01`)**
+  * **Requisitos que cubre:** `RF-02` (`EARS 02.4.1`), `QA 3`.
+  * **Detalle:** `ShiftHandoverService::executeClose` pasa `SHIFT_HANDOVER` como canal y como causa; el repositorio deja de aplicar los valores por defecto de Coordinación.
+  * **Hecho cuando:** `ShiftHandoverCustodyChainTest` caso 1 certifica cierre y apertura con `SHIFT_HANDOVER`.
+
+- [x] **T-CUSTODY-16 · Tipificar el Nivel 1 del protocolo sanitario (`F-02`)**
+  * **Requisitos que cubre:** `RF-02` (`EARS 02.4.2`), `QA 3`.
+  * **Detalle:** el traspaso a guardia 24/7 usa `SANITARY_FAILSAFE_GUARD` en cierre y apertura, con el técnico saliente como autor del cierre.
+  * **Hecho cuando:** `ShiftHandoverCustodyChainTest` caso 2 certifica ambos lados del tramo.
+
+- [x] **T-CUSTODY-17 · Cerrar el tramo al liberar por Nivel 2 (`F-03`)**
+  * **Requisitos que cubre:** `RF-02` (`EARS 02.4.3`), `EARS 01.1`.
+  * **Detalle:** `PdoIncidentRepository::releaseCustodyToInbox` cierra el tramo con `SANITARY_FAILSAFE_UNASSIGNED` y deja la incidencia en `REGISTERED` en la misma transacción; desaparece el `UPDATE` directo del servicio.
+  * **Hecho cuando:** `ShiftHandoverCustodyChainTest` casos 3 y 4 certifican que no queda ningún tramo abierto.
+
+- [x] **T-CUSTODY-18 · Derivar el canal de cobertura de ausencia (`F-04`)**
+  * **Requisitos que cubre:** `RF-02` (`EARS 02.1`, `EARS 02.2`).
+  * **Detalle:** `CustodyChannelResolver` decide el canal comprobando la ausencia vigente del técnico saliente; `CoordinatorController` lo aplica sin cambios de contrato HTTP.
+  * **Hecho cuando:** `CustodyChannelResolverTest` y `CustodyChainApiTest` caso 7 certifican la derivación y la reasignación ordinaria intacta.

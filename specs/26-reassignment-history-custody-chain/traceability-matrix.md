@@ -32,8 +32,8 @@
 | **04.2** KPIs de resumen e hilo intercalado | `CoordinatorIncidentDetailModal.js` (`custody-kpi-*`, `custody-timeline`) | Revisión de plantilla; `DesignTokenDebtRatchetTest.mjs` | ✅ |
 | **04.3** Etiquetas de auditoría de custodia | `AuditActionLabels.js` (`INCIDENT_CUSTODY_ASSIGNED`, `INCIDENT_CUSTODY_REASSIGNED`) | `AuditActionCatalogTest.php`; `DesignTokenDebtRatchetTest.mjs` | ✅ |
 | **05.1** Cierre en resolución, cancelación y reapertura | `PdoIncidentRepository::resolve` / `cancel` / `reopen` | `CustodyChainApiTest.php` 5.1; `PdoIncidentRepositoryTest.php` | ✅ |
-| **05.2** Relevo de turno con autoría humana | `ShiftHandoverService::executeClose` (`$closedBy`) | `ShiftHandoverSanitaryTest.php`; `ShiftHandoverConcurrencyTest.php` | ✅ |
-| **05.3** Absorción oportunista y guardia sanitaria | `PdoIncidentRepository` (fuentes `OPPORTUNISTIC_*`, `SANITARY_FAILSAFE_*`) | `OpportunisticIncidentApiIntegrationTest.php`; `ShiftHandoverSanitaryTest.php` | ✅ |
+| **05.2** Relevo de turno con autoría humana | `ShiftHandoverService::executeClose` (`$closedBy`) + canales `SHIFT_HANDOVER` | `ShiftHandoverCustodyChainTest.php` (casos 1 y 2); `ShiftHandoverSanitaryTest.php` | ✅ |
+| **05.3** Absorción oportunista y guardia sanitaria | `PdoIncidentRepository` (fuentes `OPPORTUNISTIC_*`, `SANITARY_FAILSAFE_GUARD`) y `releaseCustodyToInbox` (`SANITARY_FAILSAFE_UNASSIGNED`) | `ShiftHandoverCustodyChainTest.php` (casos 3 y 4); `OpportunisticIncidentApiIntegrationTest.php` | ✅ |
 | **05.4** Sellado defensivo al reabrir o retirar un crónico | `reopenWithLifecycleNotifications`; `replaceChronicOpportunisticIncident` | `OpportunisticIncidentApiIntegrationTest.php`; `PdoIncidentRepositoryTest.php` | ✅ |
 
 ## 2. Requisitos no funcionales

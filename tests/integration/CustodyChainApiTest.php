@@ -295,6 +295,46 @@ $assert(
     json_encode($fallback)
 );
 
+// ---------------------------------------------------------------------------
+echo "\n--- Caso 7: reasignación durante una ausencia vigente del saliente ---\n";
+// ---------------------------------------------------------------------------
+$coverageIncident = $makeIncident($machines[0]->getId());
+$coverageIncidentId = (int)$coverageIncident->getId();
+$router->dispatch(new Request(
+    method: 'PATCH',
+    path: "/api/coordinator/incidents/{$coverageIncidentId}/assign",
+    parsedBody: ['technician_id' => $technicianId],
+    headers: $authHdr
+));
+
+$pdo->prepare(
+    "INSERT INTO technician_absences (technician_id, reason, starts_at, ends_at, notes, created_by)
+     VALUES (:technician_id, 'VACATION', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 days',
+             'Ausencia vigente para la certificación de cobertura', :created_by)"
+)->execute([':technician_id' => $technicianId, ':created_by' => $coordinatorId]);
+
+$coverage = $router->dispatch(new Request(
+    method: 'PATCH',
+    path: "/api/coordinator/incidents/{$coverageIncidentId}/assign",
+    parsedBody: [
+        'technician_id' => $secondId,
+        'reassignment_reason' => 'Cobertura de la ruta durante la ausencia del titular',
+    ],
+    headers: $authHdr
+));
+$assert('7.1 Reasignación con ausencia vigente 200', $coverage->getStatusCode() === 200, 'HTTP ' . $coverage->getStatusCode());
+
+$coverageSegments = $pdo->query(
+    "SELECT * FROM incident_assignments WHERE incident_id = {$coverageIncidentId} ORDER BY id"
+)->fetchAll(PDO::FETCH_ASSOC);
+$assert(
+    '7.2 Cierre y apertura con el canal ABSENCE_COVERAGE_REASSIGN (F-04)',
+    count($coverageSegments) === 2
+        && $coverageSegments[0]['unassignment_reason_type'] === 'ABSENCE_COVERAGE_REASSIGN'
+        && $coverageSegments[1]['assignment_source'] === 'ABSENCE_COVERAGE_REASSIGN',
+    json_encode($coverageSegments)
+);
+
 echo "\n======================================================================\n";
 echo " Total aserciones fallidas: {$failures}\n";
 if ($failures === 0) {

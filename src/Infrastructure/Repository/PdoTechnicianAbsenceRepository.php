@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace VendGuard\Infrastructure\Repository;
 
+use VendGuard\Infrastructure\Database\ConnectionFactory;
+
 use DateTimeImmutable;
 use PDO;
 use PDOException;
@@ -22,8 +24,16 @@ use VendGuard\Core\Domain\ValueObject\AbsenceReason;
  */
 final class PdoTechnicianAbsenceRepository implements TechnicianAbsenceRepositoryInterface
 {
-    public function __construct(private readonly PDO $pdo)
+    private readonly PDO $pdo;
+
+    /**
+     * La conexión es opcional para que el repositorio pueda resolverse bajo
+     * demanda desde la capa de presentación, igual que el resto de repositorios
+     * PDO del proyecto; los llamadores que ya tienen una conexión la inyectan.
+     */
+    public function __construct(?PDO $pdo = null)
     {
+        $this->pdo = $pdo ?? ConnectionFactory::getConnection();
     }
 
     public function create(
