@@ -1757,6 +1757,75 @@ assert('21.5 El modal del albaran se monta con el rol de coordinacion y el exped
 assert('21.6 El albaran arranca cerrado en cada expediente',
   CoordinatorIncidentDetailModal.data().showServiceSheetModal === false);
 
+// ---------------------------------------------------------------------
+// Group 22 · Módulo 26: cadena de custodia en la ficha (F-26-06)
+// ---------------------------------------------------------------------
+const custodyTemplate = CoordinatorIncidentDetailModal.template;
+
+assert('22.1 La sección de custodia se renderiza siempre con su anclaje',
+  custodyTemplate.includes('data-testid="incident-custody-chain-section"') &&
+  custodyTemplate.includes('🔄 Cadena de Custodia y Reasignaciones'));
+
+assert('22.2 Estado vacío, KPIs y línea de tiempo están cableados',
+  custodyTemplate.includes('data-testid="custody-empty-state"') &&
+  custodyTemplate.includes('data-testid="custody-kpi-current"') &&
+  custodyTemplate.includes('data-testid="custody-kpi-reassignments"') &&
+  custodyTemplate.includes('data-testid="custody-kpi-custody-time"') &&
+  custodyTemplate.includes('data-testid="custody-kpi-unassigned-time"') &&
+  custodyTemplate.includes('data-testid="custody-timeline"') &&
+  custodyTemplate.includes("'custody-item-' + item.item_type.toLowerCase()"));
+
+const custodyFixture = {
+  custody_chain: {
+    summary: {
+      is_empty: false,
+      has_active_custodian: true,
+      reassignments_count: 2,
+      total_assignments_count: 3,
+      total_custody_label: '2 h 44 min',
+      total_unassigned_label: '15 min'
+    },
+    segments: [
+      { segment_number: 3, technician_name: 'Jordi Ruta', is_active: true, assigned_at: '2026-11-03T10:00:00+01:00' }
+    ],
+    timeline_items: [
+      { item_type: 'CUSTODY_SEGMENT', payload: { is_active: true } },
+      { item_type: 'UNASSIGNED_GAP', payload: {} }
+    ]
+  }
+};
+
+const custodyInstance = createInstance({ detail: custodyFixture });
+assert('22.3 El computed expone la cadena publicada por el servidor',
+  custodyInstance.custodyChain.summary.reassignments_count === 2 &&
+  custodyInstance.custodyChain.segments[0].technician_name === 'Jordi Ruta');
+
+const custodySectionStart = custodyTemplate.indexOf('data-testid="incident-custody-chain-section"');
+const custodySectionEnd = custodyTemplate.indexOf('</section>', custodySectionStart);
+const custodySection = custodyTemplate.slice(custodySectionStart, custodySectionEnd);
+assert('22.4 La sección usa solo tokens de color, sin hex literales',
+  custodySection.length > 0 && !/#[0-9a-fA-F]{3,8}\b/.test(custodySection));
+
+api.coordinator.assignTechnician = async () => {
+  throw new ApiError(409, 'ASSIGNMENT_STATE_CHANGED', 'La incidencia cambió mientras se enviaba la asignación.');
+};
+let collisionRefresh = null;
+const collisionInstance = createInstance({
+  detail: reassignFixture,
+  incidentId: 142,
+  isAssignPanelOpen: true,
+  selectedTechnicianId: 7,
+  reassignReason: 'Motivo válido para reintentar tras la colisión concurrente.'
+});
+collisionInstance.fetchDetail = async (options) => { collisionRefresh = options; };
+await CoordinatorIncidentDetailModal.methods.confirmAssign.call(collisionInstance);
+
+assert('22.5 Una colisión 409 conserva el borrador y recarga la ficha sin perderlo',
+  collisionRefresh?.preserveAssignDrafts === true &&
+  collisionInstance.reassignReason === 'Motivo válido para reintentar tras la colisión concurrente.' &&
+  collisionInstance.assignErrorMessage.includes('cambió') &&
+  collisionInstance.isSubmittingAssign === false);
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
