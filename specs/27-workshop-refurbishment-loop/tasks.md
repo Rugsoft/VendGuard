@@ -34,7 +34,7 @@ flowchart LR
 
 ## Fase 1: Esquema de Base de Datos PostgreSQL / Supabase y Guardas de Esquema
 
-- [ ] **T-WORKSHOP-01 · Crear migración incremental `023_workshop_repair_items.sql` y converger `database/supabase_init.sql`**
+- [x] **T-WORKSHOP-01 · Crear migración incremental `023_workshop_repair_items.sql` y converger `database/supabase_init.sql`**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** Ninguna
   - **Archivos exactos a crear o modificar:**
