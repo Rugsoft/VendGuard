@@ -112,7 +112,7 @@ flowchart LR
     5. Implementar la entidad inmutable `WorkshopRepairItem` con métodos de transición (`markReceivedInWorkshop()`, `startBenchTest()`, `resolveAsRefurbished()`, `resolveAsScrapped()`), cálculo puro `calculateNetSavings(float $unitCostSnapshot, float $refurbishmentCostEur): float` con suelo `0.00` (`C2`) y bandera `hasZeroNetSavingsWarning(): bool` cuando `refurbishment_cost_eur >= unit_cost_snapshot`.
   - **Hecho cuando:** `php -l src/Core/Domain/ValueObject/WorkshopRepairStatus.php && php -l src/Core/Domain/Entity/WorkshopRepairItem.php && php -l src/Core/Domain/Service/BenchDiagnosisValidator.php`
 
-- [ ] **T-WORKSHOP-05 · Implementar DTOs de Aplicación y suite unitaria `WorkshopRepairDomainAndValidatorTest.php`**
+- [x] **T-WORKSHOP-05 · Implementar DTOs de Aplicación y suite unitaria `WorkshopRepairDomainAndValidatorTest.php`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-WORKSHOP-04`
   - **Archivos exactos a crear o modificar:**
