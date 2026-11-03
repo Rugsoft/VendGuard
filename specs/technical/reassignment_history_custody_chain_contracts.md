@@ -508,7 +508,7 @@ Cuando la incidencia se encuentra en un estado con custodio activo (`ASSIGNED`, 
 ### 5.3. Comportamiento Frontend en `CoordinatorIncidentDetailModal.js` ante Errores (`EARS 03.4`, `R4`)
 * Si `PATCH /api/coordinator/incidents/{id}/assign` devuelve cualquier error `4xx`/`5xx`:
   1. El modal **no se cierra** y **conserva intacto** el borrador de `reassignment_reason` (y de `override_justification` / `urgency_override_reason`) escrito por el coordinador.
-  2. Si el código de error es `INVALID_STATUS_FOR_ASSIGNMENT`, `TECHNICIAN_ALREADY_ASSIGNED` o `409 CONFLICT` (indicando que la avería cambió de estado o de titular en paralelo), el componente invoca automáticamente la recarga de `GET /api/coordinator/incidents/{id}/detail` para refrescar en pantalla el estado y la `custody_chain` vigentes sin borrar el borrador del formulario.
+  2. Si el código de error es `INVALID_STATUS_FOR_ASSIGNMENT`, `TECHNICIAN_ALREADY_ASSIGNED` o `ASSIGNMENT_STATE_CHANGED` (`409`, indicando que la avería cambió de estado o de titular en paralelo), el componente invoca automáticamente la recarga de `GET /api/coordinator/incidents/{id}/detail` para refrescar en pantalla el estado y la `custody_chain` vigentes sin borrar el borrador del formulario.
 
 ---
 
@@ -535,5 +535,6 @@ Cuando la incidencia se encuentra en un estado con custodio activo (`ASSIGNED`, 
 | `422` | `MISSING_REASSIGNMENT_REASON` | Se intentó reasignar una incidencia con custodio activo enviando `reassignment_reason` vacío (`EARS 03.1`). |
 | `422` | `REASSIGNMENT_REASON_TOO_SHORT` | Tras recortar espacios y colapsar blancos múltiples, `reassignment_reason` tiene `< 10` caracteres o carece de caracteres alfanuméricos reales (`EARS 03.1`, `QA 1`). |
 | `422` | `TECHNICIAN_ALREADY_ASSIGNED` | El `technician_id` solicitado ya es el custodio activo de la incidencia (`EARS 03.3`, `R4`). |
-| `422` | `INVALID_STATUS_FOR_ASSIGNMENT` | La incidencia cambió en paralelo a un estado final (`RESOLVED`, `CLOSED`, `CANCELLED`) y ya no admite asignación/reasignación (`EARS 03.4`, `R4`). |
+| `409` | `ASSIGNMENT_STATE_CHANGED` | La incidencia cambió de estado o de titular entre la lectura con la que se abrió el formulario y la consolidación de la asignación (`EARS 03.4`, `R4`). El cuerpo incluye `expected_status`, `expected_technician_id`, `current_status`, `current_technician_id` y `current_technician_name`. |
+| `422` | `INVALID_STATUS_FOR_ASSIGNMENT` | El estado de la incidencia ya no admite asignación/reasignación en el momento de la lectura (estado final o no operable), sin cambio concurrente (`EARS 03.4`, `R4`). |
 | `422` | `COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED` | Se descarta al técnico sugerido de guardia en una avería con riesgo sanitario de frío (Art. II) sin aportar `override_justification` de al menos 20 caracteres reales (`EARS 03.2`, `QA 1`). |

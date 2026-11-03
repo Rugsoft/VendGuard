@@ -690,8 +690,9 @@ class CoordinatorController
      * reasignación carece de motivo válido; 422 `TECHNICIAN_ALREADY_ASSIGNED` si el
      * destino es el responsable actual; 422 `COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED`
      * si una avería de frío descarta al técnico de guardia sugerido sin justificación de
-     * 20 caracteres reales (Art. II y Art. V.1); 500 `ASSIGNMENT_FAILED` ante un fallo
-     * inesperado.
+     * 20 caracteres reales (Art. II y Art. V.1); 409 `ASSIGNMENT_STATE_CHANGED` si la
+     * avería cambió de estado o de titular en paralelo mientras el formulario estaba
+     * abierto (EARS 03.4, R4); 500 `ASSIGNMENT_FAILED` ante un fallo inesperado.
      */
     public function assignTechnician(Request $request): Response
     {
@@ -886,6 +887,16 @@ class CoordinatorController
 
                     return $assigned;
                 });
+        } catch (\VendGuard\Core\Domain\Exception\AssignmentStateChangedException $e) {
+            // EARS 03.4 / R4: la foto del formulario quedó obsoleta. Se responde 409
+            // con el estado y el custodio vigentes para que el cliente refresque la
+            // ficha sin perder el texto redactado.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                $e->getDetails()
+            );
         } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
             return Response::error('INVALID_STATUS_FOR_ASSIGNMENT', $e->getMessage(), 422);
         } catch (\DomainException $e) {

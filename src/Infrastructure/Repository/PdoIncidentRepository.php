@@ -14,6 +14,7 @@ use RuntimeException;
 use Throwable;
 use VendGuard\Core\Domain\Enum\IncidentAssignmentSource;
 use VendGuard\Core\Domain\Enum\IncidentUnassignmentReasonType;
+use VendGuard\Core\Domain\Exception\AssignmentStateChangedException;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
@@ -3525,11 +3526,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         try {
-            $incident = $incidentId instanceof Incident ? $incidentId : $this->findById($incidentId);
-            if ($incident === null) {
+            // 0. Foto de entrada: la que trae el formulario del coordinador (o la
+            //    lectura inmediatamente anterior). Se conserva como expectativa para
+            //    detectar que otro actor cambió la avería mientras se enviaba (EARS
+            //    03.4); la escritura se hará sobre la fila bloqueada, no sobre esta.
+            $snapshot = $incidentId instanceof Incident ? $incidentId : $this->findById($incidentId);
+            if ($snapshot === null) {
                 throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
             }
-            $numericId = (int)$incident->getId();
+            $numericId = (int)$snapshot->getId();
 
             // 1. Validar transición legal (EARS 5.1, RF-07.3): REGISTERED/REOPENED admiten
             //    la asignación inicial y los estados con responsable vigente admiten el
@@ -3541,11 +3546,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 IncidentStatus::PENDING_PARTS,
                 IncidentStatus::PENDING_INFO,
             ];
-            $isReassignment = in_array($incident->getStatus(), $reassignmentStatuses, true);
-            if (!$isReassignment && !in_array($incident->getStatus(), $assignmentStatuses, true)) {
+            $isReassignment = in_array($snapshot->getStatus(), $reassignmentStatuses, true);
+            if (!$isReassignment && !in_array($snapshot->getStatus(), $assignmentStatuses, true)) {
                 throw new InvalidTransitionException(
-                    "Solo las incidencias activas (REGISTRADA, REABIERTA, ASIGNADA, EN CURSO, PENDIENTE DE REPUESTOS o PENDIENTE DE INFORMACIÓN) admiten asignación técnica. Estado actual: {$incident->getStatus()->value}.",
-                    $incident->getStatus(),
+                    "Solo las incidencias activas (REGISTRADA, REABIERTA, ASIGNADA, EN CURSO, PENDIENTE DE REPUESTOS o PENDIENTE DE INFORMACIÓN) admiten asignación técnica. Estado actual: {$snapshot->getStatus()->value}.",
+                    $snapshot->getStatus(),
                     IncidentStatus::ASSIGNED
                 );
             }
@@ -3556,8 +3561,33 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             if ($isReassignment && $cleanReassignmentReason === '') {
                 throw new DomainException('La reasignación técnica exige un motivo justificado.');
             }
-            if ($isReassignment && $incident->getAssignedTechnicianId() === $technicianId) {
+            if ($isReassignment && $snapshot->getAssignedTechnicianId() === $technicianId) {
                 throw new DomainException('El técnico indicado ya es el responsable activo de la incidencia.');
+            }
+
+            // 1.c Serialización de la escritura (EARS 03.4, R4): la foto con la que
+            //     llegó el coordinador puede haber quedado obsoleta mientras el
+            //     formulario estaba abierto. Se toma el bloqueo exclusivo de la fila
+            //     y se revalida contra esa expectativa; si otro actor resolvió,
+            //     canceló o cambió el titular en paralelo, la operación se rechaza
+            //     como colisión (409) sin tocar la cadena de custodia. El bloqueo se
+            //     mantiene hasta el COMMIT, así que comprobación y escritura son una
+            //     sola unidad y no queda ventana para colarse entre ambas.
+            $incident = $this->findByIdForUpdate($numericId);
+            if ($incident === null) {
+                throw new DomainException("No se encontró ninguna incidencia con ID {$numericId}.");
+            }
+            if (
+                $incident->getStatus() !== $snapshot->getStatus()
+                || $incident->getAssignedTechnicianId() !== $snapshot->getAssignedTechnicianId()
+            ) {
+                throw new AssignmentStateChangedException(
+                    expectedStatus: $snapshot->getStatus(),
+                    expectedTechnicianId: $snapshot->getAssignedTechnicianId(),
+                    currentStatus: $incident->getStatus(),
+                    currentTechnicianId: $incident->getAssignedTechnicianId(),
+                    currentTechnicianName: $incident->getTechnicianName()
+                );
             }
 
             // 2. Resolver urgencia final (posible reclasificación coordinador, EARS 5.3)
