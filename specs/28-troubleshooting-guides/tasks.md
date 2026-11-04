@@ -204,7 +204,7 @@ flowchart LR
 
 ## Fase 5: Capa de Presentación REST (`TroubleshootingGuideController`) y Router
 
-- [ ] **T-GUIDE-10 · Implementar `TroubleshootingGuideController` y registrar rutas en `AppRouter.php`**
+- [x] **T-GUIDE-10 · Implementar `TroubleshootingGuideController` y registrar rutas en `AppRouter.php`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-GUIDE-09`
   - **Archivos exactos a crear o modificar:**

@@ -16,6 +16,7 @@ use VendGuard\Presentation\Controller\TechnicianOpportunisticController;
 use VendGuard\Presentation\Controller\TechnicianOfflineSyncController;
 use VendGuard\Presentation\Controller\TechnicianRefundController;
 use VendGuard\Presentation\Controller\TechnicianRouteMapController;
+use VendGuard\Presentation\Controller\TroubleshootingGuideController;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -248,6 +249,14 @@ class AppRouter
         $router->put('/api/coordinator/root-causes/{id}', [CoordinatorRootCauseController::class, 'updateRootCause'], [$coordinatorAuth]);
         $router->post('/api/coordinator/root-causes/{id}/solutions', [CoordinatorRootCauseController::class, 'createSolution'], [$coordinatorAuth]);
         $router->put('/api/coordinator/root-causes/{id}/solutions/{solutionId}', [CoordinatorRootCauseController::class, 'updateSolution'], [$coordinatorAuth]);
+
+        // Catálogo de guías rápidas de diagnóstico (Módulo 28, RF-04 y RF-05).
+        // Las cuatro rutas exigen COORDINATOR: el técnico y la sede reciben 403.
+        // La lectura operativa por modelo se registra en la sección técnica.
+        $router->get('/api/coordinator/troubleshooting-guides', [TroubleshootingGuideController::class, 'listCatalog'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/troubleshooting-guides', [TroubleshootingGuideController::class, 'createGuide'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/troubleshooting-guides/{id}', [TroubleshootingGuideController::class, 'updateGuide'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/troubleshooting-guides/{id}/status', [TroubleshootingGuideController::class, 'updateStatus'], [$coordinatorAuth]);
         // Registro de jornada y horas efectivas (Módulo 22, contrato §5.1 y §5.2).
         // El router resuelve por orden de registro: la descarga se registra antes que
         // el informe para que `/work-hours/export` no se interprete como otra ruta.
@@ -342,6 +351,10 @@ class AppRouter
         // restringe el acceso a TECHNICIAN y COORDINATOR.
         $internalAuthenticated = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware();
         $router->get('/api/technician/root-causes', [\VendGuard\Presentation\Controller\TechnicianController::class, 'listActiveRootCauses'], [$internalAuthenticated]);
+        // Guías de diagnóstico por modelo (Módulo 28, RF-01 y RF-02.1). La ruta
+        // acredita a cualquier usuario interno y el controlador restringe el
+        // acceso a TECHNICIAN y COORDINATOR; la sede no alcanza el catálogo.
+        $router->get('/api/troubleshooting-guides/by-model', [TroubleshootingGuideController::class, 'getByModel'], [$internalAuthenticated]);
         // Avería Oportunista In Situ (Módulo 16: T-OPP-09, RF-01 a RF-05).
         // El catálogo exige que la sede esté habilitada para este técnico; el alta y
         // la asunción revalidan esa habilitación en el servicio, bajo su propia
