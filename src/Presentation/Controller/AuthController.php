@@ -114,6 +114,7 @@ class AuthController
 
         return Response::json([
             'token' => $result['token'],
+            'chat_token' => $result['chat_token'] ?? null,
             'user' => [
                 'id' => $user->getId(),
                 'name' => $user->getName(),

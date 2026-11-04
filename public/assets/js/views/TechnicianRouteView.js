@@ -2039,7 +2039,7 @@ export const TechnicianRouteView = {
           return;
         }
 
-        store.setInternalSession(response.user, response.token);
+        store.setInternalSession(response.user, response.token, response.chat_token);
         this.loginEmail = '';
         this.loginPassword = '';
         this.offlineReauthOwner = null;

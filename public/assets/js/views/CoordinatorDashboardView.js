@@ -706,7 +706,7 @@ export const CoordinatorDashboardView = {
           return;
         }
 
-        store.setInternalSession(response.user, response.token);
+        store.setInternalSession(response.user, response.token, response.chat_token);
         this.loginPassword = '';
         await this.loadIncidents();
         this.loadTechnicians();

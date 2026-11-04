@@ -21,6 +21,7 @@ docs/auditoria_arquitectura.md
 docs/features_pendientes.md
 repomix-output.xml
 .atl/
+.cloud-attachments/
 
 # Subidas dinámicas de usuarios (conservando directorio)
 public/uploads/*

@@ -62,6 +62,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/utils/IncidentStatusPermissions.js',
   '/assets/js/utils/MapZoomPan.js',
   '/assets/js/utils/Mercator.js',
+  '/assets/js/utils/n8nChat.js',
   '/assets/js/utils/OfflineStorage.js',
   '/assets/js/utils/OfflineSyncManager.js',
   '/assets/js/utils/OpportunisticContext.js',
