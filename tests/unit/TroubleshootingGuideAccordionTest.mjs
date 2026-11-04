@@ -20,6 +20,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { TroubleshootingGuideAccordion as Accordion } from '../../public/assets/js/components/TroubleshootingGuideAccordion.js';
+import { getOfflineTroubleshootingGuidesByModel } from '../../public/assets/js/utils/OfflineStorage.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '../..');
@@ -406,6 +407,74 @@ assert(
     breakdownType: 'TEMPERATURE_COLD',
     machineType: 'SNACKS'
   })) === true
+);
+
+const offlineCold = { ...cold, machine_model_key: 'sanden vendo g-drink' };
+const offlinePayment = { ...payment, machine_model_key: 'sanden vendo g-drink' };
+
+const offlineSnapshot = {
+  troubleshooting_guides: [offlineCold, offlinePayment],
+  van_stock: { items: [] }
+};
+const offlinePaymentOnSnacks = getOfflineTroubleshootingGuidesByModel(
+  offlineSnapshot,
+  'Sanden Vendo G-Drink',
+  'PAYMENT_SYSTEM',
+  'SNACKS'
+);
+assert(
+  '7.9 getOfflineTroubleshootingGuidesByModel no enciende banner de máquina en avería de pago (EARS 01.3)',
+  offlinePaymentOnSnacks.sanitary_cold_warning_for_machine === false
+);
+const offlineColdOnSnacks = getOfflineTroubleshootingGuidesByModel(
+  offlineSnapshot,
+  'Sanden Vendo G-Drink',
+  'TEMPERATURE_COLD',
+  'SNACKS'
+);
+assert(
+  '7.10 getOfflineTroubleshootingGuidesByModel sí enciende banner de máquina si la avería es de frío (Art. II)',
+  offlineColdOnSnacks.sanitary_cold_warning_for_machine === true
+);
+const offlinePaymentOnPerishable = getOfflineTroubleshootingGuidesByModel(
+  offlineSnapshot,
+  'Sanden Vendo G-Drink',
+  'PAYMENT_SYSTEM',
+  'PERISHABLE_FOOD'
+);
+assert(
+  '7.11 getOfflineTroubleshootingGuidesByModel sí enciende banner de máquina si es perecedera (Art. II)',
+  offlinePaymentOnPerishable.sanitary_cold_warning_for_machine === true
+);
+
+const offlineStockSnapshot = {
+  troubleshooting_guides: [offlineCold, offlinePayment],
+  van_stock: { items: [{ spare_part_id: 10, quantity_available: 7 }] }
+};
+const offlineStockRes = getOfflineTroubleshootingGuidesByModel(
+  offlineStockSnapshot,
+  'Sanden Vendo G-Drink',
+  'PAYMENT_SYSTEM',
+  'SNACKS'
+);
+assert(
+  '7.12 getOfflineTroubleshootingGuidesByModel cruza saldo de furgoneta desde snapshot.van_stock',
+  offlineStockRes.guides.find((g) => g.id === 1)?.recommended_spare_parts[0]?.van_stock_quantity === 7
+    && offlineStockRes.guides.find((g) => g.id === 1)?.recommended_spare_parts[0]?.has_van_stock === true
+);
+assert(
+  '7.13 getOfflineTroubleshootingGuidesByModel sitúa la coincidencia exacta de categoría en primera posición',
+  offlineStockRes.guides[0].id === 2 && offlineStockRes.has_exact_category_match === true
+);
+const offlineNoExactRes = getOfflineTroubleshootingGuidesByModel(
+  offlineStockSnapshot,
+  'Sanden Vendo G-Drink',
+  'OTHER',
+  'SNACKS'
+);
+assert(
+  '7.14 getOfflineTroubleshootingGuidesByModel sin coincidencia exacta sigue el orden canónico con prioridad de frío',
+  offlineNoExactRes.guides[0].id === 1 && offlineNoExactRes.has_exact_category_match === false
 );
 
 console.log('\n======================================================================');

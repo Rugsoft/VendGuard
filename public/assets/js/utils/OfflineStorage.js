@@ -871,8 +871,7 @@ export function getOfflineTroubleshootingGuidesByModel(
     has_exact_category_match: exactMatch,
     selected_guide_id: guides.length > 0 ? Number(guides[0]?.id ?? 0) || null : null,
     sanitary_cold_warning_for_machine: isPerishable
-      || requested === 'TEMPERATURE_COLD'
-      || guides.some((guide) => guide?.sanitary_cold_warning === true),
+      || requested === 'TEMPERATURE_COLD',
     guides
   };
 }
