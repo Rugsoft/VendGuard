@@ -130,7 +130,7 @@ flowchart LR
 
 ## Fase 3: Capa de Infraestructura y Repositorio PDO (`PdoMachineTroubleshootingGuideRepository`)
 
-- [ ] **T-GUIDE-06 · Definir `MachineTroubleshootingGuideRepositoryInterface` e implementar `PdoMachineTroubleshootingGuideRepository`**
+- [x] **T-GUIDE-06 · Definir `MachineTroubleshootingGuideRepositoryInterface` e implementar `PdoMachineTroubleshootingGuideRepository`**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-GUIDE-05`
   - **Archivos exactos a crear o modificar:**
