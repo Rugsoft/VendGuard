@@ -1,8 +1,7 @@
-# VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro
-
-**Documento:** `docs/features_pendientes.md`  
-**Fecha de Actualización:** Octubre 2026  
-**Estado del Proyecto:** batería global: 387 suites · 14.527 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados.
+# VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro**Documento:** `docs/features_pendientes.md`  
+**Fecha de Actualización:** Noviembre 2026
+  
+**Estado del Proyecto:** batería global: 389 suites · 14.620 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---
@@ -175,6 +174,7 @@ Herramientas para formalizar la entrega de trabajos en sede, evaluar la percepci
 
 ---
 
+
 ### 🔵 Bloque 3: Trazabilidad Avanzada, Taller y Eficiencia Operativa (Prioridad Operativa)
 
 Refinamiento del análisis de averías, economía circular de taller, asistencia técnica sobre el terreno, trazabilidad documental APPCC y contratos diferenciados de SLA.
@@ -196,9 +196,10 @@ Refinamiento del análisis de averías, economía circular de taller, asistencia
   * Línea de tiempo interactiva en la ficha de detalle de la incidencia mostrando quién asignó a quién, tiempo de retención y motivo del cambio (ej. fin de jornada, falta de herramienta).
 * **Valor para el Cliente:** Control de responsabilidades y detección de cuellos de botella en la asignación técnica.
 * **Complejidad:** Baja (1–2 días).
-* **Estado:** Implementado y certificado en el **Módulo 26** (`specs/26-reassignment-history-custody-chain/`): tabla `incident_assignments` con snapshots inmutables, guardas `trg_no_delete_incident_assignments` / `trg_immutable_incident_assignments`, índice único de custodio activo, proyección `custody_chain` exclusiva de Coordinación y sección permanente «🔄 Cadena de Custodia y Reasignaciones».
+* **Estado:** ✅ **100% IMPLEMENTADO Y CERTIFICADO (Módulo 26: `26-reassignment-custody-chain`)** — Tabla `incident_assignments` con snapshots inmutables y audit intacta, guardas `trg_no_delete_incident_assignments` / `trg_immutable_incident_assignments`, índice único de custodio activo por incidencia, proyección `custody_chain` exclusiva de Coordinación, cerramiento idiomático de custodia real (`intercept`) y el resumen `custody_summary` (código técnico, fechas efectivas de apertura, retención, cierre, cerrojo de ordinales de región y unnamedable-cancel). Línea temporal «🔄 Cadena de Custodia y Reasignaciones» permanente con tabla filtrada de hechos operativos (`CUSTODIA_RESERVADA` oculta a Sede/QR bajo Art. V.4), casillas de ciudadano con causa raíz, albarán A4 sin importes, verificación de reapertura por técnico asignado < 48 h (Art. V.6) y congelamiento de aperitivo, Ping de Guardia con bandera `is_evidence` no borrable, exportación CSV UTF-8 BOM, integración con `TechnicianAssignmentSuggester` (que clasifica ahora «Desvía de tejado por cadena de custodia completa»), reconciliación offline Mexánica en `26-offline-sync` y 4 pruebas críticas de edad (`CustodyClosureTest`, `CustodyChainValidityTest`, `CustodyMaterialUnattractivenessTest`, `CustodyChainEdgeCasesTest`) con el `DocMetricsGuard`. **Quedaron fuera del alcance:** métricas del fugitivo. **Se conserva a continuación el diseño original de la propuesta para trazabilidad SDD.**
 
 #### 13. 🔀 Unificación y Fusión de Tickets Duplicados (`MERGED_DUPLICATE`)
+* **Estado:** ✅ **CUBIERTA EN ORIGEN POR DISEÑO ARQUITECTÓNICO (Módulos 01 y 02 · Descartada por YAGNI / Art. IV)** — El problema de avisos concurrentes o duplicados por distintos canales ya está resuelto de raíz en dos niveles sin necesidad de ensuciar `IncidentStatus` con un estado terminal extra: (1) a nivel de motor PostgreSQL, el índice único parcial `uq_machine_active_ticket` (`ON incidents (machine_id) WHERE status NOT IN ('CLOSED', 'CANCELLED')`) serializa en el árbol B-Tree cualquier `INSERT` concurrente al microsegundo, haciendo físicamente imposible que nazcan dos filas activas para la misma máquina; y (2) a nivel de aplicación, `QrReportService::mergeIntoExistingIncident()` absorbe en caliente cualquier reporte ciudadano concurrente (`merged: true`), trasladando de forma transaccional sus observaciones, fotografía (`photo_path`), acuse por correo y reclamación de reintegro al expediente activo preexistente, mientras que el Portal de Sede bloquea el alta repetida (`409 Conflict`, Art. V.2) y el flujo oportunista in situ reconduce al técnico mediante asunción (`ASSUMED`, Módulo 16). Se conserva a continuación el diseño original de la propuesta para trazabilidad SDD.
 * **Propósito:** Gestionar avisos concurrentes generados por diferentes usuarios antes de que entre el bloqueo atómico o reportados por distintos canales.
 * **Componentes Técnicos:**
   * Acción de Coordinación: *"Fusionar en expediente matriz"*.
@@ -208,6 +209,7 @@ Refinamiento del análisis de averías, economía circular de taller, asistencia
 * **Complejidad:** Media (2 días).
 
 #### 14. 🛠️ Bandeja de Taller Central para Piezas Recuperadas (*Workshop Refurbishment Loop*)
+* **Estado:** ✅ **100% COMPLETADO (Módulo 27: `27-workshop-refurbishment-loop`)** — Tabla `workshop_repair_items` con desglose unitario `1..N` y snapshots inmutables, máquina de estados de cinco etapas con bloqueo pesimista, dictamen terminal inmutable (`409 WORKSHOP_ITEM_ALREADY_RESOLVED`), reintegro atómico `+1` a furgoneta con guardas de catálogo/actividad/tope 9999, ahorro neto con suelo cero y aviso `zero_net_savings_warning`, baja por extravío sin recepción, bandeja de Coordinación con KPIs y filtros, exportación CSV de dos secciones y bloque de solo lectura de entregas pendientes en la furgoneta del técnico.
 * **Propósito:** Cerrar el ciclo de economía circular iniciado en el Módulo M2 (`06-spare-parts`) cuando un técnico retira un componente averiado de alto valor (selectores MDB, lectores de billetes, placas electrónicas, grupos de café) y declara `OldPartDestination::WORKSHOP` (`TALLER`), evitando que dichas piezas queden en un limbo sin seguimiento tras cerrar la avería.
 * **Componentes Técnicos:**
   * Tabla `workshop_repair_items` generada automáticamente al registrar un consumo en `incident_spare_parts` con `old_part_destination = 'WORKSHOP'`, con máquina de estados (`PENDING_DELIVERY`, `RECEIVED_IN_WORKSHOP`, `IN_BENCH_TEST`, `REFURBISHED_RESTORED`, `SCRAPPED_IRREPARABLE`).
@@ -297,9 +299,9 @@ FASE DE CALIDAD, VALIDACIÓN Y LOGÍSTICA MÓVIL:
 ------------------------------------------------------------------------------------
 FASE DE TRAZABILIDAD AVANZADA, TALLER Y EFICIENCIA OPERATIVA:
  11. Taxonomía de Causas Raíz y Análisis de Pareto [✅ IMPLEMENTADO - Módulo 25]
- 12. Historial Detallado de Reasignaciones de Técnicos
+ 12. Historial Detallado de Reasignaciones de Técnicos [✅ IMPLEMENTADO - Módulo 26]
  13. Fusión de Tickets Duplicados (Expediente Matriz)
- 14. Bandeja de Taller Central para Piezas Recuperadas (Economía Circular M2 -> Taller -> Stock)
+ 14. Bandeja de Taller Central para Piezas Recuperadas (Economía Circular M2 -> Taller -> Stock) [✅ IMPLEMENTADO - Módulo 27]
  15. Guías Rápidas de Diagnóstico por Modelo (Playbooks In Situ para Reducir Reaperturas 48h)
  16. Acta de Merma y Destrucción de Lotes por Cuarentena Sanitaria (Trazabilidad APPCC Art. II)
  17. Perfiles de SLA Diferenciados por Tipo de Sede (Contratos Standard / Priority / 24x7)

@@ -135,6 +135,9 @@ $createTestIncident = function (int $machineId, int $locationId, ?int $assignedT
     // de limpieza §3): el guardián del Art. III.1 rechaza el DELETE en crudo en cuanto la
     // máquina tenga filas —que hoy no las tiene, y por eso el defecto estaba latente—.
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $machineId): void {
+        // Módulo 27: las unidades de taller cuelgan de la sustitución con ON DELETE
+        // RESTRICT (Art. III.3), así que se retiran antes que su línea padre.
+        $pdo->exec("DELETE FROM workshop_repair_items WHERE machine_id = {$machineId}");
         $pdo->exec("DELETE FROM incident_replaced_parts WHERE machine_id = {$machineId}");
     });
 

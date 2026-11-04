@@ -12,7 +12,7 @@
 ## 1. Resumen y Propósito
 
 Este documento formaliza el esquema relacional de base de datos para **VendGuard** bajo el contrato de motor único PostgreSQL (Supabase), cumpliendo con:
-1. **Artículo III de la Constitución:** Prohibición absoluta de borrado físico (`DELETE FROM`). Todas las 37 tablas del dominio cuentan con disparadores `BEFORE DELETE` vinculados a la función constitucional `prevent_hard_delete()`, que rechaza con `SQLSTATE 45000` (`ART_III_1_VIOLATION`) cualquier intento de borrado físico que no ocurra bajo la ventana de purga autorizada del arnés de pruebas. El borrado lógico se gestiona mediante `deleted_at TIMESTAMPTZ NULL` o, en el catálogo de taxonomía, mediante `is_active = FALSE`.
+1. **Artículo III de la Constitución:** Prohibición absoluta de borrado físico (`DELETE FROM`). Todas las 38 tablas del dominio cuentan con disparadores `BEFORE DELETE` vinculados a la función constitucional `prevent_hard_delete()`, que rechaza con `SQLSTATE 45000` (`ART_III_1_VIOLATION`) cualquier intento de borrado físico que no ocurra bajo la ventana de purga autorizada del arnés de pruebas. El borrado lógico se gestiona mediante `deleted_at TIMESTAMPTZ NULL` o, en el catálogo de taxonomía, mediante `is_active = FALSE`.
 2. **Artículo V de la Constitución & EARS 2.1:** Restricción de unicidad estricta mediante el índice único parcial `uq_machine_active_ticket` para garantizar que **ninguna máquina pueda tener más de una incidencia activa de forma simultánea** (incluyendo el estado `RESOLVED` durante la ventana de garantía sanitaria de 48 horas).
 3. **Artículo II de la Constitución:** Integridad en tipos de máquina (`machine_type`), categorías de fallo (`incident_category`) y estados sanitarios (`sanitary_status`) para la supervisión y control estricto de la cadena de frío.
 4. **Artículo V.1 de la Constitución:** Longitudes mínimas exigidas por restricciones `CHECK` nativas en base de datos (`chk_resolution_diagnosis_len`, `chk_resolution_action_len`, etc.) garantizando explicaciones técnicas suficientes (mínimo 20 caracteres no vacíos).
@@ -20,7 +20,7 @@ Este documento formaliza el esquema relacional de base de datos para **VendGuard
 
 ---
 
-## 2. Inventario de Tablas Canónicas del Sistema (37 tablas + Libro)
+## 2. Inventario de Tablas Canónicas del Sistema (38 tablas + Libro)
 
 El sistema opera sobre **37 tablas de dominio** y **1 tabla de infraestructura de migraciones**:
 
@@ -63,13 +63,14 @@ El sistema opera sobre **37 tablas de dominio** y **1 tabla de infraestructura d
 | 35 | `root_causes` | Catálogo maestro de causas raíz (Módulo 25) |
 | 36 | `standard_solutions` | Soluciones estandarizadas vinculadas a cada causa (Módulo 25) |
 | 37 | `incident_assignments` | Tramos de custodia técnica con snapshots congelados de actores, causa de salida y sellado único (Módulo 26) |
+| 38 | `workshop_repair_items` | Bandeja de taller central de piezas recuperadas: desglose unitario 1..N, snapshots congelados, dictamen terminal y reintegro (Módulo 27) |
 | + | `schema_migrations` | Libro de control del ejecutor `PostgresMigrationRunner` |
 
 ---
 
 ## 3. Tipos Enumerados Nativos (ENUM)
 
-El esquema implementa 32 tipos `ENUM` nativos en PostgreSQL:
+El esquema implementa 34 tipos `ENUM` nativos en PostgreSQL:
 - `user_role`: `'COORDINATOR'`, `'TECHNICIAN'`
 - `machine_type`: `'HOT_DRINKS'`, `'COLD_DRINKS'`, `'SNACKS'`, `'PERISHABLE_FOOD'`, `'COMBO'`
 - `preventive_machine_type`: `'PERISHABLE_FOOD'`, `'HOT_DRINKS'`, `'COLD_DRINKS'`, `'SNACKS'`, `'COMBO'`
@@ -85,9 +86,15 @@ El esquema implementa 32 tipos `ENUM` nativos en PostgreSQL:
 
 ---
 
+Los dos enumerados del Módulo 27 nacen con la migración `023_workshop_repair_items.sql`:
+`workshop_repair_status` (`PENDING_DELIVERY`, `RECEIVED_IN_WORKSHOP`, `IN_BENCH_TEST`,
+`REFURBISHED_RESTORED`, `SCRAPPED_IRREPARABLE`) y `workshop_restock_destination`
+(`CENTRAL_WAREHOUSE`, `TECHNICIAN_VAN`). El catálogo `audit_entity_type` incorpora el valor
+`WORKSHOP_REPAIR_ITEM` mediante `ALTER TYPE ... ADD VALUE IF NOT EXISTS`.
+
 ## 4. Disparadores y Funciones Constitucionales
 
-- **`prevent_hard_delete()`**: Función disparadora `BEFORE DELETE` en las 37 tablas del dominio. Si `current_setting('vendguard.purge', true) = 'on'`, autoriza el borrado para tareas de mantenimiento del arnés. De lo contrario, interrumpe la transacción con excepción constitucional `45000`.
+- **`prevent_hard_delete()`**: Función disparadora `BEFORE DELETE` en las 38 tablas del dominio. Si `current_setting('vendguard.purge', true) = 'on'`, autoriza el borrado para tareas de mantenimiento del arnés. De lo contrario, interrumpe la transacción con excepción constitucional `45000`.
 - **`touch_updated_at()`**: Función disparadora `BEFORE UPDATE` que actualiza automáticamente la columna `updated_at` con `statement_timestamp()` si no fue modificada explícitamente en la sentencia.
 - **`enforce_incident_assignments_immutability()` (Módulo 26):** Función disparadora `BEFORE UPDATE` que rechaza con `SQLSTATE 45000` cualquier cambio en los datos de apertura o en los snapshots de un tramo de custodia y cualquier modificación de un tramo ya cerrado (Art. III.3, EARS 01.3). La Tabla 37 `incident_assignments` (15 columnas) conserva los tramos con las identidades congeladas de técnico, asignador y cerrador, la coherencia todo-o-nada entre tramo abierto y cerrado, y el índice único parcial `uq_incident_assignments_active_custody (incident_id) WHERE unassigned_at IS NULL`, que garantiza un solo custodio activo por avería (Art. V.3). El backfill de la migración `022_incident_assignments_custody_chain.sql` reconstruye los expedientes anteriores con los valores de respaldo `SIN-CODIGO`, `Coordinación / Sistema` y `Registro histórico previo` (D4, QA 5).
 - **`enforce_root_causes_immutability()` y `enforce_standard_solutions_immutability()` (Módulo 25):** Funciones disparadoras `BEFORE UPDATE` que rechazan con `SQLSTATE 45000` cualquier intento de cambiar `code`, `category` o `root_cause_id` tras el alta del catálogo (C4, QA 1).

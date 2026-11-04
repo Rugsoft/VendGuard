@@ -14,6 +14,7 @@ use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
 use VendGuard\Core\Domain\Exception\InvalidResolutionException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
+use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentReplacedPart;
 use VendGuard\Core\Domain\Model\IncidentServiceSheet;
@@ -30,8 +31,11 @@ use VendGuard\Core\Domain\Repository\RootCauseRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
+use VendGuard\Core\Domain\Repository\WorkshopRepairItemRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
+use VendGuard\Infrastructure\Persistence\PdoWorkshopRepairItemRepository;
+use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoRootCauseRepository;
 use VendGuard\Core\Service\ResolutionTaxonomyValidator;
 use VendGuard\Core\Service\ResolutionValidator;
@@ -76,6 +80,9 @@ class SparePartTraceabilityService
     /** Catálogo maestro de causas y soluciones (Módulo 25). */
     private ?RootCauseRepositoryInterface $rootCauseRepo;
 
+    /** Bandeja de taller central de piezas recuperadas (Módulo 27). */
+    private ?WorkshopRepairItemRepositoryInterface $workshopRepo;
+
     public function __construct(
         SparePartRequestRepositoryInterface $requestRepo,
         IncidentReplacedPartRepositoryInterface $replacedPartRepo,
@@ -87,7 +94,8 @@ class SparePartTraceabilityService
         ?AuditLogger $auditLogger = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
         ?TransactionManagerInterface $transactionManager = null,
-        ?RootCauseRepositoryInterface $rootCauseRepo = null
+        ?RootCauseRepositoryInterface $rootCauseRepo = null,
+        ?WorkshopRepairItemRepositoryInterface $workshopRepo = null
     ) {
         $this->requestRepo = $requestRepo;
         $this->replacedPartRepo = $replacedPartRepo;
@@ -100,6 +108,7 @@ class SparePartTraceabilityService
         $this->notificationEnqueuer = $notificationEnqueuer;
         $this->transactionManager = $transactionManager;
         $this->rootCauseRepo = $rootCauseRepo;
+        $this->workshopRepo = $workshopRepo;
     }
 
     private function rootCauses(): RootCauseRepositoryInterface
@@ -110,6 +119,31 @@ class SparePartTraceabilityService
     private function transactions(): TransactionManagerInterface
     {
         return $this->transactionManager ??= new PdoTransactionManager();
+    }
+
+    /**
+     * Repositorio de la bandeja de taller, con la implementación PDO como valor
+     * por defecto: el servicio ya construye sus dependencias de infraestructura
+     * opcionales de la misma forma cuando no se le inyectan.
+     *
+     * `null` sólo cuando no hay conexión configurada (arnés unitario hermético sin
+     * `DATABASE_URL`): en ese contexto no existe base donde abrir unidades y el
+     * cierre no puede depender de una conexión que nadie ha pedido. Con la
+     * transacción ya escribiendo filas, la conexión existe y el fallback se
+     * construye sin problema; un error real de construcción no se silencia, se
+     * propaga a la transacción.
+     */
+    private function workshopItems(): ?WorkshopRepairItemRepositoryInterface
+    {
+        if ($this->workshopRepo !== null) {
+            return $this->workshopRepo;
+        }
+
+        try {
+            return $this->workshopRepo = new PdoWorkshopRepairItemRepository();
+        } catch (\RuntimeException) {
+            return null;
+        }
     }
 
     /**
@@ -549,6 +583,8 @@ class SparePartTraceabilityService
                 $sheetData,
                 $enqueuer,
                 $taxonomy,
+                $incident,
+                $actor,
                 $resolvedAt,
                 &$insertedParts,
                 &$insertedSheet
@@ -559,6 +595,17 @@ class SparePartTraceabilityService
 
                     // Módulo 18: la línea declarada descuenta el stock en esta misma transacción.
                     $this->deductVanStock($inserted);
+
+                    // Módulo 27: una extracción con destino taller abre sus unidades
+                    // en la misma transacción que el cierre (D1, C4, C6).
+                    $this->openWorkshopUnitsForReplacedPart(
+                        $inserted,
+                        $incident->getAssignedTechnicianId(),
+                        $incident->getMachineCode(),
+                        $incident->getMachineModel(),
+                        $incident->getLocationName(),
+                        $actor
+                    );
                 }
 
                 if ($replacedPartsDeclared) {
@@ -816,6 +863,10 @@ class SparePartTraceabilityService
         $insertedParts = [];
         $totalPartsCost = 0.00;
 
+        // La máquina se resuelve una sola vez: sus snapshots son los mismos para
+        // todas las líneas de la orden preventiva.
+        $machine = $this->machineRepo->findById($machineId);
+
         foreach ($replacedParts as $item) {
             $quantity = isset($item['quantity']) ? (int)$item['quantity'] : 1;
             if ($quantity < 1 || $quantity > 50) {
@@ -909,6 +960,16 @@ class SparePartTraceabilityService
 
             // Mismo punto único de descuento que el correctivo (Módulo 18, RF-02.3).
             $this->deductVanStock($inserted);
+
+            // Módulo 27: el preventivo también alimenta la bandeja de taller.
+            $this->openWorkshopUnitsForReplacedPart(
+                $inserted,
+                $technicianId,
+                $machine?->getCode(),
+                $machine?->getModel(),
+                null,
+                $actor
+            );
         }
 
         if ($this->auditLogger !== null) {
@@ -934,6 +995,179 @@ class SparePartTraceabilityService
             'total_parts_cost' => round($totalPartsCost, 2),
             'replaced_parts' => array_map(fn(IncidentReplacedPart $p) => $p->toArray(), $insertedParts),
         ];
+    }
+
+    /**
+     * Abre en la bandeja de taller las unidades `1..N` de una sustitución.
+     *
+     * Una línea con `quantity = 3` no produce una fila «cantidad: 3»: produce tres
+     * expedientes unitarios con `unit_index = 1..3` y `total_units_in_line = 3`, que
+     * es lo que permite seguir cada pieza física por el ciclo (D1, C4, QA 4).
+     *
+     * **Idempotencia.** El repositorio usa `ON CONFLICT ... DO NOTHING`: si la
+     * unidad ya existe —un reintento de sincronización, un volcado de conflicto
+     * que llega tarde (`C6`)— devuelve una lista vacía y aquí no se duplica ni se
+     * vuelve a auditar. Así una reapertura en garantía (`C4`) tampoco reescribe los
+     * expedientes de la visita anterior: cada cierre inserta líneas nuevas.
+     *
+     * **Técnico extractor.** Se atribuye al técnico asignado a la avería u orden
+     * (`assigned_technician_id`) y sólo cae al actor de la operación cuando éste es
+     * un técnico; una resolución dictada por Coordinación no puede «robar» la
+     * extracción a quien desmontó la pieza (`QA 4`).
+     *
+     * @param array{id: int|null, role: string, name: string}|null $actor
+     */
+    private function openWorkshopUnitsForReplacedPart(
+        IncidentReplacedPart $part,
+        ?int $assignedTechnicianId,
+        ?string $machineCode,
+        ?string $machineModel,
+        ?string $locationName,
+        ?array $actor
+    ): void {
+        if ($part->getOldPartDestination() !== OldPartDestination::TALLER) {
+            return;
+        }
+
+        $partId = $part->getId();
+        if ($partId === null) {
+            return;
+        }
+
+        $repository = $this->workshopItems();
+        if ($repository === null) {
+            return;
+        }
+
+        $actorRole = strtoupper((string)($actor['role'] ?? ''));
+        $actorId = isset($actor['id']) ? (int)$actor['id'] : null;
+        $extractorId = $assignedTechnicianId
+            ?? ($actorRole === 'TECHNICIAN' ? $actorId : null)
+            ?? $part->getTechnicianId();
+
+        $snapshot = $this->workshopSnapshotContext(
+            $part,
+            $machineCode,
+            $machineModel,
+            $locationName,
+            $actorRole === 'TECHNICIAN' && $actorId === $extractorId ? ($actor['name'] ?? null) : null
+        );
+
+        $quantity = $part->getQuantity();
+        for ($unitIndex = 1; $unitIndex <= $quantity; $unitIndex++) {
+            $created = $repository->createUnitBreakdownForReplacedPart([
+                'incident_replaced_part_id' => $partId,
+                'unit_index' => $unitIndex,
+                'total_units_in_line' => $quantity,
+                'intervention_type' => $part->getInterventionType(),
+                'incident_id' => $part->getIncidentId(),
+                'preventive_order_id' => $part->getPreventiveOrderId(),
+                'machine_id' => $part->getMachineId(),
+                'location_id' => $part->getLocationId(),
+                'extracted_by_technician_id' => $extractorId,
+                'spare_part_id' => $part->getSparePartId(),
+                'is_out_of_catalog' => $part->isOutOfCatalog(),
+                'part_code' => $part->getPartCode(),
+                'part_name' => $part->getPartName() ?? $part->getCustomPartName() ?? 'Pieza sin catálogo',
+                'part_category' => $snapshot['part_category'],
+                'machine_code' => $snapshot['machine_code'],
+                'machine_model' => $snapshot['machine_model'],
+                'location_name' => $snapshot['location_name'],
+                'technician_name' => $snapshot['technician_name'],
+                'unit_cost' => $part->getUnitCostSnapshot(),
+            ]);
+
+            if ($created === []) {
+                continue;
+            }
+
+            $this->auditWorkshopUnitCreated($created, $part, $extractorId, $actor);
+        }
+    }
+
+    /**
+     * Resuelve los snapshots que la línea de recambio no trae consigo.
+     *
+     * La categoría de la pieza sí se relee del catálogo: el snapshot es lo que
+     * estaba vigente al extraer y el catálogo no se toca en esta transacción.
+     *
+     * @return array{part_category: string, machine_code: string, machine_model: string, location_name: string, technician_name: string}
+     */
+    private function workshopSnapshotContext(
+        IncidentReplacedPart $part,
+        ?string $machineCode,
+        ?string $machineModel,
+        ?string $locationName,
+        ?string $technicianName
+    ): array {
+        if ($machineCode === null || $machineModel === null) {
+            $machine = $this->machineRepo->findById($part->getMachineId());
+            $machineCode ??= $machine?->getCode();
+            $machineModel ??= $machine?->getModel();
+        }
+
+        if ($locationName === null) {
+            $location = (new PdoLocationRepository())->findById($part->getLocationId());
+            $locationName = $location?->getName();
+        }
+
+        $category = 'OTHER';
+        if (!$part->isOutOfCatalog() && $part->getSparePartId() !== null) {
+            $sparePart = $this->sparePartRepo->findById((int)$part->getSparePartId());
+            $category = $sparePart !== null ? $sparePart->getCategory()->value : 'OTHER';
+        }
+
+        return [
+            'part_category' => $category,
+            'machine_code' => $machineCode ?? ('MAQ-' . $part->getMachineId()),
+            'machine_model' => $machineModel ?? 'Modelo no disponible',
+            'location_name' => $locationName ?? ('Sede #' . $part->getLocationId()),
+            'technician_name' => $technicianName ?? 'Técnico de Ruta',
+        ];
+    }
+
+    /**
+     * Deja rastro de la apertura unitaria en el `audit_log` (Art. III.3).
+     *
+     * Se registra una entrada por expediente creado, no una por línea: el detalle
+     * identifica la unidad concreta (`unit_index` sobre `total_units_in_line`) y
+     * permite reconstruir el desglose `1..N` desde la auditoría.
+     *
+     * @param array<string, mixed> $unit
+     * @param array{id: int|null, role: string, name: string}|null $actor
+     */
+    private function auditWorkshopUnitCreated(
+        array $unit,
+        IncidentReplacedPart $part,
+        int $extractorId,
+        ?array $actor
+    ): void {
+        if ($this->auditLogger === null) {
+            return;
+        }
+
+        $this->auditLogger->logEvent(new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_WORKSHOP_REPAIR_ITEM,
+            entityId: (int)$unit['id'],
+            action: 'WORKSHOP_ITEM_CREATED_FROM_EXTRACTION',
+            userId: isset($actor['id']) ? (int)$actor['id'] : null,
+            userRole: (string)($actor['role'] ?? 'SYSTEM'),
+            userName: (string)($actor['name'] ?? 'Sistema'),
+            previousState: null,
+            newState: [
+                'status' => (string)($unit['status'] ?? 'PENDING_DELIVERY'),
+                'unit_index' => (int)$unit['unit_index'],
+                'total_units_in_line' => (int)$unit['total_units_in_line'],
+            ],
+            metadata: [
+                'incident_replaced_part_id' => (int)$part->getId(),
+                'unit_index' => (int)$unit['unit_index'],
+                'total_units_in_line' => (int)$unit['total_units_in_line'],
+                'source_type' => $part->getInterventionType(),
+                'extracted_by_technician_id' => $extractorId,
+            ],
+        ));
     }
 
     /**

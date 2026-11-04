@@ -19,10 +19,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/autoload.php';
 require_once __DIR__ . '/../Support/RecordingVanStockRepository.php';
 require_once __DIR__ . '/../Support/ThrowingVanStockRepository.php';
+require_once __DIR__ . '/../Support/NullWorkshopRepairItemRepository.php';
 
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Application\Service\VanStockService;
+use VendGuard\Core\Domain\Repository\WorkshopRepairItemRepositoryInterface;
 use VendGuard\Core\Domain\Exception\IncompatibleSparePartException;
 use VendGuard\Core\Domain\Exception\InvalidOutOfCatalogJustificationException;
 use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
@@ -620,6 +622,110 @@ class RecordingTransactionManager implements TransactionManagerInterface
     }
 }
 
+/**
+ * Repositorio de taller en memoria.
+ *
+ * El cierre con `old_part_destination = TALLER` abre unidades del Módulo 27. Sin
+ * este doble, la suite unitaria caía en el repositorio PDO por defecto y el alta
+ * intentaba escribir contra el motor real con una línea de sustitución ficticia.
+ * El doble conserva la forma del resumen y devuelve una unidad por índice.
+ */
+class InMemoryWorkshopRepairItemRepository implements WorkshopRepairItemRepositoryInterface
+{
+    /** @var list<array<string, mixed>> */
+    public array $units = [];
+
+    private int $sequence = 0;
+
+    public function createUnitBreakdownForReplacedPart(array $breakdownPayload): array
+    {
+        $unitIndex = (int)($breakdownPayload['unit_index'] ?? 1);
+        $totalUnits = (int)($breakdownPayload['total_units_in_line'] ?? 1);
+
+        $row = [
+            'id' => ++$this->sequence,
+            'incident_replaced_part_id' => (int)($breakdownPayload['incident_replaced_part_id'] ?? 0),
+            'unit_index' => $unitIndex,
+            'total_units_in_line' => $totalUnits,
+            'unit_badge' => $unitIndex . '/' . $totalUnits,
+            'intervention_type' => (string)($breakdownPayload['intervention_type'] ?? 'INCIDENT'),
+            'incident_id' => $breakdownPayload['incident_id'] ?? null,
+            'preventive_order_id' => $breakdownPayload['preventive_order_id'] ?? null,
+            'machine_id' => (int)($breakdownPayload['machine_id'] ?? 0),
+            'location_id' => (int)($breakdownPayload['location_id'] ?? 0),
+            'extracted_by_technician_id' => (int)($breakdownPayload['extracted_by_technician_id'] ?? 0),
+            'spare_part_id' => $breakdownPayload['spare_part_id'] ?? null,
+            'is_out_of_catalog' => (bool)($breakdownPayload['is_out_of_catalog'] ?? false),
+            'part_code' => $breakdownPayload['part_code'] ?? null,
+            'part_name' => (string)($breakdownPayload['part_name'] ?? ''),
+            'part_category' => (string)($breakdownPayload['part_category'] ?? 'OTHER'),
+            'machine_code' => (string)($breakdownPayload['machine_code'] ?? ''),
+            'machine_model' => (string)($breakdownPayload['machine_model'] ?? ''),
+            'location_name' => (string)($breakdownPayload['location_name'] ?? ''),
+            'technician_name' => (string)($breakdownPayload['technician_name'] ?? ''),
+            'unit_cost_snapshot' => (float)($breakdownPayload['unit_cost'] ?? 0.0),
+            'status' => 'PENDING_DELIVERY',
+            'status_label' => 'Pendiente de entrega',
+            'created_at' => '2026-11-03T10:00:00+01:00',
+        ];
+
+        $this->units[] = $row;
+
+        return $row;
+    }
+
+    public function findById(int $id): ?array
+    {
+        foreach ($this->units as $unit) {
+            if ((int)$unit['id'] === $id) {
+                return $unit;
+            }
+        }
+
+        return null;
+    }
+
+    public function findByIdForUpdate(int $id): ?array
+    {
+        return $this->findById($id);
+    }
+
+    public function updateReception(int $id, int $receivedByUserId, ?string $receptionNotes, string $receivedAt): array
+    {
+        return [];
+    }
+
+    public function updateStartBench(int $id, int $benchStartedByUserId, string $benchStartedAt): array
+    {
+        return [];
+    }
+
+    public function updateResolution(int $id, array $resolutionData): array
+    {
+        return [];
+    }
+
+    public function findPendingDeliveriesForTechnician(int $technicianId): array
+    {
+        return [];
+    }
+
+    public function paginateWorkshopTray(\VendGuard\Application\DTO\WorkshopTrayQueryDTO $query): array
+    {
+        return ['items' => [], 'total' => 0, 'page' => 1, 'per_page' => 20, 'total_pages' => 1];
+    }
+
+    public function computeTrayKpis(\VendGuard\Application\DTO\WorkshopTrayQueryDTO $query): array
+    {
+        return [];
+    }
+
+    public function findAllForExport(\VendGuard\Application\DTO\WorkshopTrayQueryDTO $query): array
+    {
+        return [];
+    }
+}
+
 /** Repositorio de auditoría en memoria. */
 class RecordingAuditLogRepository implements AuditLogRepositoryInterface
 {
@@ -720,7 +826,8 @@ function createTestEnvironment(): array {
         machineRepo: $machineRepo,
         vanStockService: new VanStockService($vanStockRepo),
         serviceSheetRepo: $sheetRepo,
-        transactionManager: $transactions
+        transactionManager: $transactions,
+        workshopRepo: new InMemoryWorkshopRepairItemRepository()
     );
 
     return [
@@ -1435,7 +1542,8 @@ $throwingService = new SparePartTraceabilityService(
     machineRepo: $env['machineRepo'],
     vanStockService: new VanStockService(new ThrowingVanStockRepository()),
     serviceSheetRepo: $env['sheetRepo'],
-    transactionManager: $env['transactions']
+    transactionManager: $env['transactions'],
+    workshopRepo: new InMemoryWorkshopRepairItemRepository()
 );
 $deductionFailed = false;
 try {
@@ -1578,9 +1686,9 @@ $auditedService = new SparePartTraceabilityService(
     machineRepo: $envAudited['machineRepo'],
     vanStockService: new VanStockService($envAudited['vanStockRepo']),
     serviceSheetRepo: $envAudited['sheetRepo'],
-    auditLogger: new AuditLogger($auditRepo),
-    transactionManager: $envAudited['transactions']
-);
+    auditLogger: new AuditLogger($auditRepo),        transactionManager: $envAudited['transactions'],
+        workshopRepo: new \VendGuard\Tests\Support\NullWorkshopRepairItemRepository()
+    );
 $auditedService->resolveIncidentWithParts(101, 42, $closePayload);
 $auditEvent = $auditRepo->events[0] ?? null;
 $auditState = is_array($auditEvent?->getNewState()) ? $auditEvent->getNewState() : [];
