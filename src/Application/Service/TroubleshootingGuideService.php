@@ -150,10 +150,21 @@ final class TroubleshootingGuideService
             : array_values($guides);
 
         $vanStock = $this->fetchVanStock($technicianId);
-        $rootCauseCache = [];
+
+        // Una sola lectura del catálogo activo con sus soluciones: la causa
+        // sugerida viaja con su solución predeterminada y una causa dada de baja
+        // en el ínterin desaparece del mapa (C2).
+        $rootCauses = [];
+        foreach ($this->rootCauseRepository->findActiveCatalogWithSolutions() as $rootCause) {
+            $rootCauseId = $rootCause->getId();
+            if ($rootCauseId !== null) {
+                $rootCauses[$rootCauseId] = $rootCause;
+            }
+        }
+
         $payload = [];
         foreach ($orderedGuides as $guide) {
-            $payload[] = $this->enrichGuide($guide, $vanStock, $isPerishable, $rootCauseCache);
+            $payload[] = $this->enrichGuide($guide, $vanStock, $isPerishable, $rootCauses);
         }
 
         $warningForMachine = $isPerishable
@@ -391,8 +402,8 @@ final class TroubleshootingGuideService
      * Proyecta una guía con su aviso sanitario, repuestos cruzados con la
      * furgoneta y causa sugerida vigente.
      *
-     * @param array<int, int>                $vanStock
-     * @param array<int, RootCause|null>     $rootCauseCache
+     * @param array<int, int>       $vanStock
+     * @param array<int, RootCause> $rootCauses Catálogo activo indexado por identificador.
      *
      * @return array<string, mixed>
      */
@@ -400,7 +411,7 @@ final class TroubleshootingGuideService
         MachineTroubleshootingGuide $guide,
         array $vanStock,
         bool $isPerishableMachine,
-        array &$rootCauseCache
+        array $rootCauses
     ): array {
         $parts = [];
         foreach ($guide->getRecommendedSparePartIds() as $partId) {
@@ -423,9 +434,7 @@ final class TroubleshootingGuideService
         }
 
         $rootCauseId = $guide->getSuggestedRootCauseId();
-        if ($rootCauseId !== null && !array_key_exists($rootCauseId, $rootCauseCache)) {
-            $rootCauseCache[$rootCauseId] = $this->rootCauseRepository->findRootCauseById($rootCauseId);
-        }
+        $rootCause = $rootCauseId !== null ? ($rootCauses[$rootCauseId] ?? null) : null;
 
         return [
             'id' => $guide->getId(),
@@ -439,9 +448,7 @@ final class TroubleshootingGuideService
             'error_codes' => $guide->getErrorCodes(),
             'steps' => $guide->getSteps(),
             'recommended_spare_parts' => $parts,
-            'suggested_root_cause' => $this->projectRootCause(
-                $rootCauseId !== null ? ($rootCauseCache[$rootCauseId] ?? null) : null
-            ),
+            'suggested_root_cause' => $this->projectRootCause($rootCause),
         ];
     }
 

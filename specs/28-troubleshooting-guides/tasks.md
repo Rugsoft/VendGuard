@@ -186,7 +186,7 @@ flowchart LR
        - Registrar en `audit_log` bajo `entity_type = 'MACHINE_TROUBLESHOOTING_GUIDE'` las acciones `CREATE_TROUBLESHOOTING_GUIDE`, `UPDATE_TROUBLESHOOTING_GUIDE`, `ACTIVATE_TROUBLESHOOTING_GUIDE` o `DEACTIVATE_TROUBLESHOOTING_GUIDE` con `previous_state` y `new_state` completos (`Art. III.3`).
   - **Hecho cuando:** `php -l src/Application/Service/TroubleshootingGuideService.php`
 
-- [ ] **T-GUIDE-09 · Crear suite de integración de servicio (`TroubleshootingGuideServiceIntegrationTest.php`)**
+- [x] **T-GUIDE-09 · Crear suite de integración de servicio (`TroubleshootingGuideServiceIntegrationTest.php`)**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-GUIDE-08`
   - **Archivos exactos a crear o modificar:**
