@@ -32,8 +32,9 @@ function ensureStyle() {
 /**
  * Monta el widget de chat de n8n con el token verificado del usuario.
  * @param {string} token - Token JWT firmado con HS256
+ * @param {Object|null} user - Datos del usuario autenticado { id, name, ... }
  */
-export async function mountChatWidget(token) {
+export async function mountChatWidget(token, user = null) {
   if (!token || typeof window === 'undefined' || typeof document === 'undefined') {
     return;
   }
@@ -50,14 +51,44 @@ export async function mountChatWidget(token) {
 
   ensureStyle();
 
+  // Obtener el nombre del usuario (del objeto user o decodificando el claim del JWT)
+  let userName = user?.name || '';
+  if (!userName && typeof token === 'string') {
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payloadStr = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
+        const payload = JSON.parse(payloadStr);
+        userName = payload?.name || '';
+      }
+    } catch (_) {}
+  }
+
+  const nombre = (userName || '').trim().split(' ')[0]; // solo el nombre de pila
+  const saludo = nombre
+    ? `¡Hola, ${nombre}! Soy tu asistente de Vendguard.`
+    : '¡Hola! Soy tu asistente de Vendguard.';
+
   try {
     const { createChat } = await import(BUNDLE_URL);
 
     createChat({
       webhookUrl: WEBHOOK_URL,
-      metadata: {
-        token: token
-      }
+      metadata: { token },
+      defaultLanguage: 'en',
+      initialMessages: [
+        saludo,
+        '¿En qué puedo ayudarte hoy?'
+      ],
+      i18n: {
+        en: {
+          title: 'Asistente Vendguard',
+          subtitle: 'Consulta incidencias, máquinas y técnicos',
+          footer: '',
+          getStarted: 'Nueva conversación',
+          inputPlaceholder: 'Escribe tu pregunta...',
+        },
+      },
     });
 
     isChatMounted = true;

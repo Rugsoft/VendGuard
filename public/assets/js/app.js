@@ -64,7 +64,7 @@ export const App = {
       immediate: true,
       handler(token) {
         if (token && this.user) {
-          mountChatWidget(token);
+          mountChatWidget(token, this.user);
         } else {
           unmountChatWidget();
         }
