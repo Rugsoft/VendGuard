@@ -36,11 +36,24 @@ class AppRouter
         // 1. Rutas de Diagnóstico y Health Check (T-01)
         // -----------------------------------------------------------------
         $healthHandler = function (Request $request): Response {
-            // Si la petición proviene de un navegador web (HTML), sirve el frontend SPA
-            $accept = (string)$request->getHeader('Accept');
+            // Negociación de contenido explícita. Un navegador envía `text/html`; un
+            // cliente genérico (`*/*`) que pide la raíz espera el documento, no el health
+            // JSON. El JSON de la raíz exige `Accept: application/json`, mientras que la
+            // sonda `/api/health` conserva su respuesta JSON ante `*/*`. `Vary: Accept`
+            // evita que una caché compartida sirva una representación por otra.
+            $accept = strtolower((string)$request->getHeader('Accept'));
+            $trimmedAccept = trim($accept);
+            $wantsJson = str_contains($accept, 'application/json');
+            $isWildcard = $trimmedAccept === '' || $trimmedAccept === '*/*';
+            $prefersHtml = str_contains($accept, 'text/html')
+                || ($request->getPath() === '/' && $isWildcard && !$wantsJson);
             $htmlPath = dirname(__DIR__, 3) . '/public/index.html';
-            if (str_contains($accept, 'text/html') && file_exists($htmlPath)) {
-                return new Response((string)file_get_contents($htmlPath), 200, ['Content-Type' => 'text/html; charset=UTF-8']);
+
+            if ($prefersHtml && file_exists($htmlPath)) {
+                return new Response((string)file_get_contents($htmlPath), 200, [
+                    'Content-Type' => 'text/html; charset=UTF-8',
+                    'Vary' => 'Accept',
+                ]);
             }
 
             return Response::json([
@@ -53,7 +66,7 @@ class AppRouter
                     'php_version' => PHP_VERSION,
                     'sapi' => PHP_SAPI,
                 ],
-            ]);
+            ], 200, null, ['Vary' => 'Accept']);
         };
 
         $router->get('/', $healthHandler);

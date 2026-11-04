@@ -124,6 +124,7 @@ for (const icon of manifest?.icons ?? []) {
 console.log('\n--- 2. Service Worker: App Shell completo y Network-Only para /api/ (RF-01.2, Art. V.4) ---');
 
 const swSource = readPublic('/sw.js');
+const indexHtmlSource = readPublic('/index.html');
 const shellMatch = /const APP_SHELL_ASSETS = \[([\s\S]*?)\n\];/.exec(swSource);
 const shellAssets = shellMatch
   ? [...shellMatch[1].matchAll(/'([^']+)'/g)].map((match) => match[1])
@@ -149,6 +150,18 @@ assert(
   shellSet.has('/assets/js/utils/OfflineStorage.js')
     && shellSet.has('/assets/js/utils/OfflineSyncManager.js')
     && shellSet.has('/assets/js/components/OfflineSyncTrayModal.js')
+);
+
+assert(
+  '2.2c El manifiesto se sirve con su MIME estándar, no como binario',
+  /'webmanifest'\s*=>\s*'application\/manifest\+json; charset=UTF-8'/.test(readPublic('/index.php'))
+);
+assert(
+  '2.2d Un SW nuevo recarga una sola vez para no quedarse con el shell anterior (RF-01.3)',
+  /controllerchange/.test(indexHtmlSource)
+    && /hadServiceWorkerController/.test(indexHtmlSource)
+    && /window\.location\.reload\(\)/.test(indexHtmlSource)
+    && Number(/vendguard-app-shell-v(\d+)/.exec(swSource)?.[1] ?? 0) >= 7
 );
 
 const missingAssets = shellAssets.filter((asset) => {

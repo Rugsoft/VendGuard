@@ -106,7 +106,8 @@ Se enlaza en [`public/index.html`](../../public/index.html) mediante `<link rel=
 
 ### 2.2. Contrato del Service Worker (`public/sw.js`)
 
-* **Nombre de caché versionado:** `CACHE_NAME = 'vendguard-app-shell-v2'`.
+* **Nombre de caché versionado:** `CACHE_NAME = 'vendguard-app-shell-v7'`.
+* **Actualización transparente (RF-01.3):** cuando un SW nuevo se activa (`skipWaiting()` + `clients.claim()`), la página recarga una vez si ya existía un controlador. Así la primera carga tras un despliegue no se queda con los módulos que sirvió el SW anterior; en la primera instalación no hay recarga.
 * **Activos precacheados en `install` (`APP_SHELL_ASSETS`):**
   * `/index.html`, `/manifest.webmanifest`
   * La raíz `/` **no** se precachea: su respuesta depende de la negociación de contenido y el health JSON puede contaminar la caché del App Shell. La navegación sin red se resuelve explícitamente contra `/index.html`.
@@ -118,6 +119,7 @@ Se enlaza en [`public/index.html`](../../public/index.html) mediante `<link rel=
   2. **Activos del mismo origen (`GET` de documentos, scripts, estilos, iconos):** Estrategia **`Stale-While-Revalidate`**:
      * Si existe en `CacheStorage`, se responde de inmediato (< 50 ms, cumpliendo holgadamente los `< 2,0 s` de `RNF-01`) y en segundo plano se actualiza la entrada si hay red.
      * Si es una navegación HTML (`request.mode === 'navigate'`) y no hay red, se devuelve `/index.html` desde la caché.
+  3. **Negociación de contenido de la raíz (`/`):** `Accept: text/html` o `*/*` sirven `index.html`; `Accept: application/json` sirve el health JSON. `/api/health` mantiene JSON ante `*/*` y ambas representaciones declaran `Vary: Accept`.
 
 ---
 
