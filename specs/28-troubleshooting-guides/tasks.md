@@ -262,7 +262,7 @@ flowchart LR
     4. Integrar `<troubleshooting-guide-accordion>` en la parada activa de `TechnicianRouteView.js` y en `CoordinatorIncidentDetailModal.js`, conectando la aplicación en 1 toque de la causa raíz sugerida (activando `showAllRootCauses = true` si la causa pertenece a otra categoría según `QA 4`, y dejando intactos `diagnosis` y `action_taken` según `Art. V.1`).
   - **Hecho cuando:** `node --check public/assets/js/api.js && node --check public/assets/js/services/OfflineStorageService.js && node --check public/assets/js/components/TroubleshootingGuideAccordion.js && node --check public/assets/js/components/TechnicianRouteView.js && node --check public/assets/js/components/CoordinatorIncidentDetailModal.js`
 
-- [ ] **T-GUIDE-13 · Construir `CoordinatorTroubleshootingGuidesTab.js`, integrarlo en `CoordinatorSparePartsView.js`, estilizar en `styles.css` y actualizar `public/sw.js`**
+- [x] **T-GUIDE-13 · Construir `CoordinatorTroubleshootingGuidesTab.js`, integrarlo en `CoordinatorSparePartsView.js`, estilizar en `styles.css` y actualizar `public/sw.js`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-GUIDE-12`
   - **Archivos exactos a crear o modificar:**
