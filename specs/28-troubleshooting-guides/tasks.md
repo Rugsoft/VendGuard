@@ -92,7 +92,7 @@ flowchart LR
 
 ## Fase 2: Modelos de Dominio, Validador Puro y DTOs
 
-- [ ] **T-GUIDE-04 · Implementar entidad `MachineTroubleshootingGuide`, `TroubleshootingGuideValidator` y `TroubleshootingGuideValidationException`**
+- [x] **T-GUIDE-04 · Implementar entidad `MachineTroubleshootingGuide`, `TroubleshootingGuideValidator` y `TroubleshootingGuideValidationException`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-GUIDE-03`
   - **Archivos exactos a crear o modificar:**
