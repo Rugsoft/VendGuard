@@ -83,6 +83,14 @@ export const TroubleshootingGuideAccordion = {
       type: Boolean,
       default: false
     },
+    /**
+     * Cruce de stock con la furgoneta. Coordinación no tiene furgoneta: el
+     * modal lo desactiva para no atribuirle un saldo que no le pertenece.
+     */
+    showStock: {
+      type: Boolean,
+      default: true
+    },
     isLoading: {
       type: Boolean,
       default: false
@@ -172,7 +180,9 @@ export const TroubleshootingGuideAccordion = {
 
     /**
      * El aviso sanitario se enciende por máquina perecedera, por categoría de
-     * frío solicitada o porque alguna guía del modelo sea de cadena de frío.
+     * frío solicitada o porque la guía visible sea de cadena de frío. Una guía
+     * de frío del mismo modelo que no se está consultando no debe teñir la
+     * pantalla de una avería de pago (EARS 01.3).
      */
     showSanitaryBanner() {
       if (this.sanitaryWarning) {
@@ -185,7 +195,7 @@ export const TroubleshootingGuideAccordion = {
         return true;
       }
 
-      return this.orderedGuides.some(
+      return this.visibleGuides.some(
         (guide) => guide?.sanitary_cold_warning === true
           || normalizeCategory(guide?.breakdown_type) === 'TEMPERATURE_COLD'
       );
@@ -309,10 +319,17 @@ export const TroubleshootingGuideAccordion = {
       this.searchQuery = '';
     },
 
-    /** Etiqueta del semáforo de furgoneta, sin importes (`Art. V.4`). */
+    /**
+     * Etiqueta del semáforo de furgoneta, sin importes (`Art. V.4`). Devuelve
+     * cadena vacía cuando el rol no cruza stock (Coordinación), salvo que la
+     * pieza esté inactiva: esa marca sigue siendo informativa (`C2`).
+     */
     stockLabel(part) {
       if (!part || part.is_active === false) {
         return 'Inactiva en catálogo';
+      }
+      if (!this.showStock) {
+        return '';
       }
 
       const quantity = Number(part.van_stock_quantity ?? 0);
@@ -321,10 +338,13 @@ export const TroubleshootingGuideAccordion = {
         : '⚠️ Sin stock en tu furgoneta';
     },
 
-    /** Tono del chip de stock: verde, ámbar o rojo. */
+    /** Tono del chip de stock: verde, ámbar, rojo o neutro sin cruce. */
     stockClass(part) {
       if (!part || part.is_active === false) {
         return 'vg-chip-danger';
+      }
+      if (!this.showStock) {
+        return '';
       }
 
       return Number(part.van_stock_quantity ?? 0) > 0 ? 'vg-chip-success' : 'vg-chip-warning';
@@ -503,7 +523,7 @@ export const TroubleshootingGuideAccordion = {
                 :class="stockClass(part)"
                 :title="part.name"
               >
-                {{ part.part_code }} · {{ stockLabel(part) }}
+                {{ part.part_code }}{{ stockLabel(part) ? ' · ' + stockLabel(part) : '' }}
               </span>
             </div>
           </div>

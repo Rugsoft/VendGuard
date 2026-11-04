@@ -61,6 +61,7 @@ function makeContext(overrides = {}) {
     breakdownType: '',
     machineType: '',
     sanitaryWarning: false,
+    showStock: true,
     selectedGuideId: null,
     showAllGuides: false,
     searchQuery: '',
@@ -90,11 +91,23 @@ function makeContext(overrides = {}) {
     return methods.stepKey.call(this, guide, index);
   };
 
-  // `hasExactCategoryMatch` y `visibleGuides` leen la colección ordenada.
+  // `hasExactCategoryMatch`, `visibleGuides` y el banner leen la colección.
   Object.defineProperty(context, 'orderedGuides', {
     configurable: true,
     get() {
       return computed.orderedGuides.call(this);
+    }
+  });
+  Object.defineProperty(context, 'selectedGuide', {
+    configurable: true,
+    get() {
+      return computed.selectedGuide.call(this);
+    }
+  });
+  Object.defineProperty(context, 'visibleGuides', {
+    configurable: true,
+    get() {
+      return computed.visibleGuides.call(this);
     }
   });
 
@@ -213,32 +226,46 @@ assert(
 console.log('\n--- 3. Semáforo de stock sin importes (02.2 / Art. V.4) ---');
 
 const [inStock, emptyStock, negativeStock, inactivePart] = cold.recommended_spare_parts;
+const technicianStock = makeContext();
 assert(
   '3.1 Un saldo positivo anuncia las unidades disponibles',
-  methods.stockLabel(inStock) === '✅ En tu furgoneta: 4 uds.'
+  methods.stockLabel.call(technicianStock, inStock) === '✅ En tu furgoneta: 4 uds.'
 );
 assert(
   '3.2 El saldo cero se declara como falta de stock',
-  methods.stockLabel(emptyStock) === '⚠️ Sin stock en tu furgoneta'
+  methods.stockLabel.call(technicianStock, emptyStock) === '⚠️ Sin stock en tu furgoneta'
 );
 assert(
   '3.3 El saldo negativo también se declara como falta de stock',
-  methods.stockLabel(negativeStock) === '⚠️ Sin stock en tu furgoneta'
+  methods.stockLabel.call(technicianStock, negativeStock) === '⚠️ Sin stock en tu furgoneta'
 );
 assert(
   '3.4 Una pieza desactivada se identifica como inactiva',
-  methods.stockLabel(inactivePart) === 'Inactiva en catálogo'
+  methods.stockLabel.call(technicianStock, inactivePart) === 'Inactiva en catálogo'
 );
 assert(
   '3.5 Ninguna etiqueta expone importes monetarios',
   [inStock, emptyStock, negativeStock, inactivePart]
-    .every((part) => !/[€$]|EUR|USD/.test(methods.stockLabel(part)))
+    .every((part) => !/[€$]|EUR|USD/.test(methods.stockLabel.call(technicianStock, part)))
 );
 assert(
   '3.6 Los tonos distinguen disponible, sin stock e inactiva',
-  methods.stockClass(inStock) === 'vg-chip-success'
-    && methods.stockClass(emptyStock) === 'vg-chip-warning'
-    && methods.stockClass(inactivePart) === 'vg-chip-danger'
+  methods.stockClass.call(technicianStock, inStock) === 'vg-chip-success'
+    && methods.stockClass.call(technicianStock, emptyStock) === 'vg-chip-warning'
+    && methods.stockClass.call(technicianStock, inactivePart) === 'vg-chip-danger'
+);
+
+const coordinatorStock = makeContext({ showStock: false });
+assert(
+  '3.7 Coordinación no ve un saldo de furgoneta que no le pertenece',
+  methods.stockLabel.call(coordinatorStock, inStock) === ''
+    && methods.stockLabel.call(coordinatorStock, emptyStock) === ''
+    && methods.stockClass.call(coordinatorStock, inStock) === ''
+);
+assert(
+  '3.8 La pieza inactiva sigue marcada aunque el rol no cruce stock',
+  methods.stockLabel.call(coordinatorStock, inactivePart) === 'Inactiva en catálogo'
+    && methods.stockClass.call(coordinatorStock, inactivePart) === 'vg-chip-danger'
 );
 
 // =====================================================================
@@ -363,6 +390,22 @@ assert(
   '7.6 La plantilla lo declara como alerta con su testid y texto de frío',
   componentSource.includes('data-testid="guide-sanitary-warning"')
     && componentSource.includes('Alerta sanitaria prioritaria')
+);
+assert(
+  '7.7 Una guía de frío oculta no tiñe una avería de pago del mismo modelo',
+  computed.showSanitaryBanner.call(makeContext({
+    guides: [cold, payment],
+    breakdownType: 'PAYMENT_SYSTEM',
+    machineType: 'SNACKS'
+  })) === false
+);
+assert(
+  '7.8 Al consultar la guía de frío del modelo mixto el banner se enciende',
+  computed.showSanitaryBanner.call(makeContext({
+    guides: [cold, payment],
+    breakdownType: 'TEMPERATURE_COLD',
+    machineType: 'SNACKS'
+  })) === true
 );
 
 console.log('\n======================================================================');

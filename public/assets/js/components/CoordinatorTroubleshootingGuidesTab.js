@@ -150,18 +150,18 @@ export const CoordinatorTroubleshootingGuidesTab = {
     /** Modelos seleccionables: parque real + modelos ya gobernados por el catálogo. */
     modelOptions() {
       const unique = new Map();
-      for (const model of this.models) {
-        const label = typeof model === 'string' ? model : (model?.machine_model || model?.model || '');
-        const trimmed = String(label).trim();
-        if (trimmed !== '') {
-          unique.set(trimmed.toLowerCase(), trimmed);
+      const add = (value) => {
+        const label = String(value ?? '').trim().replace(/\s+/g, ' ');
+        if (label !== '') {
+          unique.set(label.toLowerCase(), label);
         }
+      };
+
+      for (const model of this.models) {
+        add(typeof model === 'string' ? model : (model?.machine_model || model?.model || ''));
       }
       for (const guide of this.guides) {
-        const trimmed = String(guide?.machine_model ?? '').trim();
-        if (trimmed !== '') {
-          unique.set(trimmed.toLowerCase(), trimmed);
-        }
+        add(guide?.machine_model);
       }
 
       return [...unique.values()].sort((left, right) => left.localeCompare(right));
@@ -185,10 +185,12 @@ export const CoordinatorTroubleshootingGuidesTab = {
 
     filteredGuides() {
       const query = this.searchQuery.trim().toLowerCase();
+      const normalizeModel = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+      const selectedModelKey = normalizeModel(this.modelFilter);
 
       return this.guides.filter((guide) => {
         if (this.modelFilter !== 'ALL'
-          && String(guide.machine_model_key ?? '').toLowerCase() !== this.modelFilter.toLowerCase()) {
+          && normalizeModel(guide.machine_model_key || guide.machine_model) !== selectedModelKey) {
           return false;
         }
         if (this.categoryFilter !== 'ALL' && guide.breakdown_type !== this.categoryFilter) {
@@ -204,7 +206,12 @@ export const CoordinatorTroubleshootingGuidesTab = {
           const haystack = [
             guide.machine_model,
             guide.title,
-            ...(Array.isArray(guide.error_codes) ? guide.error_codes.map((entry) => entry.code) : [])
+            ...(Array.isArray(guide.error_codes)
+              ? guide.error_codes.flatMap((entry) => [entry.code, entry.meaning])
+              : []),
+            ...(Array.isArray(guide.steps)
+              ? guide.steps.flatMap((step) => [step.title, step.instruction])
+              : [])
           ].join(' ').toLowerCase();
           if (!haystack.includes(query)) {
             return false;
@@ -605,7 +612,7 @@ export const CoordinatorTroubleshootingGuidesTab = {
               v-model="searchQuery"
               type="search"
               class="vg-input"
-              placeholder="Modelo, título o código de error…"
+              placeholder="Modelo, título, código o paso…"
               data-testid="guide-search"
             >
           </label>

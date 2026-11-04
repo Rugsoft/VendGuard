@@ -176,9 +176,11 @@ final class TroubleshootingGuideService
             $payload[] = $this->enrichGuide($guide, $vanStock, $isPerishable, $rootCauses);
         }
 
+        // El banner de máquina sólo declara riesgo si la máquina es perecedera o
+        // la categoría consultada es de frío. La guía concreta de frío conserva
+        // su `sanitary_cold_warning` y la superficie decide si está visible.
         $warningForMachine = $isPerishable
-            || $requestedCategory === IncidentCategory::TEMPERATURE_COLD
-            || $this->containsColdWarningGuide($orderedGuides);
+            || $requestedCategory === IncidentCategory::TEMPERATURE_COLD;
 
         return [
             'machine_model' => $normalizedModel,
@@ -568,23 +570,6 @@ final class TroubleshootingGuideService
         }
 
         return $stock;
-    }
-
-    /**
-     * Una consulta sin categoría de frío sigue avisando si el modelo tiene alguna
-     * guía de cadena de frío entre sus activas (Art. II).
-     *
-     * @param list<MachineTroubleshootingGuide> $guides
-     */
-    private function containsColdWarningGuide(array $guides): bool
-    {
-        foreach ($guides as $guide) {
-            if ($guide->getBreakdownType() === IncidentCategory::TEMPERATURE_COLD) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     // ─────────────────────────────────────────────────────────────────────

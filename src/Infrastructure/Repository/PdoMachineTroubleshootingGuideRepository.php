@@ -160,7 +160,20 @@ final class PdoMachineTroubleshootingGuideRepository implements MachineTroublesh
         if ($search !== null && trim($search) !== '') {
             // `!` como escape: un `%` tecleado por Coordinación busca un porcentaje
             // y no «cualquier cosa».
-            $where[] = "(title ILIKE :search ESCAPE '!' OR machine_model ILIKE :search ESCAPE '!')";
+            $where[] = "(
+                title ILIKE :search ESCAPE '!'
+                OR machine_model ILIKE :search ESCAPE '!'
+                OR EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(error_codes_json) AS error_entry
+                    WHERE COALESCE(error_entry->>'code', '') ILIKE :search ESCAPE '!'
+                       OR COALESCE(error_entry->>'meaning', '') ILIKE :search ESCAPE '!'
+                )
+                OR EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(steps_json) AS step_entry
+                    WHERE COALESCE(step_entry->>'title', '') ILIKE :search ESCAPE '!'
+                       OR COALESCE(step_entry->>'instruction', '') ILIKE :search ESCAPE '!'
+                )
+            )";
             $params[':search'] = '%' . str_replace(
                 ['!', '%', '_'],
                 ['!!', '!%', '!_'],

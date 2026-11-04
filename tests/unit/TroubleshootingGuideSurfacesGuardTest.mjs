@@ -92,6 +92,10 @@ assert(
   !/\bthis\.(resolveDiagnosis|resolveAction|diagnosis|action_taken)\s*=/.test(coordinatorHandler)
     && !/\bthis\.(resolveDiagnosis|resolveAction|diagnosis|action_taken)\s*=/.test(technicianHandler)
 );
+assert(
+  '6.8 El detalle de Coordinación no atribuye stock de furgoneta',
+  /<TroubleshootingGuideAccordion[\s\S]{0,900}?:show-stock="false"/.test(coordinator)
+);
 
 // =====================================================================
 console.log('\n--- 7. Opacidad en Sede, QR y Albarán A4 (03.2 / Art. V.4) ---');

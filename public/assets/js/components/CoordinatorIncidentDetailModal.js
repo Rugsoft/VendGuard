@@ -1989,6 +1989,7 @@ export const CoordinatorIncidentDetailModal = {
                   :machine-type="machine.has_perishables ? 'PERISHABLE_FOOD' : (machine.machine_type || machine.type || '')"
                   :guides="troubleshootingGuides"
                   :sanitary-warning="troubleshootingGuidesWarning"
+                  :show-stock="false"
                   :is-loading="isLoadingTroubleshootingGuides"
                   :error-message="troubleshootingGuidesError"
                   @apply-root-cause="applyGuideRootCause"

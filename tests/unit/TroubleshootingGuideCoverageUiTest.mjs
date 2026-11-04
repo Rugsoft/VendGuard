@@ -174,6 +174,60 @@ assert(
     .every((name) => typeof computed[name] === 'function')
 );
 
+// =====================================================================
+console.log('\n--- 3. Búsqueda textual por título, código, significado y paso (05.1) ---');
+
+const searchableGuide = {
+  id: 20,
+  machine_model: 'Necta Korinto',
+  machine_model_key: 'necta korinto',
+  breakdown_type: 'PAYMENT_SYSTEM',
+  is_active: true,
+  title: 'Lector MDB sin respuesta',
+  error_codes: [{ code: 'MDB-02', meaning: 'Validador de monedas sin comunicación' }],
+  steps: [{ title: 'Comprobar el bus', instruction: 'Revisar el latiguillo del módulo de pago y su conector.' }]
+};
+const searchContext = makeContext({ guides: [searchableGuide] });
+
+searchContext.searchQuery = 'latiguillo';
+assert(
+  '3.1 Una palabra de la instrucción de un paso encuentra la guía',
+  computed.filteredGuides.call(searchContext).length === 1
+);
+searchContext.searchQuery = 'validador';
+assert(
+  '3.2 El significado de un código también forma parte del índice',
+  computed.filteredGuides.call(searchContext).length === 1
+);
+searchContext.searchQuery = 'mdb-02';
+assert(
+  '3.3 El código de error sigue encontrando la guía',
+  computed.filteredGuides.call(searchContext).length === 1
+);
+searchContext.searchQuery = 'sin coincidencias';
+assert(
+  '3.4 La búsqueda no produce falsos positivos',
+  computed.filteredGuides.call(searchContext).length === 0
+);
+
+console.log('\n--- 4. Filtro de modelo normalizado (C5) ---');
+
+const normalizedContext = makeContext({
+  guides: [searchableGuide],
+  modelFilter: '  NECTA   KORINTO  '
+});
+assert(
+  '4.1 Mayúsculas y espacios repetidos no rompen el filtro de modelo',
+  computed.filteredGuides.call(normalizedContext).length === 1
+);
+assert(
+  '4.2 El selector agrupa variantes de escritura del mismo modelo',
+  computed.modelOptions.call(makeContext({
+    guides: [searchableGuide],
+    models: ['Necta  Korinto', 'necta korinto']
+  })).length === 1
+);
+
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Exitosas: ${assertions - failures} | Fallidas: ${failures}`);
 

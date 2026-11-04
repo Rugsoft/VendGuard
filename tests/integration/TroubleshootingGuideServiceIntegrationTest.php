@@ -445,6 +445,26 @@ try {
         $coverage['total_active_guides'] . '/' . $coverage['total_guides']
     );
 
+    $stepSearchIds = array_column(
+        $service->listForCoordinator(['search' => 'interruptor general'])['guides'],
+        'id'
+    );
+    $assert(
+        'La búsqueda del catálogo entra en las instrucciones de los pasos',
+        in_array($paymentGuideId, array_map('intval', $stepSearchIds), true),
+        implode(',', $stepSearchIds)
+    );
+
+    $codeSearchIds = array_column(
+        $service->listForCoordinator(['search' => 'MDB-02'])['guides'],
+        'id'
+    );
+    $assert(
+        'La búsqueda del catálogo entra en los códigos de error',
+        in_array($paymentGuideId, array_map('intval', $codeSearchIds), true),
+        implode(',', $codeSearchIds)
+    );
+
     $filteredCoverage = $service->listForCoordinator([
         'machine_model' => 'Fas Perla',
         'breakdown_type' => 'PRODUCT_JAM',
