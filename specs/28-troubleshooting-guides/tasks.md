@@ -148,7 +148,7 @@ flowchart LR
        - `create(MachineTroubleshootingGuide $guide): MachineTroubleshootingGuide` y `update(MachineTroubleshootingGuide $guide): MachineTroubleshootingGuide`.
   - **Hecho cuando:** `php -l src/Core/Domain/Repository/MachineTroubleshootingGuideRepositoryInterface.php && php -l src/Infrastructure/Repository/PdoMachineTroubleshootingGuideRepository.php`
 
-- [ ] **T-GUIDE-07 · Integrar `troubleshooting_guides` en `PdoOfflineSyncMutationRepository`, `OfflineBootstrapSnapshotDto` y `OfflineSyncService`**
+- [x] **T-GUIDE-07 · Integrar `troubleshooting_guides` en `PdoOfflineSyncMutationRepository`, `OfflineBootstrapSnapshotDto` y `OfflineSyncService`**
   - **Tiempo estimado:** 20 min
   - **Dependencias previas:** `T-GUIDE-06`
   - **Archivos exactos a crear o modificar:**

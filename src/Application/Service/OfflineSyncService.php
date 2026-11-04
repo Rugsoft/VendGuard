@@ -189,6 +189,9 @@ final class OfflineSyncService
             rootCauseTaxonomy: is_array($snapshot['root_cause_taxonomy'] ?? null)
                 ? $snapshot['root_cause_taxonomy']
                 : [],
+            troubleshootingGuides: is_array($snapshot['troubleshooting_guides'] ?? null)
+                ? $snapshot['troubleshooting_guides']
+                : [],
         );
     }
 

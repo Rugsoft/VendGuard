@@ -77,6 +77,11 @@ final readonly class OfflineBootstrapSnapshotDto implements JsonSerializable
      * }> $rootCauseTaxonomy Catálogo activo que permite clasificar resoluciones
      *   en sótanos sin cobertura (Módulo 25, RF-03.2, EARS 03.2). Viaja sin
      *   importes ni costes (Art. V.4).
+     * @param list<array<string, mixed>> $troubleshootingGuides Catálogo activo de
+     *   guías de diagnóstico por modelo (Módulo 28, D3, RF-03.1): pasos, códigos
+     *   de error, repuestos recomendados cruzados con la furgoneta del técnico
+     *   —sin coste alguno— y causa raíz sugerida. Permite consultar la guía en un
+     *   sótano sin cobertura (Art. V.4).
      */
     public DateTimeImmutable $syncedAt;
 
@@ -90,7 +95,8 @@ final readonly class OfflineBootstrapSnapshotDto implements JsonSerializable
         public array $preventiveChecklistsByOrder,
         public array $sparePartsCatalogByMachine,
         public array $vanStock,
-        public array $rootCauseTaxonomy = []
+        public array $rootCauseTaxonomy = [],
+        public array $troubleshootingGuides = []
     ) {
         if ($technicianId <= 0) {
             throw new InvalidArgumentException('El paquete de ruta exige un técnico autenticado.');
@@ -134,6 +140,7 @@ final readonly class OfflineBootstrapSnapshotDto implements JsonSerializable
             'warn_after_seconds' => self::WARN_AFTER_SECONDS,
             'readonly_after_seconds' => self::READONLY_AFTER_SECONDS,
             'root_cause_taxonomy' => array_values($this->rootCauseTaxonomy),
+            'troubleshooting_guides' => array_values($this->troubleshootingGuides),
             'route' => [
                 'stops' => array_values($this->route['stops'] ?? []),
                 'enabled_locations' => array_values($this->route['enabled_locations'] ?? []),
