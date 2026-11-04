@@ -1,7 +1,7 @@
 # VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro**Documento:** `docs/features_pendientes.md`  
 **Fecha de Actualización:** Noviembre 2026
   
-**Estado del Proyecto:** batería global: 392 suites · 14.685 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
+**Estado del Proyecto:** batería global: 396 suites · 14.765 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---
@@ -224,7 +224,7 @@ Refinamiento del análisis de averías, economía circular de taller, asistencia
 * **Componentes Técnicos:**
   * Tabla `machine_troubleshooting_guides` (`id`, `machine_model`, `breakdown_type`, `title`, `error_codes_json`, `steps_markdown`, `recommended_spare_part_ids`, `updated_by`, `updated_at`).
   * Acordeón interactivo ligero **"📖 Guía Rápida de Modelo"** dentro de la tarjeta de parada activa en `TechnicianRouteView.js`, que muestra los códigos de error habituales del display, los 3–4 pasos de comprobación en orden de probabilidad y las referencias del catálogo recomendadas.
-  * CRUD de guías en el panel de Coordinación/Administración alimentado con semillas reales para los modelos del parque (*Necta Korinto*, *Fasel Fast 900*, *Jofemar Vision*, *Saeco Cristallo*).
+  * CRUD de guías en el panel de Coordinación/Administración alimentado con semillas reales para los modelos del parque (*Necta Korinto*, *Fas Fast 900*, *Jofemar Vision*, *Saeco Cristallo*).
 * **Valor para el Cliente:** Disminuye el MTTR en intervenciones realizadas por técnicos suplentes y reduce la tasa de reincidencia por diagnósticos incompletos.
 * **Complejidad:** Baja (1–1.5 días).
 

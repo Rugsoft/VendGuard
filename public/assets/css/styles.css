@@ -960,6 +960,17 @@
   color: var(--color-success-text);
 }
 
+.vg-guide-empty-inline {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-xs);
+  background-color: var(--color-surface-card);
+  color: var(--color-ink-muted);
+  font-size: var(--font-size-caption);
+  line-height: 1.4;
+}
+
 .vg-guides-tab__kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

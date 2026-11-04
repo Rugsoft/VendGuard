@@ -174,6 +174,9 @@ export const TechnicianRouteView = {
       // Módulo 28: guías de diagnóstico por parada, resueltas desde la copia
       // local (D3) y rellenadas al hidratar la ruta. La clave es el id de la avería.
       troubleshootingGuidesByIncident: {},
+      // Averías cuyo intento de resolución ya terminó, aunque no exista guía:
+      // permite declarar el vacío de EARS 01.2.3 sin parpadear durante la carga.
+      troubleshootingGuidesLoaded: {},
 
       // Interactive route map (RF-MAP-07, RF-MAP-08)
       showRouteMapModal: false,
@@ -1355,6 +1358,7 @@ export const TechnicianRouteView = {
     async loadTroubleshootingGuidesForRoute(snapshot = null) {
       const source = snapshot ?? this.offlineSnapshot;
       const resolved = {};
+      const loaded = {};
 
       for (const incident of this.incidents) {
         const model = String(incident?.machine?.model ?? incident?.machine_model ?? '').trim();
@@ -1373,8 +1377,10 @@ export const TechnicianRouteView = {
               category,
               machineType
             );
+            loaded[incident.id] = true;
           } else if (!this.isOfflineMode && !this.isBrowserOffline()) {
             resolved[incident.id] = await api.getTroubleshootingGuidesByModel(model, category, machineType);
+            loaded[incident.id] = true;
           }
         } catch (error) {
           // Silencio deliberado: la ruta sigue operativa sin guía.
@@ -1382,11 +1388,17 @@ export const TechnicianRouteView = {
       }
 
       this.troubleshootingGuidesByIncident = resolved;
+      this.troubleshootingGuidesLoaded = loaded;
     },
 
     /** Guías ya resueltas de una parada. */
     troubleshootingGuidesFor(incident) {
       return this.troubleshootingGuidesByIncident?.[incident?.id]?.guides ?? [];
+    },
+
+    /** ¿Terminó la resolución de guías de esta parada? (EARS 01.2.3) */
+    hasTroubleshootingGuidesLoaded(incident) {
+      return this.troubleshootingGuidesLoaded?.[incident?.id] === true;
     },
 
     /** Aviso sanitario a nivel de máquina que publica el servidor o la copia. */
@@ -4236,6 +4248,16 @@ export const TechnicianRouteView = {
               style="margin-bottom: 12px;"
               @apply-root-cause="applyGuideRootCause(incident, $event)"
             />
+
+            <!-- EARS 01.2.3: el modelo sin guía lo declara sin añadir acciones y
+                 sin bloquear la parada; sólo tras resolverse la búsqueda. -->
+            <p
+              v-if="(isAssigned(incident) || isInProgress(incident)) && hasTroubleshootingGuidesLoaded(incident) && troubleshootingGuidesFor(incident).length === 0"
+              class="vg-guide-empty-inline"
+              data-testid="guide-empty-inline"
+            >
+              Sin guía de diagnóstico para este modelo todavía.
+            </p>
 
             <!-- Action Buttons Bar (Large, Mobile Finger-Friendly Tap Targets >= 44px) -->
             <div style="border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 10px;">

@@ -297,3 +297,30 @@ flowchart LR
     2. Crear `specs/28-troubleshooting-guides/traceability-matrix.md` cruzando cada criterio EARS (`01.1` a `05.2`), `D1`–`D4`, `C1`–`C6` y `QA 1`–`QA 4` con su código de producción y sus pruebas automatizadas.
     3. Actualizar `docs/features_pendientes.md` marcando la **Feature 15 (`📖 Guías Rápidas de Diagnóstico por Modelo` · Módulo 28)** como **100 % Implementada**.
   - **Hecho cuando:** `composer test`
+
+---
+
+## Fase 8: Hardening de certificación (post-auditoría)
+
+- [x] **T-GUIDE-15 · Cerrar los 7 huecos declarados en la auditoría de la Spec 28**
+  - **Tiempo estimado:** 35 min
+  - **Dependencias previas:** `T-GUIDE-01` a `T-GUIDE-14`
+  - **Archivos exactos a crear o modificar:**
+    - Crear `tests/unit/FunctionalSpecMirrorParityTest.php`
+    - Crear `tests/unit/TroubleshootingGuideUiContractTest.mjs`
+    - Crear `tests/unit/TroubleshootingGuideAccordionTest.mjs`
+    - Crear `tests/unit/TroubleshootingGuideSurfacesGuardTest.mjs`
+    - Modificar `public/assets/js/views/TechnicianRouteView.js`
+    - Modificar `public/assets/css/styles.css`
+    - Modificar `specs/28-troubleshooting-guides/spec.md`
+    - Modificar `specs/functional/troubleshooting_guides_spec.md`
+    - Modificar `docs/features_pendientes.md`
+  - **Requisitos cubiertos:** `RF-01.2`, `RF-02.1`, `RF-02.3`, `RF-03.2`, `RNF-01`, `C6`, `QA 4`.
+  - **Detalle de implementación:**
+    1. Declarar el estado informativo `guide-empty-inline` en la parada de ruta tras resolverse la búsqueda de guías (`EARS 01.2.3`).
+    2. Probar en runtime el buscador, las casillas locales sin red y el semáforo de stock del acordeón.
+    3. Probar el handler de causa sugerida de ambas superficies (`QA 4`) y la opacidad de Sede/QR/A4 (`03.2`).
+    4. Vigilar la ausencia de `v-html`, `innerHTML` y Markdown (`RNF-01`).
+    5. Restaurar el espejo funcional completo y guardar su paridad de versión e identificadores.
+    6. Corregir la grafía del modelo real a «Fas Fast 900» sin tocar el Módulo 25.
+  - **Hecho cuando:** las cuatro suites nuevas ejecutan en verde y `php tests/run_all.php` mantiene la batería global al 100 %.
