@@ -3089,34 +3089,140 @@ WHERE irp.old_part_destination = 'TALLER'
 ON CONFLICT (incident_replaced_part_id, unit_index) DO NOTHING;
 
 -- =============================================================================
+-- ============================================================================
+-- MÓDULO 28 · GUÍAS RÁPIDAS DE DIAGNÓSTICO POR MODELO
+-- ============================================================================
+-- Bloque de convergencia del esquema de arranque. Declara exactamente lo mismo
+-- que la migración `024_machine_troubleshooting_guides.sql` para que una base
+-- creada desde cero y una base migrada converjan sin diferencias:
+--   1. El valor `MACHINE_TROUBLESHOOTING_GUIDE` en el catálogo de auditoría.
+--   2. La Tabla 39 `machine_troubleshooting_guides` (14 columnas) con sus tres
+--      claves foráneas `ON DELETE RESTRICT`, su clave única por modelo y
+--      categoría y sus cinco `CHECK`.
+--   3. Los tres índices de lectura del conmutador y del catálogo.
+--   4. La función `enforce_troubleshooting_guides_immutability()` y los tres
+--      disparadores constitucionales (Art. III.1, Art. III.3, C1).
+-- ----------------------------------------------------------------------------
+
+ALTER TYPE audit_entity_type ADD VALUE IF NOT EXISTS 'MACHINE_TROUBLESHOOTING_GUIDE';
+
+CREATE TABLE IF NOT EXISTS machine_troubleshooting_guides (
+    id                          BIGINT GENERATED ALWAYS AS IDENTITY,
+    machine_model               VARCHAR(100) NOT NULL,
+    machine_model_key           VARCHAR(100) NOT NULL,
+    breakdown_type              incident_category NOT NULL,
+    title                       VARCHAR(150) NOT NULL,
+    error_codes_json            JSONB NOT NULL DEFAULT '[]'::jsonb,
+    steps_json                  JSONB NOT NULL,
+    recommended_spare_part_ids  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    suggested_root_cause_id     BIGINT,
+    is_active                   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by                  BIGINT,
+    updated_by                  BIGINT,
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_machine_troubleshooting_guides PRIMARY KEY (id),
+    CONSTRAINT uq_troubleshooting_guides_model_category UNIQUE (machine_model_key, breakdown_type),
+    CONSTRAINT fk_troubleshooting_guides_root_cause FOREIGN KEY (suggested_root_cause_id)
+        REFERENCES root_causes (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_troubleshooting_guides_created_by FOREIGN KEY (created_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_troubleshooting_guides_updated_by FOREIGN KEY (updated_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+
+    CONSTRAINT chk_troubleshooting_guides_model_not_empty CHECK (
+        char_length(btrim(machine_model)) BETWEEN 2 AND 100
+        AND char_length(btrim(machine_model_key)) BETWEEN 2 AND 100
+        AND machine_model_key = lower(btrim(machine_model_key))
+    ),
+    CONSTRAINT chk_troubleshooting_guides_title_len CHECK (
+        char_length(btrim(title)) BETWEEN 5 AND 150
+    ),
+    CONSTRAINT chk_troubleshooting_guides_error_codes_bounds CHECK (
+        jsonb_typeof(error_codes_json) = 'array'
+        AND jsonb_array_length(error_codes_json) BETWEEN 0 AND 20
+    ),
+    CONSTRAINT chk_troubleshooting_guides_steps_bounds CHECK (
+        jsonb_typeof(steps_json) = 'array'
+        AND jsonb_array_length(steps_json) BETWEEN 2 AND 10
+    ),
+    CONSTRAINT chk_troubleshooting_guides_spare_parts_bounds CHECK (
+        jsonb_typeof(recommended_spare_part_ids) = 'array'
+        AND jsonb_array_length(recommended_spare_part_ids) BETWEEN 0 AND 10
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_troubleshooting_guides_model_active
+    ON machine_troubleshooting_guides (machine_model_key, is_active, breakdown_type);
+CREATE INDEX IF NOT EXISTS idx_troubleshooting_guides_category_active
+    ON machine_troubleshooting_guides (breakdown_type, is_active);
+CREATE INDEX IF NOT EXISTS idx_troubleshooting_guides_root_cause
+    ON machine_troubleshooting_guides (suggested_root_cause_id)
+    WHERE suggested_root_cause_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION enforce_troubleshooting_guides_immutability()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $fn$
+BEGIN
+    IF OLD.machine_model_key IS DISTINCT FROM NEW.machine_model_key
+       OR OLD.machine_model IS DISTINCT FROM NEW.machine_model
+       OR OLD.breakdown_type IS DISTINCT FROM NEW.breakdown_type THEN
+        RAISE EXCEPTION 'INMUTABILIDAD_VIOLADA (C1): El modelo de máquina y la categoría de avería de una guía de diagnóstico son inmutables tras su creación.'
+            USING ERRCODE = '45000';
+    END IF;
+    RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS trg_no_delete_machine_troubleshooting_guides ON machine_troubleshooting_guides;
+CREATE TRIGGER trg_no_delete_machine_troubleshooting_guides
+    BEFORE DELETE ON machine_troubleshooting_guides
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+DROP TRIGGER IF EXISTS trg_touch_machine_troubleshooting_guides ON machine_troubleshooting_guides;
+CREATE TRIGGER trg_touch_machine_troubleshooting_guides
+    BEFORE UPDATE ON machine_troubleshooting_guides
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_immutable_machine_troubleshooting_guides ON machine_troubleshooting_guides;
+CREATE TRIGGER trg_immutable_machine_troubleshooting_guides
+    BEFORE UPDATE ON machine_troubleshooting_guides
+    FOR EACH ROW EXECUTE FUNCTION enforce_troubleshooting_guides_immutability();
+
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 38 tablas (las 38 del contrato de correspondencia) · 34 tipos del dominio en sus
--- 38 columnas `ENUM` · 6 funciones de blindaje: `prevent_hard_delete()`,
+-- 39 tablas (las 39 del contrato de correspondencia) · 34 tipos del dominio en sus
+-- 39 columnas `ENUM` · 7 funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
 -- `prevent_satisfaction_survey_rewrite()`, `prevent_service_sheet_update()`
 -- (las tres últimas de bloqueo de `UPDATE` comparten forma) y
--- `enforce_incident_assignments_immutability()` (Módulo 26)
--- 65 disparadores: 38 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 21
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 6 `BEFORE UPDATE` de
+-- `enforce_incident_assignments_immutability()` (Módulo 26) y
+-- `enforce_troubleshooting_guides_immutability()` (Módulo 28)
+-- 68 disparadores: 39 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 22
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 7 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
 -- `trg_no_update_technician_shift_logs`, `trg_immutable_root_causes`,
--- `trg_immutable_standard_solutions` y `trg_immutable_incident_assignments`)
--- 62 restricciones nombradas: 38 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 24 únicas
--- 63 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- `trg_immutable_standard_solutions`, `trg_immutable_incident_assignments` y
+-- `trg_immutable_machine_troubleshooting_guides`)
+-- 64 restricciones nombradas: 39 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 25 únicas
+-- 68 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
 -- en la bitácora), las 12 del Módulo 23 (5 en órdenes y 7 en líneas) y las 4 del
 -- Módulo 24 (formato del identificador, tipo de parada, operación y resultado) y
 -- las 2 del Módulo 26 (snapshots no vacíos y coherencia de cierre del tramo) y
 -- las 5 del Módulo 27 (desglose unitario, costes no negativos, longitud de notas de
--- recepción, longitud del dictamen y coherencia terminal del ciclo de taller)
--- · 86 claves foráneas con las reglas declaradas en el contrato §2.4
--- 96 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- recepción, longitud del dictamen y coherencia terminal del ciclo de taller) y
+-- las 5 del Módulo 28 (modelo no vacío, longitud del título, cotas de códigos de
+-- error, de pasos y de repuestos recomendados)
+-- · 89 claves foráneas con las reglas declaradas en el contrato §2.4
+-- 99 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
 -- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2), el Módulo 23 (5) y el
--- Módulo 24 (2), el Módulo 26 (3) y el Módulo 27 (6)— y nueve índices únicos parciales:
+-- Módulo 24 (2), el Módulo 26 (3), el Módulo 27 (6) y el Módulo 28 (3)— y nueve índices únicos parciales:
 -- `uq_incident_assignments_active_custody` (M26, Art. V.3), `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
 -- `uq_users_telegram_chat_id` (M16), `uq_zone_postal_codes_live` (M17),

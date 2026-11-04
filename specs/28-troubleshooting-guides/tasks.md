@@ -2,7 +2,7 @@
 
 **Módulo:** `28-troubleshooting-guides`  
 **Versión:** 1.0 (Alineado con `spec.md` v2.0, `troubleshooting_guides_contracts.md` v1.0 y `plan.md` v2.0)  
-**Estado:** Pendiente de Ejecución (Puerta SDD: Aprobación de `tasks.md` antes de escribir código)  
+**Estado:** Aprobado por el Product Owner el 2026-11-04 · Puerta SDD cerrada · Listo para Ejecución (Fase 3: tests y código)  
 **Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema  
 **Ley Suprema:** [`constitution.md`](../../constitution.md) y [`AGENTS.md`](../../AGENTS.md)
 
@@ -34,7 +34,7 @@ flowchart LR
 
 ## Fase 1: Esquema de Base de Datos PostgreSQL / Supabase y Guardas de Esquema
 
-- [ ] **T-GUIDE-01 · Crear migración incremental `024_machine_troubleshooting_guides.sql` y converger `database/supabase_init.sql`**
+- [x] **T-GUIDE-01 · Crear migración incremental `024_machine_troubleshooting_guides.sql` y converger `database/supabase_init.sql`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** Ninguna
   - **Archivos exactos a crear o modificar:**
