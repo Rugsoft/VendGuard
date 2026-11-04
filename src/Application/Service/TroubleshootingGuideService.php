@@ -112,13 +112,19 @@ final class TroubleshootingGuideService
      *     guides: list<array<string, mixed>>
      * }
      *
+     * La tipología sanitaria se resuelve de forma autoritativa contra `machines`:
+     * primero por `machine_id` y, si no llega, por el modelo normalizado. El
+     * `machine_type` de la query queda sólo como compatibilidad para modelos que
+     * no existan en el parque; nunca puede apagar el aviso de una máquina real.
+     *
      * @throws TroubleshootingGuideValidationException Si la categoría solicitada no existe.
      */
     public function getGuidesForModel(
         string $machineModel,
         ?string $breakdownType,
         ?string $machineType,
-        ?int $technicianId
+        ?int $technicianId,
+        ?int $machineId = null
     ): array {
         $normalizedModel = MachineTroubleshootingGuide::normalizeModelName($machineModel);
         if ($normalizedModel === '') {
@@ -127,8 +133,11 @@ final class TroubleshootingGuideService
 
         $modelKey = MachineTroubleshootingGuide::normalizeModelKey($normalizedModel);
         $requestedCategory = $this->parseRequestedCategory($breakdownType);
-        $isPerishable = $machineType !== null
-            && strtoupper(trim($machineType)) === self::PERISHABLE_MACHINE_TYPE;
+        $clientMachineType = $machineType !== null
+            ? strtoupper(trim($machineType))
+            : null;
+        $authoritativeMachineType = $this->resolveAuthoritativeMachineType($modelKey, $machineId);
+        $isPerishable = ($authoritativeMachineType ?? $clientMachineType) === self::PERISHABLE_MACHINE_TYPE;
 
         $guides = $this->guideRepository->findActiveByModelKey($modelKey);
 
@@ -481,6 +490,58 @@ final class TroubleshootingGuideService
             'is_active' => true,
             'default_solution' => $defaultPayload,
         ];
+    }
+
+    /**
+     * Tipología autoritativa de la máquina de la incidencia.
+     *
+     * `machine_id` manda cuando pertenece al modelo solicitado. Si no llega, se
+     * consultan las máquinas activas de ese modelo normalizado; una sola máquina
+     * perecedera basta para encender la salvaguarda. Sin fila en el parque no se
+     * inventa tipología y se conserva el `machine_type` heredado del cliente.
+     */
+    private function resolveAuthoritativeMachineType(string $modelKey, ?int $machineId): ?string
+    {
+        if ($machineId !== null && $machineId > 0) {
+            $stmt = $this->pdo->prepare(
+                'SELECT model, machine_type
+                   FROM machines
+                  WHERE id = :id AND deleted_at IS NULL
+                  LIMIT 1'
+            );
+            $stmt->execute([':id' => $machineId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row !== false
+                && MachineTroubleshootingGuide::normalizeModelKey((string)($row['model'] ?? '')) === $modelKey
+            ) {
+                $type = strtoupper(trim((string)($row['machine_type'] ?? '')));
+                if ($type !== '') {
+                    return $type;
+                }
+            }
+        }
+
+        $stmt = $this->pdo->prepare(
+            "SELECT machine_type
+               FROM machines
+              WHERE deleted_at IS NULL
+                AND lower(regexp_replace(btrim(model), '[[:space:]]+', ' ', 'g')) = :model_key"
+        );
+        $stmt->execute([':model_key' => $modelKey]);
+
+        $types = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $rawType) {
+            $type = strtoupper(trim((string)$rawType));
+            if ($type !== '') {
+                $types[$type] = true;
+            }
+        }
+
+        if (isset($types[self::PERISHABLE_MACHINE_TYPE])) {
+            return self::PERISHABLE_MACHINE_TYPE;
+        }
+
+        return $types === [] ? null : (string)array_key_first($types);
     }
 
     /**

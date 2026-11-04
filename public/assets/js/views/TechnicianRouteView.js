@@ -1379,7 +1379,12 @@ export const TechnicianRouteView = {
             );
             loaded[incident.id] = true;
           } else if (!this.isOfflineMode && !this.isBrowserOffline()) {
-            resolved[incident.id] = await api.getTroubleshootingGuidesByModel(model, category, machineType);
+            resolved[incident.id] = await api.getTroubleshootingGuidesByModel(
+              model,
+              category,
+              machineType,
+              incident?.machine?.id ?? incident?.machine_id ?? null
+            );
             loaded[incident.id] = true;
           }
         } catch (error) {

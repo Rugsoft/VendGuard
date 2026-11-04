@@ -1331,7 +1331,7 @@ export class ApiClient {
   /**
    * 3c. Troubleshooting Guides (Módulo 28, RF-01, RF-04, RF-05)
    */
-  getTroubleshootingGuidesByModel(machineModel, breakdownType = null, machineType = null) {
+  getTroubleshootingGuidesByModel(machineModel, breakdownType = null, machineType = null, machineId = null) {
     const params = new URLSearchParams();
     params.set('machine_model', String(machineModel ?? ''));
     if (breakdownType) {
@@ -1339,6 +1339,9 @@ export class ApiClient {
     }
     if (machineType) {
       params.set('machine_type', String(machineType));
+    }
+    if (machineId !== null && machineId !== undefined && String(machineId).trim() !== '') {
+      params.set('machine_id', String(machineId).trim());
     }
 
     return this.get(`/troubleshooting-guides/by-model?${params.toString()}`);

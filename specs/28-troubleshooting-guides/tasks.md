@@ -173,10 +173,10 @@ flowchart LR
     - Crear `src/Application/Service/TroubleshootingGuideService.php`
   - **Requisitos cubiertos:** `RF-01.1`–`RF-01.3`, `RF-02.1`–`RF-02.3`, `RF-04.1`–`RF-04.3`, `RF-05.1`, `RNF-02`, `RNF-03`, `D1`–`D4`, `C1`–`C5`, `QA 1`–`QA 4`.
   - **Detalle de implementación:**
-    1. Implementar `getGuidesForModel(string $machineModel, ?string $breakdownType, ?string $machineType, ?int $technicianId): array`:
+    1. Implementar `getGuidesForModel(string $machineModel, ?string $breakdownType, ?string $machineType, ?int $technicianId, ?int $machineId = null): array`:
        - Normalizar `machine_model_key` (`C5`) y recuperar todas las guías activas del modelo.
        - Si existe guía para `breakdownType`, situarla en primera posición y ordenar el resto según la jerarquía canónica (`TEMPERATURE_COLD` $\rightarrow$ `PAYMENT_SYSTEM` $\rightarrow$ `PRODUCT_JAM` $\rightarrow$ `ELECTRICAL_OFF` $\rightarrow$ `OTHER`, `QA 3`); si no existe para `breakdownType`, `has_exact_category_match = false` y preseleccionar la primera guía disponible según dicha jerarquía (`RF-01.2`).
-       - Evaluar `sanitary_cold_warning = ($guideCategory === 'TEMPERATURE_COLD' || $machineType === 'PERISHABLE_FOOD')` (`Art. II`, `RF-01.3`).
+       - Resolver la tipología sanitaria de forma autoritativa contra `machines` (primero por `machine_id`, después por el modelo normalizado) y evaluar `sanitary_cold_warning = ($guideCategory === 'TEMPERATURE_COLD' || $isPerishable)` (`Art. II`, `RF-01.3`). El `machine_type` de la query queda sólo como respaldo para modelos ausentes del parque y nunca puede apagar el aviso de una máquina perecedera real.
        - Enriquecer `recommended_spare_parts` respetando el orden definido en la guía (`QA 3`), marcando `is_active` (`C2`), cruzando `van_stock_quantity` y `has_van_stock` para el técnico autenticado y **omitiendo todo importe económico** (`Art. V.4`).
        - Enriquecer `suggested_root_cause` incluyendo su solución predeterminada activa, u ocultándola si la causa fue desactivada a posteriori (`C2`).
     2. Implementar `listForCoordinator(array $filters): array` combinando `fetchFleetCoverageSummary()` (inmune a filtros, `QA 1`) y `findFilteredForCoordinator()`.

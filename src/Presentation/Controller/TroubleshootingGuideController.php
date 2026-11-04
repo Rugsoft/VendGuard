@@ -94,7 +94,8 @@ final class TroubleshootingGuideController
                 $rawModel,
                 $this->optionalQueryString($request, 'breakdown_type'),
                 $this->optionalQueryString($request, 'machine_type'),
-                $this->technicianId($request)
+                $this->technicianId($request),
+                $this->optionalPositiveQueryId($request, 'machine_id')
             );
 
             return Response::json($data, 200, 'Guías de diagnóstico recuperadas correctamente.');
@@ -440,6 +441,21 @@ final class TroubleshootingGuideController
         $value = $request->getQuery($key);
 
         return is_string($value) && trim($value) !== '' ? trim($value) : null;
+    }
+
+    /**
+     * Identificador positivo opcional. Un valor ausente o mal formado no se
+     * convierte en una excusa para apagar la salvaguarda: el servicio cae al
+     * modelo autoritativo.
+     */
+    private function optionalPositiveQueryId(Request $request, string $key): ?int
+    {
+        $value = $request->getQuery($key);
+        if (!is_string($value) || !ctype_digit(trim($value)) || (int)$value <= 0) {
+            return null;
+        }
+
+        return (int)$value;
     }
 
     private function guideError(TroubleshootingGuideValidationException $exception): Response

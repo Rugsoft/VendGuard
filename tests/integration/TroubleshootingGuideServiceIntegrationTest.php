@@ -206,14 +206,26 @@ try {
     }
     $assert('Toda guía de una máquina perecedera avisa de cadena de frío', $perishable['sanitary_cold_warning_for_machine'] === true && $allWarn);
 
-    $mixed = $service->getGuidesForModel('Sanden Vendo G-Drink', null, null, $technicianId);
-    $flags = [];
-    foreach ($mixed['guides'] as $guide) {
-        $flags[$guide['breakdown_type']] = $guide['sanitary_cold_warning'];
-    }
+    $nonPerishable = $service->getGuidesForModel('Bianchi Gaia Espresso', null, null, $technicianId);
+    $nonPerishableGuide = $nonPerishable['guides'][0] ?? [];
     $assert(
-        'El aviso por guía se enciende sólo en la categoría de frío',
-        ($flags['TEMPERATURE_COLD'] ?? false) === true && ($flags['PAYMENT_SYSTEM'] ?? true) === false
+        'Una máquina no perecedera no enciende el aviso de una guía que no es de frío',
+        $nonPerishable['sanitary_cold_warning_for_machine'] === false
+            && ($nonPerishableGuide['sanitary_cold_warning'] ?? true) === false
+    );
+
+    $sandenMachineId = (int)$pdo->query("SELECT id FROM machines WHERE code = 'VEND-0101'")->fetchColumn();
+    $authoritative = $service->getGuidesForModel(
+        'Sanden Vendo G-Drink',
+        'TEMPERATURE_COLD',
+        'HOT_DRINKS',
+        $technicianId,
+        $sandenMachineId
+    );
+    $assert(
+        'La tipología de la máquina prevalece sobre machine_type enviado por el cliente',
+        $authoritative['sanitary_cold_warning_for_machine'] === true
+            && ($authoritative['guides'][0]['sanitary_cold_warning'] ?? false) === true
     );
 
     $coldQuery = $service->getGuidesForModel('Sanden Vendo G-Drink', 'TEMPERATURE_COLD', null, $technicianId);

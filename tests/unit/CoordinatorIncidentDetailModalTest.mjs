@@ -452,6 +452,28 @@ console.log('\n--- Group 7: Header, reopened banner and metadata rendering ---')
 
 const fixtureInstance = createInstance({ detail: detailFixture });
 
+let guideRequest = null;
+api.getTroubleshootingGuidesByModel = async (...args) => {
+  guideRequest = args;
+  return {
+    guides: [{ id: 28, machine_model: 'FAS Perla Fast Cold', breakdown_type: 'TEMPERATURE_COLD' }],
+    sanitary_cold_warning_for_machine: true
+  };
+};
+const guideFixture = {
+  ...detailFixture,
+  incident: { ...detailFixture.incident, category: 'PAYMENT_SYSTEM' }
+};
+const guideInstance = createInstance({ detail: guideFixture });
+await CoordinatorIncidentDetailModal.methods.loadTroubleshootingGuides.call(guideInstance);
+assert('7.0 Coordinator guides load from detail.machine and send its machine id',
+  guideRequest?.[0] === 'FAS Perla Fast Cold'
+    && guideRequest?.[1] === 'PAYMENT_SYSTEM'
+    && guideRequest?.[3] === 10
+    && guideInstance.troubleshootingGuides.length === 1
+    && guideInstance.troubleshootingGuidesWarning === true
+    && guideInstance.troubleshootingGuidesError === '');
+
 assert('7.1 Computed accessors surface the incident, location, machine, timeline and SLA blocks',
   computed(fixtureInstance, 'incident') === detailFixture.incident &&
   computed(fixtureInstance, 'location') === detailFixture.location &&

@@ -919,7 +919,12 @@ export const CoordinatorIncidentDetailModal = {
      * Un fallo aquí no oculta la ficha: el acordeón muestra su propio aviso.
      */
     async loadTroubleshootingGuides() {
-      const model = String(this.incident?.machine?.model ?? this.incident?.machine_model ?? '').trim();
+      const model = String(
+        this.machine?.model
+          ?? this.incident?.machine?.model
+          ?? this.incident?.machine_model
+          ?? ''
+      ).trim();
       this.troubleshootingGuides = [];
       this.troubleshootingGuidesWarning = false;
       this.troubleshootingGuidesError = '';
@@ -936,7 +941,8 @@ export const CoordinatorIncidentDetailModal = {
         const response = await api.getTroubleshootingGuidesByModel(
           model,
           this.incident?.category ?? null,
-          machineType
+          machineType,
+          this.machine?.id ?? this.incident?.machine_id ?? null
         );
 
         this.troubleshootingGuides = Array.isArray(response?.guides) ? response.guides : [];

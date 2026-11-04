@@ -8,7 +8,7 @@
 
 **Esquema de referencia:** `RF-01` emparejamiento por modelo y salvaguarda sanitaria · `RF-02` bloques, stock de furgoneta y causa raíz · `RF-03` paquete sin conexión y opacidad · `RF-04` gobierno y auditoría del catálogo · `RF-05` cobertura del parque y semillas reales.
 
-**Corrida de certificación:** `php tests/run_all.php` certifica **397 suites · 14.788 aserciones · 0 fallos · 0 errores**. Las tres suites del módulo en el canal PostgreSQL `new_engine` certifican **3 suites · 99 aserciones · 0 fallos**. El repositorio no declara un script `composer test` ni contiene `composer.json`; el ejecutor nativo es la fuente de verdad del proyecto.
+**Corrida de certificación:** `php tests/run_all.php` certifica **397 suites · 14.795 aserciones · 0 fallos · 0 errores**. Las tres suites del módulo en el canal PostgreSQL `new_engine` certifican **3 suites · 104 aserciones · 0 fallos**. El repositorio no declara un script `composer test` ni contiene `composer.json`; el ejecutor nativo es la fuente de verdad del proyecto.
 
 > **Nota de integración:** la tarea `T-GUIDE-13` nombraba `CoordinatorSparePartsView.js`, un fichero que no existe en este árbol. La sub-pestaña «📖 Guías de Diagnóstico» se integró en el contenedor real de sub-pestañas, `public/assets/js/views/CoordinatorDashboardView.js`, sin crear una vista paralela muerta.
 
@@ -146,8 +146,8 @@
 
 | Comprobación | Comando | Resultado |
 | :--- | :--- | :--- |
-| Batería hermética global | `php tests/run_all.php` | ✅ **397 suites · 14.788 aserciones · 0 fallos · exit 0** |
-| Canal PostgreSQL `new_engine` (suites del módulo) | `source deploy/local/postgres/.env.local && php tests/run_new_engine.php TroubleshootingGuide` | ✅ **3 suites · 99 aserciones · 0 fallos** |
+| Batería hermética global | `php tests/run_all.php` | ✅ **397 suites · 14.795 aserciones · 0 fallos · exit 0** |
+| Canal PostgreSQL `new_engine` (suites del módulo) | `source deploy/local/postgres/.env.local && php tests/run_new_engine.php TroubleshootingGuide` | ✅ **3 suites · 104 aserciones · 0 fallos** |
 | Blindaje constitucional de las 39 tablas | `php tests/integration/PostgresConstitutionalTest.php` | ✅ **76 aserciones · 0 fallos** |
 | Esquema y paridad | suites `PostgresTroubleshootingGuideSchemaTest`, `SchemaConvergenceParityTest`, `PostgresSchemaTest` | ✅ |
 | Contratos HTTP y RBAC | `TroubleshootingGuideApiIntegrationTest.php` | ✅ |

@@ -195,7 +195,8 @@ CREATE TRIGGER trg_immutable_machine_troubleshooting_guides
 * **Query Params:**
   * `machine_model` (obligatorio, string): Modelo de la máquina (ej. `Sanden Vendo G-Drink`).
   * `breakdown_type` (opcional, string): Categoría reportada en la incidencia (`TEMPERATURE_COLD`, `PAYMENT_SYSTEM`, `PRODUCT_JAM`, `ELECTRICAL_OFF`, `OTHER`).
-  * `machine_type` (opcional, string): Tipo de máquina (`PERISHABLE_FOOD`, etc.) para evaluar la salvaguarda sanitaria del Art. II (`RF-01.3`).
+  * `machine_id` (opcional, integer): Identificador de la máquina de la incidencia. Es la fuente autoritativa de la tipología sanitaria; si pertenece al modelo solicitado, el servidor resuelve `PERISHABLE_FOOD` desde `machines`.
+  * `machine_type` (opcional, string): Tipo de máquina para compatibilidad con clientes antiguos. El servidor resuelve primero la tipología contra `machines` (por `machine_id` o por el modelo normalizado) y este parámetro sólo actúa como respaldo cuando el modelo no existe en el parque; nunca puede apagar la salvaguarda del Art. II (`RF-01.3`).
 * **Respuesta `200 OK`:**
   ```json
   {

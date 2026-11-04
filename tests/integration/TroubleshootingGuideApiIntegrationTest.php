@@ -150,6 +150,8 @@ try {
     $valveId = $partIds['VALV-ULKA-01'] ?? 0;
     $filterId = $partIds['FILT-AGUA-01'] ?? 0;
     $rootCauseOtherId = $rootCauseIds['RC-OTH-01'] ?? 0;
+    $sandenMachineId = (int)$pdo->query("SELECT id FROM machines WHERE code = 'VEND-0101'")->fetchColumn();
+    $bianchiMachineId = (int)$pdo->query("SELECT id FROM machines WHERE code = 'VEND-0102'")->fetchColumn();
 
     if ($monId === 0 || $valveId === 0 || $filterId === 0 || $rootCauseOtherId === 0) {
         throw new RuntimeException('Faltan referencias del catálogo sembrado (repuestos o causa raíz).');
@@ -658,6 +660,61 @@ try {
         $auditActions['UPDATE_TROUBLESHOOTING_GUIDE'] === 1
             && $auditActions['DEACTIVATE_TROUBLESHOOTING_GUIDE'] === 1
             && $auditActions['ACTIVATE_TROUBLESHOOTING_GUIDE'] === 1
+    );
+
+    // La tipología sanitaria no puede depender de la query del cliente. Se crea
+    // una guía no fría para el modelo perecedero Sanden y se consulta sin
+    // `machine_type`: la base de datos debe seguir encendiendo el aviso.
+    $resPerishableGuide = $call('POST', '/api/coordinator/troubleshooting-guides', $createPayload([
+        'machine_model' => 'Sanden Vendo G-Drink',
+        'breakdown_type' => 'OTHER',
+        'title' => 'Circuito hidráulico: guía no fría de una máquina perecedera',
+    ]), $coordToken);
+    $assert(
+        '4.16 Se prepara una guía no fría para el modelo perecedero Sanden',
+        $resPerishableGuide->getStatusCode() === 201
+    );
+
+    $resWithoutClientType = $call('GET', '/api/troubleshooting-guides/by-model', [], $techToken, [
+        'machine_model' => 'Sanden Vendo G-Drink',
+        'breakdown_type' => 'OTHER',
+    ]);
+    $withoutClientType = $data($resWithoutClientType);
+    $withoutClientTypeGuide = $withoutClientType['guides'][0] ?? [];
+    $assert(
+        '4.17 Omitir machine_type no apaga el aviso de una máquina perecedera',
+        $resWithoutClientType->getStatusCode() === 200
+            && ($withoutClientTypeGuide['breakdown_type'] ?? null) === 'OTHER'
+            && ($withoutClientTypeGuide['sanitary_cold_warning'] ?? null) === true
+            && ($withoutClientType['sanitary_cold_warning_for_machine'] ?? null) === true
+    );
+
+    $resMachineAuthority = $call('GET', '/api/troubleshooting-guides/by-model', [], $techToken, [
+        'machine_model' => 'Sanden Vendo G-Drink',
+        'breakdown_type' => 'OTHER',
+        'machine_id' => $sandenMachineId,
+        'machine_type' => 'HOT_DRINKS',
+    ]);
+    $machineAuthorityGuide = $data($resMachineAuthority)['guides'][0] ?? [];
+    $assert(
+        '4.18 machine_id prevalece sobre un machine_type falso del cliente',
+        $resMachineAuthority->getStatusCode() === 200
+            && ($machineAuthorityGuide['sanitary_cold_warning'] ?? null) === true
+    );
+
+    $resNonPerishableLie = $call('GET', '/api/troubleshooting-guides/by-model', [], $techToken, [
+        'machine_model' => 'Bianchi Gaia Espresso',
+        'breakdown_type' => 'OTHER',
+        'machine_id' => $bianchiMachineId,
+        'machine_type' => 'PERISHABLE_FOOD',
+    ]);
+    $nonPerishableLie = $data($resNonPerishableLie);
+    $nonPerishableLieGuide = $nonPerishableLie['guides'][0] ?? [];
+    $assert(
+        '4.19 Un machine_type falso no enciende el aviso de una máquina no perecedera',
+        $resNonPerishableLie->getStatusCode() === 200
+            && ($nonPerishableLieGuide['sanitary_cold_warning'] ?? true) === false
+            && ($nonPerishableLie['sanitary_cold_warning_for_machine'] ?? true) === false
     );
 } catch (Throwable $exception) {
     $crash = $exception;
