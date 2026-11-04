@@ -221,7 +221,7 @@ flowchart LR
     2. Registrar las 5 rutas en `src/Presentation/Routing/AppRouter.php` con los middlewares de autenticación y rol correspondientes.
   - **Hecho cuando:** `php -l src/Presentation/Controller/TroubleshootingGuideController.php && php -l src/Presentation/Routing/AppRouter.php`
 
-- [ ] **T-GUIDE-11 · Crear suite de integración de contratos HTTP y RBAC (`TroubleshootingGuideApiIntegrationTest.php`)**
+- [x] **T-GUIDE-11 · Crear suite de integración de contratos HTTP y RBAC (`TroubleshootingGuideApiIntegrationTest.php`)**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-GUIDE-10`
   - **Archivos exactos a crear o modificar:**
