@@ -87,6 +87,10 @@ final class PostgresFixtureBuilder
         // genérico certifica el CRUD sobre una columna descriptiva mutable.
         'root_causes' => ['code'],
         'standard_solutions' => ['code'],
+        // Guías del Módulo 28: el modelo y la categoría son la identidad inmutable
+        // de la guía (C1) y su disparador rechaza la reescritura; el `UPDATE`
+        // genérico certifica el CRUD sobre el título, que sí es editable.
+        'machine_troubleshooting_guides' => ['machine_model', 'machine_model_key', 'breakdown_type'],
         // Tramos de custodia (Módulo 26): los campos de cierre forman una rama
         // todo-o-nada de `chk_incident_assignments_closure_coherence`, de modo
         // que el `UPDATE` genérico los dejaría en un estado que el motor rechaza
@@ -730,6 +734,11 @@ final class PostgresFixtureBuilder
             // convertiría el alta en un rechazo legítimo del motor y el CRUD no se
             // certificaría. Alta y actualización usan valores distintos para que la
             // modificación se pueda comprobar.
+            // La guía del Módulo 28 exige la clave de modelo plegada a minúsculas:
+            // el texto sintético genérico, con mayúsculas y espacios, violaría
+            // `chk_troubleshooting_guides_model_not_empty` en el alta mínima.
+            $table === 'machine_troubleshooting_guides' && $column === 'machine_model_key'
+                => $variant === 'update' ? 'fixture.model.update' : 'fixture.model.insert',
             $column === 'postal_code' && in_array($udt, ['varchar', 'bpchar'], true)
                 => $variant === 'update' ? '08999' : '08001',
             in_array($udt, ['varchar', 'bpchar'], true) => substr($literal, 0, $meta['max_length'] ?? 255),
@@ -743,6 +752,13 @@ final class PostgresFixtureBuilder
             // el `CHECK` del Módulo 19 rechaza un objeto vacío, y un `{}`
             // sintetizado convertiría el alta mínima en un rechazo legítimo.
             $column === 'signed_document' && in_array($udt, ['json', 'jsonb'], true) => '{"version":1}',
+            // La guía del Módulo 28 exige entre dos y diez pasos y una clave de
+            // modelo plegada a minúsculas: el objeto vacío y el texto sintético en
+            // mayúsculas convertirían el alta mínima en un rechazo legítimo.
+            $table === 'machine_troubleshooting_guides' && $column === 'steps_json'
+                => $variant === 'update'
+                    ? '[{"step_order":1,"title":"Paso sintético actualizado","instruction":"Volver a medir el componente tras la actualización del banco."},{"step_order":2,"title":"Paso sintético de cierre","instruction":"Confirmar que la medida quedó dentro del rango declarado."}]'
+                    : '[{"step_order":1,"title":"Paso sintético de alta","instruction":"Comprobar el componente sintético del banco de pruebas."},{"step_order":2,"title":"Paso sintético de cierre","instruction":"Verificar el resultado del paso anterior antes de cerrar."}]',
             in_array($udt, ['json', 'jsonb'], true) => '{}',
             $meta['data_type'] === 'USER-DEFINED' => self::enumLabel($pdo, $udt, $variant),
             default => throw new RuntimeException(sprintf(

@@ -65,7 +65,7 @@ flowchart LR
     2. Resolver dinámicamente los identificadores de `spare_parts` por su `part_code` y el `suggested_root_cause_id` por su `code` en `root_causes`, usando `ON CONFLICT (machine_model_key, breakdown_type) DO NOTHING` para preservar las ediciones de Coordinación en arranques sucesivos.
   - **Hecho cuando:** `php database/run_seeds.php && vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php`
 
-- [ ] **T-GUIDE-03 · Actualizar contratos de esquema (`39 tablas`), utilidades de test y crear `PostgresTroubleshootingGuideSchemaTest.php`**
+- [x] **T-GUIDE-03 · Actualizar contratos de esquema (`39 tablas`), utilidades de test y crear `PostgresTroubleshootingGuideSchemaTest.php`**
   - **Tiempo estimado:** 20 min
   - **Dependencias previas:** `T-GUIDE-01`, `T-GUIDE-02`
   - **Archivos exactos a crear o modificar:**

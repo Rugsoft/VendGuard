@@ -430,6 +430,11 @@ try {
     );
 
     $assert(
+        'machine_troubleshooting_guides declara sus 14 columnas canónicas',
+        count($pgColumns['machine_troubleshooting_guides'] ?? []) === 14,
+        'columnas: ' . count($pgColumns['machine_troubleshooting_guides'] ?? [])
+    );
+    $assert(
         'workshop_repair_items declara sus 34 columnas canónicas',
         count($pgColumns['workshop_repair_items'] ?? []) === 34,
         'columnas: ' . count($pgColumns['workshop_repair_items'] ?? [])
