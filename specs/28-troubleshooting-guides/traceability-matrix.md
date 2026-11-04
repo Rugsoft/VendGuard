@@ -8,7 +8,7 @@
 
 **Esquema de referencia:** `RF-01` emparejamiento por modelo y salvaguarda sanitaria · `RF-02` bloques, stock de furgoneta y causa raíz · `RF-03` paquete sin conexión y opacidad · `RF-04` gobierno y auditoría del catálogo · `RF-05` cobertura del parque y semillas reales.
 
-**Corrida de certificación:** `php tests/run_all.php` certifica **396 suites · 14.765 aserciones · 0 fallos · 0 errores**. Las tres suites del módulo en el canal PostgreSQL `new_engine` certifican **3 suites · 99 aserciones · 0 fallos**. El repositorio no declara un script `composer test` ni contiene `composer.json`; el ejecutor nativo es la fuente de verdad del proyecto.
+**Corrida de certificación:** `php tests/run_all.php` certifica **397 suites · 14.788 aserciones · 0 fallos · 0 errores**. Las tres suites del módulo en el canal PostgreSQL `new_engine` certifican **3 suites · 99 aserciones · 0 fallos**. El repositorio no declara un script `composer test` ni contiene `composer.json`; el ejecutor nativo es la fuente de verdad del proyecto.
 
 > **Nota de integración:** la tarea `T-GUIDE-13` nombraba `CoordinatorSparePartsView.js`, un fichero que no existe en este árbol. La sub-pestaña «📖 Guías de Diagnóstico» se integró en el contenedor real de sub-pestañas, `public/assets/js/views/CoordinatorDashboardView.js`, sin crear una vista paralela muerta.
 
@@ -133,7 +133,8 @@
 | `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` | Guarda de diseño | Escalera `vg-btn`, sin geometría/color inline en botones del panel |
 | `tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs` | Guarda PWA | App Shell con los dos componentes, `Network-Only` y tokens del modo offline |
 | `tests/unit/RootCauseTaxonomyFrontendAndPwaTest.mjs` | Unitaria ESM | Independencia del `Art. V.1`, conmutador de categorías y opacidad Sede/QR/A4 |
-| `tests/unit/TroubleshootingGuideAccordionTest.mjs` | Unitaria ESM | Buscador `02.1.1`, casillas locales `C6`, stock `02.2`, causa `02.3` y orden `QA 3` |
+| `tests/unit/TroubleshootingGuideAccordionTest.mjs` | Unitaria ESM | Buscador `02.1.1`, casillas locales `C6`, stock `02.2`, causa `02.3`, orden `QA 3`, aviso `01.2.2` y banner sanitario `01.3` |
+| `tests/unit/TroubleshootingGuideCoverageUiTest.mjs` | Unitaria ESM | Inmunidad de los 3 KPIs de cobertura al filtrado de la tabla (`QA 1`, `EARS 05.1`) |
 | `tests/unit/TroubleshootingGuideUiContractTest.mjs` | Unitaria ESM | Estado informativo de `01.2.3` en la parada de ruta y su clase tokenizada |
 | `tests/unit/TroubleshootingGuideSurfacesGuardTest.mjs` | Guarda ESM | Handler `QA 4`, opacidad Sede/QR/A4 `03.2` y renderizado seguro `RNF-01` |
 | `tests/unit/FunctionalSpecMirrorParityTest.php` | Guarda PHP | Paridad de versión, identificadores e historias entre spec canónico y espejo |
@@ -145,7 +146,7 @@
 
 | Comprobación | Comando | Resultado |
 | :--- | :--- | :--- |
-| Batería hermética global | `php tests/run_all.php` | ✅ **396 suites · 14.765 aserciones · 0 fallos · exit 0** |
+| Batería hermética global | `php tests/run_all.php` | ✅ **397 suites · 14.788 aserciones · 0 fallos · exit 0** |
 | Canal PostgreSQL `new_engine` (suites del módulo) | `source deploy/local/postgres/.env.local && php tests/run_new_engine.php TroubleshootingGuide` | ✅ **3 suites · 99 aserciones · 0 fallos** |
 | Blindaje constitucional de las 39 tablas | `php tests/integration/PostgresConstitutionalTest.php` | ✅ **76 aserciones · 0 fallos** |
 | Esquema y paridad | suites `PostgresTroubleshootingGuideSchemaTest`, `SchemaConvergenceParityTest`, `PostgresSchemaTest` | ✅ |
@@ -154,7 +155,7 @@
 | Validador y casos límite | `TroubleshootingGuideValidatorTest.php` | ✅ |
 | Guardas de diseño y PWA | `DesignTokenDebtRatchetTest.mjs`, `LegacyButtonPaletteRetirementTest.mjs`, `CoordinatorButtonVariantsGuardTest.mjs`, `OfflinePwaAssetsAndUiGuardTest.mjs` | ✅ |
 | Sintaxis de los módulos ES | `node --check` de las siete superficies listadas | ✅ |
-| Hardening de los 7 huecos de auditoría | `TroubleshootingGuideAccordionTest.mjs`, `TroubleshootingGuideUiContractTest.mjs`, `TroubleshootingGuideSurfacesGuardTest.mjs`, `FunctionalSpecMirrorParityTest.php` | ✅ **4 suites · 80 aserciones · 0 fallos** |
+| Hardening de los 7 huecos de auditoría | `TroubleshootingGuideAccordionTest.mjs`, `TroubleshootingGuideUiContractTest.mjs`, `TroubleshootingGuideSurfacesGuardTest.mjs`, `FunctionalSpecMirrorParityTest.php`, `TroubleshootingGuideCoverageUiTest.mjs` | ✅ **5 suites · 103 aserciones · 0 fallos** |
 
 ## 9. Correspondencia de nombres (solicitados → reales)
 
@@ -175,6 +176,8 @@
 | Hueco | Cierre verificado |
 | :--- | :--- |
 | `01.2.3` en ruta | `guide-empty-inline` tras resolución, en paradas asignadas o en curso, sin acciones |
+| `01.2.2` sin categoría exacta | `guide-no-exact-category` en el acordeón, sólo si hay guías del modelo y ninguna de la categoría reportada |
+| `01.3` / `05.1` verificación UI | Aserciones del banner sanitario y de los 3 KPIs de cobertura inmunes al filtro |
 | `02.1.1` / `02.1.2` / `C6` | `TroubleshootingGuideAccordionTest.mjs` (buscador, persistencia local y ausencia de red) |
 | `02.3` / `QA 4` | `TroubleshootingGuideSurfacesGuardTest.mjs` (conmutador y preselección sin autorrelleno) |
 | `03.2` opacidad | Guarda sobre Sede, QR, impresión QR y Albarán A4 |

@@ -134,6 +134,22 @@ export const TroubleshootingGuideAccordion = {
         ?? null;
     },
 
+    /**
+     * `EARS 01.2.2`: hay guías del modelo pero ninguna de la categoría
+     * reportada. Evita que el técnico confunda la ficha mostrada con la de su
+     * síntoma inicial.
+     */
+    hasExactCategoryMatch() {
+      const requested = normalizeCategory(this.breakdownType);
+      if (requested === '') {
+        return true;
+      }
+
+      return this.orderedGuides.some(
+        (guide) => normalizeCategory(guide?.breakdown_type) === requested
+      );
+    },
+
     /** Texto de búsqueda ya normalizado. */
     normalizedSearch() {
       return String(this.searchQuery ?? '').trim().toLowerCase();
@@ -380,6 +396,15 @@ export const TroubleshootingGuideAccordion = {
             {{ showAllGuides ? 'Ver solo la guía sugerida' : 'Ver todas las guías de este modelo (' + orderedGuides.length + ')' }}
           </button>
         </div>
+
+        <p
+          v-if="!hasExactCategoryMatch"
+          class="vg-guide-accordion__message"
+          role="status"
+          data-testid="guide-no-exact-category"
+        >
+          No hay una ficha específica para la categoría reportada; te mostramos las guías activas disponibles para este modelo.
+        </p>
 
         <label class="vg-guide-accordion__search" for="guide-error-search">
           <span>Buscar por código de error</span>

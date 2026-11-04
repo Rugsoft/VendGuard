@@ -324,3 +324,17 @@ flowchart LR
     5. Restaurar el espejo funcional completo y guardar su paridad de versión e identificadores.
     6. Corregir la grafía del modelo real a «Fas Fast 900» sin tocar el Módulo 25.
   - **Hecho cuando:** las cuatro suites nuevas ejecutan en verde y `php tests/run_all.php` mantiene la batería global al 100 %.
+
+- [x] **T-GUIDE-16 · Cerrar los hallazgos de la auditoría de cumplimiento (`01.2.2`, `01.3` y `05.1`)**
+  - **Tiempo estimado:** 25 min
+  - **Dependencias previas:** `T-GUIDE-15`
+  - **Archivos exactos a crear o modificar:**
+    - Modificar `public/assets/js/components/TroubleshootingGuideAccordion.js`
+    - Modificar `tests/unit/TroubleshootingGuideAccordionTest.mjs`
+    - Crear `tests/unit/TroubleshootingGuideCoverageUiTest.mjs`
+  - **Requisitos cubiertos:** `EARS 01.2.2`, `EARS 01.3`, `EARS 05.1`, `QA 1`, Art. II.
+  - **Detalle de implementación:**
+    1. Declarar `hasExactCategoryMatch` y el aviso `guide-no-exact-category` cuando la categoría reportada no tiene ficha pero el modelo sí tiene guías.
+    2. Añadir aserciones runtime del banner sanitario (máquina perecedera, guía de frío, categoría de frío y prop explícito).
+    3. Certificar que las tres tarjetas de cobertura leen `coverage_summary` y no las filas filtradas.
+  - **Hecho cuando:** `TroubleshootingGuideAccordionTest.mjs` (35) y `TroubleshootingGuideCoverageUiTest.mjs` (11) ejecutan en verde y la batería global sigue al 100 %.

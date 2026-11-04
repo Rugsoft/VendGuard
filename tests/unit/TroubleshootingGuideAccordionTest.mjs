@@ -90,6 +90,14 @@ function makeContext(overrides = {}) {
     return methods.stepKey.call(this, guide, index);
   };
 
+  // `hasExactCategoryMatch` y `visibleGuides` leen la colección ordenada.
+  Object.defineProperty(context, 'orderedGuides', {
+    configurable: true,
+    get() {
+      return computed.orderedGuides.call(this);
+    }
+  });
+
   return context;
 }
 
@@ -287,6 +295,74 @@ const fallbackContext = makeContext({
 assert(
   '5.3 Si no hay coincidencia exacta se ofrece la primera del orden canónico',
   computed.orderedGuides.call(fallbackContext).map((guide) => guide.id).join(',') === '1,2,4'
+);
+
+// =====================================================================
+console.log('\n--- 6. Aviso cuando no hay ficha de la categoría reportada (01.2.2) ---');
+
+const noExactContext = makeContext({
+  guides: [cold, payment, other],
+  breakdownType: 'PRODUCT_JAM'
+});
+assert(
+  '6.1 Sin coincidencia exacta, el aviso se enciende',
+  computed.hasExactCategoryMatch.call(noExactContext) === false
+);
+assert(
+  '6.2 La guía mostrada es la primera del orden canónico',
+  computed.orderedGuides.call(noExactContext)[0].id === 1
+);
+
+const exactContext = makeContext({
+  guides: [cold, payment, other],
+  breakdownType: 'PAYMENT_SYSTEM'
+});
+assert(
+  '6.3 Con coincidencia exacta, el aviso se apaga',
+  computed.hasExactCategoryMatch.call(exactContext) === true
+);
+assert(
+  '6.4 Sin categoría reportada no se muestra el aviso',
+  computed.hasExactCategoryMatch.call(makeContext({ guides: [cold], breakdownType: '' })) === true
+);
+assert(
+  '6.5 El fuente declara el estado informativo y su texto',
+  /data-testid="guide-no-exact-category"/.test(componentSource)
+    && componentSource.includes('No hay una ficha específica para la categoría reportada')
+);
+assert(
+  '6.6 El aviso convive con el estado de modelo sin guías, sin sustituirlo',
+  componentSource.includes('data-testid="guide-empty"')
+    && componentSource.indexOf('guide-no-exact-category') < componentSource.indexOf('data-testid="guide-empty"')
+);
+
+// =====================================================================
+console.log('\n--- 7. Banner sanitario prioritario (01.3 / Art. II) ---');
+
+assert(
+  '7.1 Una máquina perecedera enciende el banner',
+  computed.showSanitaryBanner.call(makeContext({ machineType: 'PERISHABLE_FOOD' })) === true
+);
+assert(
+  '7.2 Una guía de frío enciende el banner',
+  computed.showSanitaryBanner.call(makeContext({ guides: [cold] })) === true
+);
+assert(
+  '7.3 La categoría reportada de frío enciende el banner',
+  computed.showSanitaryBanner.call(makeContext({ breakdownType: 'TEMPERATURE_COLD' })) === true
+);
+assert(
+  '7.4 El prop explícito fuerza el banner',
+  computed.showSanitaryBanner.call(makeContext({ sanitaryWarning: true })) === true
+);
+assert(
+  '7.5 Una máquina y guías sin riesgo no lo encienden',
+  computed.showSanitaryBanner.call(makeContext({ guides: [payment], machineType: 'SNACKS' })) === false
+);
+assert(
+  '7.6 La plantilla lo declara como alerta con su testid y texto de frío',
+  componentSource.includes('data-testid="guide-sanitary-warning"')
+    && componentSource.includes('Alerta sanitaria prioritaria')
 );
 
 console.log('\n======================================================================');
