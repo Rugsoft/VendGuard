@@ -1329,6 +1329,60 @@ export class ApiClient {
   };
 
   /**
+   * 3c. Troubleshooting Guides (Módulo 28, RF-01, RF-04, RF-05)
+   */
+  getTroubleshootingGuidesByModel(machineModel, breakdownType = null, machineType = null) {
+    const params = new URLSearchParams();
+    params.set('machine_model', String(machineModel ?? ''));
+    if (breakdownType) {
+      params.set('breakdown_type', String(breakdownType));
+    }
+    if (machineType) {
+      params.set('machine_type', String(machineType));
+    }
+
+    return this.get(`/troubleshooting-guides/by-model?${params.toString()}`);
+  }
+
+  /**
+   * Catálogo administrativo con cobertura del parque (contrato §3.3, QA 1).
+   * @param {{machine_model?: string, breakdown_type?: string, status?: string, search?: string}} [filters={}]
+   * @returns {Promise<{coverage_summary: Object, guides: Array<Object>}>}
+   */
+  getCoordinatorTroubleshootingGuides(filters = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.append(key, String(value));
+      }
+    }
+    const qs = params.toString() ? `?${params.toString()}` : '';
+
+    return this.get(`/coordinator/troubleshooting-guides${qs}`);
+  }
+
+  /** Alta auditada de una guía rápida (contrato §3.4, RF-04.1). */
+  createTroubleshootingGuide(payload = {}) {
+    return this.post('/coordinator/troubleshooting-guides', payload);
+  }
+
+  /** Edición de los campos mutables de una guía (contrato §3.5, C1). */
+  updateTroubleshootingGuide(guideId, payload = {}) {
+    return this.put(
+      `/coordinator/troubleshooting-guides/${encodeURIComponent(guideId)}`,
+      payload
+    );
+  }
+
+  /** Baja o reactivación lógica auditada (contrato §3.6, Art. III.1). */
+  updateTroubleshootingGuideStatus(guideId, isActive) {
+    return this.patch(
+      `/coordinator/troubleshooting-guides/${encodeURIComponent(guideId)}/status`,
+      { is_active: Boolean(isActive) }
+    );
+  }
+
+  /**
    * 4. Coordinator Operations (Triage, Assignment, Cancellation)
    */
   coordinator = {

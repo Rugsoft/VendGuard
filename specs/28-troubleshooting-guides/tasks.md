@@ -238,7 +238,7 @@ flowchart LR
 
 ## Fase 6: Frontend Vue 3 (`TroubleshootingGuideAccordion`, `CoordinatorTroubleshootingGuidesTab`), Offline PWA y `sw.js`
 
-- [ ] **T-GUIDE-12 · Ampliar `api.js`, `OfflineStorageService.js` y `AuditActionLabels.js`, y construir `TroubleshootingGuideAccordion.js` e integrarlo en `TechnicianRouteView.js` y `CoordinatorIncidentDetailModal.js`**
+- [x] **T-GUIDE-12 · Ampliar `api.js`, `OfflineStorageService.js` y `AuditActionLabels.js`, y construir `TroubleshootingGuideAccordion.js` e integrarlo en `TechnicianRouteView.js` y `CoordinatorIncidentDetailModal.js`**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-GUIDE-11`
   - **Archivos exactos a crear o modificar:**
