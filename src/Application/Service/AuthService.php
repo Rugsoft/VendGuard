@@ -159,9 +159,11 @@ class AuthService
         $this->userLockoutRepo->resetLoginAttempts($user->getId());
 
         $token = $this->generateInternalToken($user);
+        $chatToken = $this->generateChatToken($user);
 
         return [
             'token' => $token,
+            'chat_token' => $chatToken,
             'user' => $user,
         ];
     }
@@ -238,6 +240,83 @@ class AuthService
         $payload = $this->verifySignedPayload($signedPart);
 
         if ($payload === null || ($payload['type'] ?? '') !== 'internal') {
+            return null;
+        }
+
+        return $payload;
+    }
+
+    /**
+    /**
+     * Genera un token JWT estándar RFC 7519 firmado con HS256 para el widget n8n.
+     */
+    public function generateChatToken(User $user, int $ttlSeconds = 28800): string
+    {
+        $header = [
+            'alg' => 'HS256',
+            'typ' => 'JWT',
+        ];
+
+        $now = time();
+        $payload = [
+            'sub' => (string)$user->getId(),
+            'name' => $user->getName(),
+            'email' => $user->getEmail(),
+            'role' => $user->getRole() === UserRole::COORDINATOR ? 'coordinador' : 'tecnico',
+            'iat' => $now,
+            'exp' => $now + $ttlSeconds,
+        ];
+
+        $encodedHeader = $this->base64UrlEncode((string)json_encode($header, JSON_UNESCAPED_SLASHES));
+        $encodedPayload = $this->base64UrlEncode((string)json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+        $signingInput = $encodedHeader . '.' . $encodedPayload;
+        $signature = hash_hmac('sha256', $signingInput, $this->secretKey, true);
+        $encodedSignature = $this->base64UrlEncode($signature);
+
+        return $signingInput . '.' . $encodedSignature;
+    }
+
+    /**
+     * Valida y decodifica un token JWT de chat.
+     *
+     * @return array{sub: string, name: string, email: string, role: string, iat: int, exp: int}|null
+     */
+    public function validateChatToken(string $token): ?array
+    {
+        $parts = explode('.', $token);
+        if (count($parts) !== 3) {
+            return null;
+        }
+
+        [$encodedHeader, $encodedPayload, $encodedSignature] = $parts;
+
+        $signingInput = $encodedHeader . '.' . $encodedPayload;
+        $expectedSignature = hash_hmac('sha256', $signingInput, $this->secretKey, true);
+
+        $actualSignature = $this->base64UrlDecode($encodedSignature);
+        if ($actualSignature === null || !hash_equals($expectedSignature, $actualSignature)) {
+            return null;
+        }
+
+        $headerJson = $this->base64UrlDecode($encodedHeader);
+        $payloadJson = $this->base64UrlDecode($encodedPayload);
+        if ($headerJson === null || $payloadJson === null) {
+            return null;
+        }
+
+        $header = json_decode($headerJson, true);
+        $payload = json_decode($payloadJson, true);
+
+        if (!is_array($header) || ($header['alg'] ?? '') !== 'HS256' || ($header['typ'] ?? '') !== 'JWT') {
+            return null;
+        }
+
+        if (!is_array($payload)) {
+            return null;
+        }
+
+        if (isset($payload['exp']) && is_int($payload['exp']) && time() > $payload['exp']) {
             return null;
         }
 

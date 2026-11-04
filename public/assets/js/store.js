@@ -76,6 +76,7 @@ if (!vueReactive) {
 export const state = vueReactive({
   // Active session
   token: null,
+  chatToken: null,
   authType: null, // 'internal' | 'site' | null
   user: null,     // { id, name, email, role, phone }
   location: null, // { id, site_code, name, address, contact_name }
@@ -92,9 +93,10 @@ export const state = vueReactive({
  * @param {Object} user - User payload { id, name, email, role, phone }
  * @param {string} token - Internal bearer token (auth_token_...)
  */
-export function setInternalSession(user, token) {
+export function setInternalSession(user, token, chatToken = null) {
   state.user = user;
   state.token = token;
+  state.chatToken = chatToken;
   state.authType = 'internal';
   state.location = null;
 
@@ -107,6 +109,7 @@ export function setInternalSession(user, token) {
         STORAGE_KEY,
         JSON.stringify({
           authType: 'internal',
+          chatToken,
           token,
           user
         })
@@ -157,6 +160,7 @@ export function clearSession() {
   state.user = null;
   state.location = null;
   state.activeIncident = null;
+  state.chatToken = null;
 
   api.clearAuth();
 
@@ -234,7 +238,7 @@ export function restoreSession() {
     }
 
     if (session.authType === 'internal' && session.user) {
-      setInternalSession(session.user, session.token);
+      setInternalSession(session.user, session.token, session.chatToken || null);
       return true;
     }
 

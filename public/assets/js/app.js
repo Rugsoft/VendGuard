@@ -18,6 +18,7 @@ import { CoordinatorDashboardView } from './views/CoordinatorDashboardView.js?v=
 import { TechnicianRouteView } from './views/TechnicianRouteView.js';
 import { QrReportView } from './views/QrReportView.js';
 import { PublicRefundTrackingView } from './views/PublicRefundTrackingView.js';
+import { mountChatWidget, unmountChatWidget } from './utils/n8nChat.js';
 
 export const App = {
   name: 'VendGuardApp',
@@ -51,8 +52,23 @@ export const App = {
     isAuthenticated() {
       return store.isAuthenticated;
     },
+    chatToken() {
+      return store.state.chatToken;
+    },
     flashMessage() {
       return store.state.flashMessage;
+    }
+  },
+  watch: {
+    chatToken: {
+      immediate: true,
+      handler(token) {
+        if (token && this.user) {
+          mountChatWidget(token);
+        } else {
+          unmountChatWidget();
+        }
+      }
     }
   },
   created() {
@@ -156,6 +172,7 @@ export const App = {
     },
 
     handleLogout() {
+      unmountChatWidget();
       store.clearSession();
     },
     dismissFlash() {
