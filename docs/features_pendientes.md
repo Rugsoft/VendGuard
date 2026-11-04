@@ -1,7 +1,7 @@
 # VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro**Documento:** `docs/features_pendientes.md`  
 **Fecha de Actualización:** Noviembre 2026
   
-**Estado del Proyecto:** batería global: 389 suites · 14.620 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
+**Estado del Proyecto:** batería global: 392 suites · 14.685 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---
@@ -219,6 +219,7 @@ Refinamiento del análisis de averías, economía circular de taller, asistencia
 * **Complejidad:** Media (2 días).
 
 #### 15. 📖 Guías Rápidas de Diagnóstico por Modelo (*In-Situ Troubleshooting Playbooks*)
+* **Estado:** ✅ **100% IMPLEMENTADA (Módulo 28: `28-troubleshooting-guides`)** — Catálogo de guías por pareja única `(modelo normalizado, categoría)` con 8 semillas reales del parque, migración `024`, entidad y validador con cotas `C1`–`C3`, servicio de emparejamiento y cobertura `QA 1`–`QA 3`, CRUD auditado antes/después, rutas REST con RBAC, bootstrap offline enriquecido, acordeón de ruta y detalle con alerta sanitaria, stock de furgoneta sin importes, causa raíz en un toque y panel de Coordinación con KPIs, filtros y baja/reactivación lógica. Certificado por la batería global y la matriz `specs/28-troubleshooting-guides/traceability-matrix.md`. Se conserva a continuación el diseño original de la propuesta para trazabilidad SDD.
 * **Propósito:** Asistir a los técnicos (especialmente a los suplentes `BACKUP` asignados fuera de su ruta habitual o técnicos de nueva incorporación) con fichas operativas de verificación rápida específicas para la combinación `(machine.model, breakdown_type)`, reduciendo errores de diagnóstico y reaperturas en garantía dentro de las 48h (Art. V.6).
 * **Componentes Técnicos:**
   * Tabla `machine_troubleshooting_guides` (`id`, `machine_model`, `breakdown_type`, `title`, `error_codes_json`, `steps_markdown`, `recommended_spare_part_ids`, `updated_by`, `updated_at`).

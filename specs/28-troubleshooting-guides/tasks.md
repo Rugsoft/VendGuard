@@ -284,7 +284,7 @@ flowchart LR
 
 ## Fase 7: Verificación Integral, Matriz de Trazabilidad y Cierre Documental
 
-- [ ] **T-GUIDE-14 · Ejecutar suite completa (`composer test`), generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
+- [x] **T-GUIDE-14 · Ejecutar suite completa (`composer test`), generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-GUIDE-01` a `T-GUIDE-13`
   - **Archivos exactos a crear o modificar:**
