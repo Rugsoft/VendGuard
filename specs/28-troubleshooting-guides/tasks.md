@@ -166,7 +166,7 @@ flowchart LR
 
 ## Fase 4: Capa de Aplicación (`TroubleshootingGuideService`) y Suite de Integración de Servicio
 
-- [ ] **T-GUIDE-08 · Implementar `TroubleshootingGuideService` (consulta por modelo, cruce de furgoneta, cobertura `QA 1` y CRUD auditado `Art. III.3`)**
+- [x] **T-GUIDE-08 · Implementar `TroubleshootingGuideService` (consulta por modelo, cruce de furgoneta, cobertura `QA 1` y CRUD auditado `Art. III.3`)**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-GUIDE-07`
   - **Archivos exactos a crear o modificar:**
