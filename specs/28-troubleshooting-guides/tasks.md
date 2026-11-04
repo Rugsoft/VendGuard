@@ -113,7 +113,7 @@ flowchart LR
     3. Implementar `TroubleshootingGuideValidationException` con constructores semánticos para `404`, `409` y `422`.
   - **Hecho cuando:** `php -l src/Core/Domain/Model/MachineTroubleshootingGuide.php && php -l src/Core/Service/TroubleshootingGuideValidator.php && php -l src/Core/Domain/Exception/TroubleshootingGuideValidationException.php`
 
-- [ ] **T-GUIDE-05 · Crear suite unitaria `TroubleshootingGuideValidatorTest.php`**
+- [x] **T-GUIDE-05 · Crear suite unitaria `TroubleshootingGuideValidatorTest.php`**
   - **Tiempo estimado:** 20 min
   - **Dependencias previas:** `T-GUIDE-04`
   - **Archivos exactos a crear o modificar:**
