@@ -125,7 +125,7 @@ flowchart LR
     3. Implementar `SanitarySpoilageValidationException`.
   - **Hecho cuando:** `php -l src/Core/Domain/Model/SanitarySpoilageRecord.php && php -l src/Core/Service/SanitarySpoilageValidator.php && php -l src/Core/Domain/Exception/SanitarySpoilageValidationException.php`
 
-- [ ] **T-SPOILAGE-05 · Crear suite unitaria `SanitarySpoilageValidatorTest.php`**
+- [x] **T-SPOILAGE-05 · Crear suite unitaria `SanitarySpoilageValidatorTest.php`**
   - **Tiempo estimado:** 20 min
   - **Dependencias previas:** `T-SPOILAGE-04`
   - **Archivos exactos a crear o modificar:**
