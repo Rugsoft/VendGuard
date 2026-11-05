@@ -4243,13 +4243,14 @@ export const TechnicianRouteView = {
             <!-- Módulo 28: guías rápidas de diagnóstico de la parada activa (RF-01, D3).
                  La selección de causa no rellena diagnóstico ni acción (Art. V.1). -->
             <TroubleshootingGuideAccordion
-              v-if="(isAssigned(incident) || isInProgress(incident)) && troubleshootingGuidesFor(incident).length > 0"
+              v-if="(isAssigned(incident) || isInProgress(incident)) && (troubleshootingGuidesFor(incident).length > 0 || troubleshootingGuideWarningFor(incident))"
               :incident-id="incident.id"
               :machine-model="incident.machine?.model || incident.machine_model || ''"
               :breakdown-type="incident.category || ''"
               :machine-type="incident.machine?.machine_type || incident.machine_type_snapshot || ''"
               :guides="troubleshootingGuidesFor(incident)"
               :sanitary-warning="troubleshootingGuideWarningFor(incident)"
+              :show-empty="troubleshootingGuidesFor(incident).length > 0"
               :collapsible="true"
               style="margin-bottom: 12px;"
               @apply-root-cause="applyGuideRootCause(incident, $event)"

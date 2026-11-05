@@ -477,6 +477,51 @@ assert(
   offlineNoExactRes.guides[0].id === 1 && offlineNoExactRes.has_exact_category_match === false
 );
 
+// =====================================================================
+console.log('\n--- 8. Aviso sanitario fuera del plegado e IDs únicos (H-28-01/H-28-02) ---');
+
+const bannerSourceIndex = componentSource.indexOf('data-testid="guide-sanitary-warning"');
+const disclosureSourceIndex = componentSource.indexOf('class="vg-guide-accordion__disclosure"');
+assert(
+  '8.1 El banner sanitario se renderiza fuera del bloque plegable',
+  bannerSourceIndex >= 0 && disclosureSourceIndex >= 0 && bannerSourceIndex < disclosureSourceIndex
+);
+assert(
+  '8.2 El buscador usa un ID por instancia y no un literal fijo',
+  !/\sid="guide-error-search"/.test(componentSource)
+    && componentSource.includes(':for="searchInputId"')
+    && componentSource.includes(':id="searchInputId"')
+);
+
+const firstAccordionInstance = Accordion.data();
+const secondAccordionInstance = Accordion.data();
+assert(
+  '8.3 Dos instancias distintas generan IDs de búsqueda distintos',
+  firstAccordionInstance.searchInputId.startsWith('guide-error-search-')
+    && secondAccordionInstance.searchInputId.startsWith('guide-error-search-')
+    && firstAccordionInstance.searchInputId !== secondAccordionInstance.searchInputId
+);
+
+// =====================================================================
+console.log('\n--- 9. La búsqueda no se rotula como guía sugerida (H-28-04) ---');
+
+assert(
+  '9.1 La plantilla distingue el resultado de búsqueda de la guía sugerida',
+  componentSource.includes('data-testid="guide-search-results-label"')
+    && componentSource.includes('v-if="normalizedSearch !== \'\'"')
+    && componentSource.includes('v-else-if="hasMultipleGuides && !showAllGuides"')
+);
+
+assert(
+  '9.2 Un único resultado se rotula en singular',
+  Accordion.computed.searchResultsLabel.call({ visibleGuides: [{ id: 1 }] }) === 'Resultado de búsqueda'
+);
+
+assert(
+  '9.3 Varios resultados indican el número de coincidencias',
+  Accordion.computed.searchResultsLabel.call({ visibleGuides: [{ id: 1 }, { id: 2 }] }) === 'Resultados de búsqueda (2)'
+);
+
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Exitosas: ${assertions - failures} | Fallidas: ${failures}`);
 

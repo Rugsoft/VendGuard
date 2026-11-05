@@ -12,7 +12,7 @@
  *   3. Sólo se pinta cuando la resolución de guías ya terminó.
  *   4. Sólo se pinta cuando no hay ninguna guía para el modelo.
  *   5. El bloque no añade botones ni manejadores que bloqueen la parada.
- *   6. El acordeón conserva su `v-if` de guías para no duplicar estados.
+ *   6. El acordeón se pinta con guías o con aviso sanitario, sin duplicar estados.
  *   7. La carga marca la resolución tanto en la ruta offline como en la API.
  *   8. La clase CSS usa tokens, sin hexadecimal ni sombra.
  *
@@ -105,8 +105,13 @@ assert('4.2 El bloque no enlaza ningún manejador de acción', !/@click=/i.test(
 console.log('\n--- 5. El acordeón conserva su condición para no duplicar estados ---');
 
 assert(
-  '5.1 El acordeón sigue exigiendo al menos una guía',
-  /<TroubleshootingGuideAccordion[\s\S]{0,400}?v-if="[^"]*troubleshootingGuidesFor\(incident\)\.length > 0"/.test(view)
+  '5.1 El acordeón se pinta con guías o con aviso sanitario',
+  /<TroubleshootingGuideAccordion[\s\S]{0,500}?v-if="[^"]*troubleshootingGuidesFor\(incident\)\.length > 0[^"]*troubleshootingGuideWarningFor\(incident\)/.test(view)
+);
+assert(
+  '5.2 El estado sin guía sigue visible y el acordeón no lo duplica',
+  /troubleshootingGuidesFor\(incident\)\.length === 0"/.test(view)
+    && /:show-empty="troubleshootingGuidesFor\(incident\)\.length > 0"/.test(view)
 );
 
 console.log('\n--- 6. La clase del estado respeta el sistema de diseño ---');

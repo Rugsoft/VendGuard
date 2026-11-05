@@ -31,6 +31,9 @@
 
 const STEP_STORAGE_PREFIX = 'vendguard:troubleshooting-guide-steps:';
 
+/** Secuencia por instancia para que varias tarjetas no repitan IDs DOM. */
+let accordionInstanceSequence = 0;
+
 /** Orden canónico de categorías cuando el servidor no lo impone (`QA 3`). */
 const CATEGORY_RANK = Object.freeze({
   TEMPERATURE_COLD: 0,
@@ -103,11 +106,20 @@ export const TroubleshootingGuideAccordion = {
     errorMessage: {
       type: String,
       default: ''
+    },
+    /**
+     * El padre puede reservar el estado vacío cuando ya lo pinta fuera del
+     * acordeón, como ocurre en la tarjeta del técnico sin guías.
+     */
+    showEmpty: {
+      type: Boolean,
+      default: true
     }
   },
   emits: ['apply-root-cause'],
   data() {
     return {
+      searchInputId: `guide-error-search-${++accordionInstanceSequence}`,
       selectedGuideId: null,
       showAllGuides: false,
       searchQuery: '',
@@ -181,6 +193,16 @@ export const TroubleshootingGuideAccordion = {
       }
 
       return this.selectedGuide ? [this.selectedGuide] : [];
+    },
+
+    /**
+     * Rótulo de las tarjetas cuando hay búsqueda activa: una coincidencia no es
+     * la recomendación del sistema para la avería (H-28-04).
+     */
+    searchResultsLabel() {
+      const count = this.visibleGuides.length;
+
+      return count === 1 ? 'Resultado de búsqueda' : `Resultados de búsqueda (${count})`;
     },
 
     /**
@@ -379,6 +401,15 @@ export const TroubleshootingGuideAccordion = {
       <!-- La hoja vive en styles.css y se enlaza bajo demanda para que la
            superficie del técnico y la del coordinador compartan el layout. -->
       <link rel="stylesheet" href="/assets/css/styles.css" />
+      <!-- Fuera del <details>: la alerta sanitaria debe seguir visible con la guía plegada. -->
+      <div
+        v-if="showSanitaryBanner"
+        class="vg-alert vg-alert-error"
+        role="alert"
+        data-testid="guide-sanitary-warning"
+      >
+        ❄️ <strong>Alerta sanitaria prioritaria:</strong> máquina de alimentos perecederos o avería de cadena de frío. Asegura el precinto y respeta el SLA crítico antes de cerrar la intervención.
+      </div>
       <component
         :is="collapsible ? 'details' : 'div'"
         class="vg-guide-accordion__disclosure"
@@ -401,15 +432,6 @@ export const TroubleshootingGuideAccordion = {
         </component>
 
         <div class="vg-guide-accordion__body">
-
-      <div
-        v-if="showSanitaryBanner"
-        class="vg-alert vg-alert-error"
-        role="alert"
-        data-testid="guide-sanitary-warning"
-      >
-        ❄️ <strong>Alerta sanitaria prioritaria:</strong> máquina de alimentos perecederos o avería de cadena de frío. Asegura el precinto y respeta el SLA crítico antes de cerrar la intervención.
-      </div>
 
       <p v-if="isLoading" role="status" class="vg-guide-accordion__message" data-testid="guide-loading">
         Cargando guías de diagnóstico…
@@ -447,10 +469,10 @@ export const TroubleshootingGuideAccordion = {
           No hay una ficha específica para la categoría reportada; te mostramos las guías activas disponibles para este modelo.
         </p>
 
-        <label class="vg-guide-accordion__search" for="guide-error-search">
+        <label class="vg-guide-accordion__search" :for="searchInputId">
           <span>Buscar por código de error</span>
           <input
-            id="guide-error-search"
+            :id="searchInputId"
             v-model="searchQuery"
             type="search"
             class="vg-input"
@@ -477,7 +499,14 @@ export const TroubleshootingGuideAccordion = {
         >
           <header class="vg-guide-accordion__guide-header">
             <div>
-              <span v-if="hasMultipleGuides && !showAllGuides" class="vg-guide-accordion__eyebrow">
+              <span
+                v-if="normalizedSearch !== ''"
+                class="vg-guide-accordion__eyebrow"
+                data-testid="guide-search-results-label"
+              >
+                {{ searchResultsLabel }}
+              </span>
+              <span v-else-if="hasMultipleGuides && !showAllGuides" class="vg-guide-accordion__eyebrow">
                 Guía sugerida para esta avería
               </span>
               <h4 class="vg-guide-accordion__guide-title">{{ guide.title }}</h4>
@@ -574,7 +603,7 @@ export const TroubleshootingGuideAccordion = {
         </article>
       </template>
 
-        <p v-else class="vg-guide-accordion__message" data-testid="guide-empty">
+        <p v-else-if="showEmpty" class="vg-guide-accordion__message" data-testid="guide-empty">
           No hay guías activas para este modelo.
         </p>
         </div>
