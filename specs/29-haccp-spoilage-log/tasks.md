@@ -160,7 +160,7 @@ flowchart LR
        - `completePendingReinspectionAndRestoreMachineOk(int $machineId, int $technicianId, float $restoredTempC, string $certificateCode, string $notes): array`: cierra órdenes preventivas de reinspección pendientes en la máquina, actualiza `machine_sanitary_settings.sanitary_status = 'OK'` y `next_sanitary_inspection_due`, actualiza `machines.last_sanitary_inspection_at` e inserta o registra el nuevo certificado higiénico (`RF-03.1`, `C6`).
   - **Hecho cuando:** `php -l src/Core/Domain/Repository/SanitarySpoilageRecordRepositoryInterface.php && php -l src/Infrastructure/Repository/PdoSanitarySpoilageRecordRepository.php`
 
-- [ ] **T-SPOILAGE-07 · Implementar consultas de KPIs globales (`QA 3`), máquinas activas en cuarentena y listado filtrado con ordenación determinista (`QA 4`) en `PdoSanitarySpoilageRecordRepository`**
+- [x] **T-SPOILAGE-07 · Implementar consultas de KPIs globales (`QA 3`), máquinas activas en cuarentena y listado filtrado con ordenación determinista (`QA 4`) en `PdoSanitarySpoilageRecordRepository`**
   - **Tiempo estimado:** 20 min
   - **Dependencias previas:** `T-SPOILAGE-06`
   - **Archivos exactos a crear o modificar:**

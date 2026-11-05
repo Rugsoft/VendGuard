@@ -147,6 +147,62 @@ interface SanitarySpoilageRecordRepositoryInterface
     public function findByIdForUpdate(int $id): ?SanitarySpoilageRecord;
 
     /**
+     * Devuelve el historial completo de actas de una máquina.
+     *
+     * El orden es determinista: fecha de emisión descendente y, como
+     * desempate, identificador descendente (`QA 4`).
+     *
+     * @param int $machineId Identificador de la máquina.
+     * @return list<SanitarySpoilageRecord>
+     */
+    public function findByMachineId(int $machineId): array;
+
+    /**
+     * Calcula los cuatro indicadores globales del panel de Coordinación.
+     *
+     * Los indicadores son inmunes a los filtros de la tabla inferior: se
+     * calculan siempre sobre el histórico completo y sobre el parque activo
+     * (`QA 3`). `active_quarantined_machines_count` excluye las máquinas dadas
+     * de baja lógica o inactivas; las actas históricas de esas máquinas siguen
+     * contando en los otros tres acumulados (Art. III.3).
+     *
+     * @return array<string, mixed> Claves `active_quarantined_machines_count`,
+     *         `total_records_count`, `total_discarded_units_count` y
+     *         `total_estimated_loss_eur`.
+     */
+    public function fetchKpiSummary(): array;
+
+    /**
+     * Lista las máquinas activas que están actualmente en cuarentena.
+     *
+     * Cada fila incluye los datos de la máquina y la sede y, cuando existe,
+     * la avería correctiva abierta que bloquea el levantamiento (`C1`). El
+     * orden es por código de máquina ascendente (`QA 4`).
+     *
+     * @return list<array<string, mixed>> Claves `machine_id`, `machine_code`,
+     *         `machine_model`, `machine_type`, `location_id`, `location_name`,
+     *         `sanitary_status`, `last_sanitary_inspection_at`,
+     *         `next_sanitary_inspection_due`, `has_open_incident`,
+     *         `open_incident_id`, `open_incident_code` y `open_incident_status`.
+     */
+    public function fetchActiveQuarantinedMachines(): array;
+
+    /**
+     * Devuelve el libro de actas filtrado para el panel de Coordinación.
+     *
+     * Los filtros son combinables y todos opcionales: `machine_id`,
+     * `quarantine_origin`, `disposal_method`, `date_from` (`YYYY-MM-DD`),
+     * `date_to` (`YYYY-MM-DD`) y `search`. La búsqueda textual se aplica con
+     * `ILIKE` sobre el código de acta, los lotes, el certificado, el código y
+     * modelo de la máquina y el nombre de la sede. El orden es siempre
+     * `created_at DESC, id DESC` (`QA 4`).
+     *
+     * @param array<string, mixed> $filters Filtros opcionales del panel.
+     * @return list<SanitarySpoilageRecord>
+     */
+    public function findFilteredForCoordinator(array $filters): array;
+
+    /**
      * Actualiza el coste estimado y registra el ajuste auditado.
      *
      * Solo escribe las tres columnas que el disparador de inmutabilidad permite

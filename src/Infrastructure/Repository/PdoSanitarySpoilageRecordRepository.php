@@ -452,6 +452,213 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
     /**
      * {@inheritdoc}
      */
+    public function findByMachineId(int $machineId): array
+    {
+        $stmt = $this->pdo->prepare(
+            self::SELECT_RECORD . '
+            WHERE r.machine_id = :machine_id
+            ORDER BY r.created_at DESC, r.id DESC'
+        );
+        $stmt->execute([':machine_id' => $machineId]);
+
+        return $this->hydrateAll($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * {@inheritdoc}
+     *
+     * El borrador de la tarea citaba `mss.sanitary_status`; la configuración
+     * sanitaria vive en `machines`, así que la consulta lee la fuente real.
+     */
+    public function fetchKpiSummary(): array
+    {
+        $row = $this->pdo->query("
+            SELECT
+                (
+                    SELECT COUNT(*)
+                    FROM machines m
+                    WHERE m.is_active = TRUE
+                      AND m.deleted_at IS NULL
+                      AND m.sanitary_status = 'QUARANTINE'
+                ) AS active_quarantined_machines_count,
+                (
+                    SELECT COUNT(*)
+                    FROM sanitary_spoilage_records
+                ) AS total_records_count,
+                (
+                    SELECT COALESCE(SUM(discarded_units_count), 0)
+                    FROM sanitary_spoilage_records
+                ) AS total_discarded_units_count,
+                (
+                    SELECT COALESCE(ROUND(SUM(estimated_merchandise_loss_eur), 2), 0.00)
+                    FROM sanitary_spoilage_records
+                ) AS total_estimated_loss_eur
+        ")->fetch(PDO::FETCH_ASSOC);
+
+        if ($row === false) {
+            throw new RuntimeException('No se pudieron calcular los indicadores globales del Acta de Merma.');
+        }
+
+        return [
+            'active_quarantined_machines_count' => (int)$row['active_quarantined_machines_count'],
+            'total_records_count' => (int)$row['total_records_count'],
+            'total_discarded_units_count' => (int)$row['total_discarded_units_count'],
+            'total_estimated_loss_eur' => round((float)$row['total_estimated_loss_eur'], 2),
+        ];
+    }
+
+    /**
+     * {@inheritdoc}
+     *
+     * `machines` no tiene `internal_code`: el código rotulado del parque es
+     * `machines.code`, que es el que se ordena y se publica como
+     * `machine_code`.
+     */
+    public function fetchActiveQuarantinedMachines(): array
+    {
+        $stmt = $this->pdo->query("
+            SELECT
+                m.id AS machine_id,
+                m.code AS machine_code,
+                m.model AS machine_model,
+                m.machine_type,
+                m.location_id,
+                l.name AS location_name,
+                m.sanitary_status,
+                m.last_sanitary_inspection_at,
+                m.next_sanitary_inspection_due,
+                inc.id AS open_incident_id,
+                inc.ticket_code AS open_incident_code,
+                inc.status AS open_incident_status
+            FROM machines m
+            INNER JOIN locations l ON l.id = m.location_id
+            LEFT JOIN LATERAL (
+                SELECT i.id, i.ticket_code, i.status
+                FROM incidents i
+                WHERE i.machine_id = m.id
+                  AND i.deleted_at IS NULL
+                  AND i.status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED')
+                ORDER BY i.created_at DESC, i.id DESC
+                LIMIT 1
+            ) inc ON TRUE
+            WHERE m.is_active = TRUE
+              AND m.deleted_at IS NULL
+              AND m.sanitary_status = 'QUARANTINE'
+            ORDER BY m.code ASC
+        ");
+
+        $machines = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $machines[] = [
+                'machine_id' => (int)$row['machine_id'],
+                'machine_code' => (string)$row['machine_code'],
+                'machine_model' => (string)$row['machine_model'],
+                'machine_type' => (string)$row['machine_type'],
+                'location_id' => (int)$row['location_id'],
+                'location_name' => (string)$row['location_name'],
+                'sanitary_status' => (string)$row['sanitary_status'],
+                'last_sanitary_inspection_at' => $row['last_sanitary_inspection_at'] !== null
+                    ? (string)$row['last_sanitary_inspection_at']
+                    : null,
+                'next_sanitary_inspection_due' => $row['next_sanitary_inspection_due'] !== null
+                    ? (string)$row['next_sanitary_inspection_due']
+                    : null,
+                'has_open_incident' => $row['open_incident_id'] !== null,
+                'open_incident_id' => $row['open_incident_id'] !== null
+                    ? (int)$row['open_incident_id']
+                    : null,
+                'open_incident_code' => $row['open_incident_code'] !== null
+                    ? (string)$row['open_incident_code']
+                    : null,
+                'open_incident_status' => $row['open_incident_status'] !== null
+                    ? (string)$row['open_incident_status']
+                    : null,
+            ];
+        }
+
+        return $machines;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function findFilteredForCoordinator(array $filters): array
+    {
+        $where = [];
+        $params = [];
+
+        if (isset($filters['machine_id']) && $filters['machine_id'] !== '') {
+            $machineId = (int)$filters['machine_id'];
+            if ($machineId > 0) {
+                $where[] = 'r.machine_id = :machine_id';
+                $params[':machine_id'] = $machineId;
+            }
+        }
+
+        $origin = isset($filters['quarantine_origin']) && is_string($filters['quarantine_origin'])
+            ? strtoupper(trim($filters['quarantine_origin']))
+            : '';
+        if ($origin !== '') {
+            $where[] = 'r.quarantine_origin = :quarantine_origin';
+            $params[':quarantine_origin'] = $origin;
+        }
+
+        $disposalMethod = isset($filters['disposal_method']) && is_string($filters['disposal_method'])
+            ? strtoupper(trim($filters['disposal_method']))
+            : '';
+        if ($disposalMethod !== '') {
+            $where[] = 'r.disposal_method = :disposal_method';
+            $params[':disposal_method'] = $disposalMethod;
+        }
+
+        $dateFrom = $this->normalizeDateBoundary($filters['date_from'] ?? null, '00:00:00');
+        if ($dateFrom !== null) {
+            $where[] = 'r.created_at >= CAST(:date_from AS timestamptz)';
+            $params[':date_from'] = $dateFrom;
+        }
+
+        $dateTo = $this->normalizeDateBoundary($filters['date_to'] ?? null, '23:59:59');
+        if ($dateTo !== null) {
+            $where[] = 'r.created_at <= CAST(:date_to AS timestamptz)';
+            $params[':date_to'] = $dateTo;
+        }
+
+        $search = isset($filters['search']) && is_string($filters['search'])
+            ? trim($filters['search'])
+            : '';
+        if ($search !== '') {
+            // `!` como escape: un `%` tecleado por Coordinación busca un porcentaje
+            // y no «cualquier cosa».
+            $where[] = "(
+                r.record_code ILIKE :search ESCAPE '!'
+                OR r.affected_batch_codes ILIKE :search ESCAPE '!'
+                OR r.certificate_code ILIKE :search ESCAPE '!'
+                OR m.code ILIKE :search ESCAPE '!'
+                OR m.model ILIKE :search ESCAPE '!'
+                OR l.name ILIKE :search ESCAPE '!'
+            )";
+            $params[':search'] = '%' . str_replace(
+                ['!', '%', '_'],
+                ['!!', '!%', '!_'],
+                $search
+            ) . '%';
+        }
+
+        $sql = self::SELECT_RECORD;
+        if ($where !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
+        }
+        $sql .= ' ORDER BY r.created_at DESC, r.id DESC';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $this->hydrateAll($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function updateLossEstimate(
         int $id,
         float $lossEur,
@@ -745,6 +952,48 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
         $next = (int)$stmtSeq->fetchColumn();
 
         return sprintf('PREV-%04d-%04d', $year, $next);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return list<SanitarySpoilageRecord>
+     */
+    private function hydrateAll(array $rows): array
+    {
+        $records = [];
+        foreach ($rows as $row) {
+            $record = $this->hydrateOrNull($row);
+            if ($record !== null) {
+                $records[] = $record;
+            }
+        }
+
+        return $records;
+    }
+
+    /**
+     * Normaliza un filtro de fecha de día completo al límite temporal indicado.
+     *
+     * El contrato del panel acepta `YYYY-MM-DD`; se rechaza cualquier otra
+     * forma antes de que llegue al motor para no depender de la conversión
+     * implícita de PostgreSQL.
+     */
+    private function normalizeDateBoundary(mixed $value, string $time): ?string
+    {
+        if (!is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        $date = trim($value);
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+        if ($parsed === false || $parsed->format('Y-m-d') !== $date) {
+            throw new InvalidArgumentException(sprintf(
+                'La fecha «%s» no usa el formato YYYY-MM-DD.',
+                $date
+            ));
+        }
+
+        return $date . ' ' . $time;
     }
 
     /**
