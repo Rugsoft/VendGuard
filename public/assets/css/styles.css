@@ -1021,7 +1021,7 @@
 .vg-guides-tab__toolbar-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
   margin-bottom: 14px;
@@ -1069,6 +1069,10 @@
   flex: 1 1 240px;
 }
 
+.vg-guides-tab__field--status {
+  flex: 0 0 auto;
+}
+
 .vg-guides-tab__counter {
   font-size: var(--font-size-caption);
   font-weight: 400;
@@ -1093,8 +1097,19 @@
 .vg-guides-tab__table td {
   padding: 12px 14px;
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
   border-bottom: 1px solid var(--color-hairline);
+}
+
+.vg-guides-tab__table tbody tr:hover {
+  background-color: var(--color-canvas);
+}
+
+.vg-guides-tab__guide-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
 }
 
 .vg-guides-tab__table th {

@@ -153,8 +153,9 @@ assert(
 );
 
 assert(
-  '2.4 La cobertura se carga desde coverage_summary del catálogo',
+  '2.4 La cobertura se carga desde coverage_summary y la pestaña enlaza styles.css',
   componentSource.includes('catalog?.coverage_summary')
+    && componentSource.includes('href="/assets/css/styles.css"')
 );
 
 assert(

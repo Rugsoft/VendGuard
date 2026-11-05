@@ -530,6 +530,11 @@ export const CoordinatorTroubleshootingGuidesTab = {
   },
   template: `
     <div class="vg-guides-tab" data-testid="coordinator-guides-tab">
+      <!-- La hoja no viaja en index.html: se enlaza bajo demanda, como en las
+           pestañas de Pareto y Stock de furgoneta, para que las tarjetas KPI,
+           la toolbar y la tabla tengan su layout incluso en una carga directa. -->
+      <link rel="stylesheet" href="/assets/css/styles.css" />
+
       <div v-if="errorMessage" class="vg-guides-tab__alert vg-guides-tab__alert--error" role="alert">
         <span>⚠️ {{ errorMessage }}</span>
         <button type="button" class="vg-btn vg-btn-sm vg-btn-ghost vg-btn-ghost-danger" @click="errorMessage = ''">Descartar</button>
@@ -617,28 +622,31 @@ export const CoordinatorTroubleshootingGuidesTab = {
             >
           </label>
 
-          <div class="vg-action-group" role="group" aria-label="Estado de la guía">
-            <button
-              type="button"
-              class="vg-btn vg-btn-sm"
-              :class="statusFilter === 'ALL' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-              data-testid="guide-status-all"
-              @click="statusFilter = 'ALL'"
-            >Todas</button>
-            <button
-              type="button"
-              class="vg-btn vg-btn-sm"
-              :class="statusFilter === 'ACTIVE' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-              data-testid="guide-status-active"
-              @click="statusFilter = 'ACTIVE'"
-            >Activas</button>
-            <button
-              type="button"
-              class="vg-btn vg-btn-sm"
-              :class="statusFilter === 'INACTIVE' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-              data-testid="guide-status-inactive"
-              @click="statusFilter = 'INACTIVE'"
-            >Inactivas</button>
+          <div class="vg-guides-tab__field vg-guides-tab__field--status">
+            <span>Estado</span>
+            <div class="vg-action-group" role="group" aria-label="Estado de la guía">
+              <button
+                type="button"
+                class="vg-btn vg-btn-sm"
+                :class="statusFilter === 'ALL' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+                data-testid="guide-status-all"
+                @click="statusFilter = 'ALL'"
+              >Todas</button>
+              <button
+                type="button"
+                class="vg-btn vg-btn-sm"
+                :class="statusFilter === 'ACTIVE' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+                data-testid="guide-status-active"
+                @click="statusFilter = 'ACTIVE'"
+              >Activas</button>
+              <button
+                type="button"
+                class="vg-btn vg-btn-sm"
+                :class="statusFilter === 'INACTIVE' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+                data-testid="guide-status-inactive"
+                @click="statusFilter = 'INACTIVE'"
+              >Inactivas</button>
+            </div>
           </div>
         </div>
       </section>
@@ -671,8 +679,10 @@ export const CoordinatorTroubleshootingGuidesTab = {
               </td>
               <td><span class="vg-chip">{{ categoryLabel(guide.breakdown_type) }}</span></td>
               <td>
-                <span>{{ guide.title }}</span>
-                <span v-if="guide.breakdown_type === 'TEMPERATURE_COLD'" class="vg-chip vg-chip-danger">❄️ Frío</span>
+                <div class="vg-guides-tab__guide-cell">
+                  <span>{{ guide.title }}</span>
+                  <span v-if="guide.breakdown_type === 'TEMPERATURE_COLD'" class="vg-chip vg-chip-danger">❄️ Frío</span>
+                </div>
               </td>
               <td>{{ (guide.recommended_spare_part_ids || []).length }}</td>
               <td>
