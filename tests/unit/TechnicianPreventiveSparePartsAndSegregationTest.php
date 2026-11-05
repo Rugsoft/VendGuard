@@ -420,6 +420,17 @@ class MockPrevSparePartRepo implements SparePartRepositoryInterface
     public function softDelete(int $id): bool { return true; }
     public function updateStatus(int $id, bool $isActive): bool { return true; }
     public function findById(int $id): ?SparePart { return $this->parts[$id] ?? null; }
+    public function findByIds(array $ids): array
+    {
+        $found = [];
+        foreach ($ids as $id) {
+            $part = $this->parts[(int)$id] ?? null;
+            if ($part !== null) {
+                $found[(int)$id] = $part;
+            }
+        }
+        return $found;
+    }
     public function findByCode(string $c): ?SparePart { return null; }
     public function isCodeExists(string $c, ?int $e = null): bool { return false; }
     public function findAll(?string $s = null, ?string $c = null, ?string $m = null, ?bool $a = null): array { return []; }

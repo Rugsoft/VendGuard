@@ -84,6 +84,9 @@ final class TroubleshootingGuideService
 
     private ?AuditLogger $auditLogger;
 
+    /** Catálogo activo de causas memoizado por petición (H-28-05). */
+    private ?array $rootCauseCatalog = null;
+
     public function __construct(
         MachineTroubleshootingGuideRepositoryInterface $guideRepository,
         RootCauseRepositoryInterface $rootCauseRepository,
@@ -160,20 +163,23 @@ final class TroubleshootingGuideService
 
         $vanStock = $this->fetchVanStock($technicianId);
 
-        // Una sola lectura del catálogo activo con sus soluciones: la causa
-        // sugerida viaja con su solución predeterminada y una causa dada de baja
-        // en el ínterin desaparece del mapa (C2).
-        $rootCauses = [];
-        foreach ($this->rootCauseRepository->findActiveCatalogWithSolutions() as $rootCause) {
-            $rootCauseId = $rootCause->getId();
-            if ($rootCauseId !== null) {
-                $rootCauses[$rootCauseId] = $rootCause;
+        // Una sola lectura del catálogo activo con sus soluciones por petición:
+        // la ruta resuelve varias paradas y no debe repetirla (H-28-05).
+        $rootCauses = $this->activeRootCauseCatalog();
+
+        // Los repuestos de todas las guías se resuelven en una sola consulta:
+        // antes se hacía un `findById()` por pieza dentro del bucle (H-28-05).
+        $sparePartIds = [];
+        foreach ($orderedGuides as $guide) {
+            foreach ($guide->getRecommendedSparePartIds() as $partId) {
+                $sparePartIds[(int)$partId] = true;
             }
         }
+        $spareParts = $this->sparePartRepository->findByIds(array_keys($sparePartIds));
 
         $payload = [];
         foreach ($orderedGuides as $guide) {
-            $payload[] = $this->enrichGuide($guide, $vanStock, $isPerishable, $rootCauses);
+            $payload[] = $this->enrichGuide($guide, $vanStock, $isPerishable, $rootCauses, $spareParts);
         }
 
         // El banner de máquina sólo declara riesgo si la máquina es perecedera o
@@ -413,8 +419,9 @@ final class TroubleshootingGuideService
      * Proyecta una guía con su aviso sanitario, repuestos cruzados con la
      * furgoneta y causa sugerida vigente.
      *
-     * @param array<int, int>       $vanStock
-     * @param array<int, RootCause> $rootCauses Catálogo activo indexado por identificador.
+     * @param array<int, int>        $vanStock
+     * @param array<int, RootCause>  $rootCauses Catálogo activo indexado por identificador.
+     * @param array<int, SparePart>  $spareParts Repuestos ya resueltos en lote.
      *
      * @return array<string, mixed>
      */
@@ -422,11 +429,12 @@ final class TroubleshootingGuideService
         MachineTroubleshootingGuide $guide,
         array $vanStock,
         bool $isPerishableMachine,
-        array $rootCauses
+        array $rootCauses,
+        array $spareParts
     ): array {
         $parts = [];
         foreach ($guide->getRecommendedSparePartIds() as $partId) {
-            $part = $this->sparePartRepository->findById($partId);
+            $part = $spareParts[(int)$partId] ?? null;
             if ($part === null) {
                 // La pieza desapareció del maestro: no se inventa una fila vacía.
                 continue;
@@ -461,6 +469,29 @@ final class TroubleshootingGuideService
             'recommended_spare_parts' => $parts,
             'suggested_root_cause' => $this->projectRootCause($rootCause),
         ];
+    }
+
+    /**
+     * Catálogo activo de causas y soluciones, leído una sola vez por petición
+     * para que varias paradas no repitan la consulta (H-28-05).
+     *
+     * @return array<int, RootCause>
+     */
+    private function activeRootCauseCatalog(): array
+    {
+        if ($this->rootCauseCatalog !== null) {
+            return $this->rootCauseCatalog;
+        }
+
+        $catalog = [];
+        foreach ($this->rootCauseRepository->findActiveCatalogWithSolutions() as $rootCause) {
+            $rootCauseId = $rootCause->getId();
+            if ($rootCauseId !== null) {
+                $catalog[$rootCauseId] = $rootCause;
+            }
+        }
+
+        return $this->rootCauseCatalog = $catalog;
     }
 
     /**
@@ -583,9 +614,11 @@ final class TroubleshootingGuideService
      */
     private function assertActiveSpareParts(array $sparePartIds): void
     {
-        foreach ($sparePartIds as $partId) {
-            /** @var SparePart|null $part */
-            $part = $this->sparePartRepository->findById($partId);
+        $uniqueIds = array_values(array_unique(array_map('intval', $sparePartIds)));
+        $parts = $this->sparePartRepository->findByIds($uniqueIds);
+
+        foreach ($uniqueIds as $partId) {
+            $part = $parts[$partId] ?? null;
             if ($part === null || !$part->isActive()) {
                 throw TroubleshootingGuideValidationException::invalidSpareParts(sprintf(
                     'el repuesto %d no existe o está desactivado en el catálogo maestro (C2).',

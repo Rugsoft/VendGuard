@@ -293,6 +293,52 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
     /**
      * {@inheritdoc}
      */
+    public function findByIds(array $ids): array
+    {
+        $normalized = [];
+        foreach ($ids as $id) {
+            $value = (int)$id;
+            if ($value > 0) {
+                $normalized[$value] = $value;
+            }
+        }
+
+        if ($normalized === []) {
+            return [];
+        }
+
+        $values = array_values($normalized);
+        $inClause = implode(',', array_fill(0, count($values), '?'));
+        $sql = "
+            SELECT
+                sp.*,
+                COALESCE((SELECT SUM(quantity) FROM incident_replaced_parts WHERE spare_part_id = sp.id), 0) AS total_installed_units
+            FROM spare_parts sp
+            WHERE sp.id IN ({$inClause})
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($values);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if ($rows === []) {
+            return [];
+        }
+
+        $allModelsMap = $this->fetchBatchCompatibleModels($values);
+
+        $results = [];
+        foreach ($rows as $row) {
+            $id = (int)$row['id'];
+            $results[$id] = $this->hydrateSparePart($row, $allModelsMap[$id] ?? []);
+        }
+
+        return $results;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function findByCode(string $partCode): ?SparePart
     {
         $sql = "

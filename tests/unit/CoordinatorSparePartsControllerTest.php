@@ -150,6 +150,18 @@ class MockControllerSparePartRepository implements SparePartRepositoryInterface
         return $this->parts[$id] ?? null;
     }
 
+    public function findByIds(array $ids): array
+    {
+        $found = [];
+        foreach ($ids as $id) {
+            $part = $this->parts[(int)$id] ?? null;
+            if ($part !== null) {
+                $found[(int)$id] = $part;
+            }
+        }
+        return $found;
+    }
+
     public function findByCode(string $partCode): ?SparePart
     {
         foreach ($this->parts as $p) {

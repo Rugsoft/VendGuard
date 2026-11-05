@@ -56,6 +56,14 @@ interface SparePartRepositoryInterface
     public function findById(int $id): ?SparePart;
 
     /**
+     * Resuelve varios repuestos en una sola consulta (H-28-05).
+     *
+     * @param list<int> $ids Identificadores solicitados
+     * @return array<int, SparePart> Mapa indexado por identificador; omite los ausentes
+     */
+    public function findByIds(array $ids): array;
+
+    /**
      * Busca un repuesto por su código de pieza normalizado.
      *
      * @param string $partCode
