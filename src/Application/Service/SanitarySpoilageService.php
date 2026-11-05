@@ -415,7 +415,7 @@ final class SanitarySpoilageService
         $records = $this->recordRepository->findFilteredForCoordinator($filters);
         $csv = $this->buildCsv($kpis, $records);
 
-        $firstRecordId = $records[0]->getId() ?? 0;
+        $firstRecordId = $records !== [] ? ($records[0]->getId() ?? 0) : 0;
         $this->logSpoilageAudit(
             $firstRecordId,
             'EXPORT_SPOILAGE_RECORDS_CSV',

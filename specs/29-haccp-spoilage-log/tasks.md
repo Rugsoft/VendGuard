@@ -199,7 +199,7 @@ flowchart LR
     5. Implementar `exportCsvForCoordinator(array $filters, array $actor): string`: valida `date_from <= date_to` (`QA 4`), registra `'EXPORT_SPOILAGE_RECORDS_CSV'` en `audit_log` y genera el CSV con cabecera UTF-8 BOM (`\xEF\xBB\xBF`), separador `;`, **Sección 1** (4 KPIs globales) y **Sección 2** (detalle ordenado por `created_at DESC, id DESC`), neutralizando cualquier celda textual que comience por `=`, `+`, `-` o `@` (anteponiendo `'`) y devolviendo las cabeceras vacías si hay 0 filas (`QA 4`).
   - **Hecho cuando:** `php -l src/Application/Service/SanitarySpoilageService.php`
 
-- [ ] **T-SPOILAGE-09 · Crear suite de integración de servicio (`SanitarySpoilageServiceIntegrationTest.php`)**
+- [x] **T-SPOILAGE-09 · Crear suite de integración de servicio (`SanitarySpoilageServiceIntegrationTest.php`)**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SPOILAGE-08`
   - **Archivos exactos a crear o modificar:**
