@@ -560,8 +560,8 @@ preg_match_all(
 );
 
 $assert(
-    '4.2 Las semillas declaran diez cláusulas: cinco refrescos y cinco de sólo-existencia',
-    count($declaredClauses) === 10,
+    '4.2 Las semillas declaran once cláusulas: cinco refrescos y seis de sólo-existencia',
+    count($declaredClauses) === 11,
     'encontradas: ' . count($declaredClauses)
 );
 

@@ -2759,6 +2759,182 @@ class SeedRunner
         ];
     }
 
+    /**
+     * Actas de merma y destrucción de lotes por cuarentena sanitaria (Módulo 29).
+     *
+     * Siembra las tres actas históricas que cubren los desenlaces reales de una
+     * cuarentena: producto destruido por rotura de frío, inspección preventiva no
+     * conforme con ajuste económico auditado y cabina verificada vacía. Máquina y
+     * usuarios se resuelven por sus claves estables —código y correo— porque los
+     * identificadores los asigna la secuencia de cada base.
+     *
+     * El alta es insertar si no existe y nunca reafirma los hechos sanitarios: un
+     * acta emitida es inmutable (Art. III.3) y solo admite el ajuste financiero
+     * auditado de Coordinación.
+     *
+     * @return int Actas canónicas procesadas.
+     */
+    public function seedSanitarySpoilageRecords(): int
+    {
+        $sqlTemplate = "INSERT INTO sanitary_spoilage_records (
+            record_code, machine_id, incident_id, maintenance_order_id,
+            technician_id, registered_by, quarantine_origin,
+            discarded_units_count, empty_machine_confirmed, affected_batch_codes,
+            cabin_temp_at_removal, restored_stabilized_temp_c, disposal_method,
+            evidence_photo_url, sanitary_notes, estimated_merchandise_loss_eur,
+            loss_adjusted_by, loss_adjustment_reason, certificate_code, created_at
+        ) VALUES (
+            :record_code, :machine_id, NULL, NULL,
+            :technician_id, :registered_by, :quarantine_origin,
+            :discarded_units_count, %s, :affected_batch_codes,
+            :cabin_temp_at_removal, :restored_stabilized_temp_c, :disposal_method,
+            :evidence_photo_url, :sanitary_notes, :estimated_merchandise_loss_eur,
+            :loss_adjusted_by, :loss_adjustment_reason, :certificate_code, :created_at
+        ) %s";
+
+        $machineStmt = $this->pdo->prepare('SELECT id FROM machines WHERE code = :code');
+        $userStmt = $this->pdo->prepare('SELECT id FROM users WHERE email = :email');
+
+        $count = 0;
+        foreach (self::canonicalSanitarySpoilageRecordRows() as $record) {
+            $machineStmt->execute([':code' => $record['machine_code']]);
+            $machineId = $machineStmt->fetchColumn();
+            if ($machineId === false) {
+                throw new RuntimeException(
+                    'No se pudo resolver la máquina sembrada «' . $record['machine_code'] . '» (Módulo 29).'
+                );
+            }
+
+            $technicianId = $this->resolveSeedUserId($userStmt, $record['technician_email']);
+            $registeredById = $this->resolveSeedUserId($userStmt, $record['registered_by_email']);
+            $lossAdjustedById = $record['loss_adjusted_by_email'] === null
+                ? null
+                : $this->resolveSeedUserId($userStmt, $record['loss_adjusted_by_email']);
+
+            $sql = sprintf(
+                $sqlTemplate,
+                $this->dialect->booleanLiteral($record['empty_machine_confirmed']),
+                $this->dialect->upsertDoNothing(['record_code'])
+            );
+
+            $this->pdo->prepare($sql)->execute([
+                ':record_code' => $record['record_code'],
+                ':machine_id' => (int)$machineId,
+                ':technician_id' => $technicianId,
+                ':registered_by' => $registeredById,
+                ':quarantine_origin' => $record['quarantine_origin'],
+                ':discarded_units_count' => $record['discarded_units_count'],
+                ':affected_batch_codes' => $record['affected_batch_codes'],
+                ':cabin_temp_at_removal' => $record['cabin_temp_at_removal'],
+                ':restored_stabilized_temp_c' => $record['restored_stabilized_temp_c'],
+                ':disposal_method' => $record['disposal_method'],
+                ':evidence_photo_url' => $record['evidence_photo_url'],
+                ':sanitary_notes' => $record['sanitary_notes'],
+                ':estimated_merchandise_loss_eur' => $record['estimated_merchandise_loss_eur'],
+                ':loss_adjusted_by' => $lossAdjustedById,
+                ':loss_adjustment_reason' => $record['loss_adjustment_reason'],
+                ':certificate_code' => $record['certificate_code'],
+                ':created_at' => $record['created_at'],
+            ]);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
+     * Resuelve el identificador de un usuario sembrado por su correo canónico.
+     *
+     * @param \PDOStatement $userStmt Consulta preparada reutilizable.
+     */
+    private function resolveSeedUserId(\PDOStatement $userStmt, string $email): int
+    {
+        $userStmt->execute([':email' => $email]);
+        $userId = $userStmt->fetchColumn();
+        if ($userId === false) {
+            throw new RuntimeException(
+                'No se pudo resolver el usuario sembrado «' . $email . '» (Módulo 29).'
+            );
+        }
+
+        return (int)$userId;
+    }
+
+    /**
+     * Catálogo canónico de actas de merma (Módulo 29).
+     *
+     * Los códigos de máquina y los correos coinciden con `database/supabase_seeds.sql`
+     * (secciones 3, 4 y 21); los códigos de certificado siguen el formato oficial
+     * `CERT-AAAA-NNNN` que el propio levantamiento expide.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalSanitarySpoilageRecordRows(): array
+    {
+        return [
+            [
+                'record_code' => 'ACTA-MERMA-2026-0001',
+                'machine_code' => 'VEND-0101',
+                'technician_email' => 'jordi.ruta@vendguard.internal',
+                'registered_by_email' => 'jordi.ruta@vendguard.internal',
+                'quarantine_origin' => 'BIOLOGICAL_CLOCK_4H',
+                'discarded_units_count' => 14,
+                'empty_machine_confirmed' => false,
+                'affected_batch_codes' => 'LOTE-2026-0412 · yogures naturales; LOTE-2026-0415 · sándwiches de pavo',
+                'cabin_temp_at_removal' => '9.4',
+                'restored_stabilized_temp_c' => '3.2',
+                'disposal_method' => 'ON_SITE_ORGANIC_SEALED',
+                'evidence_photo_url' => '/uploads/spoilage/ACTA-MERMA-2026-0001.jpg',
+                'sanitary_notes' => 'Retirada de 14 unidades expuestas por rotura de la cadena de frío; cabina higienizada con solución alimentaria y secada antes de reponer.',
+                'estimated_merchandise_loss_eur' => '35.00',
+                'loss_adjusted_by_email' => null,
+                'loss_adjustment_reason' => null,
+                'certificate_code' => 'CERT-2026-0101',
+                'created_at' => '2026-09-14 08:40:00+00',
+            ],
+            [
+                'record_code' => 'ACTA-MERMA-2026-0002',
+                'machine_code' => 'VEND-0201',
+                'technician_email' => 'marta.ruta@vendguard.internal',
+                'registered_by_email' => 'coordinacion@vendguard.internal',
+                'quarantine_origin' => 'PREVENTIVE_NON_CONFORMITY',
+                'discarded_units_count' => 8,
+                'empty_machine_confirmed' => false,
+                'affected_batch_codes' => 'LOTE-2026-0931 · sándwiches mixtos; LOTE-2026-0936 · ensaladas de pasta',
+                'cabin_temp_at_removal' => '10.2',
+                'restored_stabilized_temp_c' => '3.8',
+                'disposal_method' => 'RETURN_TO_CENTRAL_BIOHAZARD',
+                'evidence_photo_url' => '/uploads/spoilage/ACTA-MERMA-2026-0002.jpg',
+                'sanitary_notes' => 'Inspección preventiva no conforme por exceso térmico: retirada precintada de 8 unidades y desinfección completa de la cabina.',
+                'estimated_merchandise_loss_eur' => '29.60',
+                'loss_adjusted_by_email' => 'coordinacion@vendguard.internal',
+                'loss_adjustment_reason' => 'Ajuste contable al precio de reposición real de los dos lotes retirados.',
+                'certificate_code' => 'CERT-2026-0102',
+                'created_at' => '2026-09-28 17:05:00+00',
+            ],
+            [
+                'record_code' => 'ACTA-MERMA-2026-0003',
+                'machine_code' => 'VEND-0301',
+                'technician_email' => 'carlos.ruta@vendguard.internal',
+                'registered_by_email' => 'carlos.ruta@vendguard.internal',
+                'quarantine_origin' => 'BIOLOGICAL_CLOCK_4H',
+                'discarded_units_count' => 0,
+                'empty_machine_confirmed' => true,
+                'affected_batch_codes' => 'SIN_STOCK_AFECTADO',
+                'cabin_temp_at_removal' => '18.6',
+                'restored_stabilized_temp_c' => '3.0',
+                'disposal_method' => 'NOT_APPLICABLE_EMPTY',
+                'evidence_photo_url' => '/uploads/spoilage/ACTA-MERMA-2026-0003-empty.jpg',
+                'sanitary_notes' => 'Cabina verificada vacía: sin producto perecedero expuesto; se higienizó y se fotografió el interior antes de reabrir.',
+                'estimated_merchandise_loss_eur' => '0.00',
+                'loss_adjusted_by_email' => null,
+                'loss_adjustment_reason' => null,
+                'certificate_code' => 'CERT-2026-0103',
+                'created_at' => '2026-10-19 11:25:00+00',
+            ],
+        ];
+    }
+
     public function seedAll(string $defaultPassword = 'Password123!'): array
     {
         $this->pdo->beginTransaction();
@@ -2806,6 +2982,10 @@ class SeedRunner
             // las reparte por los cinco estados del ciclo (D1). Reejecutarlo no
             // duplica unidades ni reescribe un dictamen (Art. III.3).
             $workshopRepairItemCount = $this->seedWorkshopRepairItems();
+            // Las actas de merma (Módulo 29) cuelgan de máquina, técnico y
+            // coordinador ya sembrados: entran al final para no depender del
+            // orden de las maestras y no reafirman ningún hecho sanitario.
+            $spoilageRecordCount = $this->seedSanitarySpoilageRecords();
 
             $this->pdo->commit();
 
@@ -2829,6 +3009,7 @@ class SeedRunner
                 'offline_sync_mutations' => $offlineSyncMutationCount,
                 'incident_assignments' => $custodyAssignmentCount,
                 'workshop_repair_items' => $workshopRepairItemCount,
+                'sanitary_spoilage_records' => $spoilageRecordCount,
             ];
         } catch (PDOException $e) {
             if ($this->pdo->inTransaction()) {

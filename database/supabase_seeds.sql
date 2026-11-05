@@ -1508,6 +1508,135 @@ FROM (VALUES
 ) AS v(machine_model, machine_model_key, breakdown_type, title, error_codes_json, steps_json, spare_part_codes, root_cause_code)
 ON CONFLICT (machine_model_key, breakdown_type) DO NOTHING;
 
+-- ============================================================================
+-- SECCIÓN 21 · sanitary_spoilage_records — las actas de merma del parque (M29)
+-- ============================================================================
+-- QUÉ SIEMBRA
+--   Tres actas APPCC históricas que cubren los tres desenlaces reales de una
+--   cuarentena sanitaria: la rotura de cadena de frío con producto destruido, la
+--   inspección preventiva no conforme con ajuste económico auditado por
+--   Coordinación y la reapertura de una cabina verificada vacía. Son las que el
+--   técnico imprime en formato A4 y las que Coordinación suma en su libro de
+--   mermas.
+--
+-- POR QUÉ `DO NOTHING` Y NO `DO UPDATE`
+--   El acta es un hecho sanitario inmutable (Art. III.3): una resemilla no puede
+--   reescribir unidades, lotes, temperaturas ni coste. La semilla solo asegura
+--   que el expediente exista; cualquier corrección posterior es un ajuste
+--   financiero auditado por Coordinación, no una edición de la fila.
+--
+-- POR QUÉ LA MÁQUINA Y LOS USUARIOS SE RESUELVEN POR CÓDIGO
+--   Los identificadores los asigna la secuencia de cada base. La semilla escribe
+--   el código de máquina y el correo del usuario, y deja que el motor resuelva
+--   la clave foránea: reejecutarla no depende de los números de cada base.
+--
+-- POR QUÉ EL CERTIFICADO ES UN CÓDIGO Y NO UNA CLAVE FORÁNEA
+--   `certificate_code` es el código oficial que el acta imprime y que el propio
+--   levantamiento emite en el mismo acto indivisible (RF-03.1); el contrato no lo
+--   declara como clave foránea para que el histórico siga siendo legible aunque
+--   el certificado se consulte desde otro expediente.
+-- ============================================================================
+
+INSERT INTO sanitary_spoilage_records (
+    record_code, machine_id, incident_id, maintenance_order_id,
+    technician_id, registered_by, quarantine_origin,
+    discarded_units_count, empty_machine_confirmed, affected_batch_codes,
+    cabin_temp_at_removal, restored_stabilized_temp_c, disposal_method,
+    evidence_photo_url, sanitary_notes, estimated_merchandise_loss_eur,
+    loss_adjusted_by, loss_adjustment_reason, certificate_code, created_at
+)
+SELECT
+    v.record_code,
+    (SELECT id FROM machines WHERE code = v.machine_code),
+    NULL,
+    NULL,
+    (SELECT id FROM users WHERE email = v.technician_email),
+    (SELECT id FROM users WHERE email = v.registered_by_email),
+    v.quarantine_origin,
+    v.discarded_units_count,
+    v.empty_machine_confirmed,
+    v.affected_batch_codes,
+    v.cabin_temp_at_removal,
+    v.restored_stabilized_temp_c,
+    v.disposal_method,
+    v.evidence_photo_url,
+    v.sanitary_notes,
+    v.estimated_merchandise_loss_eur,
+    (SELECT id FROM users WHERE email = v.loss_adjusted_by_email),
+    v.loss_adjustment_reason,
+    v.certificate_code,
+    CAST(v.created_at AS TIMESTAMPTZ)
+FROM (VALUES
+    (
+        'ACTA-MERMA-2026-0001',
+        'VEND-0101',
+        'jordi.ruta@vendguard.internal',
+        'jordi.ruta@vendguard.internal',
+        'BIOLOGICAL_CLOCK_4H',
+        14,
+        FALSE,
+        'LOTE-2026-0412 · yogures naturales; LOTE-2026-0415 · sándwiches de pavo',
+        9.4,
+        3.2,
+        'ON_SITE_ORGANIC_SEALED',
+        '/uploads/spoilage/ACTA-MERMA-2026-0001.jpg',
+        'Retirada de 14 unidades expuestas por rotura de la cadena de frío; cabina higienizada con solución alimentaria y secada antes de reponer.',
+        35.00,
+        NULL,
+        NULL,
+        'CERT-2026-0101',
+        '2026-09-14 08:40:00+00'
+    ),
+    (
+        'ACTA-MERMA-2026-0002',
+        'VEND-0201',
+        'marta.ruta@vendguard.internal',
+        'coordinacion@vendguard.internal',
+        'PREVENTIVE_NON_CONFORMITY',
+        8,
+        FALSE,
+        'LOTE-2026-0931 · sándwiches mixtos; LOTE-2026-0936 · ensaladas de pasta',
+        10.2,
+        3.8,
+        'RETURN_TO_CENTRAL_BIOHAZARD',
+        '/uploads/spoilage/ACTA-MERMA-2026-0002.jpg',
+        'Inspección preventiva no conforme por exceso térmico: retirada precintada de 8 unidades y desinfección completa de la cabina.',
+        29.60,
+        'coordinacion@vendguard.internal',
+        'Ajuste contable al precio de reposición real de los dos lotes retirados.',
+        'CERT-2026-0102',
+        '2026-09-28 17:05:00+00'
+    ),
+    (
+        'ACTA-MERMA-2026-0003',
+        'VEND-0301',
+        'carlos.ruta@vendguard.internal',
+        'carlos.ruta@vendguard.internal',
+        'BIOLOGICAL_CLOCK_4H',
+        0,
+        TRUE,
+        'SIN_STOCK_AFECTADO',
+        18.6,
+        3.0,
+        'NOT_APPLICABLE_EMPTY',
+        '/uploads/spoilage/ACTA-MERMA-2026-0003-empty.jpg',
+        'Cabina verificada vacía: sin producto perecedero expuesto; se higienizó y se fotografió el interior antes de reabrir.',
+        0.00,
+        NULL,
+        NULL,
+        'CERT-2026-0103',
+        '2026-10-19 11:25:00+00'
+    )
+) AS v(
+    record_code, machine_code, technician_email, registered_by_email,
+    quarantine_origin, discarded_units_count, empty_machine_confirmed,
+    affected_batch_codes, cabin_temp_at_removal, restored_stabilized_temp_c,
+    disposal_method, evidence_photo_url, sanitary_notes,
+    estimated_merchandise_loss_eur, loss_adjusted_by_email,
+    loss_adjustment_reason, certificate_code, created_at
+)
+ON CONFLICT (record_code) DO NOTHING;
+
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante · 5 saldos de stock de furgoneta · 1 configuración de ruta ·
 --       13 máquinas · 6 usuarios internos · 5 frecuencias normativas · 13 repuestos ·
@@ -1528,4 +1657,7 @@ ON CONFLICT (machine_model_key, breakdown_type) DO NOTHING;
 --       8 guías de diagnóstico por modelo (Módulo 28): cinco de los seis modelos
 --       activos del parque sembrado quedan cubiertos y «Fas Perla» queda
 --       deliberadamente huérfano para demostrar el indicador de cobertura (QA 1).
+--       3 actas de merma APPCC (Módulo 29): dos con unidades y lotes destruidos
+--       —una de ellas con ajuste económico auditado por Coordinación— y una de
+--       cabina verificada vacía, con coste 0,00 € y fotografía del interior.
 -- =============================================================================

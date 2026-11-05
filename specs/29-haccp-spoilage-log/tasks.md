@@ -57,7 +57,7 @@ flowchart LR
     4. Reflejar exactamente las mismas definiciones en `database/supabase_init.sql`.
   - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php`
 
-- [ ] **T-SPOILAGE-02 · Poblar semillas reales del parque en `database/supabase_seeds.sql` y `SeedRunner.php`**
+- [x] **T-SPOILAGE-02 · Poblar semillas reales del parque en `database/supabase_seeds.sql` y `SeedRunner.php`**
   - **Tiempo estimado:** 20 min
   - **Dependencias previas:** `T-SPOILAGE-01`
   - **Archivos exactos a crear o modificar:**
