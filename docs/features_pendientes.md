@@ -1,7 +1,7 @@
 # VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro**Documento:** `docs/features_pendientes.md`  
 **Fecha de Actualización:** Noviembre 2026
   
-**Estado del Proyecto:** batería global: 397 suites · 14.812 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
+**Estado del Proyecto:** batería global: 400 suites · 14.951 aserciones, al 100 % en verde. Documento NO versionado (.gitignore:21); la guarda de cifras solo audita markdown versionados. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---
@@ -229,6 +229,7 @@ Refinamiento del análisis de averías, economía circular de taller, asistencia
 * **Complejidad:** Baja (1–1.5 días).
 
 #### 16. ☣️ Acta de Merma y Destrucción de Lotes por Cuarentena Sanitaria (*HACCP Spoilage Log*)
+* **Estado:** ✅ **100% IMPLEMENTADO (Módulo 29: `29-haccp-spoilage-log`)** — Tabla 40 `sanitary_spoilage_records` con inmutabilidad por disparador y `ON DELETE RESTRICT`, validador puro (techos térmicos de 4,0 / 8,0 °C por tipología, lotes con bloque alfanumérico real, coherencia `0 unidades ⇔ 0,00 €`), levantamiento atómico con acta numerada `ACTA-MERMA-AAAA-NNNN`, certificado higiénico, restitución a `OK` y desbloqueo del QR, Acta Oficial A4 sin importes, panel de Coordinación con 4 KPIs inmunes al filtro y exportación CSV neutralizada frente a fórmulas. Suite `SanitarySpoilage*`, guardas de esquema PostgreSQL y guardas de diseño en verde.
 * **Propósito:** Dotar de trazabilidad documental y sanitaria completa (normativa APPCC / HACCP) al levantamiento de cuarentenas en máquinas `FOOD_PERISHABLE` que hayan superado el umbral crítico de 4 horas sin frío (Art. II de la Constitución y Módulo 11), registrando los lotes retirados y destruidos antes de reabrir la máquina al consumo público.
 * **Componentes Técnicos:**
   * Tabla `sanitary_spoilage_records` vinculada al ticket o inspección preventiva (`id`, `incident_id`, `maintenance_order_id`, `machine_id`, `technician_id`, `discarded_units_count`, `affected_batch_codes`, `cabin_temp_at_removal`, `disposal_method`, `evidence_photo_url`, `estimated_merchandise_loss_eur`, `created_at`).
@@ -304,7 +305,7 @@ FASE DE TRAZABILIDAD AVANZADA, TALLER Y EFICIENCIA OPERATIVA:
  13. Fusión de Tickets Duplicados (Expediente Matriz)
  14. Bandeja de Taller Central para Piezas Recuperadas (Economía Circular M2 -> Taller -> Stock) [✅ IMPLEMENTADO - Módulo 27]
  15. Guías Rápidas de Diagnóstico por Modelo (Playbooks In Situ para Reducir Reaperturas 48h)
- 16. Acta de Merma y Destrucción de Lotes por Cuarentena Sanitaria (Trazabilidad APPCC Art. II)
+ 16. Acta de Merma y Destrucción de Lotes por Cuarentena Sanitaria (Trazabilidad APPCC Art. II) [✅ IMPLEMENTADO - Módulo 29]
  17. Perfiles de SLA Diferenciados por Tipo de Sede (Contratos Standard / Priority / 24x7)
  20. Registro de Jornada y Cómputo de Horas Efectivas (Time Tracking derivado de turnos) [✅ IMPLEMENTADO - Módulo 22]
 ------------------------------------------------------------------------------------

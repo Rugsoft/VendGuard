@@ -662,8 +662,8 @@ foreach ($declaredClauses as $declared) {
 }
 
 $assert(
-    sprintf('4.%d Las semillas declaran cinco excepciones de existencia y cinco refrescos', ++$caseNumber),
-    $doNothingRules === 5 && $refreshRules === 5,
+    sprintf('4.%d Las semillas declaran seis excepciones de existencia y cinco refrescos', ++$caseNumber),
+    $doNothingRules === 6 && $refreshRules === 5,
     sprintf('DO NOTHING: %d · refrescos: %d', $doNothingRules, $refreshRules)
 );
 // =====================================================================

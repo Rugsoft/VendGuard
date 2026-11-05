@@ -54,6 +54,20 @@ final class SanitarySpoilageService
 {
     private const ALLOWED_ACTORS = ['TECHNICIAN', 'COORDINATOR'];
 
+    /**
+     * Vocabulario de auditoría del acta (Módulo 29).
+     *
+     * El visor del coordinador sólo puede ofrecer los códigos que algún escritor
+     * enumera; declararlos junto al único punto que los persiste mantiene el
+     * filtro y el `audit_log.action` real como el mismo conjunto (EARS 5.5,
+     * Art. III.3). Un literal suelto en cada llamada se leería como filtro
+     * fantasma en cuanto el catálogo lo ofreciera.
+     */
+    private const ACTION_CREATE_SPOILAGE_RECORD_AND_LIFT_QUARANTINE = 'CREATE_SPOILAGE_RECORD_AND_LIFT_QUARANTINE';
+    private const ACTION_VIEW_SANITARY_SPOILAGE_ACT = 'VIEW_SANITARY_SPOILAGE_ACT';
+    private const ACTION_ADJUST_SPOILAGE_MERCHANDISE_LOSS = 'ADJUST_SPOILAGE_MERCHANDISE_LOSS';
+    private const ACTION_EXPORT_SPOILAGE_RECORDS_CSV = 'EXPORT_SPOILAGE_RECORDS_CSV';
+
     private SanitarySpoilageRecordRepositoryInterface $recordRepository;
 
     private PDO $pdo;
@@ -176,7 +190,7 @@ final class SanitarySpoilageService
 
             $this->logSpoilageAudit(
                 $recordId,
-                'CREATE_SPOILAGE_RECORD_AND_LIFT_QUARANTINE',
+                self::ACTION_CREATE_SPOILAGE_RECORD_AND_LIFT_QUARANTINE,
                 $actor,
                 [
                     'sanitary_status' => (string)($machine['sanitary_status'] ?? 'QUARANTINE'),
@@ -241,7 +255,7 @@ final class SanitarySpoilageService
 
         $this->logSpoilageAudit(
             $recordId,
-            'VIEW_SANITARY_SPOILAGE_ACT',
+            self::ACTION_VIEW_SANITARY_SPOILAGE_ACT,
             $actor,
             null,
             [
@@ -371,7 +385,7 @@ final class SanitarySpoilageService
 
             $this->logSpoilageAudit(
                 $recordId,
-                'ADJUST_SPOILAGE_MERCHANDISE_LOSS',
+                self::ACTION_ADJUST_SPOILAGE_MERCHANDISE_LOSS,
                 $actor,
                 [
                     'estimated_merchandise_loss_eur' => $record->getEstimatedMerchandiseLossEur(),
@@ -418,7 +432,7 @@ final class SanitarySpoilageService
         $firstRecordId = $records !== [] ? ($records[0]->getId() ?? 0) : 0;
         $this->logSpoilageAudit(
             $firstRecordId,
-            'EXPORT_SPOILAGE_RECORDS_CSV',
+            self::ACTION_EXPORT_SPOILAGE_RECORDS_CSV,
             $actor,
             null,
             [
