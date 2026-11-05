@@ -4250,6 +4250,7 @@ export const TechnicianRouteView = {
               :machine-type="incident.machine?.machine_type || incident.machine_type_snapshot || ''"
               :guides="troubleshootingGuidesFor(incident)"
               :sanitary-warning="troubleshootingGuideWarningFor(incident)"
+              :collapsible="true"
               style="margin-bottom: 12px;"
               @apply-root-cause="applyGuideRootCause(incident, $event)"
             />

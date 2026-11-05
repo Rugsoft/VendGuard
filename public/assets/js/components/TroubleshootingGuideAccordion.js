@@ -91,6 +91,11 @@ export const TroubleshootingGuideAccordion = {
       type: Boolean,
       default: true
     },
+    /** Allows collapsing the guide on the technician mobile surface. */
+    collapsible: {
+      type: Boolean,
+      default: false
+    },
     isLoading: {
       type: Boolean,
       default: false
@@ -374,15 +379,28 @@ export const TroubleshootingGuideAccordion = {
       <!-- La hoja vive en styles.css y se enlaza bajo demanda para que la
            superficie del técnico y la del coordinador compartan el layout. -->
       <link rel="stylesheet" href="/assets/css/styles.css" />
-      <header class="vg-guide-accordion__header">
-        <div>
+      <component
+        :is="collapsible ? 'details' : 'div'"
+        class="vg-guide-accordion__disclosure"
+        :class="{ 'vg-guide-accordion__disclosure--static': !collapsible }"
+      >
+        <component
+          :is="collapsible ? 'summary' : 'header'"
+          class="vg-guide-accordion__header"
+          :data-testid="collapsible ? 'guide-toggle' : null"
+          :title="collapsible ? 'Desplegar o contraer las guías de diagnóstico' : null"
+        >
           <span class="vg-guide-accordion__eyebrow">Guías rápidas de diagnóstico</span>
           <h3 class="vg-guide-accordion__title">📖 {{ modelLabel() }}</h3>
-        </div>
-        <span v-if="orderedGuides.length > 0" class="vg-chip" data-testid="guide-count">
-          {{ orderedGuides.length }} {{ orderedGuides.length === 1 ? 'guía' : 'guías' }}
-        </span>
-      </header>
+          <span class="vg-guide-accordion__header-meta">
+            <span v-if="orderedGuides.length > 0" class="vg-chip" data-testid="guide-count">
+              {{ orderedGuides.length }} {{ orderedGuides.length === 1 ? 'guía' : 'guías' }}
+            </span>
+            <span class="vg-guide-accordion__chevron" aria-hidden="true">⌄</span>
+          </span>
+        </component>
+
+        <div class="vg-guide-accordion__body">
 
       <div
         v-if="showSanitaryBanner"
@@ -556,9 +574,11 @@ export const TroubleshootingGuideAccordion = {
         </article>
       </template>
 
-      <p v-else class="vg-guide-accordion__message" data-testid="guide-empty">
-        No hay guías activas para este modelo.
-      </p>
+        <p v-else class="vg-guide-accordion__message" data-testid="guide-empty">
+          No hay guías activas para este modelo.
+        </p>
+        </div>
+      </component>
     </section>
   `
 };
