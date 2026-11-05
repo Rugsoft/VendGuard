@@ -3191,25 +3191,179 @@ CREATE TRIGGER trg_immutable_machine_troubleshooting_guides
     BEFORE UPDATE ON machine_troubleshooting_guides
     FOR EACH ROW EXECUTE FUNCTION enforce_troubleshooting_guides_immutability();
 
+-- =============================================================================
+-- ============================================================================
+-- MÓDULO 29 · ACTA DE MERMA Y DESTRUCCIÓN DE LOTES POR CUARENTENA SANITARIA
+-- ============================================================================
+-- Bloque de convergencia del esquema de arranque. Declara exactamente lo mismo
+-- que la migración `025_sanitary_spoilage_records.sql` para que una base
+-- creada desde cero y una base migrada converjan sin diferencias:
+--   1. El valor `SANITARY_SPOILAGE_RECORD` en el catálogo de auditoría.
+--   2. La Tabla 40 `sanitary_spoilage_records` (22 columnas) con sus seis
+--      claves foráneas `ON DELETE RESTRICT`, su clave única por código oficial
+--      y sus ocho `CHECK`.
+--   3. Los cuatro índices de consulta del libro de mermas.
+--   4. La función `enforce_sanitary_spoilage_records_immutability()` y los tres
+--      disparadores constitucionales (Art. III.1, Art. III.3, RNF-01).
+-- ----------------------------------------------------------------------------
+
+ALTER TYPE audit_entity_type ADD VALUE IF NOT EXISTS 'SANITARY_SPOILAGE_RECORD';
+
+CREATE TABLE IF NOT EXISTS sanitary_spoilage_records (
+    id                              BIGINT GENERATED ALWAYS AS IDENTITY,
+    record_code                     VARCHAR(32) NOT NULL,
+    machine_id                      BIGINT NOT NULL,
+    incident_id                     BIGINT,
+    maintenance_order_id            BIGINT,
+    technician_id                   BIGINT NOT NULL,
+    registered_by                   BIGINT NOT NULL,
+    quarantine_origin               VARCHAR(32) NOT NULL,
+    discarded_units_count           INTEGER NOT NULL,
+    empty_machine_confirmed         BOOLEAN NOT NULL DEFAULT FALSE,
+    affected_batch_codes            TEXT NOT NULL,
+    cabin_temp_at_removal           NUMERIC(4,1) NOT NULL,
+    restored_stabilized_temp_c      NUMERIC(4,1) NOT NULL,
+    disposal_method                 VARCHAR(40) NOT NULL,
+    evidence_photo_url              VARCHAR(255) NOT NULL,
+    sanitary_notes                  TEXT NOT NULL,
+    estimated_merchandise_loss_eur  NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+    loss_adjusted_by                BIGINT,
+    loss_adjustment_reason          TEXT,
+    certificate_code                VARCHAR(32) NOT NULL,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_sanitary_spoilage_records PRIMARY KEY (id),
+    CONSTRAINT uq_sanitary_spoilage_records_code UNIQUE (record_code),
+    CONSTRAINT fk_spoilage_records_machine FOREIGN KEY (machine_id)
+        REFERENCES machines (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_spoilage_records_incident FOREIGN KEY (incident_id)
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_spoilage_records_preventive_order FOREIGN KEY (maintenance_order_id)
+        REFERENCES preventive_orders (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_spoilage_records_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_spoilage_records_registered_by FOREIGN KEY (registered_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_spoilage_records_loss_adjusted_by FOREIGN KEY (loss_adjusted_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+
+    CONSTRAINT chk_spoilage_records_origin CHECK (
+        quarantine_origin IN ('BIOLOGICAL_CLOCK_4H', 'PREVENTIVE_NON_CONFORMITY', 'MANUAL_SANITARY_LOCK')
+    ),
+    CONSTRAINT chk_spoilage_records_units_bounds CHECK (
+        discarded_units_count BETWEEN 0 AND 500
+    ),
+    CONSTRAINT chk_spoilage_records_empty_coherence CHECK (
+        (discarded_units_count = 0 AND empty_machine_confirmed = TRUE AND disposal_method = 'NOT_APPLICABLE_EMPTY')
+        OR (discarded_units_count > 0 AND empty_machine_confirmed = FALSE AND disposal_method IN (
+            'ON_SITE_ORGANIC_SEALED',
+            'RETURN_TO_CENTRAL_BIOHAZARD',
+            'AUTHORIZED_WASTE_MANAGER'
+        ))
+    ),
+    CONSTRAINT chk_spoilage_records_batch_codes_len CHECK (
+        char_length(btrim(affected_batch_codes)) BETWEEN 3 AND 500
+    ),
+    CONSTRAINT chk_spoilage_records_temps_bounds CHECK (
+        cabin_temp_at_removal BETWEEN -5.0 AND 35.0
+        AND restored_stabilized_temp_c BETWEEN -5.0 AND 35.0
+    ),
+    CONSTRAINT chk_spoilage_records_photo_not_empty CHECK (
+        char_length(btrim(evidence_photo_url)) BETWEEN 5 AND 255
+    ),
+    CONSTRAINT chk_spoilage_records_notes_len CHECK (
+        char_length(btrim(sanitary_notes)) BETWEEN 20 AND 1000
+    ),
+    CONSTRAINT chk_spoilage_records_loss_non_negative CHECK (
+        (discarded_units_count = 0 AND estimated_merchandise_loss_eur = 0.00 AND loss_adjusted_by IS NULL AND loss_adjustment_reason IS NULL)
+        OR (discarded_units_count > 0 AND estimated_merchandise_loss_eur > 0.00 AND estimated_merchandise_loss_eur <= 99999.99)
+    ),
+    CONSTRAINT chk_spoilage_records_adjustment_coherence CHECK (
+        (loss_adjusted_by IS NULL AND loss_adjustment_reason IS NULL)
+        OR (discarded_units_count > 0 AND loss_adjusted_by IS NOT NULL AND loss_adjustment_reason IS NOT NULL AND char_length(btrim(loss_adjustment_reason)) BETWEEN 20 AND 500)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_spoilage_records_machine_created
+    ON sanitary_spoilage_records (machine_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_spoilage_records_incident
+    ON sanitary_spoilage_records (incident_id)
+    WHERE incident_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_spoilage_records_preventive_order
+    ON sanitary_spoilage_records (maintenance_order_id)
+    WHERE maintenance_order_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_spoilage_records_technician_created
+    ON sanitary_spoilage_records (technician_id, created_at DESC);
+
+CREATE OR REPLACE FUNCTION enforce_sanitary_spoilage_records_immutability()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $fn$
+BEGIN
+    IF OLD.record_code IS DISTINCT FROM NEW.record_code
+       OR OLD.machine_id IS DISTINCT FROM NEW.machine_id
+       OR OLD.incident_id IS DISTINCT FROM NEW.incident_id
+       OR OLD.maintenance_order_id IS DISTINCT FROM NEW.maintenance_order_id
+       OR OLD.technician_id IS DISTINCT FROM NEW.technician_id
+       OR OLD.registered_by IS DISTINCT FROM NEW.registered_by
+       OR OLD.quarantine_origin IS DISTINCT FROM NEW.quarantine_origin
+       OR OLD.discarded_units_count IS DISTINCT FROM NEW.discarded_units_count
+       OR OLD.empty_machine_confirmed IS DISTINCT FROM NEW.empty_machine_confirmed
+       OR OLD.affected_batch_codes IS DISTINCT FROM NEW.affected_batch_codes
+       OR OLD.cabin_temp_at_removal IS DISTINCT FROM NEW.cabin_temp_at_removal
+       OR OLD.restored_stabilized_temp_c IS DISTINCT FROM NEW.restored_stabilized_temp_c
+       OR OLD.disposal_method IS DISTINCT FROM NEW.disposal_method
+       OR OLD.evidence_photo_url IS DISTINCT FROM NEW.evidence_photo_url
+       OR OLD.sanitary_notes IS DISTINCT FROM NEW.sanitary_notes
+       OR OLD.certificate_code IS DISTINCT FROM NEW.certificate_code
+       OR OLD.created_at IS DISTINCT FROM NEW.created_at THEN
+        RAISE EXCEPTION 'INMUTABILIDAD_VIOLADA (Art. III.3): Los hechos sanitarios y físicos de un Acta de Merma APPCC son inmutables tras su emisión; solo se admite el ajuste financiero auditado por Coordinación.'
+            USING ERRCODE = '45000';
+    END IF;
+    RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS trg_no_delete_sanitary_spoilage_records ON sanitary_spoilage_records;
+CREATE TRIGGER trg_no_delete_sanitary_spoilage_records
+    BEFORE DELETE ON sanitary_spoilage_records
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+DROP TRIGGER IF EXISTS trg_touch_sanitary_spoilage_records ON sanitary_spoilage_records;
+CREATE TRIGGER trg_touch_sanitary_spoilage_records
+    BEFORE UPDATE ON sanitary_spoilage_records
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_immutable_sanitary_spoilage_records ON sanitary_spoilage_records;
+CREATE TRIGGER trg_immutable_sanitary_spoilage_records
+    BEFORE UPDATE ON sanitary_spoilage_records
+    FOR EACH ROW EXECUTE FUNCTION enforce_sanitary_spoilage_records_immutability();
+
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 39 tablas (las 39 del contrato de correspondencia) · 34 tipos del dominio en sus
--- 39 columnas `ENUM` · 7 funciones de blindaje: `prevent_hard_delete()`,
+-- 40 tablas (las 40 del contrato de correspondencia) · 34 tipos del dominio en sus
+-- 39 columnas `ENUM` · 8 funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
 -- `prevent_satisfaction_survey_rewrite()`, `prevent_service_sheet_update()`
 -- (las tres últimas de bloqueo de `UPDATE` comparten forma) y
 -- `enforce_incident_assignments_immutability()` (Módulo 26) y
--- `enforce_troubleshooting_guides_immutability()` (Módulo 28)
--- 68 disparadores: 39 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 22
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 7 `BEFORE UPDATE` de
+-- `enforce_troubleshooting_guides_immutability()` (Módulo 28) y
+-- `enforce_sanitary_spoilage_records_immutability()` (Módulo 29)
+-- 71 disparadores: 40 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 23
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 8 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
 -- `trg_no_update_technician_shift_logs`, `trg_immutable_root_causes`,
 -- `trg_immutable_standard_solutions`, `trg_immutable_incident_assignments` y
--- `trg_immutable_machine_troubleshooting_guides`)
--- 64 restricciones nombradas: 39 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 25 únicas
--- 68 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- `trg_immutable_machine_troubleshooting_guides` y
+-- `trg_immutable_sanitary_spoilage_records`)
+-- 66 restricciones nombradas: 40 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 26 únicas
+-- 76 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
 -- en la bitácora), las 12 del Módulo 23 (5 en órdenes y 7 en líneas) y las 4 del
 -- Módulo 24 (formato del identificador, tipo de parada, operación y resultado) y
@@ -3217,12 +3371,16 @@ CREATE TRIGGER trg_immutable_machine_troubleshooting_guides
 -- las 5 del Módulo 27 (desglose unitario, costes no negativos, longitud de notas de
 -- recepción, longitud del dictamen y coherencia terminal del ciclo de taller) y
 -- las 5 del Módulo 28 (modelo no vacío, longitud del título, cotas de códigos de
--- error, de pasos y de repuestos recomendados)
--- · 89 claves foráneas con las reglas declaradas en el contrato §2.4
--- 99 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- error, de pasos y de repuestos recomendados) y las 8 del Módulo 29 (origen de
+-- cuarentena, cotas de unidades, coherencia de máquina vacía, longitud de lotes,
+-- rango térmico, fotografía no vacía, longitud de observaciones y coherencia
+-- contable del coste y su ajuste)
+-- · 95 claves foráneas con las reglas declaradas en el contrato §2.4
+-- 103 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
 -- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2), el Módulo 23 (5) y el
--- Módulo 24 (2), el Módulo 26 (3), el Módulo 27 (6) y el Módulo 28 (3)— y nueve índices únicos parciales:
+-- Módulo 24 (2), el Módulo 26 (3), el Módulo 27 (6), el Módulo 28 (3) y el
+-- Módulo 29 (4)— y nueve índices únicos parciales:
 -- `uq_incident_assignments_active_custody` (M26, Art. V.3), `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
 -- `uq_users_telegram_chat_id` (M16), `uq_zone_postal_codes_live` (M17),

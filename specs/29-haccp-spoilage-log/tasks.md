@@ -34,7 +34,7 @@ flowchart LR
 
 ## Fase 1: Esquema de Base de Datos PostgreSQL / Supabase y Guardas de Esquema
 
-- [ ] **T-SPOILAGE-01 · Crear migración incremental `025_sanitary_spoilage_records.sql` y converger `database/supabase_init.sql`**
+- [x] **T-SPOILAGE-01 · Crear migración incremental `025_sanitary_spoilage_records.sql` y converger `database/supabase_init.sql`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** Ninguna
   - **Archivos exactos a crear o modificar:**
