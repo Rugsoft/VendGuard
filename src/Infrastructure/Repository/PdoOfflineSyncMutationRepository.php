@@ -15,6 +15,7 @@ use VendGuard\Core\Domain\Model\OfflineSyncMutation;
 use VendGuard\Core\Domain\Model\RootCause;
 use VendGuard\Core\Domain\Model\StandardSolution;
 use VendGuard\Core\Domain\Repository\OfflineSyncMutationRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
@@ -183,6 +184,7 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
             'spare_parts_catalog_by_machine' => $this->fetchSparePartsCatalogByMachine($machinesOnRoute),
             'van_stock' => $this->fetchVanStock($technicianId),
             'root_cause_taxonomy' => $this->fetchRootCauseTaxonomy(),
+            'troubleshooting_guides' => $this->fetchTroubleshootingGuides($technicianId),
         ];
     }
 
@@ -223,6 +225,180 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
             ],
             $catalog
         );
+    }
+
+    /**
+     * Catálogo activo de guías de diagnóstico, enriquecido para el técnico
+     * (Módulo 28, `D3`, `RF-03.1`, `C2`, Art. V.4).
+     *
+     * La consulta cruza cada repuesto recomendado con el saldo de la furgoneta
+     * del técnico autenticado y **no selecciona ninguna columna monetaria**: el
+     * paquete local muestra unidades físicas, nunca costes. La causa raíz
+     * sugerida sólo viaja si sigue activa (`C2`), con su solución predeterminada
+     * activa. Son dos consultas fijas —guías y repuestos— con independencia del
+     * número de guías: no hay una lectura por guía ni por repuesto.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function fetchTroubleshootingGuides(int $technicianId): array
+    {
+        $guideRows = $this->fetchAll(
+            "SELECT g.id, g.machine_model, g.machine_model_key, g.breakdown_type, g.title,
+                    g.error_codes_json, g.steps_json, g.recommended_spare_part_ids,
+                    rc.id AS root_cause_id, rc.code AS root_cause_code,
+                    rc.category AS root_cause_category, rc.name AS root_cause_name,
+                    ss.id AS default_solution_id, ss.code AS default_solution_code,
+                    ss.name AS default_solution_name
+               FROM machine_troubleshooting_guides g
+               LEFT JOIN root_causes rc
+                      ON rc.id = g.suggested_root_cause_id
+                     AND rc.is_active = TRUE
+               LEFT JOIN LATERAL (
+                    SELECT s.id, s.code, s.name
+                      FROM standard_solutions s
+                     WHERE s.root_cause_id = rc.id
+                       AND s.is_active = TRUE
+                     ORDER BY s.is_default DESC, s.id ASC
+                     LIMIT 1
+               ) ss ON TRUE
+              WHERE g.is_active = TRUE
+              ORDER BY g.machine_model ASC,
+                       CASE g.breakdown_type
+                           WHEN 'TEMPERATURE_COLD' THEN 1
+                           WHEN 'PAYMENT_SYSTEM' THEN 2
+                           WHEN 'PRODUCT_JAM' THEN 3
+                           WHEN 'ELECTRICAL_OFF' THEN 4
+                           ELSE 5
+                       END ASC,
+                       g.id ASC"
+        );
+
+        if ($guideRows === []) {
+            return [];
+        }
+
+        $partIds = [];
+        foreach ($guideRows as $row) {
+            foreach ($this->decodeJsonArray($row['recommended_spare_part_ids']) as $partId) {
+                if (is_int($partId) && $partId > 0) {
+                    $partIds[$partId] = true;
+                }
+            }
+        }
+
+        $partsById = [];
+        if ($partIds !== []) {
+            $placeholders = [];
+            $params = [':technician_id' => $technicianId];
+            $index = 0;
+            foreach (array_keys($partIds) as $partId) {
+                $key = ':part_' . $index;
+                $index++;
+                $placeholders[] = $key;
+                $params[$key] = $partId;
+            }
+
+            $partRows = $this->fetchAll(
+                'SELECT sp.id, sp.part_code, sp.name, sp.category, sp.is_active,
+                        COALESCE(vs.quantity_available, 0) AS van_stock_quantity
+                   FROM spare_parts sp
+                   LEFT JOIN technician_van_stocks vs
+                          ON vs.spare_part_id = sp.id
+                         AND vs.technician_id = :technician_id
+                  WHERE sp.id IN (' . implode(', ', $placeholders) . ')',
+                $params
+            );
+
+            foreach ($partRows as $partRow) {
+                $partsById[(int)$partRow['id']] = $partRow;
+            }
+        }
+
+        $guides = [];
+        foreach ($guideRows as $row) {
+            $recommendedParts = [];
+            foreach ($this->decodeJsonArray($row['recommended_spare_part_ids']) as $partId) {
+                $part = $partsById[(int)$partId] ?? null;
+                if ($part === null) {
+                    continue;
+                }
+
+                $vanQuantity = (int)$part['van_stock_quantity'];
+                $recommendedParts[] = [
+                    'spare_part_id' => (int)$part['id'],
+                    'part_code' => (string)$part['part_code'],
+                    'name' => (string)$part['name'],
+                    'category' => (string)$part['category'],
+                    'is_active' => self::asBool($part['is_active']),
+                    'van_stock_quantity' => $vanQuantity,
+                    'has_van_stock' => $vanQuantity > 0,
+                ];
+            }
+
+            $rootCause = null;
+            if ($row['root_cause_id'] !== null) {
+                $rootCauseCategory = IncidentCategory::from((string)$row['root_cause_category']);
+                $rootCause = [
+                    'id' => (int)$row['root_cause_id'],
+                    'code' => (string)$row['root_cause_code'],
+                    'category' => $rootCauseCategory->value,
+                    'category_label' => $rootCauseCategory->label(),
+                    'name' => (string)$row['root_cause_name'],
+                    'is_active' => true,
+                    'default_solution' => $row['default_solution_id'] !== null
+                        ? [
+                            'id' => (int)$row['default_solution_id'],
+                            'code' => (string)$row['default_solution_code'],
+                            'name' => (string)$row['default_solution_name'],
+                        ]
+                        : null,
+                ];
+            }
+
+            $guides[] = [
+                'id' => (int)$row['id'],
+                'machine_model' => (string)$row['machine_model'],
+                'machine_model_key' => (string)$row['machine_model_key'],
+                'breakdown_type' => (string)$row['breakdown_type'],
+                'breakdown_type_label' => IncidentCategory::from((string)$row['breakdown_type'])->label(),
+                'title' => (string)$row['title'],
+                'error_codes' => $this->decodeJsonArray($row['error_codes_json']),
+                'steps' => $this->decodeJsonArray($row['steps_json']),
+                'recommended_spare_parts' => $recommendedParts,
+                'suggested_root_cause' => $rootCause,
+            ];
+        }
+
+        return $guides;
+    }
+
+    /**
+     * Lista de un `JSONB` del catálogo, ya normalizada como lista de PHP.
+     *
+     * @return list<mixed>
+     */
+    private function decodeJsonArray(mixed $value): array
+    {
+        if (!is_string($value) || $value === '') {
+            return [];
+        }
+
+        $decoded = json_decode($value, true);
+
+        return is_array($decoded) ? array_values($decoded) : [];
+    }
+
+    /**
+     * Un `BOOLEAN` de PostgreSQL puede llegar como `bool` o como `'t'`/`'f'`;
+     * `(bool)'f'` sería `true`, así que la forma se resuelve explícitamente.
+     */
+    private static function asBool(mixed $value): bool
+    {
+        return $value === true
+            || $value === 1
+            || $value === '1'
+            || $value === 't'
+            || $value === 'true';
     }
 
     /**

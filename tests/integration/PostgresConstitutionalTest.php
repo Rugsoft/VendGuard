@@ -86,7 +86,7 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 36 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19, 20, 21, 22, 23, 24 y 25). */
+/** Las 39 tablas del contrato de correspondencia (§2.1, Módulos 14 y 17–28). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -102,6 +102,9 @@ const CONTRACT_TABLES = [
     // Módulo 25: el catálogo maestro de taxonomía forma parte del blindaje
     // constitucional desde que ambas tablas declaran `prevent_hard_delete()`.
     'root_causes', 'standard_solutions',
+    // Módulos 26–28: custodia, taller y guías también declaran `prevent_hard_delete()`
+    // y entran en el barrido constitucional del Art. III.1.
+    'incident_assignments', 'workshop_repair_items', 'machine_troubleshooting_guides',
 ];
 
 /** Las siete restricciones de longitud mínima del Art. V.1, con la tabla y la columna que vigilan. */

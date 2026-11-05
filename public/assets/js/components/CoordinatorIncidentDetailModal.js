@@ -48,6 +48,7 @@ import { api } from '../api.js';
 import { IncidentBadge } from './IncidentBadge.js';
 import { AssignSuggestionPanel } from './AssignSuggestionPanel.js';
 import { ServiceSheetModal } from './ServiceSheetModal.js';
+import { TroubleshootingGuideAccordion } from './TroubleshootingGuideAccordion.js';
 import { AMBER_TECHNICAL_TOKENS } from '../utils/IncidentStatusPermissions.js';
 import {
   opportunisticModeLabel,
@@ -79,7 +80,8 @@ export const CoordinatorIncidentDetailModal = {
   components: {
     IncidentBadge,
     AssignSuggestionPanel,
-    ServiceSheetModal
+    ServiceSheetModal,
+    TroubleshootingGuideAccordion
   },
   props: {
     /**
@@ -175,7 +177,15 @@ export const CoordinatorIncidentDetailModal = {
       selectedRootCauseId: null,
       selectedStandardSolutionId: null,
       isSubmittingResolve: false,
-      resolveErrorMessage: ''
+      resolveErrorMessage: '',
+      /**
+       * Catálogo de guías rápidas del modelo (Módulo 28, RF-01.1, D3): se carga
+       * con la ficha y alimenta el acordeón sin precios de la sección 3-bis.
+       */
+      troubleshootingGuides: [],
+      troubleshootingGuidesWarning: false,
+      isLoadingTroubleshootingGuides: false,
+      troubleshootingGuidesError: ''
     };
   },
   computed: {
@@ -892,12 +902,100 @@ export const CoordinatorIncidentDetailModal = {
           this.assignErrorMessage = '';
         }
         this.scrollCommentsToLatest();
+        await this.loadTroubleshootingGuides();
       } catch (err) {
         this.detail = null;
         this.errorMessage = err?.message || 'No se pudo cargar el detalle de la incidencia.';
       } finally {
         this.isLoading = false;
       }
+    },
+
+    /**
+     * Carga las guías del modelo del expediente (Módulo 28, RF-01.1).
+     *
+     * La ficha ya trae el modelo y el tipo de máquina; la consulta usa esos
+     * datos y la categoría del aviso para que el conmutador suba la guía exacta.
+     * Un fallo aquí no oculta la ficha: el acordeón muestra su propio aviso.
+     */
+    async loadTroubleshootingGuides() {
+      const model = String(
+        this.machine?.model
+          ?? this.incident?.machine?.model
+          ?? this.incident?.machine_model
+          ?? ''
+      ).trim();
+      this.troubleshootingGuides = [];
+      this.troubleshootingGuidesWarning = false;
+      this.troubleshootingGuidesError = '';
+
+      if (model === '') {
+        return;
+      }
+
+      this.isLoadingTroubleshootingGuides = true;
+      try {
+        const machineType = this.machine?.has_perishables
+          ? 'PERISHABLE_FOOD'
+          : (this.machine?.machine_type || this.machine?.type || null);
+        const response = await api.getTroubleshootingGuidesByModel(
+          model,
+          this.incident?.category ?? null,
+          machineType,
+          this.machine?.id ?? this.incident?.machine_id ?? null
+        );
+
+        this.troubleshootingGuides = Array.isArray(response?.guides) ? response.guides : [];
+        this.troubleshootingGuidesWarning = response?.sanitary_cold_warning_for_machine === true;
+      } catch (error) {
+        this.troubleshootingGuidesError = error?.message
+          || 'No se pudieron cargar las guías de diagnóstico de este modelo.';
+      } finally {
+        this.isLoadingTroubleshootingGuides = false;
+      }
+    },
+
+    /**
+     * Aplica la causa sugerida en la resolución administrativa (Módulo 28, D2, QA 4).
+     *
+     * Abre el panel si estaba cerrado, activa el catálogo completo cuando la
+     * causa pertenece a otra categoría y preselecciona su solución. Nunca
+     * escribe en `diagnosis` ni en `action_taken` (Art. V.1).
+     */
+    async applyGuideRootCause(payload = {}) {
+      const rootCause = payload?.rootCause ?? null;
+      const rootCauseId = Number(rootCause?.id ?? 0);
+      if (!(rootCauseId > 0)) {
+        return;
+      }
+
+      if (!this.isResolvePanelOpen) {
+        await this.openResolvePanel();
+      }
+
+      const causeCategory = String(rootCause?.category ?? '').trim().toUpperCase();
+      const incidentCategory = String(this.incident?.category ?? '').trim().toUpperCase();
+      if (causeCategory !== '' && incidentCategory !== '' && causeCategory !== incidentCategory) {
+        this.showAllRootCauseCategories = true;
+      }
+
+      const cause = (Array.isArray(this.rootCauseCatalog) ? this.rootCauseCatalog : [])
+        .find((entry) => Number(entry?.id) === rootCauseId);
+      if (!cause) {
+        this.rootCauseCatalogError = 'La causa sugerida por la guía ya no está activa en el catálogo maestro.';
+        return;
+      }
+
+      this.selectedRootCauseId = rootCauseId;
+      this.selectedStandardSolutionId = null;
+
+      const preferredId = Number(rootCause?.default_solution?.id ?? 0);
+      const solutions = this.resolveAvailableSolutions;
+      const preferred = solutions.find((solution) => Number(solution?.id) === preferredId)
+        ?? solutions.find((solution) => solution?.is_default === true)
+        ?? solutions[0]
+        ?? null;
+      this.selectedStandardSolutionId = preferred ? Number(preferred.id) : null;
     },
 
     /**
@@ -1872,6 +1970,30 @@ export const CoordinatorIncidentDetailModal = {
                 >
                   Evidencia gráfica no disponible
                 </div>
+              </section>
+
+              <!-- 3-bis. Guías rápidas de diagnóstico del modelo (Módulo 28, RF-01.1, D3) -->
+              <section
+                v-if="machine?.model"
+                class="info-card detail-section"
+                data-testid="section-troubleshooting-guides"
+                style="background-color: var(--color-canvas); border: 1px solid var(--color-hairline); border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 16px;"
+              >
+                <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 16px; font-weight: 500; color: var(--color-ink); margin: 0 0 8px;">
+                  📖 Guías Rápidas de Diagnóstico
+                </h3>
+                <TroubleshootingGuideAccordion
+                  :incident-id="incident.id"
+                  :machine-model="machine.model"
+                  :breakdown-type="incident.category || ''"
+                  :machine-type="machine.has_perishables ? 'PERISHABLE_FOOD' : (machine.machine_type || machine.type || '')"
+                  :guides="troubleshootingGuides"
+                  :sanitary-warning="troubleshootingGuidesWarning"
+                  :show-stock="false"
+                  :is-loading="isLoadingTroubleshootingGuides"
+                  :error-message="troubleshootingGuidesError"
+                  @apply-root-cause="applyGuideRootCause"
+                />
               </section>
 
               <!-- 4. Cronograma y Monitor de SLA (RF-03) -->

@@ -758,6 +758,11 @@ export function normalizeSnapshot(bootstrap, previous = null) {
       ? bootstrap.root_cause_taxonomy
       : [],
     preventive_checklists_by_order: bootstrap?.preventive_checklists_by_order ?? {},
+    // Módulo 28: guías rápidas activas del catálogo, con su causa sugerida y sin
+    // precios. Viajan en el mismo documento para consultarlas sin cobertura (D3).
+    troubleshooting_guides: Array.isArray(bootstrap?.troubleshooting_guides)
+      ? bootstrap.troubleshooting_guides
+      : [],
     spare_parts_catalog_by_machine: bootstrap?.spare_parts_catalog_by_machine ?? {},
     van_stock: normalizeVanStock(bootstrap?.van_stock),
     provisional_stock_deductions: { ...(previous?.provisional_stock_deductions ?? {}) },
@@ -775,6 +780,100 @@ export function normalizeSnapshot(bootstrap, previous = null) {
   // Minimización antes de persistir (`M3`): lo que no se necesita sin red no se
   // guarda, y menos aún en un dispositivo compartido entre turnos.
   return minimizeSnapshot(snapshot);
+}
+
+/** Orden canónico de categorías del catálogo de guías (`QA 3`). */
+const GUIDE_CATEGORY_RANK = Object.freeze({
+  TEMPERATURE_COLD: 0,
+  PAYMENT_SYSTEM: 1,
+  PRODUCT_JAM: 2,
+  ELECTRICAL_OFF: 3,
+  OTHER: 4
+});
+
+/**
+ * Lee las guías de un modelo desde la copia local y cruza su stock en vivo (`D3`).
+ *
+ * La copia guarda el catálogo enriquecido tal como llegó del bootstrap; aquí se
+ * filtra por modelo, se sube la coincidencia exacta de categoría y se refresca
+ * cada repuesto con `snapshot.van_stock`, de modo que una resolución encolada
+ * que ya descontó unidades se refleje sin volver a pedir el paquete.
+ *
+ * @param {Object|null} snapshot Copia local del técnico
+ * @param {string} machineModel Modelo de la máquina
+ * @param {string|null} [breakdownType=null] Categoría reportada
+ * @param {string|null} [machineType=null] Tipo de máquina (`PERISHABLE_FOOD`)
+ * @returns {{machine_model: string, machine_model_key: string, requested_breakdown_type: (string|null), has_exact_category_match: boolean, selected_guide_id: (number|null), sanitary_cold_warning_for_machine: boolean, guides: Array<Object>}}
+ */
+export function getOfflineTroubleshootingGuidesByModel(
+  snapshot,
+  machineModel,
+  breakdownType = null,
+  machineType = null
+) {
+  const label = String(machineModel ?? '').trim().replace(/\s+/g, ' ');
+  const modelKey = label.toLowerCase();
+  const requested = String(breakdownType ?? '').trim().toUpperCase() || null;
+  const isPerishable = String(machineType ?? '').trim().toUpperCase() === 'PERISHABLE_FOOD';
+
+  const stockByPart = new Map();
+  for (const item of (snapshot?.van_stock?.items ?? [])) {
+    const partId = Number(item?.spare_part_id ?? 0);
+    if (partId > 0) {
+      stockByPart.set(partId, Number(item?.quantity_available ?? 0));
+    }
+  }
+
+  const guides = (Array.isArray(snapshot?.troubleshooting_guides) ? snapshot.troubleshooting_guides : [])
+    .filter((guide) => guide
+      && guide.is_active !== false
+      && String(guide.machine_model_key ?? '').trim().toLowerCase() === modelKey)
+    .map((guide, index) => ({ guide, index }))
+    .sort((left, right) => {
+      const rank = (guide) => {
+        const category = String(guide?.breakdown_type ?? '').trim().toUpperCase();
+        if (requested !== null && category === requested) return -1;
+        return GUIDE_CATEGORY_RANK[category] ?? 99;
+      };
+      const diff = rank(left.guide) - rank(right.guide);
+
+      return diff !== 0 ? diff : left.index - right.index;
+    })
+    .map(({ guide }) => {
+      const parts = (Array.isArray(guide?.recommended_spare_parts) ? guide.recommended_spare_parts : [])
+        .map((part) => {
+          const partId = Number(part?.spare_part_id ?? 0);
+          const quantity = stockByPart.get(partId) ?? 0;
+
+          return {
+            ...part,
+            van_stock_quantity: quantity,
+            has_van_stock: quantity > 0
+          };
+        });
+
+      return {
+        ...guide,
+        sanitary_cold_warning: isPerishable
+          || String(guide?.breakdown_type ?? '').trim().toUpperCase() === 'TEMPERATURE_COLD'
+          || guide?.sanitary_cold_warning === true,
+        recommended_spare_parts: parts
+      };
+    });
+
+  const exactMatch = requested !== null
+    && guides.some((guide) => String(guide?.breakdown_type ?? '').trim().toUpperCase() === requested);
+
+  return {
+    machine_model: label,
+    machine_model_key: modelKey,
+    requested_breakdown_type: requested,
+    has_exact_category_match: exactMatch,
+    selected_guide_id: guides.length > 0 ? Number(guides[0]?.id ?? 0) || null : null,
+    sanitary_cold_warning_for_machine: isPerishable
+      || requested === 'TEMPERATURE_COLD',
+    guides
+  };
 }
 
 /**

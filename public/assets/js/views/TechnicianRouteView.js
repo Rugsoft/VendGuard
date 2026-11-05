@@ -55,6 +55,8 @@ import {
   summarizePendingCriticalStops
 } from '../utils/OpportunisticContext.js';
 import { OfflineSyncTrayModal } from '../components/OfflineSyncTrayModal.js';
+import { TroubleshootingGuideAccordion } from '../components/TroubleshootingGuideAccordion.js';
+import { getOfflineTroubleshootingGuidesByModel } from '../utils/OfflineStorage.js';
 import {
   MUTATION_STATUS,
   OFFLINE_MESSAGES,
@@ -79,6 +81,7 @@ export const TechnicianRouteView = {
   },
   components: {
     IncidentBadge,
+    TroubleshootingGuideAccordion,
     ModalDialog,
     TechnicianMetricsView,
     TechnicianPreventiveRouteTab,
@@ -167,6 +170,13 @@ export const TechnicianRouteView = {
       selectedRootCauseId: null,
       selectedStandardSolutionId: null,
       showAllRootCauseCategories: false,
+
+      // Módulo 28: guías de diagnóstico por parada, resueltas desde la copia
+      // local (D3) y rellenadas al hidratar la ruta. La clave es el id de la avería.
+      troubleshootingGuidesByIncident: {},
+      // Averías cuyo intento de resolución ya terminó, aunque no exista guía:
+      // permite declarar el vacío de EARS 01.2.3 sin parpadear durante la carga.
+      troubleshootingGuidesLoaded: {},
 
       // Interactive route map (RF-MAP-07, RF-MAP-08)
       showRouteMapModal: false,
@@ -1339,6 +1349,111 @@ export const TechnicianRouteView = {
      *
      * @returns {Promise<boolean>} `true` si había copia local del técnico.
      */
+    /**
+     * Resuelve las guías de cada parada desde la copia local (`D3`), con la API
+     * como respaldo cuando hay red y aún no existe paquete descargado.
+     *
+     * La guía es una ayuda operativa: un fallo de lectura no bloquea la parada.
+     */
+    async loadTroubleshootingGuidesForRoute(snapshot = null) {
+      const source = snapshot ?? this.offlineSnapshot;
+      const resolved = {};
+      const loaded = {};
+
+      for (const incident of this.incidents) {
+        const model = String(incident?.machine?.model ?? incident?.machine_model ?? '').trim();
+        if (model === '') {
+          continue;
+        }
+
+        const category = String(incident?.category ?? '').trim() || null;
+        const machineType = incident?.machine?.machine_type ?? incident?.machine_type_snapshot ?? null;
+
+        try {
+          if (source && Array.isArray(source.troubleshooting_guides) && source.troubleshooting_guides.length > 0) {
+            resolved[incident.id] = getOfflineTroubleshootingGuidesByModel(
+              source,
+              model,
+              category,
+              machineType
+            );
+            loaded[incident.id] = true;
+          } else if (!this.isOfflineMode && !this.isBrowserOffline()) {
+            resolved[incident.id] = await api.getTroubleshootingGuidesByModel(
+              model,
+              category,
+              machineType,
+              incident?.machine?.id ?? incident?.machine_id ?? null
+            );
+            loaded[incident.id] = true;
+          }
+        } catch (error) {
+          // Silencio deliberado: la ruta sigue operativa sin guía.
+        }
+      }
+
+      this.troubleshootingGuidesByIncident = resolved;
+      this.troubleshootingGuidesLoaded = loaded;
+    },
+
+    /** Guías ya resueltas de una parada. */
+    troubleshootingGuidesFor(incident) {
+      return this.troubleshootingGuidesByIncident?.[incident?.id]?.guides ?? [];
+    },
+
+    /** ¿Terminó la resolución de guías de esta parada? (EARS 01.2.3) */
+    hasTroubleshootingGuidesLoaded(incident) {
+      return this.troubleshootingGuidesLoaded?.[incident?.id] === true;
+    },
+
+    /** Aviso sanitario a nivel de máquina que publica el servidor o la copia. */
+    troubleshootingGuideWarningFor(incident) {
+      return this.troubleshootingGuidesByIncident?.[incident?.id]?.sanitary_cold_warning_for_machine === true;
+    },
+
+    /**
+     * Aplica en un toque la causa sugerida: abre la resolución si hace falta,
+     * abre el catálogo completo cuando la causa es de otra categoría (`QA 4`) y
+     * deja intactos diagnóstico y acción (`Art. V.1`, `D2`).
+     */
+    async applyGuideRootCause(incident, payload = {}) {
+      const rootCause = payload?.rootCause ?? null;
+      const rootCauseId = Number(rootCause?.id ?? 0);
+      if (!(rootCauseId > 0) || !incident) {
+        return;
+      }
+
+      const sameIncident = this.showResolveModal
+        && Number(this.selectedIncident?.id ?? 0) === Number(incident.id);
+      if (!sameIncident) {
+        await this.openResolveModal(incident);
+      }
+
+      const causeCategory = String(rootCause?.category ?? '').trim().toUpperCase();
+      const incidentCategory = String(incident?.category ?? '').trim().toUpperCase();
+      if (causeCategory !== '' && incidentCategory !== '' && causeCategory !== incidentCategory) {
+        this.showAllRootCauseCategories = true;
+      }
+
+      const cause = (Array.isArray(this.rootCauseCatalog) ? this.rootCauseCatalog : [])
+        .find((entry) => Number(entry?.id) === rootCauseId);
+      if (!cause) {
+        this.rootCauseCatalogError = 'La causa sugerida por la guía ya no está activa en el catálogo maestro.';
+        return;
+      }
+
+      this.selectedRootCauseId = rootCauseId;
+      this.selectedStandardSolutionId = null;
+
+      const preferredId = Number(rootCause?.default_solution?.id ?? 0);
+      const solutions = this.availableStandardSolutions;
+      const preferred = solutions.find((solution) => Number(solution?.id) === preferredId)
+        ?? solutions.find((solution) => solution?.is_default === true)
+        ?? solutions[0]
+        ?? null;
+      this.selectedStandardSolutionId = preferred ? Number(preferred.id) : null;
+    },
+
     async hydrateOfflineRoute() {
       const technicianId = this.offlineTechnicianId();
       if (!(technicianId > 0) || this.offlineStorage === null) {
@@ -1364,6 +1479,9 @@ export const TechnicianRouteView = {
         this.pendingCriticalStops = Array.isArray(envelope.pending_critical_stops_other_locations)
           ? envelope.pending_critical_stops_other_locations
           : [];
+
+        // Módulo 28: misma copia recién leída, sin segundo viaje a IndexedDB.
+        await this.loadTroubleshootingGuidesForRoute(snapshot);
 
         return true;
       } catch (error) {
@@ -1879,6 +1997,10 @@ export const TechnicianRouteView = {
         // La copia local se guarda con el paquete completo (preventivas, catálogo
         // y furgoneta): la ruta sola no basta para trabajar en el sótano.
         await this.refreshOfflineSnapshotFromServer();
+
+        // Módulo 28: las guías se resuelven después de refrescar la copia para que
+        // el cruce de furgoneta use el saldo vigente (D3).
+        await this.loadTroubleshootingGuidesForRoute();
       } catch (err) {
         if (this.isNetworkFailure(err)) {
           this.isOfflineMode = true;
@@ -4117,6 +4239,32 @@ export const TechnicianRouteView = {
                 </button>
               </div>
             </div>
+
+            <!-- Módulo 28: guías rápidas de diagnóstico de la parada activa (RF-01, D3).
+                 La selección de causa no rellena diagnóstico ni acción (Art. V.1). -->
+            <TroubleshootingGuideAccordion
+              v-if="(isAssigned(incident) || isInProgress(incident)) && (troubleshootingGuidesFor(incident).length > 0 || troubleshootingGuideWarningFor(incident))"
+              :incident-id="incident.id"
+              :machine-model="incident.machine?.model || incident.machine_model || ''"
+              :breakdown-type="incident.category || ''"
+              :machine-type="incident.machine?.machine_type || incident.machine_type_snapshot || ''"
+              :guides="troubleshootingGuidesFor(incident)"
+              :sanitary-warning="troubleshootingGuideWarningFor(incident)"
+              :show-empty="troubleshootingGuidesFor(incident).length > 0"
+              :collapsible="true"
+              style="margin-bottom: 12px;"
+              @apply-root-cause="applyGuideRootCause(incident, $event)"
+            />
+
+            <!-- EARS 01.2.3: el modelo sin guía lo declara sin añadir acciones y
+                 sin bloquear la parada; sólo tras resolverse la búsqueda. -->
+            <p
+              v-if="(isAssigned(incident) || isInProgress(incident)) && hasTroubleshootingGuidesLoaded(incident) && troubleshootingGuidesFor(incident).length === 0"
+              class="vg-guide-empty-inline"
+              data-testid="guide-empty-inline"
+            >
+              Sin guía de diagnóstico para este modelo todavía.
+            </p>
 
             <!-- Action Buttons Bar (Large, Mobile Finger-Friendly Tap Targets >= 44px) -->
             <div style="border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 10px;">

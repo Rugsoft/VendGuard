@@ -1378,6 +1378,136 @@ WHERE i.assigned_technician_id IS NOT NULL
        WHERE a.incident_id = i.id
   );
 
+-- ============================================================================
+-- SECCIÓN 20 · machine_troubleshooting_guides — las guías reales del parque (M28)
+-- ============================================================================
+-- QUÉ SIEMBRA
+--   Ocho guías rápidas de diagnóstico, una por modelo del parque, con códigos de
+--   display reales, pasos verificables de al menos 20 caracteres, los repuestos
+--   del catálogo que resuelven cada avería y la causa raíz que la taxonomía del
+--   Módulo 25 ya clasifica. Son las que el técnico consulta en su ruta y en el
+--   detalle de la avería, con o sin cobertura (RF-05.2, D4).
+--
+-- POR QUÉ `DO NOTHING` Y NO `DO UPDATE`
+--   El catálogo lo gobierna Coordinación desde su panel: puede reescribir un paso,
+--   cambiar un repuesto recomendado o dar de baja la guía. Un `DO UPDATE` en cada
+--   arranque desharía esas decisiones. La semilla solo asegura que la fila exista.
+--
+-- POR QUÉ LOS REPUESTOS Y LA CAUSA SE RESUELVEN POR CÓDIGO
+--   Los identificadores de `spare_parts` y `root_causes` los asigna la secuencia
+--   de cada base. La semilla escribe sus códigos estables (`part_code`, `code`) y
+--   deja que el motor resuelva la clave foránea, de modo que reejecutarla no
+--   dependa de los números que haya asignado cada base.
+--
+-- POR QUÉ `FAS PERLA` NO TIENE GUÍA
+--   Es el único modelo activo del parque sembrado que queda deliberadamente sin
+--   guía: el indicador «Modelos Activos sin Guía» de Coordinación (QA 1) necesita
+--   un huérfano real que demostrar en el entorno sembrado, no una cifra inventada.
+-- ============================================================================
+
+INSERT INTO machine_troubleshooting_guides (
+    machine_model, machine_model_key, breakdown_type, title,
+    error_codes_json, steps_json, recommended_spare_part_ids,
+    suggested_root_cause_id, is_active
+)
+SELECT
+    v.machine_model,
+    v.machine_model_key,
+    v.breakdown_type::incident_category,
+    v.title,
+    v.error_codes_json::jsonb,
+    v.steps_json::jsonb,
+    COALESCE((
+        SELECT jsonb_agg(sp.id ORDER BY c.ord)
+          FROM unnest(v.spare_part_codes) WITH ORDINALITY AS c(part_code, ord)
+          JOIN spare_parts sp ON sp.part_code = c.part_code
+    ), '[]'::jsonb),
+    (SELECT rc.id FROM root_causes rc WHERE rc.code = v.root_cause_code),
+    TRUE
+FROM (VALUES
+    (
+        'Sanden Vendo G-Drink',
+        'sanden vendo g-drink',
+        'TEMPERATURE_COLD',
+        'Cadena de frío: sonda NTC, turbina de evaporador y batería condensadora',
+        $json$[{"code":"E04","meaning":"Sonda térmica NTC de evaporador en circuito abierto o descalibrada"},{"code":"AL-TEMP","meaning":"Temperatura de cabina por encima del umbral sanitario de +8 °C"}]$json$,
+        $json$[{"step_order":1,"title":"Comprobar cierre de puerta y turbina de evaporador","instruction":"Abrir la puerta interior y verificar que la turbina gira sin bloqueo al accionar el pulsador de puerta, y que no hay hielo acumulado en la batería."},{"step_order":2,"title":"Medir la resistencia de la sonda NTC 10K","instruction":"Desconectar el conector J4 de la placa y medir con polímetro la resistencia de la sonda entre 10 kOhm y 18 kOhm según la temperatura ambiente de la sala."},{"step_order":3,"title":"Limpiar la batería condensadora y revisar el presostato","instruction":"Soplar la batería condensadora con aire comprimido a baja presión, revisar que el ventilador exterior gire y confirmar que el presostato no esté disparado."}]$json$,
+        ARRAY['SOND-NTC-01', 'VENT-EVAP-01']::VARCHAR[],
+        'RC-COLD-01'
+    ),
+    (
+        'Bianchi Gaia Espresso',
+        'bianchi gaia espresso',
+        'OTHER',
+        'Caldera espresso: electroválvula de entrada, bomba EX5 y filtro antical',
+        $json$[{"code":"ERR-H2O","meaning":"Tiempo de llenado de caldera agotado o caudal de entrada insuficiente"}]$json$,
+        $json$[{"step_order":1,"title":"Verificar la llave de paso y el cartucho filtrante","instruction":"Comprobar que la toma de agua de la sede tiene presión suficiente y que el cartucho antical Brita no está saturado ni bloqueado por cal."},{"step_order":2,"title":"Activar un lavado y escuchar la bomba vibratoria","instruction":"Ejecutar un ciclo de lavado desde el menú técnico de puerta y confirmar que la bomba EX5 vibra y que la electroválvula Ulka abre el paso hacia el grupo."},{"step_order":3,"title":"Medir 24V DC en la bobina de la electroválvula","instruction":"Con el ciclo activo, medir la tensión en el conector de la bobina de la electroválvula y descartar un falso contacto en el arnés del equipo."}]$json$,
+        ARRAY['VALV-ULKA-01', 'BOMB-VIB-02', 'FILT-AGUA-01']::VARCHAR[],
+        'RC-OTH-01'
+    ),
+    (
+        'Necta Samba Combo',
+        'necta samba combo',
+        'PRODUCT_JAM',
+        'Atasco en espiral: alineación de canal y fotocélula de caída',
+        $json$[{"code":"JAM-01","meaning":"Producto retenido en la espiral sin confirmación de caída"},{"code":"SEN-02","meaning":"Fotocélula de detección de caída sin señal"}]$json$,
+        $json$[{"step_order":1,"title":"Liberar el canal y revisar la espiral","instruction":"Retirar el producto atascado, comprobar que la espiral gira libre y que el paso coincide con el tamaño del envase cargado en el canal."},{"step_order":2,"title":"Limpiar las lentes de la fotocélula","instruction":"Desmontar la barrera óptica, limpiar ambas lentes con un paño seco y verificar que el led de recepción conmuta al pasar la mano por delante."},{"step_order":3,"title":"Probar tres extracciones consecutivas","instruction":"Cargar tres unidades del mismo producto y ejecutar tres ventas seguidas para confirmar que la caída se detecta en todas ellas."}]$json$,
+        ARRAY['MOT-ESP-01', 'FOTO-CAID-01']::VARCHAR[],
+        'RC-JAM-01'
+    ),
+    (
+        'Fas Fast 900',
+        'fas fast 900',
+        'PAYMENT_SYSTEM',
+        'Pasarela de pago: monedero NRI G13 y terminal VPOS Touch',
+        $json$[{"code":"MDB-01","meaning":"Sin respuesta del validador de monedas en el bus MDB"},{"code":"TLS-04","meaning":"Terminal contactless sin enlace de telemetría"}]$json$,
+        $json$[{"step_order":1,"title":"Inspeccionar el canal de monedas y la trampilla","instruction":"Accionar la palanca de devolución del selector y revisar que no haya monedas dobladas ni objetos extraños en los sensores ópticos del monedero."},{"step_order":2,"title":"Comprobar alimentación y conector MDB","instruction":"Verificar el conector Molex de seis pines del bus MDB, su tensión de 24V y que el terminal Nayax muestre estado en línea con la antena conectada."},{"step_order":3,"title":"Ejecutar una venta de prueba con tarjeta","instruction":"Realizar una compra con tarjeta contactless y confirmar el cargo, la devolución del cambio y el registro de la venta en la telemetría."}]$json$,
+        ARRAY['MON-CASH-01', 'TELEC-NAYAX-01']::VARCHAR[],
+        'RC-PAY-01'
+    ),
+    (
+        'Azkoyen Palma+',
+        'azkoyen palma+',
+        'TEMPERATURE_COLD',
+        'Bebidas frías: control de temperatura, ventilador y sonda de cabina',
+        $json$[{"code":"E05","meaning":"Sensor de temperatura de cabina fuera de rango"},{"code":"FAN-01","meaning":"Ventilador de evaporador bloqueado o sin alimentación"}]$json$,
+        $json$[{"step_order":1,"title":"Leer la temperatura real de la cabina","instruction":"Colocar un termómetro de referencia en el centro de la cabina y comparar la lectura con la que muestra el display del equipo."},{"step_order":2,"title":"Revisar el ventilador de evaporador","instruction":"Con la puerta cerrada, confirmar que el aire sale por las rejillas y que la turbina no roza con acumulación de hielo en el evaporador."},{"step_order":3,"title":"Comprobar la sonda y el contacto del termostato","instruction":"Medir la sonda NTC en el conector de la placa y verificar que el termostato de seguridad no ha disparado por sobretemperatura."}]$json$,
+        ARRAY['SOND-NTC-01', 'VENT-EVAP-01']::VARCHAR[],
+        'RC-COLD-02'
+    ),
+    (
+        'Necta Korinto',
+        'necta korinto',
+        'PRODUCT_JAM',
+        'Grupo infusor de café: juntas, cámara de compresión y bloqueo',
+        $json$[{"code":"GRP-03","meaning":"Grupo infusor bloqueado en posición de compresión"}]$json$,
+        $json$[{"step_order":1,"title":"Desmontar y revisar el grupo infusor","instruction":"Extraer el grupo, comprobar que la cámara sube y baja sin resistencia y que no hay restos de café endurecido en las guías."},{"step_order":2,"title":"Sustituir juntas tóricas y engrasar con grasa alimentaria","instruction":"Cambiar las juntas del pistón, aplicar grasa alimentaria en las guías y volver a montar el grupo con el trinquete en posición inicial."},{"step_order":3,"title":"Ejecutar un ciclo de café y comprobar la extracción","instruction":"Realizar dos cafés seguidos, verificar que el grupo no se bloquea y que el líquido sale con caudal y temperatura correctos."}]$json$,
+        ARRAY['GRUP-ESPR-01', 'JUNT-TOR-01']::VARCHAR[],
+        'RC-JAM-04'
+    ),
+    (
+        'Jofemar Vision',
+        'jofemar vision',
+        'ELECTRICAL_OFF',
+        'Pantalla y placa: display LCD sin imagen y etapa de potencia',
+        $json$[{"code":"DSP-00","meaning":"Display frontal sin comunicación con la placa de control"},{"code":"PWR-11","meaning":"Fallo de alimentación en la etapa de potencia"}]$json$,
+        $json$[{"step_order":1,"title":"Comprobar la alimentación general del equipo","instruction":"Verificar la toma de corriente, el fusible interno y que el piloto de la fuente conmutada permanezca encendido tras el arranque."},{"step_order":2,"title":"Revisar la faja plana del display","instruction":"Desconectar y volver a conectar la faja de datos del display, comprobando que no tenga pistas dobladas ni suciedad en el conector."},{"step_order":3,"title":"Medir las tensiones de la fuente conmutada","instruction":"Medir 5V y 12V en los bornes de salida de la fuente y confirmar que no hay caída de tensión al conectar la pantalla."}]$json$,
+        ARRAY['DISP-LCD-01']::VARCHAR[],
+        'RC-ELEC-03'
+    ),
+    (
+        'Saeco Cristallo',
+        'saeco cristallo',
+        'OTHER',
+        'Circuito hidráulico: descalcificación, electroválvula y bomba',
+        $json$[{"code":"DESC-02","meaning":"Bloqueo por incrustación calcárea en el circuito de agua"}]$json$,
+        $json$[{"step_order":1,"title":"Comprobar el filtro y la dureza del agua","instruction":"Revisar la fecha del cartucho antical, medir la dureza del agua de entrada y sustituir el filtro si ya está agotado."},{"step_order":2,"title":"Ejecutar el programa de descalcificación","instruction":"Lanzar el ciclo de descalcificación desde el menú de servicio, dejar actuar el producto y enjuagar con dos depósitos de agua limpia."},{"step_order":3,"title":"Verificar el caudal y la electroválvula","instruction":"Comprobar que la bomba entrega caudal constante y que la electroválvula abre sin ruido anómalo al pedir agua caliente."}]$json$,
+        ARRAY['VALV-ULKA-01', 'FILT-AGUA-01', 'BOMB-VIB-02']::VARCHAR[],
+        'RC-OTH-01'
+    )
+) AS v(machine_model, machine_model_key, breakdown_type, title, error_codes_json, steps_json, spare_part_codes, root_cause_code)
+ON CONFLICT (machine_model_key, breakdown_type) DO NOTHING;
+
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante · 5 saldos de stock de furgoneta · 1 configuración de ruta ·
 --       13 máquinas · 6 usuarios internos · 5 frecuencias normativas · 13 repuestos ·
@@ -1395,4 +1525,7 @@ WHERE i.assigned_technician_id IS NOT NULL
 --       0 unidades de taller en el arranque limpio (Módulo 27): la Sección 19
 --       solo reconstruye sustituciones con destino `TALLER` que ya existan; el
 --       reparto demo por los cinco estados vive en `SeedRunner`.
+--       8 guías de diagnóstico por modelo (Módulo 28): cinco de los seis modelos
+--       activos del parque sembrado quedan cubiertos y «Fas Perla» queda
+--       deliberadamente huérfano para demostrar el indicador de cobertura (QA 1).
 -- =============================================================================

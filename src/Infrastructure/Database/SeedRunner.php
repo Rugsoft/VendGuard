@@ -2546,6 +2546,219 @@ class SeedRunner
         ];
     }
 
+    /**
+     * Guías rápidas de diagnóstico por modelo (Módulo 28).
+     *
+     * Siembra las ocho guías reales del parque resolviendo repuesto y causa por sus
+     * códigos estables: los identificadores los asigna la secuencia de cada base y
+     * una semilla que los escribiera fijos dejaría de servir en la siguiente.
+     *
+     * El alta es **insertar si no existe** (`DO NOTHING`) y nunca reafirma los
+     * campos: el catálogo lo gobierna Coordinación y un paso reescrito, un repuesto
+     * recomendado distinto o una baja lógica posterior no puede deshacerse al
+     * resembrar el parque. `Fas Perla` se queda sin guía a propósito: es el modelo
+     * huérfano que demuestra el indicador de cobertura (QA 1).
+     *
+     * @return int Guías canónicas procesadas.
+     */
+    public function seedTroubleshootingGuides(): int
+    {
+        $sql = sprintf(
+            "INSERT INTO machine_troubleshooting_guides (
+                machine_model, machine_model_key, breakdown_type, title,
+                error_codes_json, steps_json, recommended_spare_part_ids,
+                suggested_root_cause_id, is_active
+            ) VALUES (
+                :machine_model, :machine_model_key, :breakdown_type, :title,
+                CAST(:error_codes_json AS JSONB), CAST(:steps_json AS JSONB),
+                CAST(:spare_part_ids AS JSONB),
+                (SELECT id FROM root_causes WHERE code = :root_cause_code),
+                %s
+            ) %s",
+            $this->dialect->booleanLiteral(true),
+            $this->dialect->upsertDoNothing(['machine_model_key', 'breakdown_type'])
+        );
+        $stmt = $this->pdo->prepare($sql);
+        $partStmt = $this->pdo->prepare('SELECT id FROM spare_parts WHERE part_code = :part_code');
+
+        $count = 0;
+        foreach (self::canonicalTroubleshootingGuideRows() as $guide) {
+            $partIds = [];
+            foreach ($guide['part_codes'] as $partCode) {
+                $partStmt->execute([':part_code' => $partCode]);
+                $partId = $partStmt->fetchColumn();
+                if ($partId === false) {
+                    throw new RuntimeException(
+                        'No se pudo resolver el repuesto sembrado «' . $partCode . '» (Módulo 28).'
+                    );
+                }
+                $partIds[] = (int)$partId;
+            }
+
+            $stmt->execute([
+                ':machine_model' => $guide['machine_model'],
+                ':machine_model_key' => $guide['machine_model_key'],
+                ':breakdown_type' => $guide['breakdown_type'],
+                ':title' => $guide['title'],
+                ':error_codes_json' => (string)json_encode($guide['error_codes'], JSON_UNESCAPED_UNICODE),
+                ':steps_json' => (string)json_encode($guide['steps'], JSON_UNESCAPED_UNICODE),
+                ':spare_part_ids' => (string)json_encode($partIds),
+                ':root_cause_code' => $guide['root_cause_code'],
+            ]);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
+     * Catálogo canónico de guías de diagnóstico (Módulo 28).
+     *
+     * Los códigos de repuesto y de causa raíz coinciden con los de
+     * `database/supabase_seeds.sql` y con el catálogo de los módulos 18 y 25;
+     * `CloudDeploySchemaParityTest` vigila esa paridad.
+     *
+     * @return list<array{machine_model: string, machine_model_key: string, breakdown_type: string, title: string, error_codes: list<array{code: string, meaning: string}>, steps: list<array{step_order: int, title: string, instruction: string}>, part_codes: list<string>, root_cause_code: string}>
+     */
+    private static function canonicalTroubleshootingGuideRows(): array
+    {
+        return [
+            [
+                'machine_model' => 'Sanden Vendo G-Drink',
+                'machine_model_key' => 'sanden vendo g-drink',
+                'breakdown_type' => 'TEMPERATURE_COLD',
+                'title' => 'Cadena de frío: sonda NTC, turbina de evaporador y batería condensadora',
+                'error_codes' => [
+                    ['code' => 'E04', 'meaning' => 'Sonda térmica NTC de evaporador en circuito abierto o descalibrada'],
+                    ['code' => 'AL-TEMP', 'meaning' => 'Temperatura de cabina por encima del umbral sanitario de +8 °C'],
+                ],
+                'steps' => [
+                    ['step_order' => 1, 'title' => 'Comprobar cierre de puerta y turbina de evaporador', 'instruction' => 'Abrir la puerta interior y verificar que la turbina gira sin bloqueo al accionar el pulsador de puerta, y que no hay hielo acumulado en la batería.'],
+                    ['step_order' => 2, 'title' => 'Medir la resistencia de la sonda NTC 10K', 'instruction' => 'Desconectar el conector J4 de la placa y medir con polímetro la resistencia de la sonda entre 10 kOhm y 18 kOhm según la temperatura ambiente de la sala.'],
+                    ['step_order' => 3, 'title' => 'Limpiar la batería condensadora y revisar el presostato', 'instruction' => 'Soplar la batería condensadora con aire comprimido a baja presión, revisar que el ventilador exterior gire y confirmar que el presostato no esté disparado.'],
+                ],
+                'part_codes' => ['SOND-NTC-01', 'VENT-EVAP-01'],
+                'root_cause_code' => 'RC-COLD-01',
+            ],
+            [
+                'machine_model' => 'Bianchi Gaia Espresso',
+                'machine_model_key' => 'bianchi gaia espresso',
+                'breakdown_type' => 'OTHER',
+                'title' => 'Caldera espresso: electroválvula de entrada, bomba EX5 y filtro antical',
+                'error_codes' => [
+                    ['code' => 'ERR-H2O', 'meaning' => 'Tiempo de llenado de caldera agotado o caudal de entrada insuficiente'],
+                ],
+                'steps' => [
+                    ['step_order' => 1, 'title' => 'Verificar la llave de paso y el cartucho filtrante', 'instruction' => 'Comprobar que la toma de agua de la sede tiene presión suficiente y que el cartucho antical Brita no está saturado ni bloqueado por cal.'],
+                    ['step_order' => 2, 'title' => 'Activar un lavado y escuchar la bomba vibratoria', 'instruction' => 'Ejecutar un ciclo de lavado desde el menú técnico de puerta y confirmar que la bomba EX5 vibra y que la electroválvula Ulka abre el paso hacia el grupo.'],
+                    ['step_order' => 3, 'title' => 'Medir 24V DC en la bobina de la electroválvula', 'instruction' => 'Con el ciclo activo, medir la tensión en el conector de la bobina de la electroválvula y descartar un falso contacto en el arnés del equipo.'],
+                ],
+                'part_codes' => ['VALV-ULKA-01', 'BOMB-VIB-02', 'FILT-AGUA-01'],
+                'root_cause_code' => 'RC-OTH-01',
+            ],
+            [
+                'machine_model' => 'Necta Samba Combo',
+                'machine_model_key' => 'necta samba combo',
+                'breakdown_type' => 'PRODUCT_JAM',
+                'title' => 'Atasco en espiral: alineación de canal y fotocélula de caída',
+                'error_codes' => [
+                    ['code' => 'JAM-01', 'meaning' => 'Producto retenido en la espiral sin confirmación de caída'],
+                    ['code' => 'SEN-02', 'meaning' => 'Fotocélula de detección de caída sin señal'],
+                ],
+                'steps' => [
+                    ['step_order' => 1, 'title' => 'Liberar el canal y revisar la espiral', 'instruction' => 'Retirar el producto atascado, comprobar que la espiral gira libre y que el paso coincide con el tamaño del envase cargado en el canal.'],
+                    ['step_order' => 2, 'title' => 'Limpiar las lentes de la fotocélula', 'instruction' => 'Desmontar la barrera óptica, limpiar ambas lentes con un paño seco y verificar que el led de recepción conmuta al pasar la mano por delante.'],
+                    ['step_order' => 3, 'title' => 'Probar tres extracciones consecutivas', 'instruction' => 'Cargar tres unidades del mismo producto y ejecutar tres ventas seguidas para confirmar que la caída se detecta en todas ellas.'],
+                ],
+                'part_codes' => ['MOT-ESP-01', 'FOTO-CAID-01'],
+                'root_cause_code' => 'RC-JAM-01',
+            ],
+            [
+                'machine_model' => 'Fas Fast 900',
+                'machine_model_key' => 'fas fast 900',
+                'breakdown_type' => 'PAYMENT_SYSTEM',
+                'title' => 'Pasarela de pago: monedero NRI G13 y terminal VPOS Touch',
+                'error_codes' => [
+                    ['code' => 'MDB-01', 'meaning' => 'Sin respuesta del validador de monedas en el bus MDB'],
+                    ['code' => 'TLS-04', 'meaning' => 'Terminal contactless sin enlace de telemetría'],
+                ],
+                'steps' => [
+                    ['step_order' => 1, 'title' => 'Inspeccionar el canal de monedas y la trampilla', 'instruction' => 'Accionar la palanca de devolución del selector y revisar que no haya monedas dobladas ni objetos extraños en los sensores ópticos del monedero.'],
+                    ['step_order' => 2, 'title' => 'Comprobar alimentación y conector MDB', 'instruction' => 'Verificar el conector Molex de seis pines del bus MDB, su tensión de 24V y que el terminal Nayax muestre estado en línea con la antena conectada.'],
+                    ['step_order' => 3, 'title' => 'Ejecutar una venta de prueba con tarjeta', 'instruction' => 'Realizar una compra con tarjeta contactless y confirmar el cargo, la devolución del cambio y el registro de la venta en la telemetría.'],
+                ],
+                'part_codes' => ['MON-CASH-01', 'TELEC-NAYAX-01'],
+                'root_cause_code' => 'RC-PAY-01',
+            ],
+            [
+                'machine_model' => 'Azkoyen Palma+',
+                'machine_model_key' => 'azkoyen palma+',
+                'breakdown_type' => 'TEMPERATURE_COLD',
+                'title' => 'Bebidas frías: control de temperatura, ventilador y sonda de cabina',
+                'error_codes' => [
+                    ['code' => 'E05', 'meaning' => 'Sensor de temperatura de cabina fuera de rango'],
+                    ['code' => 'FAN-01', 'meaning' => 'Ventilador de evaporador bloqueado o sin alimentación'],
+                ],
+                'steps' => [
+                    ['step_order' => 1, 'title' => 'Leer la temperatura real de la cabina', 'instruction' => 'Colocar un termómetro de referencia en el centro de la cabina y comparar la lectura con la que muestra el display del equipo.'],
+                    ['step_order' => 2, 'title' => 'Revisar el ventilador de evaporador', 'instruction' => 'Con la puerta cerrada, confirmar que el aire sale por las rejillas y que la turbina no roza con acumulación de hielo en el evaporador.'],
+                    ['step_order' => 3, 'title' => 'Comprobar la sonda y el contacto del termostato', 'instruction' => 'Medir la sonda NTC en el conector de la placa y verificar que el termostato de seguridad no ha disparado por sobretemperatura.'],
+                ],
+                'part_codes' => ['SOND-NTC-01', 'VENT-EVAP-01'],
+                'root_cause_code' => 'RC-COLD-02',
+            ],
+            [
+                'machine_model' => 'Necta Korinto',
+                'machine_model_key' => 'necta korinto',
+                'breakdown_type' => 'PRODUCT_JAM',
+                'title' => 'Grupo infusor de café: juntas, cámara de compresión y bloqueo',
+                'error_codes' => [
+                    ['code' => 'GRP-03', 'meaning' => 'Grupo infusor bloqueado en posición de compresión'],
+                ],
+                'steps' => [
+                    ['step_order' => 1, 'title' => 'Desmontar y revisar el grupo infusor', 'instruction' => 'Extraer el grupo, comprobar que la cámara sube y baja sin resistencia y que no hay restos de café endurecido en las guías.'],
+                    ['step_order' => 2, 'title' => 'Sustituir juntas tóricas y engrasar con grasa alimentaria', 'instruction' => 'Cambiar las juntas del pistón, aplicar grasa alimentaria en las guías y volver a montar el grupo con el trinquete en posición inicial.'],
+                    ['step_order' => 3, 'title' => 'Ejecutar un ciclo de café y comprobar la extracción', 'instruction' => 'Realizar dos cafés seguidos, verificar que el grupo no se bloquea y que el líquido sale con caudal y temperatura correctos.'],
+                ],
+                'part_codes' => ['GRUP-ESPR-01', 'JUNT-TOR-01'],
+                'root_cause_code' => 'RC-JAM-04',
+            ],
+            [
+                'machine_model' => 'Jofemar Vision',
+                'machine_model_key' => 'jofemar vision',
+                'breakdown_type' => 'ELECTRICAL_OFF',
+                'title' => 'Pantalla y placa: display LCD sin imagen y etapa de potencia',
+                'error_codes' => [
+                    ['code' => 'DSP-00', 'meaning' => 'Display frontal sin comunicación con la placa de control'],
+                    ['code' => 'PWR-11', 'meaning' => 'Fallo de alimentación en la etapa de potencia'],
+                ],
+                'steps' => [
+                    ['step_order' => 1, 'title' => 'Comprobar la alimentación general del equipo', 'instruction' => 'Verificar la toma de corriente, el fusible interno y que el piloto de la fuente conmutada permanezca encendido tras el arranque.'],
+                    ['step_order' => 2, 'title' => 'Revisar la faja plana del display', 'instruction' => 'Desconectar y volver a conectar la faja de datos del display, comprobando que no tenga pistas dobladas ni suciedad en el conector.'],
+                    ['step_order' => 3, 'title' => 'Medir las tensiones de la fuente conmutada', 'instruction' => 'Medir 5V y 12V en los bornes de salida de la fuente y confirmar que no hay caída de tensión al conectar la pantalla.'],
+                ],
+                'part_codes' => ['DISP-LCD-01'],
+                'root_cause_code' => 'RC-ELEC-03',
+            ],
+            [
+                'machine_model' => 'Saeco Cristallo',
+                'machine_model_key' => 'saeco cristallo',
+                'breakdown_type' => 'OTHER',
+                'title' => 'Circuito hidráulico: descalcificación, electroválvula y bomba',
+                'error_codes' => [
+                    ['code' => 'DESC-02', 'meaning' => 'Bloqueo por incrustación calcárea en el circuito de agua'],
+                ],
+                'steps' => [
+                    ['step_order' => 1, 'title' => 'Comprobar el filtro y la dureza del agua', 'instruction' => 'Revisar la fecha del cartucho antical, medir la dureza del agua de entrada y sustituir el filtro si ya está agotado.'],
+                    ['step_order' => 2, 'title' => 'Ejecutar el programa de descalcificación', 'instruction' => 'Lanzar el ciclo de descalcificación desde el menú de servicio, dejar actuar el producto y enjuagar con dos depósitos de agua limpia.'],
+                    ['step_order' => 3, 'title' => 'Verificar el caudal y la electroválvula', 'instruction' => 'Comprobar que la bomba entrega caudal constante y que la electroválvula abre sin ruido anómalo al pedir agua caliente.'],
+                ],
+                'part_codes' => ['VALV-ULKA-01', 'FILT-AGUA-01', 'BOMB-VIB-02'],
+                'root_cause_code' => 'RC-OTH-01',
+            ],
+        ];
+    }
+
     public function seedAll(string $defaultPassword = 'Password123!'): array
     {
         $this->pdo->beginTransaction();
@@ -2571,6 +2784,10 @@ class SeedRunner
             $checklistOrders = $this->seedPreventiveChecklistItems();
             $auditEvents = $this->seedPreventiveAuditTrail();
             $partsRes = $this->seedSpareParts();
+            // Las guías de diagnóstico (Módulo 28) resuelven repuesto y causa por sus
+            // códigos: entran cuando ambas maestras ya están sembradas. `Fas Perla`
+            // queda sin guía a propósito para el indicador de cobertura (QA 1).
+            $troubleshootingGuideCount = $this->seedTroubleshootingGuides();
             // El saldo de furgoneta se siembra después del catálogo maestro: lo resuelve
             // por `part_code` y por la clave canónica del técnico (Módulo 18).
             $vanStockCount = $this->seedVanStocks();
@@ -2606,6 +2823,7 @@ class SeedRunner
                 'preventive_audit_events' => $auditEvents,
                 'spare_parts' => $partsRes['parts'],
                 'spare_part_compatibilities' => $partsRes['compatibilities'],
+                'troubleshooting_guides' => $troubleshootingGuideCount,
                 'technician_van_stocks' => $vanStockCount,
                 'van_restock_orders' => $vanRestockOrderCount,
                 'offline_sync_mutations' => $offlineSyncMutationCount,

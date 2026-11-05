@@ -105,6 +105,17 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_VAN_RESTOCK_ORDER = 'VAN_RESTOCK_ORDER';
 
     /**
+     * Guía rápida de diagnóstico por modelo y categoría (Módulo 28, Tabla 39).
+     *
+     * La migración 024 añadió el valor al enum `audit_entity_type`, pero la
+     * whitelist del dominio no lo conocía: el alta, la edición y el cambio de
+     * vigencia de una guía no podían dejar su rastro bajo el tipo que exige el
+     * contrato. Reutilizar `MACHINE` apuntaría a una máquina ajena y rompería la
+     * trazabilidad del catálogo (Art. III.3).
+     */
+    public const ENTITY_MACHINE_TROUBLESHOOTING_GUIDE = 'MACHINE_TROUBLESHOOTING_GUIDE';
+
+    /**
      * Whitelist completa de tipos de entidad admitidos por el dominio.
      *
      * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
@@ -130,6 +141,7 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_VAN_RESTOCK_ORDER,
         self::ENTITY_ROOT_CAUSE_TAXONOMY,
         self::ENTITY_WORKSHOP_REPAIR_ITEM,
+        self::ENTITY_MACHINE_TROUBLESHOOTING_GUIDE,
     ];
 
     /**

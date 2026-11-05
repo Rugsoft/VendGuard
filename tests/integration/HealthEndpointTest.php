@@ -517,6 +517,37 @@ $assert(
 );
 
 // =====================================================================
+$rootWildcardResponse = $dispatch('GET', '/', ['Accept' => '*/*']);
+$assert(
+    '4.10 La raíz con `*/*` sirve el documento, no el health JSON',
+    $rootWildcardResponse->getStatusCode() === 200
+        && $rootWildcardResponse->getBody() === $expectedHtml
+        && str_contains((string)$rootWildcardResponse->getHeader('Content-Type'), 'text/html')
+);
+
+$rootJsonResponse = $dispatch('GET', '/', ['Accept' => 'application/json']);
+$rootJsonBody     = $rootJsonResponse->getDecodedBody() ?? [];
+$assert(
+    '4.11 La raíz sólo devuelve JSON cuando se pide explícitamente',
+    $rootJsonResponse->getStatusCode() === 200
+        && ($rootJsonBody['data']['name'] ?? null) === 'VendGuard API'
+);
+
+$legacyWildcardResponse = $dispatch('GET', $legacyRoute, ['Accept' => '*/*']);
+$legacyWildcardBody     = $legacyWildcardResponse->getDecodedBody() ?? [];
+$assert(
+    '4.12 La sonda /api/health conserva JSON ante `*/*`',
+    $legacyWildcardResponse->getStatusCode() === 200
+        && ($legacyWildcardBody['data']['name'] ?? null) === 'VendGuard API'
+);
+
+$assert(
+    '4.13 Las dos representaciones de la raíz declaran Vary: Accept',
+    str_contains((string)$rootHtmlResponse->getHeader('Vary'), 'Accept')
+        && str_contains((string)$rootWildcardResponse->getHeader('Vary'), 'Accept')
+        && str_contains((string)$rootJsonResponse->getHeader('Vary'), 'Accept')
+);
+
 // GRUPO 5: Una sola comparación del secreto y ninguna cabecera nueva
 // =====================================================================
 echo "\n--- Grupo 5: Garantías estructurales de la credencial ---\n";

@@ -31,6 +31,7 @@ export const AUDIT_ACTION_GROUPS = Object.freeze({
   sanitary: 'Sanidad Alimentaria',
   refund: 'Reintegros y Efectivo',
   spare_parts: 'Repuestos',
+  guides: 'Guías de Diagnóstico',
   taxonomy: 'Taxonomía de Causas',
   restock: 'Órdenes de Carga',
   notification: 'Centro de Notificaciones'
@@ -76,7 +77,10 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   // Entidad del Módulo 27: la bandeja de taller tiene espacio de identificadores
   // propio y el enumerado `audit_entity_type` ya la incluye; sin etiqueta el
   // filtro del visor perdería las filas del ciclo de reacondicionamiento.
-  WORKSHOP_REPAIR_ITEM: 'Expediente de Taller'
+  WORKSHOP_REPAIR_ITEM: 'Expediente de Taller',
+  // Entidad del Módulo 28: el catálogo de guías rápidas se audita con tipo
+  // propio y el visor necesita su etiqueta para no perder esas filas.
+  MACHINE_TROUBLESHOOTING_GUIDE: 'Guía de Diagnóstico'
 });
 
 /**
@@ -225,6 +229,12 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'START_PREVENTIVE', label: 'Inicio Offline de Inspección Preventiva', tone: 'primary', group: 'preventive' },
   { code: 'COMPLETE_PREVENTIVE', label: 'Cierre Offline de Inspección Preventiva', tone: 'success', group: 'preventive' },
   { code: 'REINSPECT_PREVENTIVE', label: 'Reinspección Offline tras Subsanación', tone: 'info', group: 'preventive' },
+  // Módulo 28: el ciclo de vida del catálogo de guías deja un evento por alta,
+  // edición, baja y reactivación; sin etiqueta el visor mostraría el código crudo.
+  { code: 'CREATE_TROUBLESHOOTING_GUIDE', label: 'Alta de Guía de Diagnóstico', tone: 'success', group: 'guides' },
+  { code: 'UPDATE_TROUBLESHOOTING_GUIDE', label: 'Modificación de Guía de Diagnóstico', tone: 'neutral', group: 'guides' },
+  { code: 'ACTIVATE_TROUBLESHOOTING_GUIDE', label: 'Reactivación de Guía de Diagnóstico', tone: 'success', group: 'guides' },
+  { code: 'DEACTIVATE_TROUBLESHOOTING_GUIDE', label: 'Desactivación de Guía de Diagnóstico', tone: 'danger', group: 'guides' },
 ]);
 
 const CATALOG_BY_CODE = Object.freeze(

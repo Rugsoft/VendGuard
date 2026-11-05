@@ -367,6 +367,18 @@ function extractAuditActions(string $source, string $relativePath): array
         }
     }
 
+    // Módulo 28: el servicio de guías entrega a su `audit()` privado la acción
+    // mediante constantes `AUDIT_ACTION_*`; esa llamada no es uno de los
+    // escritores reconocidos por las pasadas anteriores. Sin esta lectura las
+    // cuatro acciones del catálogo se leían como filtros fantasma aunque el
+    // servicio las persiste con `AuditLogger`.
+    if (str_contains($source, '->audit(')
+        && preg_match_all("/public const AUDIT_ACTION_[A-Z0-9_]*\s*=\s*'([A-Z][A-Z0-9_]+)'/", $source, $matches)) {
+        foreach ($matches[1] as $literal) {
+            $literals[$literal] = $literals[$literal] ?? $relativePath . ' (audit action constant)';
+        }
+    }
+
     return ['literals' => $literals, 'dynamic' => $dynamic];
 }
 

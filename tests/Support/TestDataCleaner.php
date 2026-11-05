@@ -80,6 +80,10 @@ final class TestDataCleaner
         // raíz, las mutaciones de una suite sobrevivirían al reinicio y la siguiente
         // encontraría ocupado el hueco de idempotencia que va a certificar.
         'offline_sync_mutations',
+        // Catálogo de guías de diagnóstico (Módulo 28): cuelga de `users` y de
+        // `root_causes`, ambas protegidas, así que el grafo desde `incidents` no lo
+        // alcanza y una guía creada por una suite sobreviviría al reinicio. Entra
+        // como raíz propia; el sembrador restituye las ocho canónicas.
     ];
 
     /**
@@ -118,6 +122,9 @@ final class TestDataCleaner
         // Bandeja de taller del Módulo 27: cuelga de `incident_replaced_parts` con FK
         // RESTRICT, de modo que el plan la coloca antes que su línea padre.
         'workshop_repair_items',
+        // Guías de diagnóstico del Módulo 28: catálogo operativo que Coordinación
+        // edita y da de baja; su purga no arrastra ninguna maestra.
+        'machine_troubleshooting_guides',
         'incident_replaced_parts',
         'refund_requests',
         'spare_part_requests',

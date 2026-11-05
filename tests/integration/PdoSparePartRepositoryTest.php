@@ -179,6 +179,18 @@ foreach ($compatibles as $c) {
 $models = $repo->findDistinctMachineModels();
 $assert("9.1 findDistinctMachineModels retorna modelos sin duplicados", count($models) >= 4 && in_array('Bianchi Gaia Espresso', $models, true));
 
+// =====================================================================
+// CASO 10: findByIds (H-28-05)
+// =====================================================================
+$createdId = (int)$created->getId();
+$batched = $repo->findByIds([$createdId, $createdId, 999999]);
+$assert(
+    "10.1 findByIds devuelve el mapa indexado por identificador",
+    ($batched[$createdId] ?? null)?->getPartCode() === $created->getPartCode()
+);
+$assert("10.2 findByIds deduplica los identificadores repetidos", count($batched) === 1);
+$assert("10.3 findByIds omite los identificadores ausentes", !isset($batched[999999]));
+
 // Limpieza de datos de prueba, con la ventana de purga abierta (contrato de limpieza §3).
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $created): void {
     $pdo->prepare("DELETE FROM spare_part_compatibilities WHERE spare_part_id = :id")->execute([':id' => $created->getId()]);

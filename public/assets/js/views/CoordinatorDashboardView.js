@@ -50,6 +50,7 @@ import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPre
 import { CoordinatorSanitarySweepPanel } from '../components/CoordinatorSanitarySweepPanel.js';
 import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab.js';
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
+import { CoordinatorTroubleshootingGuidesTab } from '../components/CoordinatorTroubleshootingGuidesTab.js';
 import { CoordinatorRootCauseParetoTab } from '../components/CoordinatorRootCauseParetoTab.js';
 import { CoordinatorVanStockTab } from '../components/CoordinatorVanStockTab.js';
 import { CoordinatorWorkshopTrayTab } from '../components/CoordinatorWorkshopTrayTab.js';
@@ -87,6 +88,7 @@ export const CoordinatorDashboardView = {
     CoordinatorSanitarySweepPanel,
     CoordinatorSparePartsTab,
     CoordinatorSparePartsAnalyticsTab,
+    CoordinatorTroubleshootingGuidesTab,
     CoordinatorRootCauseParetoTab,
     CoordinatorVanStockTab,
     CoordinatorWorkshopTrayTab,
@@ -104,7 +106,7 @@ export const CoordinatorDashboardView = {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
       activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'pareto-causas' | 'stock-furgonetas' | 'refunds' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'zones' | 'machines' | 'users'
-      sparePartsSubTab: 'catalog', // 'catalog' | 'workshop'
+      sparePartsSubTab: 'catalog', // 'catalog' | 'workshop' | 'guides'
       workshopActiveUnits: null, // badge de la sub-pestaña de taller (QA 2)
       activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders' | 'sweep'
       showPreventiveSettingsModal: false,
@@ -2657,6 +2659,15 @@ export const CoordinatorDashboardView = {
           <button
             type="button"
             class="vg-btn vg-btn-tab"
+            :class="{ 'vg-btn-tab-active': sparePartsSubTab === 'guides' }"
+            data-testid="subtab-spare-parts-guides"
+            @click="sparePartsSubTab = 'guides'"
+          >
+            📖 Guías de Diagnóstico
+          </button>
+          <button
+            type="button"
+            class="vg-btn vg-btn-tab"
             data-testid="subtab-spare-parts-van-stock"
             @click="activeTab = 'stock-furgonetas'"
           >
@@ -2669,9 +2680,13 @@ export const CoordinatorDashboardView = {
           @open-analytics="activeTab = 'analitica-repuestos'"
         />
         <CoordinatorWorkshopTrayTab
-          v-else
+          v-else-if="sparePartsSubTab === 'workshop'"
           :active="sparePartsSubTab === 'workshop'"
           @summary-changed="workshopActiveUnits = $event"
+        />
+        <CoordinatorTroubleshootingGuidesTab
+          v-else
+          data-testid="subtab-guides-panel"
         />
       </div>
 

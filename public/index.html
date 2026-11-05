@@ -58,6 +58,16 @@
        red y nada se degrada en silencio. -->
   <script>
     if ('serviceWorker' in navigator) {
+      // Si un SW nuevo toma el control (sw.js hace skipWaiting + clients.claim),
+      // la página recarga una vez para abandonar los módulos del shell anterior.
+      // En la primera instalación no hay controlador previo y no se recarga.
+      var hadServiceWorkerController = !!navigator.serviceWorker.controller;
+      var refreshingForNewServiceWorker = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (!hadServiceWorkerController || refreshingForNewServiceWorker) return;
+        refreshingForNewServiceWorker = true;
+        window.location.reload();
+      });
       window.addEventListener('load', function () {
         navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).catch(function (error) {
           console.warn('VendGuard · No se pudo registrar el Service Worker:', error);
