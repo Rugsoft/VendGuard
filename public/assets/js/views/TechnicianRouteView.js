@@ -34,6 +34,8 @@ import { TechnicianMetricsView } from './TechnicianMetricsView.js';
 import { TechnicianPreventiveRouteTab } from '../components/TechnicianPreventiveRouteTab.js';
 import { TechnicianChecklistModal } from '../components/TechnicianChecklistModal.js';
 import { TechnicianReinspectionModal } from '../components/TechnicianReinspectionModal.js';
+import { SanitarySpoilageLiftModal } from '../components/SanitarySpoilageLiftModal.js';
+import { SanitarySpoilageOfficialActModal } from '../components/SanitarySpoilageOfficialActModal.js';
 import { TechnicianSparePartsPauseModal } from '../components/TechnicianSparePartsPauseModal.js';
 import { TechnicianResolutionPartsBlock } from '../components/TechnicianResolutionPartsBlock.js';
 import { TechnicianResolutionRefundBlock } from '../components/TechnicianResolutionRefundBlock.js';
@@ -87,6 +89,8 @@ export const TechnicianRouteView = {
     TechnicianPreventiveRouteTab,
     TechnicianChecklistModal,
     TechnicianReinspectionModal,
+    SanitarySpoilageLiftModal,
+    SanitarySpoilageOfficialActModal,
     TechnicianSparePartsPauseModal,
     TechnicianResolutionPartsBlock,
     TechnicianResolutionRefundBlock,
@@ -148,6 +152,16 @@ export const TechnicianRouteView = {
       resolveServiceSheetData: { isValid: false },
       showServiceSheetModal: false,
       serviceSheetIncidentId: null,
+
+      // Módulo 29: Acta de Merma APPCC y reapertura sanitaria (RF-01 a RF-05).
+      // La acción aparece cuando la ruta publica la puerta sanitaria del cierre;
+      // el modal confirma contra el servidor el estado real de cuarentena y la
+      // ausencia de averías abiertas antes de habilitar el levantamiento (C1).
+      showSpoilageLiftModal: false,
+      spoilageMachine: null,
+      spoilageIncidentId: null,
+      showSpoilageOfficialActModal: false,
+      spoilageOfficialActRecordId: null,
       // Declaraciones sanitarias del cierre (RF-03.5.2, Art. II): la puerta se abre
       // cuando la ruta publica `sanitary_resolution_required` o cuando el servidor
       // la exige al intentar cerrar (el reloj biológico pudo vencer entre medias).
@@ -2371,6 +2385,64 @@ export const TechnicianRouteView = {
     },
 
     /**
+     * Abre el Acta de Merma APPCC de la parada (Módulo 29, RF-01, C1).
+     *
+     * La ruta no publica `sanitary_status`, solo la puerta sanitaria del cierre;
+     * por eso el modal confirma en el servidor si la máquina sigue en cuarentena
+     * y si conserva alguna avería abierta antes de habilitar el levantamiento.
+     * @param {Object} incident Parada de la ruta.
+     */
+    openSpoilageLiftModal(incident) {
+      const machineId = Number(incident?.machine?.id ?? incident?.machine_id ?? 0);
+      if (!(machineId > 0)) {
+        this.errorMessage = 'No se pudo identificar la máquina para tramitar el acta de merma.';
+        return;
+      }
+
+      this.spoilageMachine = {
+        ...(incident.machine || {}),
+        id: machineId,
+        machine_type: incident?.machine?.machine_type || incident?.machine_type_snapshot || ''
+      };
+      this.spoilageIncidentId = incident?.id ?? null;
+      this.showSpoilageLiftModal = true;
+    },
+
+    closeSpoilageLiftModal() {
+      this.showSpoilageLiftModal = false;
+      this.spoilageMachine = null;
+      this.spoilageIncidentId = null;
+    },
+
+    /**
+     * El acta ya está emitida: la ruta se recarga para retirar la cuarentena de
+     * la parada y se conserva el acuse en el aviso de la vista.
+     */
+    handleSpoilageLifted(result) {
+      const record = result?.spoilage_record || {};
+      this.feedbackMessage = record.record_code
+        ? `Acta ${record.record_code} emitida: cuarentena levantada y máquina restituida a servicio.`
+        : 'Acta de merma emitida: cuarentena levantada y máquina restituida a servicio.';
+      this.loadRoute();
+    },
+
+    /** Abre el Acta Oficial A4 sin importes (QA 3, Art. V.4). */
+    openSpoilageOfficialAct(recordId) {
+      const id = Number(recordId);
+      if (!(id > 0)) {
+        return;
+      }
+      this.showSpoilageLiftModal = false;
+      this.spoilageOfficialActRecordId = id;
+      this.showSpoilageOfficialActModal = true;
+    },
+
+    closeSpoilageOfficialAct() {
+      this.showSpoilageOfficialActModal = false;
+      this.spoilageOfficialActRecordId = null;
+    },
+
+    /**
      * Contador total de mensajes de una parada para la insignia de conversación
      * (RF-01.1). El técnico contabiliza públicos y notas internas de taller.
      *
@@ -4375,6 +4447,20 @@ export const TechnicianRouteView = {
                   ⏸️ Pausar por falta de acceso
                 </button>
               </div>
+
+              <!-- Módulo 29: Acta de Merma y reapertura sanitaria. La puerta
+                   sanitaria de la ruta anuncia cuarentena o reloj vencido; el
+                   modal verifica el estado real antes de permitir el alta. -->
+              <div v-if="incident.sanitary_resolution_required && (incident.machine?.id || incident.machine_id)" style="margin-top: 8px;">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  data-testid="btn-spoilage-lift"
+                  @click="openSpoilageLiftModal(incident)"
+                >
+                  🧾 Acta de Merma APPCC y reapertura sanitaria
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -5300,6 +5386,28 @@ export const TechnicianRouteView = {
           <button type="button" class="vg-btn vg-btn-secondary" @click="closeMyHours">Cerrar</button>
         </template>
       </ModalDialog>
+
+      <!-- =================================================================== -->
+      <!-- MODAL 29-A: ACTA DE MERMA Y LEVANTAMIENTO DE CUARENTENA (Módulo 29) -->
+      <!-- =================================================================== -->
+      <SanitarySpoilageLiftModal
+        v-model="showSpoilageLiftModal"
+        :machine="spoilageMachine"
+        :incident-id="spoilageIncidentId"
+        :user-role="currentUser?.role || 'TECHNICIAN'"
+        @close="closeSpoilageLiftModal"
+        @lifted="handleSpoilageLifted"
+        @open-official-act="openSpoilageOfficialAct"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 29-B: ACTA OFICIAL A4 PARA SANIDAD (Módulo 29, QA 3)          -->
+      <!-- =================================================================== -->
+      <SanitarySpoilageOfficialActModal
+        v-model="showSpoilageOfficialActModal"
+        :record-id="spoilageOfficialActRecordId"
+        @close="closeSpoilageOfficialAct"
+      />
     </div>
   `
 };
