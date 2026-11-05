@@ -275,7 +275,7 @@ flowchart LR
     4. Integrar en `TechnicianRouteView.js` la acción para levantar la cuarentena con Acta de Merma cuando la máquina de la parada está en `'QUARANTINE'` (habilitada una vez resuelta la avería según `C1`) y el botón para abrir e imprimir el Acta Oficial A4 (`QA 3`).
   - **Hecho cuando:** `node --check public/assets/js/api.js && node --check public/assets/js/components/SanitarySpoilageLiftModal.js && node --check public/assets/js/components/SanitarySpoilageOfficialActModal.js && node --check public/assets/js/components/TechnicianRouteView.js`
 
-- [ ] **T-SPOILAGE-13 · Construir `CoordinatorSanitarySpoilageTab.js`, integrarlo en `CoordinatorPreventiveView.js`, estilizar en `styles.css`, actualizar `public/sw.js` y crear `SanitarySpoilageFrontendTest.mjs`**
+- [x] **T-SPOILAGE-13 · Construir `CoordinatorSanitarySpoilageTab.js`, integrarlo en `CoordinatorPreventiveView.js`, estilizar en `styles.css`, actualizar `public/sw.js` y crear `SanitarySpoilageFrontendTest.mjs`**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-SPOILAGE-12`
   - **Archivos exactos a crear o modificar:**

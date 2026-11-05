@@ -48,6 +48,7 @@ import { CoordinatorPreventiveDashboard } from '../components/CoordinatorPrevent
 import { CoordinatorPreventiveOrdersTab } from '../components/CoordinatorPreventiveOrdersTab.js';
 import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPreventiveSettingsModal.js';
 import { CoordinatorSanitarySweepPanel } from '../components/CoordinatorSanitarySweepPanel.js';
+import { CoordinatorSanitarySpoilageTab } from '../components/CoordinatorSanitarySpoilageTab.js';
 import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab.js';
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
 import { CoordinatorTroubleshootingGuidesTab } from '../components/CoordinatorTroubleshootingGuidesTab.js';
@@ -86,6 +87,7 @@ export const CoordinatorDashboardView = {
     CoordinatorPreventiveOrdersTab,
     CoordinatorPreventiveSettingsModal,
     CoordinatorSanitarySweepPanel,
+    CoordinatorSanitarySpoilageTab,
     CoordinatorSparePartsTab,
     CoordinatorSparePartsAnalyticsTab,
     CoordinatorTroubleshootingGuidesTab,
@@ -108,7 +110,7 @@ export const CoordinatorDashboardView = {
       activeAdminSubTab: 'locations', // 'locations' | 'zones' | 'machines' | 'users'
       sparePartsSubTab: 'catalog', // 'catalog' | 'workshop' | 'guides'
       workshopActiveUnits: null, // badge de la sub-pestaña de taller (QA 2)
-      activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders' | 'sweep'
+      activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders' | 'spoilage' | 'sweep'
       showPreventiveSettingsModal: false,
 
       // Login Form
@@ -2507,6 +2509,15 @@ export const CoordinatorDashboardView = {
                 >
                   📋 Listado de Órdenes
                 </button>
+                <button
+                  type="button"
+                  class="vg-btn"
+                  :class="activePreventiveSubTab === 'spoilage' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+                  @click="activePreventiveSubTab = 'spoilage'"
+                  data-testid="subtab-preventive-spoilage"
+                >
+                  ☣️ Actas de Merma APPCC
+                </button>
                 <!-- Superficie operativa del barrido sanitario (T-PAUSE-41, RF-07): el distintivo
                      de escalado se ve sin entrar a la sub-pestaña, igual que la insignia de SLA
                      del triaje. -->
@@ -2550,7 +2561,14 @@ export const CoordinatorDashboardView = {
           @open-incident-detail="openIncidentDetailFromPreventive"
         />
 
-        <!-- Subpestaña 3: Superficie Operativa del Barrido Sanitario (T-PAUSE-41, RF-07).
+        <!-- Subpestaña 3: Actas de Merma y Cuarentena Sanitaria (Módulo 29, T-SPOILAGE-13).
+             La pestaña consulta su propio panel: KPIs globales, cuarentenas activas y libro
+             registro filtrable. Reutiliza los modales de alta y de Acta Oficial de T-12. -->
+        <CoordinatorSanitarySpoilageTab
+          v-else-if="activePreventiveSubTab === 'spoilage'"
+        />
+
+        <!-- Subpestaña 4: Superficie Operativa del Barrido Sanitario (T-PAUSE-41, RF-07).
              Presentación pura: la vista es la única que consulta y el panel solo pinta y
              pide recarga. Abrir la ficha reutiliza el modal de detalle ya montado. -->
         <CoordinatorSanitarySweepPanel

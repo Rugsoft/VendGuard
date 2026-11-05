@@ -25,8 +25,8 @@ const PRINT_STYLE_ID = 'vg-spoilage-official-act-print-styles';
 
 const PRINT_STYLES = `
 .vg-spoilage-act-sheet {
-  background-color: #ffffff;
-  color: #111827;
+  background-color: var(--color-surface-card);
+  color: var(--color-ink);
   max-width: 180mm;
   margin: 0 auto;
   padding: 8mm;
@@ -39,25 +39,25 @@ const PRINT_STYLES = `
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #2560ff;
+  color: var(--color-primary);
   margin-bottom: 4px;
 }
 .vg-spoilage-act-sheet__title {
   font-size: 17px;
   font-weight: 700;
   margin: 0 0 4px 0;
-  color: #111827;
+  color: var(--color-ink);
 }
 .vg-spoilage-act-sheet__subtitle {
   font-size: 12px;
-  color: #4b5563;
+  color: var(--color-ink-secondary);
   margin: 0 0 12px 0;
 }
 .vg-spoilage-act-sheet__meta {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  border: 1px solid #c8cfda;
+  border: 1px solid var(--color-hairline);
   border-radius: 4px;
   padding: 8px 10px;
   margin-bottom: 12px;
@@ -67,12 +67,12 @@ const PRINT_STYLES = `
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6c7e9d;
+  color: var(--color-ink-muted);
 }
 .vg-spoilage-act-sheet__meta-value {
   font-size: 12px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-ink);
   word-break: break-word;
 }
 .vg-spoilage-act-table {
@@ -82,32 +82,32 @@ const PRINT_STYLES = `
 }
 .vg-spoilage-act-table th,
 .vg-spoilage-act-table td {
-  border: 1px solid #c8cfda;
+  border: 1px solid var(--color-hairline);
   padding: 6px 8px;
   vertical-align: top;
   text-align: left;
 }
 .vg-spoilage-act-table th {
   width: 34%;
-  background-color: #f9fafb;
+  background-color: var(--color-canvas);
   font-size: 11px;
   font-weight: 700;
-  color: #2c333f;
+  color: var(--color-slate);
 }
 .vg-spoilage-act-table td {
   font-size: 12px;
-  color: #111827;
+  color: var(--color-ink);
 }
 .vg-spoilage-act-sheet__section-title {
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #2c333f;
+  color: var(--color-slate);
   margin: 14px 0 6px 0;
 }
 .vg-spoilage-act-sheet__notes {
-  border: 1px solid #c8cfda;
+  border: 1px solid var(--color-hairline);
   border-radius: 4px;
   padding: 8px 10px;
   font-size: 12px;
@@ -120,22 +120,22 @@ const PRINT_STYLES = `
   max-width: 90mm;
   width: 100%;
   height: auto;
-  border: 1px solid #c8cfda;
+  border: 1px solid var(--color-hairline);
   border-radius: 4px;
   margin-bottom: 12px;
 }
 .vg-spoilage-act-sheet__legal {
-  border-top: 1px solid #c8cfda;
+  border-top: 1px solid var(--color-hairline);
   padding-top: 8px;
   font-size: 10px;
   line-height: 1.45;
-  color: #4b5563;
+  color: var(--color-ink-secondary);
   margin-top: 12px;
 }
 .vg-spoilage-act-sheet__footer {
   margin-top: 10px;
   font-size: 9px;
-  color: #6c7e9d;
+  color: var(--color-ink-muted);
   text-align: right;
 }
 @media print {
