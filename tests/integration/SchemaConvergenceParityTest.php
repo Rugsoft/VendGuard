@@ -43,7 +43,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 39 tablas del contrato de correspondencia (§2.1, Módulos 14 a 28). */
+/** Las 40 tablas del contrato de correspondencia (§2.1, Módulos 14 a 29). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',

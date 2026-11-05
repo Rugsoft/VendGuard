@@ -72,7 +72,7 @@ flowchart LR
     2. Garantizar que el sembrado sea 100 % idempotente (`ON CONFLICT (record_code) DO NOTHING`).
   - **Hecho cuando:** `php database/run_seeds.php && vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php`
 
-- [ ] **T-SPOILAGE-03 · Actualizar contratos de esquema (`40 tablas`), utilidades de test y crear `PostgresSanitarySpoilageSchemaTest.php`**
+- [x] **T-SPOILAGE-03 · Actualizar contratos de esquema (`40 tablas`), utilidades de test y crear `PostgresSanitarySpoilageSchemaTest.php`**
   - **Tiempo estimado:** 20 min
   - **Dependencias previas:** `T-SPOILAGE-01`, `T-SPOILAGE-02`
   - **Archivos exactos a crear o modificar:**

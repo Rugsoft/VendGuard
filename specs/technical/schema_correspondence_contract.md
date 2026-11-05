@@ -19,7 +19,7 @@ Queda completamente retirado el camino dual de persistencia (MariaDB/MySQL).
 
 ---
 
-## 2. Inventario de las 39 Tablas del Dominio
+## 2. Inventario de las 40 Tablas del Dominio
 
 Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_delete_*` vinculado a `prevent_hard_delete()` (Art. III.1). `incident_service_sheets` e `incident_satisfaction_surveys` son además **de solo inserción**: `trg_no_update_incident_service_sheets` (`prevent_service_sheet_rewrite()`) e `trg_no_update_incident_satisfaction_surveys` (`prevent_satisfaction_survey_rewrite()`) rechazan cualquier `UPDATE` con `45000`, porque la hoja firmada es prueba documental y la valoración de la sede no se rectifica (RD-01 y RD-06 del Módulo 20). La clave primaria es `id BIGINT GENERATED ALWAYS AS IDENTITY` salvo en `operational_zone_postal_codes`, donde la identidad de la fila es el propio código postal: es la forma de garantizar que un CP pertenezca a una sola zona en todo su ciclo de vida (RF-01.2, Resolución QA 7).
 
@@ -62,6 +62,7 @@ Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_
 37. `incident_assignments` (15 columnas)
 38. `workshop_repair_items` (34 columnas)
 39. `machine_troubleshooting_guides` (14 columnas)
+40. `sanitary_spoilage_records` (22 columnas)
 
 Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de las migraciones incrementales.
 
@@ -85,6 +86,8 @@ Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de l
   llegan con la migración `023_workshop_repair_items.sql`.
 
 - **Guías rápidas de diagnóstico por modelo (Módulo 28, RF-05.2):** `machine_troubleshooting_guides` (Tabla 39, 14 columnas) declara el modelo visible y su clave plegada (`machine_model_key = lower(btrim(machine_model_key))`), `breakdown_type` del tipo `incident_category`, un título de 5 a 150 caracteres y los tres documentos `JSONB` acotados por `chk_troubleshooting_guides_error_codes_bounds` (0 a 20), `chk_troubleshooting_guides_steps_bounds` (2 a 10) y `chk_troubleshooting_guides_spare_parts_bounds` (0 a 10). La identidad funcional es `uq_troubleshooting_guides_model_category (machine_model_key, breakdown_type)`: una sola guía por modelo y categoría, activa o inactiva (C1). `suggested_root_cause_id` referencia `root_causes` con `ON DELETE RESTRICT ON UPDATE CASCADE`, y `created_by`/`updated_by` referencian `users`; hay baja lógica con `is_active`. Tres índices —`idx_troubleshooting_guides_model_active`, `idx_troubleshooting_guides_category_active` e `idx_troubleshooting_guides_root_cause` (parcial)— sirven el conmutador del técnico y el catálogo. Los disparadores `trg_no_delete_machine_troubleshooting_guides` (`prevent_hard_delete()`), `trg_touch_machine_troubleshooting_guides` (`touch_updated_at()`) y `trg_immutable_machine_troubleshooting_guides` (`enforce_troubleshooting_guides_immutability()`) cierran el ciclo: el borrado físico y el cambio de modelo o categoría se rechazan con `45000`. El enumerado `audit_entity_type` añade `MACHINE_TROUBLESHOOTING_GUIDE` con la migración `024_machine_troubleshooting_guides.sql`.
+
+- **Acta de merma y destrucción de lotes por cuarentena sanitaria (Módulo 29, RF-01 a RF-05):** `sanitary_spoilage_records` (Tabla 40, 22 columnas) es el documento oficial e inmutable que respalda cada levantamiento de cuarentena. Declara `record_code` único (`ACTA-MERMA-AAAA-NNNN`), la máquina y el vínculo nullable a la avería o a la orden preventiva de origen, el `technician_id` certificador in situ y el `registered_by` que tramitó el alta (QA 1), el origen de la cuarentena (`BIOLOGICAL_CLOCK_4H`, `PREVENTIVE_NON_CONFORMITY`, `MANUAL_SANITARY_LOCK`), las unidades destruidas (`0..500`) con la confirmación de máquina vacía o los lotes reales (`3..500` caracteres), las temperaturas de retirada y reapertura dentro del rango físico plausible (`-5,0..35,0 °C`), el método de destrucción, la fotografía obligatoria, las observaciones de higienización (`20..1000` caracteres) y el coste estimado (`NUMERIC(10,2)`) con su ajuste auditado (`loss_adjusted_by`, `loss_adjustment_reason`). Seis claves foráneas `ON DELETE RESTRICT ON UPDATE CASCADE` —máquina, avería, orden preventiva, técnico, registrador y ajustador— y ocho `CHECK` imponen la coherencia de las dos ramas de acta (`chk_spoilage_records_empty_coherence`) y de la contabilidad (`chk_spoilage_records_loss_non_negative`, `chk_spoilage_records_adjustment_coherence`, C5, D3). Cuatro índices sirven el libro de mermas y la ficha por máquina. Los disparadores `trg_no_delete_sanitary_spoilage_records` (`prevent_hard_delete()`), `trg_touch_sanitary_spoilage_records` (`touch_updated_at()`) y `trg_immutable_sanitary_spoilage_records` (`enforce_sanitary_spoilage_records_immutability()`) cierran el ciclo: los hechos sanitarios y físicos son inmutables tras la emisión y solo se admite el ajuste financiero, siempre que el acta tenga unidades destruidas (Art. III.1 y III.3, RNF-01). El enumerado `audit_entity_type` añade `SANITARY_SPOILAGE_RECORD` con la migración `025_sanitary_spoilage_records.sql`.
 
 ## 3. Integridad y Blindaje en Base de Datos
 
