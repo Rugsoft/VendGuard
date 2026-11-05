@@ -182,7 +182,7 @@ flowchart LR
 
 ## Fase 4: Capa de Aplicación (`SanitarySpoilageService`), Exportación CSV y Suite de Integración de Servicio
 
-- [ ] **T-SPOILAGE-08 · Implementar `SanitarySpoilageService` (levantamiento atómico, Acta Oficial A4, ajuste financiero `C5`/`QA 4` y exportación CSV anti-fórmulas)**
+- [x] **T-SPOILAGE-08 · Implementar `SanitarySpoilageService` (levantamiento atómico, Acta Oficial A4, ajuste financiero `C5`/`QA 4` y exportación CSV anti-fórmulas)**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-SPOILAGE-07`
   - **Archivos exactos a crear o modificar:**
