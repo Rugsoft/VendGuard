@@ -142,7 +142,7 @@ flowchart LR
 
 ## Fase 3: Capa de Infraestructura y Repositorio PDO (`PdoSanitarySpoilageRecordRepository`)
 
-- [ ] **T-SPOILAGE-06 · Definir `SanitarySpoilageRecordRepositoryInterface` e implementar `PdoSanitarySpoilageRecordRepository` (escritura, bloqueo, origen `QA 2` y restitución sanitaria)**
+- [x] **T-SPOILAGE-06 · Definir `SanitarySpoilageRecordRepositoryInterface` e implementar `PdoSanitarySpoilageRecordRepository` (escritura, bloqueo, origen `QA 2` y restitución sanitaria)**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-SPOILAGE-05`
   - **Archivos exactos a crear o modificar:**
