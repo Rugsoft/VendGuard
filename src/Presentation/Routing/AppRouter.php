@@ -12,6 +12,7 @@ use VendGuard\Presentation\Controller\CoordinatorZoneController;
 use VendGuard\Presentation\Controller\HealthController;
 use VendGuard\Presentation\Controller\LocationRefundController;
 use VendGuard\Presentation\Controller\PublicRefundController;
+use VendGuard\Presentation\Controller\SanitarySpoilageController;
 use VendGuard\Presentation\Controller\TechnicianOpportunisticController;
 use VendGuard\Presentation\Controller\TechnicianOfflineSyncController;
 use VendGuard\Presentation\Controller\TechnicianRefundController;
@@ -334,6 +335,21 @@ class AppRouter
         $router->put('/api/coordinator/van-restock-orders/{id}', [CoordinatorVanRestockOrderController::class, 'updateOrder'], [$coordinatorAuth]);
         $router->post('/api/coordinator/van-restock-orders/{id}/dispatch', [CoordinatorVanRestockOrderController::class, 'dispatchOrder'], [$coordinatorAuth]);
         $router->post('/api/coordinator/van-restock-orders/{id}/cancel', [CoordinatorVanRestockOrderController::class, 'cancelOrder'], [$coordinatorAuth]);
+
+        // Actas de Merma APPCC (Módulo 29: T-SPOILAGE-10).
+        // Los endpoints compartidos por Técnico y Coordinación se autentican como
+        // personal interno y el controlador decide el rol permitido. Los tres
+        // endpoints financieros de Coordinación se protegen en middleware antes
+        // de llegar al controlador (Art. V.4). `export-csv` se registra antes de
+        // cualquier ruta con `{id}` para que el segmento estático no sea capturado
+        // como identificador.
+        $sanitarySpoilageInternalAuth = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware();
+        $router->post('/api/sanitary-quarantines/machines/{machineId}/lift', [SanitarySpoilageController::class, 'lift'], [$sanitarySpoilageInternalAuth]);
+        $router->get('/api/sanitary-spoilage-records/by-machine/{machineId}', [SanitarySpoilageController::class, 'getByMachine'], [$sanitarySpoilageInternalAuth]);
+        $router->get('/api/sanitary-spoilage-records/{id}/official-act', [SanitarySpoilageController::class, 'getOfficialAct'], [$sanitarySpoilageInternalAuth]);
+        $router->get('/api/coordinator/sanitary-spoilage-records/export-csv', [SanitarySpoilageController::class, 'exportCsv'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/sanitary-spoilage-records', [SanitarySpoilageController::class, 'listForCoordinator'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/sanitary-spoilage-records/{id}/loss-estimate', [SanitarySpoilageController::class, 'adjustLossEstimate'], [$coordinatorAuth]);
 
         // -----------------------------------------------------------------
         // 5. Módulo de Técnico de Campo / "Mi Ruta" (T-28, T-29)

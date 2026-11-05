@@ -216,7 +216,7 @@ flowchart LR
 
 ## Fase 5: Capa de Presentación REST (`SanitarySpoilageController`), RBAC y Router
 
-- [ ] **T-SPOILAGE-10 · Implementar `SanitarySpoilageController` y registrar rutas en `AppRouter.php`**
+- [x] **T-SPOILAGE-10 · Implementar `SanitarySpoilageController` y registrar rutas en `AppRouter.php`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SPOILAGE-09`
   - **Archivos exactos a crear o modificar:**
