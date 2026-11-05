@@ -4,6 +4,8 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** `29-haccp-spoilage-log`  
 **Documento:** `specs/technical/haccp_spoilage_log_contracts.md`  
+**Versión:** 1.0 (Alineado con `spec.md` v3.0 y `plan.md` v3.0)  
+**Estado:** Contratos Técnicos Aprobados por el Product Owner el 2026-11-05 · Puerta SDD cerrada  
 **Referencia Funcional:** [`specs/29-haccp-spoilage-log/spec.md`](../29-haccp-spoilage-log/spec.md) y [`specs/functional/haccp_spoilage_log_spec.md`](../functional/haccp_spoilage_log_spec.md) (`RF-01` a `RF-05`, Decisiones `D1`–`D3`)  
 **Protocolo:** HTTP/1.1 · JSON (`application/json; charset=utf-8`) y `multipart/form-data` para subida de evidencia fotográfica  
 **Metodología:** SDD (Specification-Driven Development) · Contratos API-First  

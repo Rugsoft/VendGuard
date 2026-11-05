@@ -2,7 +2,7 @@
 
 **Módulo:** `29-haccp-spoilage-log`  
 **Versión:** 3.0 (Alineado con `spec.md` v3.0, `haccp_spoilage_log_contracts.md` v1.0, `plan.md` v3.0 y `docs/design.md`)  
-**Estado:** Especificación Aprobada por el Product Owner el 2026-11-05 · Pendiente de Ejecución de Tareas (`T-SPOILAGE-01` a `T-SPOILAGE-14`)  
+**Estado:** Aprobado por el Product Owner el 2026-11-05 · Puerta SDD cerrada · Listo para Ejecución de las Tareas `T-SPOILAGE-01` a `T-SPOILAGE-14` (Fase 3: tests y código)  
 **Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño  
 **Ley Suprema:** [`constitution.md`](../../constitution.md), [`AGENTS.md`](../../AGENTS.md) y [`docs/design.md`](../../docs/design.md)
 
