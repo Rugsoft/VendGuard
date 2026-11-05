@@ -234,7 +234,7 @@ flowchart LR
     2. Registrar las 6 rutas en `src/Presentation/Routing/AppRouter.php` (situando `export-csv` antes de `{id}`).
   - **Hecho cuando:** `php -l src/Presentation/Controller/SanitarySpoilageController.php && php -l src/Presentation/Routing/AppRouter.php`
 
-- [ ] **T-SPOILAGE-11 · Crear suite de integración de contratos HTTP, subida de fotos y RBAC (`SanitarySpoilageApiIntegrationTest.php`)**
+- [x] **T-SPOILAGE-11 · Crear suite de integración de contratos HTTP, subida de fotos y RBAC (`SanitarySpoilageApiIntegrationTest.php`)**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SPOILAGE-10`
   - **Archivos exactos a crear o modificar:**
