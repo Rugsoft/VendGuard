@@ -99,7 +99,7 @@ flowchart LR
 
 ## Fase 2: Modelos de Dominio, Validador Puro y Excepciones
 
-- [ ] **T-SPOILAGE-04 · Implementar entidad `SanitarySpoilageRecord`, `SanitarySpoilageValidator` y `SanitarySpoilageValidationException`**
+- [x] **T-SPOILAGE-04 · Implementar entidad `SanitarySpoilageRecord`, `SanitarySpoilageValidator` y `SanitarySpoilageValidationException`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SPOILAGE-03`
   - **Archivos exactos a crear o modificar:**
