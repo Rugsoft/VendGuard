@@ -110,12 +110,18 @@ export const CoordinatorTroubleshootingGuidesTab = {
       statusFilter: 'ALL',
       searchQuery: '',
 
+      // Modelos vistos en cualquier respuesta: el selector no se encoge al filtrar.
+      knownGuideModels: [],
+      isFiltering: false,
+      guideRequestSequence: 0,
+      filterTimer: null,
+
       showModal: false,
       isEditing: false,
       formError: '',
       form: emptyForm(),
       originalSuggestedRootCauseId: null,
-      originalSparePartIds: []
+      partsTouched: false
     };
   },
   computed: {
@@ -160,8 +166,8 @@ export const CoordinatorTroubleshootingGuidesTab = {
       for (const model of this.models) {
         add(typeof model === 'string' ? model : (model?.machine_model || model?.model || ''));
       }
-      for (const guide of this.guides) {
-        add(guide?.machine_model);
+      for (const guideModel of this.knownGuideModels) {
+        add(guideModel);
       }
 
       return [...unique.values()].sort((left, right) => left.localeCompare(right));
@@ -169,6 +175,32 @@ export const CoordinatorTroubleshootingGuidesTab = {
 
     activeSpareParts() {
       return this.spareParts.filter((part) => part && part.is_active !== false);
+    },
+
+    /**
+     * Repuestos asociados que ya no están activos en el catálogo. Se muestran
+     * para que Coordinación sepa qué conserva la guía y pueda retirarlos de
+     * forma explícita (`C2`).
+     */
+    inactiveRecommendedParts() {
+      if (!this.isEditing || this.spareParts.length === 0) {
+        return [];
+      }
+
+      const activeIds = new Set(this.activeSpareParts.map((part) => Number(part.id)));
+
+      return this.form.recommended_spare_part_ids
+        .map(Number)
+        .filter((id) => !activeIds.has(id))
+        .map((id) => {
+          const part = this.spareParts.find((entry) => Number(entry?.id) === id);
+
+          return {
+            id,
+            part_code: part?.part_code || `#${id}`,
+            name: part?.name || 'Repuesto no disponible en el catálogo'
+          };
+        });
     },
 
     /** Causas activas de la categoría del formulario más las transversales `OTHER`. */
@@ -183,43 +215,25 @@ export const CoordinatorTroubleshootingGuidesTab = {
         .sort((left, right) => String(left.code ?? '').localeCompare(String(right.code ?? '')));
     },
 
+    /**
+     * Filtros vigentes que se delegan al servidor (`H-28-06`). La API ya
+     * normaliza el modelo y busca en título, códigos y pasos.
+     */
+    catalogFilters() {
+      return {
+        machine_model: this.modelFilter === 'ALL' ? '' : this.modelFilter,
+        breakdown_type: this.categoryFilter === 'ALL' ? '' : this.categoryFilter,
+        status: this.statusFilter,
+        search: this.searchQuery.trim()
+      };
+    },
+
+    /**
+     * Filas de la tabla. El servidor aplica modelo, categoría, estado y
+     * búsqueda; aquí no se vuelve a filtrar lo que ya viene filtrado.
+     */
     filteredGuides() {
-      const query = this.searchQuery.trim().toLowerCase();
-      const normalizeModel = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
-      const selectedModelKey = normalizeModel(this.modelFilter);
-
-      return this.guides.filter((guide) => {
-        if (this.modelFilter !== 'ALL'
-          && normalizeModel(guide.machine_model_key || guide.machine_model) !== selectedModelKey) {
-          return false;
-        }
-        if (this.categoryFilter !== 'ALL' && guide.breakdown_type !== this.categoryFilter) {
-          return false;
-        }
-        if (this.statusFilter === 'ACTIVE' && guide.is_active !== true) {
-          return false;
-        }
-        if (this.statusFilter === 'INACTIVE' && guide.is_active === true) {
-          return false;
-        }
-        if (query !== '') {
-          const haystack = [
-            guide.machine_model,
-            guide.title,
-            ...(Array.isArray(guide.error_codes)
-              ? guide.error_codes.flatMap((entry) => [entry.code, entry.meaning])
-              : []),
-            ...(Array.isArray(guide.steps)
-              ? guide.steps.flatMap((step) => [step.title, step.instruction])
-              : [])
-          ].join(' ').toLowerCase();
-          if (!haystack.includes(query)) {
-            return false;
-          }
-        }
-
-        return true;
-      });
+      return this.guides;
     },
 
     resolvedModel() {
@@ -268,6 +282,26 @@ export const CoordinatorTroubleshootingGuidesTab = {
       return this.form.steps.every((step) => this.stepErrors(step).length === 0);
     }
   },
+  watch: {
+    modelFilter() {
+      this.loadGuides();
+    },
+    categoryFilter() {
+      this.loadGuides();
+    },
+    statusFilter() {
+      this.loadGuides();
+    },
+    searchQuery() {
+      this.scheduleGuideReload();
+    }
+  },
+  beforeUnmount() {
+    if (this.filterTimer) {
+      clearTimeout(this.filterTimer);
+      this.filterTimer = null;
+    }
+  },
   mounted() {
     this.loadCatalog();
   },
@@ -282,16 +316,14 @@ export const CoordinatorTroubleshootingGuidesTab = {
 
       try {
         const [catalog, models, parts, causes] = await Promise.all([
-          api.getCoordinatorTroubleshootingGuides(),
+          api.getCoordinatorTroubleshootingGuides(this.catalogFilters),
           api.coordinator.getSparePartModels().catch(() => []),
           api.coordinator.getSparePartsCatalog().catch(() => []),
           api.getCoordinatorRootCauses({ only_active: true }).catch(() => [])
         ]);
 
-        this.coverage = catalog?.coverage_summary && typeof catalog.coverage_summary === 'object'
-          ? catalog.coverage_summary
-          : {};
-        this.guides = Array.isArray(catalog?.guides) ? catalog.guides : [];
+        this.applyCatalog(catalog);
+        this.mergeKnownGuideModels(catalog);
 
         const modelList = Array.isArray(models) ? models : (Array.isArray(models?.items) ? models.items : []);
         this.models = modelList;
@@ -301,6 +333,7 @@ export const CoordinatorTroubleshootingGuidesTab = {
 
         const causeList = Array.isArray(causes) ? causes : (Array.isArray(causes?.items) ? causes.items : []);
         this.rootCauses = causeList;
+
       } catch (error) {
         this.errorMessage = error?.message
           || 'No se pudo cargar el catálogo de guías de diagnóstico.';
@@ -309,12 +342,79 @@ export const CoordinatorTroubleshootingGuidesTab = {
       }
     },
 
+    /** Aplica una respuesta del catálogo; la cobertura siempre es global (`QA 1`). */
+    applyCatalog(catalog) {
+      this.coverage = catalog?.coverage_summary && typeof catalog.coverage_summary === 'object'
+        ? catalog.coverage_summary
+        : {};
+      this.guides = Array.isArray(catalog?.guides) ? catalog.guides : [];
+    },
+
+    /** Acumula los modelos vistos para que el selector conserve todas sus opciones. */
+    mergeKnownGuideModels(catalog) {
+      const known = new Set(this.knownGuideModels.map((model) => String(model).toLowerCase()));
+      const additions = [];
+
+      for (const guide of (Array.isArray(catalog?.guides) ? catalog.guides : [])) {
+        const label = String(guide?.machine_model ?? '').trim().replace(/\s+/g, ' ');
+        if (label !== '' && !known.has(label.toLowerCase())) {
+          known.add(label.toLowerCase());
+          additions.push(label);
+        }
+      }
+
+      if (additions.length > 0) {
+        this.knownGuideModels = [...this.knownGuideModels, ...additions];
+      }
+    },
+
+    /**
+     * Recarga solo la tabla con los filtros vigentes. La cobertura sigue
+     * viniendo del servidor sobre el parque global.
+     */
+    async loadGuides() {
+      const requestSequence = ++this.guideRequestSequence;
+      this.isFiltering = true;
+      this.errorMessage = '';
+
+      try {
+        const catalog = await api.getCoordinatorTroubleshootingGuides(this.catalogFilters);
+        if (requestSequence !== this.guideRequestSequence) {
+          return;
+        }
+
+        this.applyCatalog(catalog);
+        this.mergeKnownGuideModels(catalog);
+      } catch (error) {
+        if (requestSequence === this.guideRequestSequence) {
+          this.errorMessage = error?.message
+            || 'No se pudo filtrar el catálogo de guías de diagnóstico.';
+        }
+      } finally {
+        if (requestSequence === this.guideRequestSequence) {
+          this.isFiltering = false;
+        }
+      }
+    },
+
+    /** La búsqueda se teclea: se espera antes de consultar al servidor. */
+    scheduleGuideReload() {
+      if (this.filterTimer) {
+        clearTimeout(this.filterTimer);
+      }
+
+      this.filterTimer = setTimeout(() => {
+        this.filterTimer = null;
+        this.loadGuides();
+      }, 250);
+    },
+
     openCreate(model = '') {
       this.isEditing = false;
       this.formError = '';
       this.form = emptyForm();
       this.originalSuggestedRootCauseId = null;
-      this.originalSparePartIds = [];
+      this.partsTouched = false;
       const label = String(model ?? '').trim();
       if (label !== '' && this.modelOptions.some((option) => option.toLowerCase() === label.toLowerCase())) {
         this.form.machine_model = this.modelOptions.find((option) => option.toLowerCase() === label.toLowerCase());
@@ -330,9 +430,7 @@ export const CoordinatorTroubleshootingGuidesTab = {
       this.originalSuggestedRootCauseId = guide.suggested_root_cause_id == null
         ? null
         : Number(guide.suggested_root_cause_id);
-      this.originalSparePartIds = Array.isArray(guide.recommended_spare_part_ids)
-        ? guide.recommended_spare_part_ids.map(Number)
-        : [];
+      this.partsTouched = false;
       this.form = {
         id: Number(guide.id),
         machine_model: guide.machine_model,
@@ -358,17 +456,7 @@ export const CoordinatorTroubleshootingGuidesTab = {
       this.formError = '';
       this.form = emptyForm();
       this.originalSuggestedRootCauseId = null;
-      this.originalSparePartIds = [];
-    },
-
-    sameIdList(left, right) {
-      if (left.length !== right.length) {
-        return false;
-      }
-
-      const normalizedLeft = [...left].map(Number).sort((a, b) => a - b);
-      const normalizedRight = [...right].map(Number).sort((a, b) => a - b);
-      return normalizedLeft.every((value, index) => value === normalizedRight[index]);
+      this.partsTouched = false;
     },
 
     addErrorCode() {
@@ -431,8 +519,20 @@ export const CoordinatorTroubleshootingGuidesTab = {
 
       if (index >= 0) {
         this.form.recommended_spare_part_ids.splice(index, 1);
+        this.partsTouched = true;
       } else if (this.form.recommended_spare_part_ids.length < MAX_SPARE_PARTS) {
         this.form.recommended_spare_part_ids.push(id);
+        this.partsTouched = true;
+      }
+    },
+
+    /** Retira una asociación inactiva sólo cuando Coordinación lo decide. */
+    removeInactivePart(partId) {
+      const index = this.form.recommended_spare_part_ids.indexOf(Number(partId));
+
+      if (index >= 0) {
+        this.form.recommended_spare_part_ids.splice(index, 1);
+        this.partsTouched = true;
       }
     },
 
@@ -469,13 +569,14 @@ export const CoordinatorTroubleshootingGuidesTab = {
         suggested_root_cause_id: selectedRootCauseId
       };
 
+      // C2: una pieza desactivada después no bloquea la edición. Si la lista no
+      // se ha tocado, el campo se omite y el servidor conserva las asociaciones.
+      if (this.isEditing && !this.partsTouched) {
+        delete payload.recommended_spare_part_ids;
+      }
+
       try {
         if (this.isEditing) {
-          // C2: una causa o una pieza desactivada después no bloquea la edición
-          // del resto. Sólo se envían los campos mutables que cambiaron de verdad.
-          if (this.sameIdList(selectedPartIds, this.originalSparePartIds)) {
-            delete payload.recommended_spare_part_ids;
-          }
           if (selectedRootCauseId === this.originalSuggestedRootCauseId) {
             delete payload.suggested_root_cause_id;
           }
@@ -492,7 +593,7 @@ export const CoordinatorTroubleshootingGuidesTab = {
         }
 
         this.closeModal();
-        await this.loadCatalog();
+        await this.loadGuides();
       } catch (error) {
         this.formError = error?.message || 'No se pudo guardar la guía de diagnóstico.';
       } finally {
@@ -512,7 +613,7 @@ export const CoordinatorTroubleshootingGuidesTab = {
         this.successMessage = guide.is_active
           ? 'Guía de diagnóstico desactivada correctamente.'
           : 'Guía de diagnóstico reactivada correctamente.';
-        await this.loadCatalog();
+        await this.loadGuides();
       } catch (error) {
         this.errorMessage = error?.message || 'No se pudo cambiar la vigencia de la guía.';
       } finally {
@@ -650,6 +751,10 @@ export const CoordinatorTroubleshootingGuidesTab = {
           </div>
         </div>
       </section>
+
+      <p v-if="isFiltering" class="vg-guides-tab__empty" role="status" data-testid="guides-filtering">
+        Filtrando el catálogo con el servidor…
+      </p>
 
       <p v-if="isLoading" class="vg-guides-tab__empty" role="status" data-testid="guides-loading">
         Cargando el catálogo de guías de diagnóstico…
@@ -847,6 +952,30 @@ export const CoordinatorTroubleshootingGuidesTab = {
             <div class="vg-guides-tab__editor-head">
               <h3 id="guide-parts-heading">Repuestos recomendados (máximo {{ maxSpareParts }})</h3>
               <span class="vg-chip">{{ form.recommended_spare_part_ids.length }} seleccionados</span>
+            </div>
+            <div
+              v-if="inactiveRecommendedParts.length > 0"
+              class="vg-guides-tab__alert vg-guides-tab__alert--warning"
+              role="status"
+              data-testid="guide-inactive-parts-warning"
+            >
+              <span>
+                ⚠️ Esta guía conserva {{ inactiveRecommendedParts.length }}
+                {{ inactiveRecommendedParts.length === 1 ? 'repuesto inactivo' : 'repuestos inactivos' }}.
+                <template v-if="partsTouched">Al guardar, se retirarán de la guía.</template>
+                <template v-else>Se conservarán mientras no modifiques la lista.</template>
+              </span>
+              <div class="vg-action-group">
+                <button
+                  v-for="part in inactiveRecommendedParts"
+                  :key="part.id"
+                  type="button"
+                  class="vg-btn vg-btn-sm vg-btn-danger-soft"
+                  @click="removeInactivePart(part.id)"
+                >
+                  Quitar {{ part.part_code }}
+                </button>
+              </div>
             </div>
             <div class="vg-guides-tab__checklist">
               <label v-for="part in activeSpareParts" :key="part.id" class="vg-guides-tab__check">

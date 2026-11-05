@@ -1297,6 +1297,12 @@ details.vg-guide-accordion__disclosure:not([open]) .vg-guide-accordion__body {
   color: var(--color-success-text);
 }
 
+.vg-guides-tab__alert--warning {
+  background-color: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning-text);
+}
+
 .vg-guide-empty-inline {
   margin: 0 0 12px;
   padding: 8px 10px;

@@ -6,6 +6,10 @@
  * la tabla filtrada (`filteredGuides`), de modo que filtrar por modelo,
  * categoría, estado o búsqueda no las apaga ni las deja a cero.
  *
+ * Desde `H-28-06`, modelo, categoría, estado y búsqueda viajan al servidor; la
+ * tabla no reimplementa el filtrado en el navegador y el selector de modelos
+ * conserva las opciones vistas en cualquier respuesta.
+ *
  * El componente se importa tal cual y se ejercitan sus computadas con un
  * contexto falso, sin DOM y sin dependencias externas.
  *
@@ -138,9 +142,9 @@ assert(
 );
 
 assert(
-  '2.2 El filtro sí reduce las filas de la tabla',
+  '2.2 La tabla pinta las filas ya filtradas por el servidor sin volver a filtrarlas',
   computed.filteredGuides.call(unfiltered).length === 3
-    && computed.filteredGuides.call(filtered).length === 0
+    && computed.filteredGuides.call(filtered).length === 3
 );
 
 const kpiStart = componentSource.indexOf('vg-guides-tab__kpis');
@@ -176,56 +180,63 @@ assert(
 );
 
 // =====================================================================
-console.log('\n--- 3. Búsqueda textual por título, código, significado y paso (05.1) ---');
+console.log('\n--- 3. Filtros delegados al servidor (H-28-06) ---');
 
-const searchableGuide = {
-  id: 20,
-  machine_model: 'Necta Korinto',
-  machine_model_key: 'necta korinto',
-  breakdown_type: 'PAYMENT_SYSTEM',
-  is_active: true,
-  title: 'Lector MDB sin respuesta',
-  error_codes: [{ code: 'MDB-02', meaning: 'Validador de monedas sin comunicación' }],
-  steps: [{ title: 'Comprobar el bus', instruction: 'Revisar el latiguillo del módulo de pago y su conector.' }]
-};
-const searchContext = makeContext({ guides: [searchableGuide] });
-
-searchContext.searchQuery = 'latiguillo';
+const defaultFilters = computed.catalogFilters.call(makeContext());
 assert(
-  '3.1 Una palabra de la instrucción de un paso encuentra la guía',
-  computed.filteredGuides.call(searchContext).length === 1
-);
-searchContext.searchQuery = 'validador';
-assert(
-  '3.2 El significado de un código también forma parte del índice',
-  computed.filteredGuides.call(searchContext).length === 1
-);
-searchContext.searchQuery = 'mdb-02';
-assert(
-  '3.3 El código de error sigue encontrando la guía',
-  computed.filteredGuides.call(searchContext).length === 1
-);
-searchContext.searchQuery = 'sin coincidencias';
-assert(
-  '3.4 La búsqueda no produce falsos positivos',
-  computed.filteredGuides.call(searchContext).length === 0
+  '3.1 Sin filtros, el payload deja modelo y categoría vacíos y el estado en ALL',
+  defaultFilters.machine_model === ''
+    && defaultFilters.breakdown_type === ''
+    && defaultFilters.status === 'ALL'
+    && defaultFilters.search === ''
 );
 
-console.log('\n--- 4. Filtro de modelo normalizado (C5) ---');
+const activeFilters = computed.catalogFilters.call(makeContext({
+  modelFilter: 'Necta Korinto',
+  categoryFilter: 'PAYMENT_SYSTEM',
+  statusFilter: 'ACTIVE',
+  searchQuery: '  MDB-02  '
+}));
+assert(
+  '3.2 Modelo, categoría, estado y búsqueda viajan al servidor',
+  activeFilters.machine_model === 'Necta Korinto'
+    && activeFilters.breakdown_type === 'PAYMENT_SYSTEM'
+    && activeFilters.status === 'ACTIVE'
+    && activeFilters.search === 'MDB-02'
+);
+
+assert(
+  '3.3 La tabla no reimplementa la búsqueda por código, significado o paso',
+  !componentSource.includes('.flatMap((entry) => [entry.code, entry.meaning])')
+);
+
+assert(
+  '3.4 La recarga filtra en el servidor con el payload vigente',
+  componentSource.includes('api.getCoordinatorTroubleshootingGuides(this.catalogFilters)')
+);
+
+assert(
+  '3.5 La búsqueda se espera antes de consultar al servidor',
+  componentSource.includes('scheduleGuideReload')
+    && componentSource.includes('setTimeout(() => {')
+    && componentSource.includes('}, 250);')
+);
+
+console.log('\n--- 4. Modelo normalizado y selector estable (C5) ---');
 
 const normalizedContext = makeContext({
-  guides: [searchableGuide],
+  guides: [],
   modelFilter: '  NECTA   KORINTO  '
 });
 assert(
-  '4.1 Mayúsculas y espacios repetidos no rompen el filtro de modelo',
-  computed.filteredGuides.call(normalizedContext).length === 1
+  '4.1 El modelo viaja íntegro al servidor, que normaliza la clave (C5)',
+  computed.catalogFilters.call(normalizedContext).machine_model === '  NECTA   KORINTO  '
 );
 assert(
-  '4.2 El selector agrupa variantes de escritura del mismo modelo',
+  '4.2 El selector agrupa variantes de escritura vistas en el catálogo',
   computed.modelOptions.call(makeContext({
-    guides: [searchableGuide],
-    models: ['Necta  Korinto', 'necta korinto']
+    knownGuideModels: ['Necta  Korinto', 'necta korinto'],
+    models: []
   })).length === 1
 );
 
