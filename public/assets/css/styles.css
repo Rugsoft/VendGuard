@@ -927,6 +927,260 @@
 }
 
 /* ======================================================================
+   GUÍAS DE DIAGNÓSTICO · ACORDEÓN (Módulo 28, RF-01, RF-02, D2)
+   ====================================================================== */
+.vg-guide-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+}
+
+.vg-guide-accordion__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.vg-guide-accordion__header > div {
+  min-width: 0;
+}
+
+.vg-guide-accordion__eyebrow {
+  display: block;
+  margin-bottom: 3px;
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-primary-dark);
+}
+
+.vg-guide-accordion__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-heading-md);
+  line-height: 1.25;
+  color: var(--color-slate);
+  overflow-wrap: anywhere;
+}
+
+.vg-guide-accordion__switch {
+  align-self: flex-start;
+}
+
+.vg-guide-accordion__message {
+  margin: 0;
+  padding: 10px 12px;
+  background-color: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-interactive);
+  color: var(--color-ink-muted);
+  font-size: var(--font-size-caption);
+  line-height: 1.45;
+}
+
+.vg-guide-accordion__search {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--color-ink-muted);
+}
+
+.vg-guide-accordion__search .vg-input {
+  width: 100%;
+}
+
+.vg-guide-accordion__guide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background-color: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+}
+
+.vg-guide-accordion__guide-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.vg-guide-accordion__guide-header > div {
+  min-width: 0;
+}
+
+.vg-guide-accordion__guide-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-body-md);
+  line-height: 1.35;
+  color: var(--color-slate);
+  overflow-wrap: anywhere;
+}
+
+.vg-guide-accordion__codes,
+.vg-guide-accordion__parts,
+.vg-guide-accordion__cause {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-interactive);
+}
+
+.vg-guide-accordion__codes h5,
+.vg-guide-accordion__parts h5,
+.vg-guide-accordion__cause h5 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+.vg-guide-accordion__codes ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vg-guide-accordion__codes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--color-slate);
+  font-size: var(--font-size-body-sm);
+  line-height: 1.4;
+}
+
+.vg-guide-accordion__codes li > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.vg-guide-accordion__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none; /* El número lo pinta step_order; el <ol> no lo duplica. */
+}
+
+.vg-guide-accordion__steps > li {
+  padding: 11px 12px;
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-interactive);
+}
+
+.vg-guide-accordion__step-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--color-slate);
+  font-size: var(--font-size-body-sm);
+  line-height: 1.4;
+}
+
+.vg-guide-accordion__step-check input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+
+.vg-guide-accordion__step-check strong {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.vg-guide-accordion__steps > li > p {
+  margin: 5px 0 0 26px;
+  color: var(--color-ink-muted);
+  font-size: var(--font-size-caption);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.vg-guide-accordion__parts .vg-action-group {
+  gap: 6px;
+}
+
+.vg-guide-accordion__cause {
+  background-color: var(--color-primary-subtle);
+  border-color: var(--color-info-border);
+}
+
+.vg-guide-accordion__cause-name {
+  margin: 0;
+  color: var(--color-slate);
+  font-size: var(--font-size-body-sm);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.vg-guide-accordion__solution {
+  margin: 0;
+  color: var(--color-ink-secondary);
+  font-size: var(--font-size-caption);
+  line-height: 1.45;
+}
+
+.vg-guide-accordion__cause .vg-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+@media (max-width: 560px) {
+  .vg-guide-accordion {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .vg-guide-accordion__guide {
+    padding: 12px;
+  }
+
+  .vg-guide-accordion__title {
+    font-size: var(--font-size-body-lg);
+  }
+
+  .vg-guide-accordion__guide-title {
+    font-size: var(--font-size-body-sm);
+  }
+
+  .vg-guide-accordion__cause .vg-btn {
+    width: 100%;
+  }
+}
+
+/* ======================================================================
    GUÍAS DE DIAGNÓSTICO · COORDINACIÓN (Módulo 28, QA 1, QA 2)
    ====================================================================== */
 .vg-guides-tab {
