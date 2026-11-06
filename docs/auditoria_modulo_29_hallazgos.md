@@ -178,7 +178,7 @@ Mantener el código en la base y añadir una etiqueta de presentación para el A
 
 - El valor persistido sigue siendo `SIN_STOCK_AFECTADO`; `SanitarySpoilageOfficialActModal` y la tabla de Coordinación lo traducen a «Sin stock afectado» en la celda y en el título, sin alterar el payload.
 - La etiqueta del método vacío se unifica con la especificación: `No aplicable (máquina vacía)`, tanto en `SanitarySpoilageRecord` como en la tabla y en el aviso del modal de levantamiento. El contrato técnico se alinea.
-- Pruebas: `SanitarySpoilageFrontendTest` 71 aserciones y `SanitarySpoilageValidatorTest` 68; batería global 400 suites · 14.981 aserciones · 0 fallos.
+- Pruebas: `SanitarySpoilageFrontendTest` 74 aserciones y `SanitarySpoilageValidatorTest` 68; batería global 400 suites · 14.984 aserciones · 0 fallos.
 
 ---
 
@@ -204,7 +204,7 @@ Comparar contra el inicio del día siguiente con `<` (`date_to + 1 day`) en luga
 
 - `PdoSanitarySpoilageRecordRepository::findFilteredForCoordinator()` expresa ahora el límite superior como el inicio exclusivo del día siguiente (`date_to + 1 day` a las `00:00:00`) y compara con `<`. El día final se incluye completo aunque el acta tenga microsegundos; la validación estricta `YYYY-MM-DD` y el rechazo de rangos invertidos no cambian.
 - `SanitarySpoilageServiceIntegrationTest` (§7) inserta un acta a las `2026-03-15 23:59:59.5` y certifica que aparece en el listado y en el CSV de ese día, y que no se arrastra al `2026-03-14`.
-- Verificación: canal `new_engine` 3 suites · 144 aserciones · 0 fallos (`SanitarySpoilageServiceIntegrationTest` 46, con la aserción `C6` de outbox); batería global 400 suites · 14.981 aserciones · 0 fallos (la suite PostgreSQL viaja en el canal `new_engine`).
+- Verificación: canal `new_engine` 3 suites · 147 aserciones · 0 fallos (`SanitarySpoilageServiceIntegrationTest` 49, con la aserción `C6` de outbox y los límites horarios de Madrid); batería global 400 suites · 14.984 aserciones · 0 fallos (la suite PostgreSQL viaja en el canal `new_engine`).
 
 ---
 
@@ -233,7 +233,7 @@ O bien implementar paginación con parámetros `page`/`page_size` y controles en
 - **Decisión:** se enmienda el contrato técnico §3.4 en lugar de implementar paginación. La EARS 05.2 solo exige filtros, orden determinista y exportación CSV completa; añadir `page`/`page_size`, metadatos y controles de tabla sería una funcionalidad no solicitada y ampliaría el MVP (Art. VI). El CSV debe seguir exportando la totalidad del conjunto filtrado, no una página.
 - **Contrato:** `haccp_spoilage_log_contracts.md` v1.1 declara que el listado es completo, sin `LIMIT`, y que el CSV reutiliza ese mismo conjunto; §3.6 se alinea con la misma regla.
 - **Implementación:** no se modifica código ni comportamiento. `findFilteredForCoordinator()` sigue devolviendo todas las actas filtradas y `CoordinatorSanitarySpoilageTab.js` sigue renderizando el listado íntegro.
-- **Verificación:** el contrato ya no promete paginación y las únicas menciones restantes son la evidencia histórica del hallazgo; `git diff --check` está limpio. La batería global no cambia (400 suites · 14.981 aserciones) porque la enmienda es documental.
+- **Verificación:** el contrato ya no promete paginación y las únicas menciones restantes son la evidencia histórica del hallazgo; `git diff --check` está limpio. La cifra vigente es 400 suites · 14.984 aserciones; la enmienda es documental.
 
 ---
 

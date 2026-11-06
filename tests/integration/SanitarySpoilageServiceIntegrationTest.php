@@ -38,6 +38,11 @@ declare(strict_types=1);
  *      el día final completo: un acta emitida a las `23:59:59.5` aparece en el
  *      listado y en el CSV de ese día, y no se arrastra al día anterior.
  *
+ *   7. **Límites horarios del día operativo de Madrid (`QA 4.3`).** El filtro
+ *      usa `Europe/Madrid` y no la zona de sesión (UTC): las actas de las
+ *      00:30 y 23:30 de Madrid caen en su día, y las de los días vecinos no se
+ *      arrastran. Se cubre invierno y verano.
+ *
  * CATEGORÍA: `new_engine`. Exige PostgreSQL local (`deploy/local/postgres/`);
  * sin motor sale con código 2, nunca se omite en silencio. `run_all.php` la
  * excluye de la batería hermética por su marca de categoría.
@@ -956,7 +961,7 @@ try {
         ':evidence_photo_url' => 'https://example.test/t29-evidencia-ultimo-segundo.jpg',
         ':sanitary_notes' => 'Acta emitida en el último medio segundo del día para certificar el límite superior del filtro.',
         ':certificate_code' => 'CERT-T29-LATE01',
-        ':created_at' => $lateDay . ' 23:59:59.5',
+        ':created_at' => $lateDay . ' 23:59:59.5+01:00',
     ]);
 
     $lateDayPanel = $service->listForCoordinator([
@@ -989,6 +994,94 @@ try {
     $assert(
         'El límite superior exclusivo no arrastra el día anterior',
         $dayBeforePanel['records'] === []
+    );
+
+    echo "\n--- 8. Límites horarios del día operativo de Madrid (QA 4.3) ---\n";
+
+    $machineI = $insertMachine($pdo, $locationId, 'T29-I-MADRID');
+    $insertDatedRecord = static function (string $recordCode, string $certificateCode, string $createdAt) use ($pdo, $machineI, $technicianId): void {
+        $stmt = $pdo->prepare("
+            INSERT INTO sanitary_spoilage_records (
+                record_code, machine_id, technician_id, registered_by, quarantine_origin,
+                discarded_units_count, empty_machine_confirmed, affected_batch_codes,
+                cabin_temp_at_removal, restored_stabilized_temp_c, disposal_method,
+                evidence_photo_url, sanitary_notes, estimated_merchandise_loss_eur,
+                certificate_code, created_at
+            ) VALUES (
+                :record_code, :machine_id, :technician_id, :registered_by, 'MANUAL_SANITARY_LOCK',
+                2, FALSE, 'LOTE-T29-HORARIO-MADRID', 7.5, 3.5, 'ON_SITE_ORGANIC_SEALED',
+                :evidence_photo_url, :sanitary_notes, 5.00, :certificate_code,
+                CAST(:created_at AS timestamptz)
+            )
+        ");
+        $stmt->execute([
+            ':record_code' => $recordCode,
+            ':machine_id' => $machineI,
+            ':technician_id' => $technicianId,
+            ':registered_by' => $technicianId,
+            ':evidence_photo_url' => 'https://example.test/t29-evidencia-horario-madrid.jpg',
+            ':sanitary_notes' => 'Acta de prueba para certificar los límites horarios del día operativo de Madrid.',
+            ':certificate_code' => $certificateCode,
+            ':created_at' => $createdAt,
+        ]);
+    };
+
+    $insertDatedRecord(sprintf('ACTA-MERMA-%04d-9008', $year), 'CERT-T29-TZ01', '2026-03-15 00:30:00+01:00');
+    $insertDatedRecord(sprintf('ACTA-MERMA-%04d-9009', $year), 'CERT-T29-TZ02', '2026-03-15 23:30:00+01:00');
+    $insertDatedRecord(sprintf('ACTA-MERMA-%04d-9010', $year), 'CERT-T29-TZ03', '2026-03-14 23:30:00+01:00');
+    $insertDatedRecord(sprintf('ACTA-MERMA-%04d-9011', $year), 'CERT-T29-TZ04', '2026-03-16 00:30:00+01:00');
+    $insertDatedRecord(sprintf('ACTA-MERMA-%04d-9012', $year), 'CERT-T29-TZ05', '2026-07-15 00:30:00+02:00');
+    $insertDatedRecord(sprintf('ACTA-MERMA-%04d-9013', $year), 'CERT-T29-TZ06', '2026-07-15 23:30:00+02:00');
+    $insertDatedRecord(sprintf('ACTA-MERMA-%04d-9014', $year), 'CERT-T29-TZ07', '2026-07-14 23:30:00+02:00');
+    $insertDatedRecord(sprintf('ACTA-MERMA-%04d-9015', $year), 'CERT-T29-TZ08', '2026-07-16 00:30:00+02:00');
+
+    $codesFor = static function (string $from, string $to) use ($service, $machineI): array {
+        $records = $service->listForCoordinator([
+            'machine_id' => $machineI,
+            'date_from' => $from,
+            'date_to' => $to,
+        ])['records'];
+        $codes = array_map(static fn (array $record): string => (string)$record['record_code'], $records);
+        sort($codes);
+
+        return $codes;
+    };
+
+    $marchCodes = $codesFor('2026-03-15', '2026-03-15');
+    $assert(
+        '8.1 El día 15 de marzo (CET) incluye las 00:30 y las 23:30 de Madrid',
+        $marchCodes === [
+            sprintf('ACTA-MERMA-%04d-9008', $year),
+            sprintf('ACTA-MERMA-%04d-9009', $year),
+        ],
+        'actas: ' . implode(', ', $marchCodes)
+    );
+
+    $julyCodes = $codesFor('2026-07-15', '2026-07-15');
+    $assert(
+        '8.2 El día 15 de julio (CEST) incluye las 00:30 y las 23:30 de Madrid',
+        $julyCodes === [
+            sprintf('ACTA-MERMA-%04d-9012', $year),
+            sprintf('ACTA-MERMA-%04d-9013', $year),
+        ],
+        'actas: ' . implode(', ', $julyCodes)
+    );
+
+    $neighborCodes = array_merge(
+        $codesFor('2026-03-14', '2026-03-14'),
+        $codesFor('2026-03-16', '2026-03-16'),
+        $codesFor('2026-07-14', '2026-07-14'),
+        $codesFor('2026-07-16', '2026-07-16')
+    );
+    $assert(
+        '8.3 Las actas de los días vecinos no se arrastran al día operativo',
+        $neighborCodes === [
+            sprintf('ACTA-MERMA-%04d-9010', $year),
+            sprintf('ACTA-MERMA-%04d-9011', $year),
+            sprintf('ACTA-MERMA-%04d-9014', $year),
+            sprintf('ACTA-MERMA-%04d-9015', $year),
+        ],
+        'actas: ' . implode(', ', $neighborCodes)
     );
 } catch (Throwable $exception) {
     $crash = $exception;

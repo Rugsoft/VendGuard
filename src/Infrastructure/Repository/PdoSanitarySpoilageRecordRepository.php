@@ -647,9 +647,13 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
             $params[':disposal_method'] = $disposalMethod;
         }
 
+        // El panel filtra por el día operativo de Madrid, no por la zona de la
+        // sesión de PostgreSQL (que en producción es UTC). Sin este AT TIME ZONE,
+        // la primera hora del día se perdería y la primera hora del día siguiente
+        // se colaría en el rango.
         $dateFrom = $this->normalizeDateBoundary($filters['date_from'] ?? null, '00:00:00');
         if ($dateFrom !== null) {
-            $where[] = 'r.created_at >= CAST(:date_from AS timestamptz)';
+            $where[] = "r.created_at >= (CAST(:date_from AS timestamp) AT TIME ZONE 'Europe/Madrid')";
             $params[':date_from'] = $dateFrom;
         }
 
@@ -658,7 +662,7 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
         // microsegundos finales de un TIMESTAMPTZ.
         $dateTo = $this->normalizeDateBoundary($filters['date_to'] ?? null, '00:00:00', 1);
         if ($dateTo !== null) {
-            $where[] = 'r.created_at < CAST(:date_to AS timestamptz)';
+            $where[] = "r.created_at < (CAST(:date_to AS timestamp) AT TIME ZONE 'Europe/Madrid')";
             $params[':date_to'] = $dateTo;
         }
 
@@ -1015,7 +1019,9 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
      *
      * El contrato del panel acepta `YYYY-MM-DD`; se rechaza cualquier otra
      * forma antes de que llegue al motor para no depender de la conversión
-     * implícita de PostgreSQL. `$dayOffset` permite expresar el límite
+     * implícita de PostgreSQL. El valor devuelto no lleva zona: es el muro de
+     * reloj de Madrid que `findFilteredForCoordinator()` convierte con
+     * `AT TIME ZONE 'Europe/Madrid'`. `$dayOffset` permite expresar el límite
      * superior como el inicio exclusivo del día siguiente (`+1`), de modo que
      * el día final se incluye completo aunque el acta conserve microsegundos.
      */

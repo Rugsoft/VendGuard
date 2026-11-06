@@ -12,6 +12,8 @@
  *  - Official act: no financial fields at all (Art. V.4, C4).
  *  - Service worker: the three modules belong to the closed App Shell and the
  *    cache version was raised.
+ *  - Seed evidence: the three APPCC seed photos live in the versioned assets
+ *    tree and never depend on the ignored uploads directory.
  *  - Design system: only vg-btn classes, tokens for color and no new hex debt.
  *
  * Dogma Vanilla: Node.js native ESM, zero external dependencies, zero network.
@@ -584,6 +586,50 @@ assert('6.6 The tab keeps the 8 px card radius and the 4 px control radius vocab
   stylesSource.includes('.vg-spoilage-panel')
     && stylesSource.includes('var(--radius-card)')
     && stylesSource.includes('var(--radius-interactive)'));
+
+// ─── 7. Seed evidence assets ─────────────────────────────────────────────────
+
+console.log('\n--- 7. Seed evidence assets (Módulo 29) ---\n');
+
+const seedEvidenceUrls = [
+  '/assets/seed/spoilage/ACTA-MERMA-2026-0001.jpg',
+  '/assets/seed/spoilage/ACTA-MERMA-2026-0002.jpg',
+  '/assets/seed/spoilage/ACTA-MERMA-2026-0003-empty.jpg'
+];
+const seedEvidencePaths = seedEvidenceUrls.map(
+  (url) => join(PROJECT_ROOT, 'public', url.replace(/^\//, ''))
+);
+const seedSqlSource = read('database/supabase_seeds.sql');
+const seedRunnerSource = read('src/Infrastructure/Database/SeedRunner.php');
+const extractSeedEvidenceUrls = (source) => [
+  ...source.matchAll(/['"](\/assets\/seed\/spoilage\/[^'"]+\.jpg)['"]/g)
+]
+  .map((match) => match[1])
+  .filter((url, index, urls) => urls.indexOf(url) === index)
+  .sort();
+const seedSqlUrls = extractSeedEvidenceUrls(seedSqlSource);
+const seedRunnerUrls = extractSeedEvidenceUrls(seedRunnerSource);
+
+assert('7.1 The three seeded evidence photos exist in the versioned assets tree',
+  seedEvidencePaths.every((path) => existsSync(path)),
+  seedEvidencePaths.filter((path) => !existsSync(path)).join(', '));
+
+assert('7.2 The seeded evidence files are real JPEG images',
+  seedEvidencePaths.every((path) => {
+    if (!existsSync(path)) {
+      return false;
+    }
+    const bytes = readFileSync(path).subarray(0, 3);
+    return bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
+  }));
+
+assert('7.3 SQL and SeedRunner seed the same three versioned URLs, never uploads',
+  seedSqlUrls.length === 3
+    && JSON.stringify(seedSqlUrls) === JSON.stringify(seedEvidenceUrls)
+    && JSON.stringify(seedRunnerUrls) === JSON.stringify(seedEvidenceUrls)
+    && !seedSqlSource.includes('/uploads/spoilage')
+    && !seedRunnerSource.includes('/uploads/spoilage'),
+  `SQL=${seedSqlUrls.join(', ')} · runner=${seedRunnerUrls.join(', ')}`);
 
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
