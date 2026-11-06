@@ -270,6 +270,45 @@ try {
     $machineA = $insertMachine($pdo, $locationId, 'T29-A');
     $incidentA = $insertIncident($pdo, $machineA, $locationId, $technicianId, 'T29-INC-A', 'RESOLVED', true);
 
+    // Regresión del hallazgo 1: una certificación previa ya ocupa el primer
+    // correlativo del año. El acta debe reservar el siguiente, nunca un
+    // aleatorio que pueda colisionar con la clave única del motor.
+    $legacyMachine = $insertMachine($pdo, $locationId, 'T29-CERT-PREVIO', true, 'OK');
+    $legacyOrderStmt = $pdo->prepare("
+        INSERT INTO preventive_orders (
+            order_code, machine_id, location_id, assigned_technician_id,
+            status, order_type, scheduled_date, due_date, completed_at, result
+        ) VALUES (
+            'PREV-T29-COLISION', :machine_id, :location_id, :technician_id,
+            'COMPLETED', 'REINSPECTION', CURRENT_DATE, CURRENT_DATE, CURRENT_TIMESTAMP, 'CONFORME'
+        )
+        RETURNING id
+    ");
+    $legacyOrderStmt->execute([
+        ':machine_id' => $legacyMachine,
+        ':location_id' => $locationId,
+        ':technician_id' => $technicianId,
+    ]);
+    $legacyOrderId = (int)$legacyOrderStmt->fetchColumn();
+
+    $pdo->prepare("
+        INSERT INTO sanitary_certificates (
+            certificate_code, preventive_order_id, machine_id, location_id,
+            technician_id, technician_name, technician_operator_code,
+            inspection_date, valid_until, temperature_measured, result, status
+        ) VALUES (
+            :certificate_code, :preventive_order_id, :machine_id, :location_id,
+            :technician_id, 'Técnico de Certificación T29', 'T29-TEC',
+            CURRENT_TIMESTAMP, CURRENT_DATE + 15, 3.5, 'CONFORME', 'VALID'
+        )
+    ")->execute([
+        ':certificate_code' => sprintf('CERT-%04d-0001', $year),
+        ':preventive_order_id' => $legacyOrderId,
+        ':machine_id' => $legacyMachine,
+        ':location_id' => $locationId,
+        ':technician_id' => $technicianId,
+    ]);
+
     $firstLift = $service->liftQuarantineWithSpoilageRecord(
         $machineA,
         $payload(),
@@ -299,7 +338,11 @@ try {
     $certificateCount = (int)$pdo->query(
         'SELECT COUNT(*) FROM sanitary_certificates WHERE certificate_code = ' . $pdo->quote($certificateA)
     )->fetchColumn();
-    $assert('El certificado higiénico del acta se persiste', $certificateCount === 1, $certificateA);
+    $assert(
+        'El certificado higiénico se persiste con el correlativo siguiente al ya emitido',
+        $certificateCount === 1 && $certificateA === sprintf('CERT-%04d-0002', $year),
+        $certificateA
+    );
 
     $firstAudit = $auditOf($firstRecordId, 'CREATE_SPOILAGE_RECORD_AND_LIFT_QUARANTINE');
     $firstAuditMetadata = is_array($firstAudit)

@@ -1,0 +1,238 @@
+# AUDITORÍA FUNCIONAL · MÓDULO 29
+
+## Acta de Merma y Destrucción de Lotes por Cuarentena Sanitaria (APPCC / HACCP)
+
+**Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
+**Módulo:** 29 · `specs/29-haccp-spoilage-log`  
+**Referencias:** [`spec.md`](../specs/29-haccp-spoilage-log/spec.md) v3.0 · [`haccp_spoilage_log_contracts.md`](../specs/technical/haccp_spoilage_log_contracts.md) v1.0 · [`traceability-matrix.md`](../specs/29-haccp-spoilage-log/traceability-matrix.md)  
+**Fecha de la revisión:** 2026-11-06  
+**Rama:** `spoilage-log` (commit de referencia `fd28e19`)  
+**Alcance:** revisión de solo lectura del código de dominio, API, persistencia, UI y esquema frente a los criterios EARS, decisiones `D1`–`D3`, casos `C1`–`C6` y resoluciones `QA 1`–`QA 4`.  
+**Resultado:** núcleo funcional implementado y certificado por la batería; **3 huecos funcionales abiertos**, **1 hueco resuelto** y **3 desviaciones menores** pendientes de hardening.
+
+> Este documento no modifica la especificación aprobada. Los hallazgos 1 a 6 son cambios de implementación; el hallazgo 7 requiere, si se mantiene la paginación, una enmienda del contrato técnico con visto bueno del Product Owner.
+
+---
+
+## 1. Resumen
+
+| # | Hallazgo | Severidad | Regla afectada | Estado |
+| :---: | :--- | :---: | :--- | :---: |
+| 1 | Colisión del código de certificado higiénico | **Alta** | RF-03.1 / EARS 03.1 | Resuelto (Módulo 29) |
+| 2 | El técnico no accede al Acta A4 de cualquier máquina | **Media** | QA 3.1 | Abierto |
+| 3 | Levantamiento técnico limitado a incidencias de su ruta | **Media** | C2 / HU-01 / EARS 01.2 | Abierto |
+| 4 | Bypass de la validación de la fotografía por la vía JSON | **Media** | EARS 02.2 / RNF-02 | Abierto |
+| 5 | Código interno de máquina vacía impreso en el Acta A4 | **Baja** | D3 / EARS 02.1 | Abierto |
+| 6 | El filtro de fechas no cubre el último segundo del día | **Baja** | QA 4.3 | Abierto |
+| 7 | El contrato promete tabla paginada y no hay paginación | **Baja** | Contrato técnico §3.4 | Abierto |
+
+---
+
+## 2. Hallazgos funcionales
+
+### 2.1. Colisión del código de certificado higiénico
+
+**Severidad:** Alta  
+**Reglas:** RF-03.1, EARS 03.1 (emisión indivisible del acta y del certificado), RNF-01.
+
+**Evidencia**
+
+- `src/Application/Service/SanitarySpoilageService.php::generateCertificateCode()` (líneas 525-528) genera el código con `random_int(1000, 9999)`: `CERT-AAAA-NNNN`.
+- `database/supabase_init.sql` (línea 1311) declara `CONSTRAINT uq_certificates_code UNIQUE (certificate_code)`.
+- `src/Infrastructure/Repository/PdoSanitaryCertificateRepository.php::createCertificate()` (líneas 39-41) genera además códigos secuenciales `CERT-AAAA-<MAX(id)+1>` en el mismo espacio de nombres.
+- No existe reintento ni secuencia dedicada en `SanitarySpoilageService`; una violación de unicidad lanza una excepción PDO.
+- El controlador solo convierte en respuesta las `SanitarySpoilageValidationException`; cualquier otro `Throwable` se relanza y produce un **HTTP 500**, revirtiendo la transacción completa.
+
+**Impacto**
+
+El levantamiento de cuarentena falla y la máquina permanece bloqueada, aunque todos los datos sanitarios sean válidos. Con 9.000 códigos aleatorios por año, la probabilidad de al menos una colisión es aproximadamente:
+
+- 8 % con 40 actas emitidas en el año.
+- 42 % con 100 actas emitidas en el año.
+
+La convivencia con los certificados secuenciales del servicio preventivo reduce aún más el espacio disponible y adelanta el problema.
+
+**Recomendación**
+
+Emitir el código del certificado con la misma disciplina que `nextRecordCode()`: secuencia dedicada o cálculo bajo `pg_advisory_xact_lock` dentro de la transacción del levantamiento, y reintento acotado ante violación de unicidad como última red. Añadir una prueba que precargue el código candidato y verifique que el levantamiento sigue emitiendo un certificado distinto sin fallar.
+
+**Resolución aplicada (2026-11-06)**
+
+- Se añadió `nextCertificateCode(int $year)` al contrato del repositorio y a `PdoSanitarySpoilageRecordRepository`. Reserva el siguiente correlativo `CERT-AAAA-NNNN` con `pg_advisory_xact_lock`, leyendo el máximo sufijo ya emitido en `sanitary_certificates` —incluidos los certificados de los flujos preventivos y las semillas—, en lugar de sortear un número entre 1000 y 9999.
+- `SanitarySpoilageService::liftQuarantineWithSpoilageRecord()` usa esa reserva dentro de la misma transacción del acta y se eliminó `generateCertificateCode()`.
+- La prueba `SanitarySpoilageServiceIntegrationTest` siembra un certificado previo `CERT-AAAA-0001` y exige que el levantamiento emita `CERT-AAAA-0002`, verificando además que la fila exista.
+- Verificación: canal `new_engine` del módulo en verde (3 suites, 123 aserciones), validador (67), frontend (54) y guarda de dialecto (107). PHP lint sin errores.
+
+**Riesgo residual:** el flujo preventivo (`PdoSanitaryCertificateRepository::createCertificate`) sigue calculando su código con `MAX(id)+1` y no participa del bloqueo de asesoría. Un levantamiento y una emisión preventiva estrictamente concurrentes podrían chocar; la reserva del Módulo 29 ya evita los códigos existentes, pero cerrar esa carrera requiere que ambos flujos compartan la misma secuencia. Queda anotado para una tarea posterior. Además, `PreventiveCoexistenceBridgeService` devuelve un `certificate_code` aleatorio en la respuesta de reinspección sin persistirlo en `sanitary_certificates`; es un flujo distinto, pero conviene alinearlo cuando se aborde la secuencia compartida.
+
+---
+
+### 2.2. El técnico no puede consultar el Acta A4 de cualquier máquina
+
+**Severidad:** Media  
+**Regla:** QA 3.1 («cualquier Técnico de Campo activo puede consultar e imprimir el Acta Oficial A4 de cualquier máquina»).
+
+**Evidencia**
+
+- El único punto de entrada al Acta A4 en la vista de técnico es el historial dentro de `SanitarySpoilageLiftModal` (`public/assets/js/components/SanitarySpoilageLiftModal.js`, bloque «Actas emitidas de esta máquina»).
+- Ese modal solo se abre desde una incidencia de la ruta marcada con `sanitary_resolution_required` (`public/assets/js/views/TechnicianRouteView.js`, líneas 4454-4466 y 5394-5404).
+- No existe buscador de máquinas ni historial independiente de actas para el rol `TECHNICIAN`; el modal `SanitarySpoilageOfficialActModal` solo está montado en esa vista y en la pestaña de Coordinación.
+- La API sí permite la consulta por identificador de acta (`GET /api/sanitary-spoilage-records/{id}/official-act`, roles `TECHNICIAN` y `COORDINATOR`).
+
+**Impacto**
+
+Un técnico que atiende una inspección en ruta no puede localizar ni imprimir el acta de una máquina que no forme parte de una incidencia abierta de su ruta, aunque la operación esté autorizada por la API. La capacidad existe en el backend pero no es alcanzable desde la interfaz.
+
+**Recomendación**
+
+Añadir al técnico un acceso directo al Acta A4 desde el historial/buscador de máquinas (o desde la ficha de máquina), sin exponer importes. Cubrir con una prueba de navegación que un técnico abre el A4 de una máquina ajena a su ruta.
+
+---
+
+### 2.3. Levantamiento técnico limitado a incidencias de su ruta
+
+**Severidad:** Media  
+**Reglas:** C2, HU-01 y EARS 01.2 (cualquier técnico activo, incluido un compañero de relevo, puede tramitar el levantamiento).
+
+**Evidencia**
+
+- `openSpoilageLiftModal(incident)` (`TechnicianRouteView.js`, líneas 2395-2408) construye la máquina a partir de la incidencia y solo se invoca desde la tarjeta de una incidencia con `sanitary_resolution_required`.
+- Una cuarentena originada por una **inspección preventiva no conforme** sin incidencia asociada no ofrece botón al técnico.
+- Coordinación sí dispone del listado global de máquinas en cuarentena y puede levantar cualquiera (`CoordinatorSanitarySpoilageTab`).
+
+**Impacto**
+
+El técnico queda limitado a las cuarentenas que la ruta le presenta como incidencia. Los casos de cuarentena preventiva o de bloqueo cautelar sin incidencia quedan en la práctica solo en manos de Coordinación, por debajo de la autorización transversal que exige C2.
+
+**Recomendación**
+
+Ofrecer al técnico un listado de máquinas activas en cuarentena (similar al de Coordinación, sin datos financieros) o un acceso desde la orden preventiva no conforme. Verificar que el modal sigue exigiendo máquina activa, estado `QUARANTINE` y ausencia de averías abiertas antes de habilitar el envío.
+
+---
+
+### 2.4. Bypass de la validación de la fotografía por la vía JSON
+
+**Severidad:** Media  
+**Reglas:** EARS 02.2 y RNF-02 (fotografía verificada, ≤ 5 MB y formato gráfico real en el 100 % de las actas).
+
+**Evidencia**
+
+- `SanitarySpoilageController::lift()` valida la imagen con `LocalFileUploader` (tamaño y `finfo`) solo cuando llega como `multipart/form-data` con el archivo `photo`.
+- Si la petición llega como JSON, acepta `evidence_photo_url` como una cadena de 5 a 255 caracteres y la pasa al servicio sin comprobar que corresponda a un archivo subido, existente o de tipo imagen (`SanitarySpoilageController.php`, líneas 87-89).
+- El validador de dominio solo comprueba longitud de la URL (`SanitarySpoilageValidator::validateCreation`).
+
+**Impacto**
+
+Un usuario interno autenticado puede emitir un acta con una URL de evidencia inventada o externa, eludiendo la verificación de contenido real que exige el Art. V.5. El acta quedaría emitida y el A4 mostraría una imagen no acreditada (o ninguna).
+
+**Recomendación**
+
+Aceptar el levantamiento únicamente por `multipart/form-data`, o verificar en el servidor que la URL pertenece a `/uploads/`, que el archivo existe y que su contenido real es JPEG, PNG o WebP dentro del límite. Añadir una prueba negativa con `evidence_photo_url` arbitraria.
+
+---
+
+## 3. Desviaciones menores
+
+### 3.1. Código interno de máquina vacía impreso en el Acta A4
+
+**Severidad:** Baja  
+**Reglas:** D3, EARS 02.1.
+
+**Evidencia**
+
+- `SanitarySpoilageValidator::EMPTY_BATCH_CODES = 'SIN_STOCK_AFECTADO'`.
+- El Acta A4 imprime `affected_batch_codes` sin traducción (`SanitarySpoilageOfficialActModal.js`).
+- La especificación pide registrar los lotes como «Sin stock afectado»; el documento oficial entrega a Sanidad el token interno en mayúsculas y con guiones bajos.
+
+**Impacto**
+
+Es un defecto de presentación del documento oficial, no de integridad: el valor almacenado es correcto y estable. También existe una diferencia menor de redacción en la etiqueta del método vacío («No aplica (Máquina verificada sin stock afectado)» frente a «No aplicable (máquina vacía)»).
+
+**Recomendación**
+
+Mantener el código en la base y añadir una etiqueta de presentación para el A4 y la tabla («Sin stock afectado»). Unificar la redacción del método con la especificación.
+
+---
+
+### 3.2. El filtro de fechas no cubre el último segundo del día
+
+**Severidad:** Baja  
+**Regla:** QA 4.3 (el rango abarca el día completo inclusive).
+
+**Evidencia**
+
+- `PdoSanitarySpoilageRecordRepository::findFilteredForCoordinator()` normaliza `date_to` a `23:59:59` y aplica `r.created_at <= CAST(:date_to AS timestamptz)` (líneas 620-623).
+- `created_at` es `TIMESTAMPTZ`, con precisión de microsegundos: un acta creada a las `23:59:59.400` queda fuera del filtro.
+
+**Impacto**
+
+Puede omitirse un acta del listado y del CSV si se emitió en la fracción final del día. Es un caso poco frecuente pero real y difícil de detectar.
+
+**Recomendación**
+
+Comparar contra el inicio del día siguiente con `<` (`date_to + 1 day`) en lugar de `<= 23:59:59`. Añadir una prueba con una acta en `23:59:59.5`.
+
+---
+
+### 3.3. El contrato promete tabla paginada y no hay paginación
+
+**Severidad:** Baja  
+**Regla:** Contrato técnico §3.4.
+
+**Evidencia**
+
+- `specs/technical/haccp_spoilage_log_contracts.md` §3.4 describe la tabla como «paginada/filtrada».
+- `PdoSanitarySpoilageRecordRepository::findFilteredForCoordinator()` no aplica `LIMIT` ni recibe página; devuelve todo el histórico.
+- `CoordinatorSanitarySpoilageTab.js` y la exportación CSV consumen la lista completa.
+- La especificación funcional (EARS 05.2) no exige paginación; solo filtros y ordenación.
+
+**Impacto**
+
+A medida que crezca el histórico, el panel y el CSV cargan todos los registros en una sola respuesta. Hoy no rompe ningún criterio funcional, pero contradice el contrato técnico y degrada la experiencia.
+
+**Recomendación**
+
+O bien implementar paginación con parámetros `page`/`page_size` y controles en la tabla, o bien enmendar el contrato técnico para declarar explícitamente que el listado es completo. La segunda opción requiere aprobación del Product Owner por afectar a un contrato aprobado.
+
+---
+
+## 4. Cobertura verificada (sin hallazgos)
+
+Se contrastaron y se consideran correctamente cubiertos:
+
+- Levantamiento atómico con bloqueo `FOR UPDATE` de la máquina y serialización de levantamientos concurrentes.
+- Bloqueo por avería correctiva abierta (C1), máquina inactiva o fuera de cuarentena.
+- Autoría del técnico in situ frente al coordinador registrador (QA 1), incluida la auditoría de ambos.
+- Operación estrictamente en línea (C3) y ausencia de encolado offline del acta.
+- Techos térmicos por tipología y rango físico de ambas lecturas (Art. II, QA 3).
+- Unidades `0..500`, lotes `3..500` con bloque alfanumérico real, confirmación de máquina vacía y método de destrucción (D3, QA 4).
+- Fotografía obligatoria en la rama `multipart`, con tope de 5 MB y `finfo` (el hueco 2.4 afecta solo a la vía JSON).
+- Observaciones de higienización `20..1000` con tres bloques reales y aviso de privacidad visible.
+- Inmutabilidad de los hechos sanitarios y prohibición de borrado mediante disparadores; relación `1..N` ante reaperturas.
+- Coste automático a 2,50 €/ud., ajustes sucesivos con motivo real, rechazo de importes idénticos y opacidad financiera para técnico, Sede, QR y A4.
+- Cuatro KPIs globales inmunes al filtrado, orden determinista, listado de cuarentenas activas y CSV con BOM y neutralización de fórmulas.
+- Registro de auditoría de alta, lectura del A4, ajuste y exportación bajo `SANITARY_SPOILAGE_RECORD`.
+
+---
+
+## 5. Orden de remediación propuesto
+
+1. **Hallazgo 1** (Alta): **resuelto** con la reserva correlativa bajo bloqueo de asesoría y la prueba de regresión. Queda anotada la carrera residual con el flujo preventivo.
+2. **Hallazgos 2, 3 y 4** (Media): accesos del técnico al A4 y al levantamiento, y endurecimiento de la evidencia fotográfica.
+3. **Hallazgos 5, 6 y 7** (Baja): etiqueta del A4, límite superior del filtro de fechas y decisión sobre paginación.
+
+Los hallazgos 1 a 6 no requieren modificar `spec.md`: son correcciones de implementación dentro de criterios ya aprobados. El hallazgo 7 sí puede requerir una enmienda del contrato técnico si se decide no paginar.
+
+---
+
+## 6. Trazabilidad de la revisión
+
+- **Especificación:** `specs/29-haccp-spoilage-log/spec.md` v3.0.
+- **Contratos:** `specs/technical/haccp_spoilage_log_contracts.md` v1.0.
+- **Dominio y aplicación:** `SanitarySpoilageService.php`, `SanitarySpoilageValidator.php`, `SanitarySpoilageRecord.php`.
+- **Persistencia:** `PdoSanitarySpoilageRecordRepository.php`, `database/supabase_migrations/025_sanitary_spoilage_records.sql`, `database/supabase_init.sql`.
+- **API:** `SanitarySpoilageController.php`, `src/Presentation/Routing/AppRouter.php` (líneas 347-352).
+- **UI:** `CoordinatorSanitarySpoilageTab.js`, `SanitarySpoilageLiftModal.js`, `SanitarySpoilageOfficialActModal.js`, `TechnicianRouteView.js`.
+- **Pruebas de referencia:** `SanitarySpoilageValidatorTest.php`, `SanitarySpoilageServiceIntegrationTest.php`, `SanitarySpoilageApiIntegrationTest.php`, `PostgresSanitarySpoilageSchemaTest.php`, `SanitarySpoilageFrontendTest.mjs`.
+
+La batería global se encontraba en verde en el momento de la revisión. Este documento no altera código, pruebas ni especificaciones; las líneas citadas corresponden al commit `fd28e19` de la rama `spoilage-log`.

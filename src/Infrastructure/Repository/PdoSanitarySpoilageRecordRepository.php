@@ -318,6 +318,42 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
 
     /**
      * {@inheritdoc}
+     *
+     * La reserva se calcula sobre `sanitary_certificates`, no sobre la clave
+     * primaria: así también esquiva los códigos que hayan emitido los flujos
+     * preventivos o las semillas. El bloqueo de asesoría serializa a los
+     * levantamientos concurrentes del mismo año; la clave única del motor sigue
+     * siendo la última red de seguridad.
+     */
+    public function nextCertificateCode(int $year): string
+    {
+        if ($year < 2000 || $year > 9999) {
+            throw new InvalidArgumentException(
+                sprintf('El año «%d» no es válido para numerar un certificado sanitario.', $year)
+            );
+        }
+
+        $prefix = sprintf('CERT-%04d-', $year);
+
+        $stmtLock = $this->pdo->prepare('SELECT pg_advisory_xact_lock(hashtext(:lock_key))');
+        $stmtLock->execute([':lock_key' => 'sanitary_certificate_code_' . $year]);
+
+        $stmtSeq = $this->pdo->prepare("
+            SELECT COALESCE(
+                MAX(CAST(SUBSTRING(certificate_code FROM '([0-9]+)$') AS INTEGER)),
+                0
+            ) + 1
+            FROM sanitary_certificates
+            WHERE certificate_code LIKE :prefix
+        ");
+        $stmtSeq->execute([':prefix' => $prefix . '%']);
+        $next = (int)$stmtSeq->fetchColumn();
+
+        return sprintf('CERT-%04d-%04d', $year, $next);
+    }
+
+    /**
+     * {@inheritdoc}
      */
     public function create(array $data): SanitarySpoilageRecord
     {

@@ -153,7 +153,7 @@ final class SanitarySpoilageService
             $links = $this->recordRepository->resolveLatestQuarantineEpisodeLinks($machineId);
             $year = (int)date('Y');
             $recordCode = $this->recordRepository->nextRecordCode($year);
-            $certificateCode = $this->generateCertificateCode($year);
+            $certificateCode = $this->recordRepository->nextCertificateCode($year);
 
             $record = $this->recordRepository->create([
                 'record_code' => $recordCode,
@@ -520,11 +520,6 @@ final class SanitarySpoilageService
         }
 
         return $technicianId;
-    }
-
-    private function generateCertificateCode(int $year): string
-    {
-        return sprintf('CERT-%04d-%04d', $year, random_int(1000, 9999));
     }
 
     /**

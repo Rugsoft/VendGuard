@@ -121,6 +121,19 @@ interface SanitarySpoilageRecordRepositoryInterface
     public function nextRecordCode(int $year): string;
 
     /**
+     * Reserva el siguiente código oficial de certificado sanitario del año.
+     *
+     * La reserva usa el mismo bloqueo de asesoría que `nextRecordCode()` y debe
+     * invocarse dentro de la transacción que insertará el certificado. El
+     * formato devuelto es `CERT-AAAA-NNNN` y nunca reutiliza un código ya
+     * emitido, incluidos los que provengan de otros flujos de inspección.
+     *
+     * @param int $year Año natural del certificado.
+     * @return string Código oficial reservado.
+     */
+    public function nextCertificateCode(int $year): string;
+
+    /**
      * Persiste un acta y devuelve la entidad hidratada con su clave primaria.
      *
      * @param array<string, mixed> $data Hechos sanitarios y vínculos validados.
