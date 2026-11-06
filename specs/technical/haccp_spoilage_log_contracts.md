@@ -4,8 +4,8 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** `29-haccp-spoilage-log`  
 **Documento:** `specs/technical/haccp_spoilage_log_contracts.md`  
-**Versión:** 1.0 (Alineado con `spec.md` v3.0 y `plan.md` v3.0)  
-**Estado:** Contratos Técnicos Aprobados por el Product Owner el 2026-11-05 · Puerta SDD cerrada  
+**Versión:** 1.1 (Alineado con `spec.md` v3.0 y `plan.md` v3.0; enmienda §3.4 aprobada el 2026-11-06)
+**Estado:** Contratos Técnicos Aprobados por el Product Owner el 2026-11-05 · Enmienda §3.4 aprobada el 2026-11-06 · Puerta SDD cerrada
 **Referencia Funcional:** [`specs/29-haccp-spoilage-log/spec.md`](../29-haccp-spoilage-log/spec.md) y [`specs/functional/haccp_spoilage_log_spec.md`](../functional/haccp_spoilage_log_spec.md) (`RF-01` a `RF-05`, Decisiones `D1`–`D3`)  
 **Protocolo:** HTTP/1.1 · JSON (`application/json; charset=utf-8`) y `multipart/form-data` para subida de evidencia fotográfica  
 **Metodología:** SDD (Specification-Driven Development) · Contratos API-First  
@@ -300,9 +300,10 @@ Devuelve el historial de actas de merma de una máquina (y si la máquina está 
 * **Roles permitidos:** `TECHNICIAN`, `COORDINATOR`.
 
 ### 3.4. `GET /api/coordinator/sanitary-spoilage-records`
-Devuelve para el panel de Coordinación las 4 tarjetas KPI globales (inmunes a los filtros de la tabla), la lista de máquinas actualmente en `'QUARANTINE'` pendientes de levantamiento y la tabla paginada/filtrada de actas con sus importes financieros.
+Devuelve para el panel de Coordinación las 4 tarjetas KPI globales (inmunes a los filtros de la tabla), la lista de máquinas actualmente en `'QUARANTINE'` pendientes de levantamiento y el listado completo y filtrado de actas con sus importes financieros.
 * **Roles permitidos:** Exclusivo `COORDINATOR` (`403 FORBIDDEN` para `TECHNICIAN` y `LOCATION_RESPONSIBLE`).
 * **Parámetros query opcionales:** `machine_id`, `quarantine_origin`, `disposal_method`, `date_from`, `date_to`, `search`.
+* **Alcance del listado (enmienda 2026-11-06):** Devuelve todas las actas que cumplen los filtros, sin paginación ni `LIMIT`, ordenadas por `created_at DESC, id DESC` (desempate por número de acta descendente). La exportación CSV reutiliza exactamente ese conjunto filtrado. La paginación no forma parte del alcance del MVP: EARS 05.2 exige filtros, orden determinista y CSV completo, y la tabla del panel consume el listado íntegro. Una paginación futura exigirá una nueva enmienda de este contrato.
 
 ### 3.5. `PATCH /api/coordinator/sanitary-spoilage-records/{id}/loss-estimate`
 Permite a Coordinación ajustar de forma justificada el coste estimado de la merma (`estimated_merchandise_loss_eur`).
@@ -317,5 +318,5 @@ Permite a Coordinación ajustar de forma justificada el coste estimado de la mer
 * **Validaciones (`422`):** `estimated_merchandise_loss_eur` entre `0.00` y `99999.99`; `loss_adjustment_reason` entre `20` y `500` caracteres reales y al menos 3 tokens alfanuméricos reales (Art. V.1).
 
 ### 3.6. `GET /api/coordinator/sanitary-spoilage-records/export-csv`
-Descarga el libro registro de Actas de Merma APPCC en formato CSV con UTF-8 BOM (`\xEF\xBB\xBF`) y separador `;` en dos secciones (1. Resumen de KPIs globales; 2. Detalle de actas filtradas).
+Descarga el libro registro de Actas de Merma APPCC en formato CSV con UTF-8 BOM (`\xEF\xBB\xBF`) y separador `;` en dos secciones (1. Resumen de KPIs globales; 2. Detalle de actas filtradas). El detalle incluye todas las actas que cumplen los filtros, sin paginación, en el mismo orden determinista que el listado del panel (§3.4).
 * **Roles permitidos:** Exclusivo `COORDINATOR` (`403 FORBIDDEN` para otros roles).

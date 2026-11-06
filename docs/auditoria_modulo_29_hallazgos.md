@@ -4,13 +4,13 @@
 
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** 29 · `specs/29-haccp-spoilage-log`  
-**Referencias:** [`spec.md`](../specs/29-haccp-spoilage-log/spec.md) v3.0 · [`haccp_spoilage_log_contracts.md`](../specs/technical/haccp_spoilage_log_contracts.md) v1.0 · [`traceability-matrix.md`](../specs/29-haccp-spoilage-log/traceability-matrix.md)  
+**Referencias:** [`spec.md`](../specs/29-haccp-spoilage-log/spec.md) v3.0 · [`haccp_spoilage_log_contracts.md`](../specs/technical/haccp_spoilage_log_contracts.md) v1.1 · [`traceability-matrix.md`](../specs/29-haccp-spoilage-log/traceability-matrix.md)
 **Fecha de la revisión:** 2026-11-06  
 **Rama:** `spoilage-log` (commit de referencia `fd28e19`)  
 **Alcance:** revisión de solo lectura del código de dominio, API, persistencia, UI y esquema frente a los criterios EARS, decisiones `D1`–`D3`, casos `C1`–`C6` y resoluciones `QA 1`–`QA 4`.  
-**Resultado:** núcleo funcional implementado y certificado por la batería; **0 huecos funcionales abiertos**, **6 hallazgos resueltos** y **1 desviación menor** pendiente de hardening (paginación del listado).
+**Resultado:** núcleo funcional implementado y certificado por la batería; **0 huecos funcionales abiertos**, **7 hallazgos resueltos** y **0 desviaciones menores** pendientes de hardening.
 
-> Este documento no modifica la especificación aprobada. Los hallazgos 1 a 6 son cambios de implementación ya aplicados; el hallazgo 7 requiere, si se mantiene la paginación, una enmienda del contrato técnico con visto bueno del Product Owner.
+> Este documento no modifica la especificación aprobada. Los hallazgos 1 a 6 son cambios de implementación ya aplicados y el hallazgo 7 se cerró mediante la enmienda §3.4 del contrato técnico (v1.1), aprobada por el Product Owner.
 
 ---
 
@@ -24,7 +24,7 @@
 | 4 | Bypass de la validación de la fotografía por la vía JSON | **Media** | EARS 02.2 / RNF-02 | Resuelto |
 | 5 | Código interno de máquina vacía impreso en el Acta A4 | **Baja** | D3 / EARS 02.1 | Resuelto |
 | 6 | El filtro de fechas no cubre el último segundo del día | **Baja** | QA 4.3 | Resuelto |
-| 7 | El contrato promete tabla paginada y no hay paginación | **Baja** | Contrato técnico §3.4 | Abierto |
+| 7 | El contrato promete tabla paginada y no hay paginación | **Baja** | Contrato técnico §3.4 | Resuelto |
 
 ---
 
@@ -228,6 +228,13 @@ A medida que crezca el histórico, el panel y el CSV cargan todos los registros 
 
 O bien implementar paginación con parámetros `page`/`page_size` y controles en la tabla, o bien enmendar el contrato técnico para declarar explícitamente que el listado es completo. La segunda opción requiere aprobación del Product Owner por afectar a un contrato aprobado.
 
+**Resolución aplicada (2026-11-06)**
+
+- **Decisión:** se enmienda el contrato técnico §3.4 en lugar de implementar paginación. La EARS 05.2 solo exige filtros, orden determinista y exportación CSV completa; añadir `page`/`page_size`, metadatos y controles de tabla sería una funcionalidad no solicitada y ampliaría el MVP (Art. VI). El CSV debe seguir exportando la totalidad del conjunto filtrado, no una página.
+- **Contrato:** `haccp_spoilage_log_contracts.md` v1.1 declara que el listado es completo, sin `LIMIT`, y que el CSV reutiliza ese mismo conjunto; §3.6 se alinea con la misma regla.
+- **Implementación:** no se modifica código ni comportamiento. `findFilteredForCoordinator()` sigue devolviendo todas las actas filtradas y `CoordinatorSanitarySpoilageTab.js` sigue renderizando el listado íntegro.
+- **Verificación:** el contrato ya no promete paginación y las únicas menciones restantes son la evidencia histórica del hallazgo; `git diff --check` está limpio. La batería global no cambia (400 suites · 14.981 aserciones) porque la enmienda es documental.
+
 ---
 
 ## 4. Cobertura verificada (sin hallazgos)
@@ -245,7 +252,7 @@ Se contrastaron y se consideran correctamente cubiertos:
 - Observaciones de higienización `20..1000` con tres bloques reales y aviso de privacidad visible.
 - Inmutabilidad de los hechos sanitarios y prohibición de borrado mediante disparadores; relación `1..N` ante reaperturas.
 - Coste automático a 2,50 €/ud., ajustes sucesivos con motivo real, rechazo de importes idénticos y opacidad financiera para técnico, Sede, QR y A4.
-- Cuatro KPIs globales inmunes al filtrado, orden determinista, listado de cuarentenas activas, rango de fechas con el día final completo inclusive (límite superior exclusivo al inicio del día siguiente) y CSV con BOM y neutralización de fórmulas.
+- Cuatro KPIs globales inmunes al filtrado, orden determinista, listado completo sin paginación (contrato §3.4 v1.1), listado de cuarentenas activas, rango de fechas con el día final completo inclusive (límite superior exclusivo al inicio del día siguiente) y CSV con BOM y neutralización de fórmulas.
 - Registro de auditoría de alta, lectura del A4, ajuste y exportación bajo `SANITARY_SPOILAGE_RECORD`.
 
 ---
@@ -257,16 +264,17 @@ Se contrastaron y se consideran correctamente cubiertos:
 3. **Hallazgo 3** (Media): **resuelto** con el listado transversal de cuarentenas activas y el acceso al levantamiento desde cuarentenas ajenas a la ruta.
 4. **Hallazgo 4** (Media): **resuelto** con la validación de la ruta JSON contra archivos reales de `/uploads/`.
 5. **Hallazgo 5** (Baja): **resuelto** con la traducción del token en el A4 y la tabla y la alineación de la etiqueta del método vacío.
-6. **Hallazgo 6** (Baja): **resuelto** con el límite superior exclusivo al inicio del día siguiente y la regresión con un acta a las `23:59:59.5`. Queda el hallazgo 7: decisión sobre paginación.
+6. **Hallazgo 6** (Baja): **resuelto** con el límite superior exclusivo al inicio del día siguiente y la regresión con un acta a las `23:59:59.5`.
+7. **Hallazgo 7** (Baja): **resuelto** mediante la enmienda §3.4 del contrato técnico (v1.1), que declara el listado completo sin paginación y alinea el CSV con ese mismo conjunto.
 
-Los hallazgos 1 a 6 no requieren modificar `spec.md`: son correcciones de implementación dentro de criterios ya aprobados. El hallazgo 7 sí puede requerir una enmienda del contrato técnico si se decide no paginar.
+Los hallazgos 1 a 6 no requieren modificar `spec.md`: son correcciones de implementación dentro de criterios ya aprobados. El hallazgo 7 se resolvió mediante una enmienda del contrato técnico, sin alterar `spec.md`.
 
 ---
 
 ## 6. Trazabilidad de la revisión
 
 - **Especificación:** `specs/29-haccp-spoilage-log/spec.md` v3.0.
-- **Contratos:** `specs/technical/haccp_spoilage_log_contracts.md` v1.0.
+- **Contratos:** `specs/technical/haccp_spoilage_log_contracts.md` v1.1.
 - **Dominio y aplicación:** `SanitarySpoilageService.php`, `SanitarySpoilageValidator.php`, `SanitarySpoilageRecord.php`.
 - **Persistencia:** `PdoSanitarySpoilageRecordRepository.php`, `database/supabase_migrations/025_sanitary_spoilage_records.sql`, `database/supabase_init.sql`.
 - **API:** `SanitarySpoilageController.php`, `src/Presentation/Routing/AppRouter.php` (líneas 347-352).
