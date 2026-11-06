@@ -205,7 +205,8 @@ interface SanitarySpoilageRecordRepositoryInterface
      *
      * Los filtros son combinables y todos opcionales: `machine_id`,
      * `quarantine_origin`, `disposal_method`, `date_from` (`YYYY-MM-DD`),
-     * `date_to` (`YYYY-MM-DD`) y `search`. La búsqueda textual se aplica con
+     * `date_to` (`YYYY-MM-DD`, con el día final completo inclusive) y
+     * `search`. La búsqueda textual se aplica con
      * `ILIKE` sobre el código de acta, los lotes, el certificado, el código y
      * modelo de la máquina y el nombre de la sede. El orden es siempre
      * `created_at DESC, id DESC` (`QA 4`).

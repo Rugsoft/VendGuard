@@ -175,7 +175,7 @@ flowchart LR
        - `total_discarded_units_count`: suma histórica de `discarded_units_count`.
        - `total_estimated_loss_eur`: suma histórica de `estimated_merchandise_loss_eur` redondeada a 2 decimales (`QA 3`).
     3. Implementar `fetchActiveQuarantinedMachines(): array`: devuelve las máquinas activas actualmente en `'QUARANTINE'` ordenadas por `m.internal_code ASC` (`QA 4`), indicando para cada una si tiene alguna avería correctiva abierta (`has_open_incident`, `open_incident_code`) para que la UI informe del bloqueo `C1` o habilite directamente el botón de levantamiento.
-    4. Implementar `findFilteredForCoordinator(array $filters): array`: aplica filtros combinables por `machine_id`, `quarantine_origin`, `disposal_method`, `date_from` (`>= YYYY-MM-DD 00:00:00`), `date_to` (`<= YYYY-MM-DD 23:59:59`) y `search` (`ILIKE` sobre `record_code`, `affected_batch_codes`, `certificate_code`, código/modelo de máquina y nombre de sede), ordenando determinísticamente por `ssr.created_at DESC, ssr.id DESC` (`QA 4`).
+    4. Implementar `findFilteredForCoordinator(array $filters): array`: aplica filtros combinables por `machine_id`, `quarantine_origin`, `disposal_method`, `date_from` (`>= YYYY-MM-DD 00:00:00`), `date_to` (`< YYYY-MM-DD+1 00:00:00`, día final completo inclusive) y `search` (`ILIKE` sobre `record_code`, `affected_batch_codes`, `certificate_code`, código/modelo de máquina y nombre de sede), ordenando determinísticamente por `ssr.created_at DESC, ssr.id DESC` (`QA 4`).
   - **Hecho cuando:** `php -l src/Infrastructure/Repository/PdoSanitarySpoilageRecordRepository.php`
 
 ---

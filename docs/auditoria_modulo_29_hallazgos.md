@@ -8,9 +8,9 @@
 **Fecha de la revisión:** 2026-11-06  
 **Rama:** `spoilage-log` (commit de referencia `fd28e19`)  
 **Alcance:** revisión de solo lectura del código de dominio, API, persistencia, UI y esquema frente a los criterios EARS, decisiones `D1`–`D3`, casos `C1`–`C6` y resoluciones `QA 1`–`QA 4`.  
-**Resultado:** núcleo funcional implementado y certificado por la batería; **0 huecos funcionales abiertos**, **4 huecos resueltos** y **2 desviaciones menores** pendientes de hardening.
+**Resultado:** núcleo funcional implementado y certificado por la batería; **0 huecos funcionales abiertos**, **6 hallazgos resueltos** y **1 desviación menor** pendiente de hardening (paginación del listado).
 
-> Este documento no modifica la especificación aprobada. Los hallazgos 1 a 6 son cambios de implementación; el hallazgo 7 requiere, si se mantiene la paginación, una enmienda del contrato técnico con visto bueno del Product Owner.
+> Este documento no modifica la especificación aprobada. Los hallazgos 1 a 6 son cambios de implementación ya aplicados; el hallazgo 7 requiere, si se mantiene la paginación, una enmienda del contrato técnico con visto bueno del Product Owner.
 
 ---
 
@@ -23,7 +23,7 @@
 | 3 | Levantamiento técnico limitado a incidencias de su ruta | **Media** | C2 / HU-01 / EARS 01.2 | Resuelto |
 | 4 | Bypass de la validación de la fotografía por la vía JSON | **Media** | EARS 02.2 / RNF-02 | Resuelto |
 | 5 | Código interno de máquina vacía impreso en el Acta A4 | **Baja** | D3 / EARS 02.1 | Resuelto |
-| 6 | El filtro de fechas no cubre el último segundo del día | **Baja** | QA 4.3 | Abierto |
+| 6 | El filtro de fechas no cubre el último segundo del día | **Baja** | QA 4.3 | Resuelto |
 | 7 | El contrato promete tabla paginada y no hay paginación | **Baja** | Contrato técnico §3.4 | Abierto |
 
 ---
@@ -200,6 +200,12 @@ Puede omitirse un acta del listado y del CSV si se emitió en la fracción final
 
 Comparar contra el inicio del día siguiente con `<` (`date_to + 1 day`) en lugar de `<= 23:59:59`. Añadir una prueba con una acta en `23:59:59.5`.
 
+**Resolución aplicada (2026-11-06)**
+
+- `PdoSanitarySpoilageRecordRepository::findFilteredForCoordinator()` expresa ahora el límite superior como el inicio exclusivo del día siguiente (`date_to + 1 day` a las `00:00:00`) y compara con `<`. El día final se incluye completo aunque el acta tenga microsegundos; la validación estricta `YYYY-MM-DD` y el rechazo de rangos invertidos no cambian.
+- `SanitarySpoilageServiceIntegrationTest` (§7) inserta un acta a las `2026-03-15 23:59:59.5` y certifica que aparece en el listado y en el CSV de ese día, y que no se arrastra al `2026-03-14`.
+- Verificación: canal `new_engine` 3 suites · 143 aserciones · 0 fallos (`SanitarySpoilageServiceIntegrationTest` 45); batería global 400 suites · 14.981 aserciones · 0 fallos (la suite PostgreSQL viaja en el canal `new_engine`).
+
 ---
 
 ### 3.3. El contrato promete tabla paginada y no hay paginación
@@ -239,7 +245,7 @@ Se contrastaron y se consideran correctamente cubiertos:
 - Observaciones de higienización `20..1000` con tres bloques reales y aviso de privacidad visible.
 - Inmutabilidad de los hechos sanitarios y prohibición de borrado mediante disparadores; relación `1..N` ante reaperturas.
 - Coste automático a 2,50 €/ud., ajustes sucesivos con motivo real, rechazo de importes idénticos y opacidad financiera para técnico, Sede, QR y A4.
-- Cuatro KPIs globales inmunes al filtrado, orden determinista, listado de cuarentenas activas y CSV con BOM y neutralización de fórmulas.
+- Cuatro KPIs globales inmunes al filtrado, orden determinista, listado de cuarentenas activas, rango de fechas con el día final completo inclusive (límite superior exclusivo al inicio del día siguiente) y CSV con BOM y neutralización de fórmulas.
 - Registro de auditoría de alta, lectura del A4, ajuste y exportación bajo `SANITARY_SPOILAGE_RECORD`.
 
 ---
@@ -250,7 +256,8 @@ Se contrastaron y se consideran correctamente cubiertos:
 2. **Hallazgo 2** (Media): **resuelto** con el buscador de actas por código de máquina, accesible desde la cabecera del técnico y desde el historial de máquina, sin importes.
 3. **Hallazgo 3** (Media): **resuelto** con el listado transversal de cuarentenas activas y el acceso al levantamiento desde cuarentenas ajenas a la ruta.
 4. **Hallazgo 4** (Media): **resuelto** con la validación de la ruta JSON contra archivos reales de `/uploads/`.
-5. **Hallazgo 5** (Baja): **resuelto** con la traducción del token en el A4 y la tabla y la alineación de la etiqueta del método vacío. Quedan los hallazgos 6 y 7: límite superior del filtro de fechas y decisión sobre paginación.
+5. **Hallazgo 5** (Baja): **resuelto** con la traducción del token en el A4 y la tabla y la alineación de la etiqueta del método vacío.
+6. **Hallazgo 6** (Baja): **resuelto** con el límite superior exclusivo al inicio del día siguiente y la regresión con un acta a las `23:59:59.5`. Queda el hallazgo 7: decisión sobre paginación.
 
 Los hallazgos 1 a 6 no requieren modificar `spec.md`: son correcciones de implementación dentro de criterios ya aprobados. El hallazgo 7 sí puede requerir una enmienda del contrato técnico si se decide no paginar.
 

@@ -653,9 +653,12 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
             $params[':date_from'] = $dateFrom;
         }
 
-        $dateTo = $this->normalizeDateBoundary($filters['date_to'] ?? null, '23:59:59');
+        // El día final se incluye completo: el límite superior es el inicio
+        // exclusivo del día siguiente, no las 23:59:59, que perderían los
+        // microsegundos finales de un TIMESTAMPTZ.
+        $dateTo = $this->normalizeDateBoundary($filters['date_to'] ?? null, '00:00:00', 1);
         if ($dateTo !== null) {
-            $where[] = 'r.created_at <= CAST(:date_to AS timestamptz)';
+            $where[] = 'r.created_at < CAST(:date_to AS timestamptz)';
             $params[':date_to'] = $dateTo;
         }
 
@@ -1012,9 +1015,11 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
      *
      * El contrato del panel acepta `YYYY-MM-DD`; se rechaza cualquier otra
      * forma antes de que llegue al motor para no depender de la conversión
-     * implícita de PostgreSQL.
+     * implícita de PostgreSQL. `$dayOffset` permite expresar el límite
+     * superior como el inicio exclusivo del día siguiente (`+1`), de modo que
+     * el día final se incluye completo aunque el acta conserve microsegundos.
      */
-    private function normalizeDateBoundary(mixed $value, string $time): ?string
+    private function normalizeDateBoundary(mixed $value, string $time, int $dayOffset = 0): ?string
     {
         if (!is_string($value) || trim($value) === '') {
             return null;
@@ -1029,7 +1034,18 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
             ));
         }
 
-        return $date . ' ' . $time;
+        if ($dayOffset !== 0) {
+            $shifted = $parsed->modify(sprintf('%+d days', $dayOffset));
+            if ($shifted === false) {
+                throw new InvalidArgumentException(sprintf(
+                    'No se pudo desplazar la fecha «%s» al día siguiente.',
+                    $date
+                ));
+            }
+            $parsed = $shifted;
+        }
+
+        return $parsed->format('Y-m-d') . ' ' . $time;
     }
 
     /**

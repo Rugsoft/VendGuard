@@ -31,6 +31,10 @@ declare(strict_types=1);
  *      admite ajuste; el CSV lleva BOM, dos secciones, cabeceras con cero filas
  *      y neutraliza las celdas que comienzan por `=`, `+`, `-` o `@`.
  *
+ *   5. **Límite superior del filtro de fechas (`QA 4.3`).** El rango incluye
+ *      el día final completo: un acta emitida a las `23:59:59.5` aparece en el
+ *      listado y en el CSV de ese día, y no se arrastra al día anterior.
+ *
  * CATEGORÍA: `new_engine`. Exige PostgreSQL local (`deploy/local/postgres/`);
  * sin motor sale con código 2, nunca se omite en silencio. `run_all.php` la
  * excluye de la batería hermética por su marca de categoría.
@@ -909,6 +913,68 @@ try {
     $assert(
         'Los cuatro registros sintéticos de fórmula se suman al libro de mermas',
         (int)$panelAfterCsv['kpis']['total_records_count'] === 10
+    );
+
+    echo "\n--- 7. Límite superior del filtro de fechas: día final completo (QA 4.3) ---\n";
+
+    $machineH = $insertMachine($pdo, $locationId, 'T29-H-ULTIMO-SEGUNDO');
+    $lateDay = '2026-03-15';
+    $lateRecordCode = sprintf('ACTA-MERMA-%04d-9007', $year);
+    $lateInsert = $pdo->prepare("
+        INSERT INTO sanitary_spoilage_records (
+            record_code, machine_id, technician_id, registered_by, quarantine_origin,
+            discarded_units_count, empty_machine_confirmed, affected_batch_codes,
+            cabin_temp_at_removal, restored_stabilized_temp_c, disposal_method,
+            evidence_photo_url, sanitary_notes, estimated_merchandise_loss_eur,
+            certificate_code, created_at
+        ) VALUES (
+            :record_code, :machine_id, :technician_id, :registered_by, 'MANUAL_SANITARY_LOCK',
+            2, FALSE, 'LOTE-T29-ULTIMO-SEGUNDO', 7.5, 3.5, 'ON_SITE_ORGANIC_SEALED',
+            :evidence_photo_url, :sanitary_notes, 5.00, :certificate_code,
+            CAST(:created_at AS timestamptz)
+        )
+    ");
+    $lateInsert->execute([
+        ':record_code' => $lateRecordCode,
+        ':machine_id' => $machineH,
+        ':technician_id' => $technicianId,
+        ':registered_by' => $technicianId,
+        ':evidence_photo_url' => 'https://example.test/t29-evidencia-ultimo-segundo.jpg',
+        ':sanitary_notes' => 'Acta emitida en el último medio segundo del día para certificar el límite superior del filtro.',
+        ':certificate_code' => 'CERT-T29-LATE01',
+        ':created_at' => $lateDay . ' 23:59:59.5',
+    ]);
+
+    $lateDayPanel = $service->listForCoordinator([
+        'machine_id' => $machineH,
+        'date_from' => $lateDay,
+        'date_to' => $lateDay,
+    ]);
+    $assert(
+        'date_to incluye un acta emitida a las 23:59:59.5 del último día',
+        count($lateDayPanel['records']) === 1
+        && (string)$lateDayPanel['records'][0]['record_code'] === $lateRecordCode,
+        'actas: ' . count($lateDayPanel['records'])
+    );
+
+    $lateDayCsv = $service->exportCsvForCoordinator([
+        'machine_id' => $machineH,
+        'date_from' => $lateDay,
+        'date_to' => $lateDay,
+    ], $coordinator);
+    $assert(
+        'El CSV del día incluye el acta del último medio segundo',
+        str_contains($lateDayCsv, $lateRecordCode)
+    );
+
+    $dayBeforePanel = $service->listForCoordinator([
+        'machine_id' => $machineH,
+        'date_from' => '2026-03-14',
+        'date_to' => '2026-03-14',
+    ]);
+    $assert(
+        'El límite superior exclusivo no arrastra el día anterior',
+        $dayBeforePanel['records'] === []
     );
 } catch (Throwable $exception) {
     $crash = $exception;
