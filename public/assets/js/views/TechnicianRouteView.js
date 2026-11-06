@@ -44,6 +44,7 @@ import { TechnicianServiceSheetBlock } from '../components/TechnicianServiceShee
 import { ServiceSheetModal } from '../components/ServiceSheetModal.js';
 import { TechnicianRouteMapModal } from '../components/TechnicianRouteMapModal.js';
 import { TechnicianMachineHistoryModal } from '../components/TechnicianMachineHistoryModal.js';
+import { TechnicianSanitaryQuarantineListModal } from '../components/TechnicianSanitaryQuarantineListModal.js';
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
 import { PendingInfoPauseModal, PAUSE_REASON_CATEGORIES } from '../components/PendingInfoPauseModal.js';
 import { TechnicianOpportunisticModal } from '../components/TechnicianOpportunisticModal.js';
@@ -99,6 +100,7 @@ export const TechnicianRouteView = {
     ServiceSheetModal,
     TechnicianRouteMapModal,
     TechnicianMachineHistoryModal,
+    TechnicianSanitaryQuarantineListModal,
     IncidentCommentThreadModal,
     PendingInfoPauseModal,
     TechnicianOpportunisticModal,
@@ -198,6 +200,7 @@ export const TechnicianRouteView = {
       // Machine incident history modal (RF-07 / EARS H.1-H.6, specs/technical/technician_machine_history_contracts.md)
       showMachineHistoryModal: false,
       historyMachine: null,
+      showSanitaryQuarantineListModal: false,
 
       // Modal 5: Hilo de conversación de la parada (Módulo 10, RF-01.1, RF-02.3)
       showCommentsModal: false,
@@ -2379,9 +2382,57 @@ export const TechnicianRouteView = {
       this.showMachineHistoryModal = true;
     },
 
+    /**
+     * Abre el buscador de actas APPCC sin depender de una parada de la ruta.
+     * El modal permite localizar cualquier máquina por su código (QA 3.1).
+     */
+    openSpoilageActsLookup() {
+      this.historyMachine = null;
+      this.showMachineHistoryModal = true;
+    },
+
     closeMachineHistoryModal() {
       this.showMachineHistoryModal = false;
       this.historyMachine = null;
+    },
+
+    /**
+     * Abre el listado transversal de cuarentenas activas. Cualquier técnico
+     * activo puede localizar una máquina ajena a su ruta y certificar su
+     * reapertura (C2), sin recibir actas ni importes.
+     */
+    openSanitaryQuarantineList() {
+      this.showSanitaryQuarantineListModal = true;
+    },
+
+    closeSanitaryQuarantineList() {
+      this.showSanitaryQuarantineListModal = false;
+    },
+
+    /**
+     * Convierte una cuarentena del listado en la máquina del modal APPCC. El
+     * modal vuelve a verificar estado y averías abiertas antes de habilitar el
+     * envío, por lo que el listado no sustituye las guardas del servidor.
+     *
+     * @param {Object} machine Entrada de `/api/sanitary-quarantines/active`.
+     */
+    openSpoilageLiftFromQuarantine(machine) {
+      const machineId = Number(machine?.machine_id ?? machine?.id ?? 0);
+      if (!(machineId > 0) || machine?.has_open_incident === true) {
+        this.errorMessage = 'No se pudo identificar una cuarentena levantable.';
+        return;
+      }
+
+      this.showSanitaryQuarantineListModal = false;
+      this.spoilageMachine = {
+        id: machineId,
+        code: String(machine.machine_code || machine.code || ''),
+        model: String(machine.machine_model || machine.model || ''),
+        machine_type: String(machine.machine_type || ''),
+        location_name: String(machine.location_name || '')
+      };
+      this.spoilageIncidentId = machine.open_incident_id ?? null;
+      this.showSpoilageLiftModal = true;
     },
 
     /**
@@ -2433,6 +2484,7 @@ export const TechnicianRouteView = {
         return;
       }
       this.showSpoilageLiftModal = false;
+      this.showMachineHistoryModal = false;
       this.spoilageOfficialActRecordId = id;
       this.showSpoilageOfficialActModal = true;
     },
@@ -3624,6 +3676,28 @@ export const TechnicianRouteView = {
               type="button"
               class="vg-btn vg-btn-secondary"
               style="height: 36px; padding: 0 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;"
+              title="Consultar actas APPCC por código de máquina"
+              aria-label="Consultar actas APPCC por código de máquina"
+              data-testid="btn-spoilage-acts-lookup"
+              @click="openSpoilageActsLookup"
+            >
+              <span>☣️</span>
+            </button>
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              style="height: 36px; padding: 0 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;"
+              title="Cuarentenas sanitarias activas"
+              aria-label="Cuarentenas sanitarias activas"
+              data-testid="btn-sanitary-quarantines"
+              @click="openSanitaryQuarantineList"
+            >
+              <span>🧾</span>
+            </button>
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              style="height: 36px; padding: 0 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;"
               title="Actualizar ruta"
               @click="loadRoute"
               :disabled="isLoading"
@@ -4479,6 +4553,16 @@ export const TechnicianRouteView = {
         v-model="showMachineHistoryModal"
         :machine="historyMachine"
         @close="closeMachineHistoryModal"
+        @open-official-act="openSpoilageOfficialAct"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 0-ter: CUARENTENAS ACTIVAS PARA EL TÉCNICO (C2, C1, C3)       -->
+      <!-- =================================================================== -->
+      <TechnicianSanitaryQuarantineListModal
+        v-model="showSanitaryQuarantineListModal"
+        @close="closeSanitaryQuarantineList"
+        @lift="openSpoilageLiftFromQuarantine"
       />
 
       <!-- =================================================================== -->

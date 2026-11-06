@@ -344,7 +344,9 @@ class AppRouter
         // cualquier ruta con `{id}` para que el segmento estático no sea capturado
         // como identificador.
         $sanitarySpoilageInternalAuth = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware();
+        $router->get('/api/sanitary-quarantines/active', [SanitarySpoilageController::class, 'listActiveQuarantines'], [$sanitarySpoilageInternalAuth]);
         $router->post('/api/sanitary-quarantines/machines/{machineId}/lift', [SanitarySpoilageController::class, 'lift'], [$sanitarySpoilageInternalAuth]);
+        $router->get('/api/sanitary-spoilage-records/by-machine-code/{code}', [SanitarySpoilageController::class, 'getByMachineCode'], [$sanitarySpoilageInternalAuth]);
         $router->get('/api/sanitary-spoilage-records/by-machine/{machineId}', [SanitarySpoilageController::class, 'getByMachine'], [$sanitarySpoilageInternalAuth]);
         $router->get('/api/sanitary-spoilage-records/{id}/official-act', [SanitarySpoilageController::class, 'getOfficialAct'], [$sanitarySpoilageInternalAuth]);
         $router->get('/api/coordinator/sanitary-spoilage-records/export-csv', [SanitarySpoilageController::class, 'exportCsv'], [$coordinatorAuth]);

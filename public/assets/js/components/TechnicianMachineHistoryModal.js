@@ -42,7 +42,7 @@ export const TechnicianMachineHistoryModal = {
       default: null
     }
   },
-  emits: ['update:modelValue', 'close'],
+  emits: ['update:modelValue', 'close', 'open-official-act'],
   data() {
     return {
       isLoading: false,
@@ -50,6 +50,12 @@ export const TechnicianMachineHistoryModal = {
       errorCode: '',
       machineInfo: null,
       history: [],
+      spoilageCode: '',
+      spoilageMachine: null,
+      spoilageRecords: [],
+      spoilageLoading: false,
+      spoilageError: '',
+      spoilageSearched: false,
       /** Detalles ampliados por id de incidencia (EARS 04.1, T-TAXONOMY-18). */
       details: {},
       detailLoading: {},
@@ -76,6 +82,12 @@ export const TechnicianMachineHistoryModal = {
       this.errorCode = '';
       this.machineInfo = null;
       this.history = [];
+      this.spoilageCode = '';
+      this.spoilageMachine = null;
+      this.spoilageRecords = [];
+      this.spoilageLoading = false;
+      this.spoilageError = '';
+      this.spoilageSearched = false;
       this.details = {};
       this.detailLoading = {};
       this.detailErrors = {};
@@ -113,6 +125,47 @@ export const TechnicianMachineHistoryModal = {
         }
       } finally {
         this.isLoading = false;
+      }
+    },
+
+    /**
+     * Busca las actas de cualquier máquina por su código visible (QA 3.1).
+     * La proyección pública del Técnico nunca contiene importes (Art. V.4).
+     */
+    async fetchSpoilageActs() {
+      const code = String(this.spoilageCode || '').trim().toUpperCase();
+      this.spoilageCode = code;
+      this.spoilageError = '';
+      this.spoilageSearched = true;
+
+      if (code === '') {
+        this.spoilageMachine = null;
+        this.spoilageRecords = [];
+        this.spoilageError = 'Introduce el código de la máquina para consultar sus actas.';
+        return;
+      }
+
+      this.spoilageLoading = true;
+      try {
+        const response = await api.technician.getMachineSanitarySpoilageRecordsByCode(code);
+        const data = response?.data || response || {};
+        this.spoilageMachine = data;
+        this.spoilageRecords = Array.isArray(data.records) ? data.records : [];
+      } catch (err) {
+        this.spoilageMachine = null;
+        this.spoilageRecords = [];
+        this.spoilageError = err instanceof ApiError && err.status === 404
+          ? 'No existe una máquina activa con ese código.'
+          : (err?.message || 'No se pudieron cargar las actas de la máquina.');
+      } finally {
+        this.spoilageLoading = false;
+      }
+    },
+
+    openSpoilageAct(record) {
+      const id = Number(record?.id);
+      if (Number.isInteger(id) && id > 0) {
+        this.$emit('open-official-act', id);
       }
     },
 
@@ -219,12 +272,90 @@ export const TechnicianMachineHistoryModal = {
   template: `
     <ModalDialog
       :model-value="modelValue"
-      title="Historial de la máquina"
+      title="Historial y actas de la máquina"
       :subtitle="machineSubtitle"
       size="md"
       @update:model-value="handleBackdropClose"
       @close="handleBackdropClose"
     >
+      <!-- Búsqueda directa de actas de cualquier máquina (QA 3.1) -->
+      <section
+        data-testid="machine-spoilage-lookup"
+        style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card, 8px); padding: 12px; margin-bottom: 16px; background-color: var(--color-surface-1);"
+      >
+        <div style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 15px; font-weight: 600; color: var(--color-slate); margin-bottom: 4px;">
+          Actas Oficiales APPCC
+        </div>
+        <p style="margin: 0 0 10px; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; line-height: 1.45; color: var(--color-ink-muted);">
+          Consulta e imprime el Acta A4 de cualquier máquina por su código. Sin importes económicos (Art. V.4).
+        </p>
+        <form @submit.prevent="fetchSpoilageActs" style="display: flex; gap: 8px; align-items: stretch;">
+          <label for="machine-spoilage-code" style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;">Código de máquina</label>
+          <input
+            id="machine-spoilage-code"
+            v-model="spoilageCode"
+            class="vg-input"
+            type="text"
+            maxlength="80"
+            placeholder="Ej. VEND-0101"
+            style="min-height: 44px; flex: 1 1 auto;"
+            data-testid="machine-spoilage-code"
+          />
+          <button
+            type="submit"
+            class="vg-btn vg-btn-primary"
+            style="min-height: 44px; white-space: nowrap;"
+            :disabled="spoilageLoading"
+            data-testid="btn-search-machine-spoilage"
+          >
+            {{ spoilageLoading ? 'Buscando…' : 'Buscar actas' }}
+          </button>
+        </form>
+        <div
+          v-if="spoilageError"
+          role="alert"
+          data-testid="machine-spoilage-error"
+          style="margin-top: 8px; font-size: 12px; color: var(--color-error-text); line-height: 1.4;"
+        >
+          ⚠️ {{ spoilageError }}
+        </div>
+        <div v-else-if="spoilageRecords.length > 0" style="margin-top: 10px;">
+          <div data-testid="machine-spoilage-machine" style="font-size: 12px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+            {{ spoilageMachineLabel }} · {{ spoilageRecords.length }} acta(s)
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px; max-height: 28vh; overflow-y: auto;">
+            <div
+              v-for="record in spoilageRecords"
+              :key="record.id"
+              style="display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive, 4px); padding: 8px 10px; background-color: var(--color-surface-card);"
+            >
+              <div style="font-size: 12px; color: var(--color-slate); line-height: 1.4;">
+                <strong>{{ record.record_code }}</strong>
+                <div style="color: var(--color-ink-muted);">
+                  {{ formatDateTime(record.created_at) }} · {{ record.discarded_units_count }} uds. · {{ record.certificate_code }}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary"
+                style="min-height: 44px; font-size: 12px; padding: 0 10px; white-space: nowrap;"
+                :data-testid="'btn-machine-spoilage-act-' + record.id"
+                @click="openSpoilageAct(record)"
+              >
+                Acta A4
+              </button>
+            </div>
+          </div>
+        </div>
+        <div
+          v-else-if="spoilageSearched && !spoilageLoading"
+          data-testid="machine-spoilage-empty"
+          style="margin-top: 8px; font-size: 12px; color: var(--color-ink-muted);"
+        >
+          Esta máquina no tiene actas de merma registradas.
+        </div>
+      </section>
+
       <!-- Loading state -->
       <div v-if="isLoading" style="padding: 28px 0; text-align: center; font-size: 13px; color: var(--color-slate, #2c333f);">
         Cargando historial de averías...
@@ -251,7 +382,7 @@ export const TechnicianMachineHistoryModal = {
       </div>
 
       <!-- History content (EARS H.1 / H.2) -->
-      <template v-else>
+      <template v-else-if="hasMachineContext">
         <div
           data-testid="machine-history-count"
           style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-bottom: 10px;"
@@ -386,6 +517,14 @@ export const TechnicianMachineHistoryModal = {
         </div>
       </template>
 
+      <div
+        v-else
+        data-testid="machine-history-no-machine"
+        style="padding: 16px 0 4px; text-align: center; font-size: 13px; color: var(--color-slate); line-height: 1.45;"
+      >
+        Selecciona una avería de tu ruta o busca un acta por código de máquina.
+      </div>
+
       <template #footer>
         <button
           type="button"
@@ -400,6 +539,14 @@ export const TechnicianMachineHistoryModal = {
     </ModalDialog>
   `,
   computed: {
+    hasMachineContext() {
+      const info = this.machineInfo || this.machine;
+      return Boolean(info && info.id);
+    },
+    spoilageMachineLabel() {
+      const machine = this.spoilageMachine || {};
+      return [machine.machine_code, machine.machine_type].filter(Boolean).join(' · ') || 'Máquina consultada';
+    },
     /**
      * Header subtitle with the machine identity (falls back to the prop payload
      * while loading or if the backend omits the machine block).
@@ -407,7 +554,7 @@ export const TechnicianMachineHistoryModal = {
      */
     machineSubtitle() {
       const info = this.machineInfo || this.machine;
-      if (!info) return '';
+      if (!info) return 'Consulta de actas APPCC por código';
       const parts = [];
       if (info.code) parts.push(String(info.code));
       if (info.model) parts.push(String(info.model));

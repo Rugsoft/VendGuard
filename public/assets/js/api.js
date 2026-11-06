@@ -2238,6 +2238,12 @@ export class ApiClient {
     getMachineSanitarySpoilageRecords: (machineId) => {
       return this.get(`/sanitary-spoilage-records/by-machine/${encodeURIComponent(machineId)}`);
     },
+    getMachineSanitarySpoilageRecordsByCode: (machineCode) => {
+      return this.get(`/sanitary-spoilage-records/by-machine-code/${encodeURIComponent(machineCode)}`);
+    },
+    getActiveSanitaryQuarantines: () => {
+      return this.get('/sanitary-quarantines/active');
+    },
 
     // Gestión de Repuestos en Movilidad (Módulo 06: RF-REP-03, RF-REP-04)
     getSparePartsCatalog: (machineId, incidentId = null) => {

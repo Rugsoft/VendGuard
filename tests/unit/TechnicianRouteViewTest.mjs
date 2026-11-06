@@ -734,6 +734,86 @@ const viewData = TechnicianRouteView.data();
 assert('8.8 Estado del modal declarado en data() con valores iniciales cerrados',
   viewData.showMachineHistoryModal === false && viewData.historyMachine === null);
 
+const actsViewInstance = { historyMachine: { id: 12 }, showMachineHistoryModal: false };
+TechnicianRouteView.methods.openSpoilageActsLookup.call(actsViewInstance);
+assert('8.9 La cabecera abre el buscador de actas sin depender de una parada',
+  actsViewInstance.showMachineHistoryModal === true && actsViewInstance.historyMachine === null);
+
+const officialActInstance = {
+  showSpoilageLiftModal: true,
+  showMachineHistoryModal: true,
+  showSpoilageOfficialActModal: false,
+  spoilageOfficialActRecordId: null
+};
+TechnicianRouteView.methods.openSpoilageOfficialAct.call(officialActInstance, 77);
+assert('8.10 Abrir el A4 desde el historial cierra el modal y fija el acta',
+  officialActInstance.showSpoilageLiftModal === false
+    && officialActInstance.showMachineHistoryModal === false
+    && officialActInstance.showSpoilageOfficialActModal === true
+    && officialActInstance.spoilageOfficialActRecordId === 77);
+
+assert('8.11 La cabecera y el historial quedan cableados al buscador de actas',
+  TechnicianRouteView.template.includes('data-testid="btn-spoilage-acts-lookup"')
+    && TechnicianRouteView.template.includes('@open-official-act="openSpoilageOfficialAct"')
+    && TechnicianRouteView.template.includes('Consultar actas APPCC por código de máquina'));
+
+assert('8.12 La vista registra el listado transversal de cuarentenas (C2)',
+  typeof TechnicianRouteView.components?.TechnicianSanitaryQuarantineListModal === 'object');
+
+assert('8.13 El listado de cuarentenas se declara cerrado y se abre desde la cabecera',
+  viewData.showSanitaryQuarantineListModal === false
+    && TechnicianRouteView.template.includes('data-testid="btn-sanitary-quarantines"')
+    && TechnicianRouteView.template.includes('@click="openSanitaryQuarantineList"'));
+
+const quarantineListView = { showSanitaryQuarantineListModal: false };
+TechnicianRouteView.methods.openSanitaryQuarantineList.call(quarantineListView);
+assert('8.14 openSanitaryQuarantineList abre el listado sin depender de una parada',
+  quarantineListView.showSanitaryQuarantineListModal === true);
+
+const liftFromQuarantineView = {
+  showSanitaryQuarantineListModal: true,
+  showSpoilageLiftModal: false,
+  spoilageMachine: null,
+  spoilageIncidentId: 99,
+  errorMessage: ''
+};
+TechnicianRouteView.methods.openSpoilageLiftFromQuarantine.call(liftFromQuarantineView, {
+  machine_id: 31,
+  machine_code: 'M-031',
+  machine_model: 'VendMax',
+  machine_type: 'COMBO',
+  location_name: 'Sede Centro',
+  has_open_incident: false
+});
+assert('8.15 Una cuarentena sin avería abre el modal APPCC con su máquina y sin incidencia de ruta',
+  liftFromQuarantineView.showSanitaryQuarantineListModal === false
+    && liftFromQuarantineView.showSpoilageLiftModal === true
+    && liftFromQuarantineView.spoilageMachine?.id === 31
+    && liftFromQuarantineView.spoilageMachine?.code === 'M-031'
+    && liftFromQuarantineView.spoilageMachine?.machine_type === 'COMBO'
+    && liftFromQuarantineView.spoilageIncidentId === null);
+
+const blockedQuarantineView = {
+  showSanitaryQuarantineListModal: true,
+  showSpoilageLiftModal: false,
+  spoilageMachine: null,
+  spoilageIncidentId: null,
+  errorMessage: ''
+};
+TechnicianRouteView.methods.openSpoilageLiftFromQuarantine.call(blockedQuarantineView, {
+  machine_id: 32,
+  machine_code: 'M-032',
+  has_open_incident: true
+});
+assert('8.16 C1 impide abrir el acta desde una cuarentena con avería abierta',
+  blockedQuarantineView.showSpoilageLiftModal === false
+    && blockedQuarantineView.showSanitaryQuarantineListModal === true
+    && blockedQuarantineView.errorMessage.includes('cuarentena levantable'));
+
+assert('8.17 El listado se monta una sola vez y emite el levantamiento al modal existente',
+  (TechnicianRouteView.template.match(/<TechnicianSanitaryQuarantineListModal/g) || []).length === 1
+    && TechnicianRouteView.template.includes('@lift="openSpoilageLiftFromQuarantine"'));
+
 // ---------------------------------------------------------------------
 // GRUPO 9: PAUSA POR FALTA DE ACCESO Y DESPRIORIZACIÓN DE LA PARADA
 // (Módulo 11: T-PAUSE-18, RF-01.1, RF-02.2, RF-02.3, RF-05.5, RNF-03, RNF-04)

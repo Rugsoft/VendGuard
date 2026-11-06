@@ -206,7 +206,7 @@ try {
     $technicianId = $insertUser($pdo, 'TECHNICIAN', 'Técnico de Certificación HTTP T29', $suffix);
     $coordinatorId = $insertUser($pdo, 'COORDINATOR', 'Coordinación de Certificación HTTP T29', $suffix);
 
-    $successMachine = $insertMachine($pdo, $locationId, 'T29API-SUCCESS-' . $suffix);
+    $successMachine = $insertMachine($pdo, $locationId, 'T29API-SUCCESS-' . strtoupper($suffix));
     $emptyMachine = $insertMachine($pdo, $locationId, 'T29API-EMPTY-' . $suffix);
     $notQuarantineMachine = $insertMachine($pdo, $locationId, 'T29API-NOTQUAR-' . $suffix, true, 'OK');
     $blockedMachine = $insertMachine($pdo, $locationId, 'T29API-BLOCKED-' . $suffix);
@@ -349,6 +349,8 @@ try {
         ['POST', "/api/sanitary-quarantines/machines/{$successMachine}/lift", $basePayload],
         ['GET', '/api/sanitary-spoilage-records/999999/official-act', []],
         ['GET', "/api/sanitary-spoilage-records/by-machine/{$successMachine}", []],
+        ['GET', '/api/sanitary-spoilage-records/by-machine-code/T29API-ANON', []],
+        ['GET', '/api/sanitary-quarantines/active', []],
         ['GET', '/api/coordinator/sanitary-spoilage-records', []],
         ['PATCH', '/api/coordinator/sanitary-spoilage-records/999999/loss-estimate', [
             'estimated_merchandise_loss_eur' => 10.00,
@@ -411,6 +413,22 @@ try {
             )),
         ],
         [
+            'GET by-machine-code',
+            static fn (): Response => $locationController->getByMachineCode($locationRequest(
+                'GET',
+                '/api/sanitary-spoilage-records/by-machine-code/T29API-ANON',
+                [],
+                ['code' => 'T29API-ANON']
+            )),
+        ],
+        [
+            'GET active quarantines',
+            static fn (): Response => $locationController->listActiveQuarantines($locationRequest(
+                'GET',
+                '/api/sanitary-quarantines/active'
+            )),
+        ],
+        [
             'GET coordinator list',
             static fn (): Response => $locationController->listForCoordinator($locationRequest(
                 'GET',
@@ -464,6 +482,63 @@ try {
             'obtenido ' . $response->getStatusCode()
         );
     }
+
+    echo "\n--- 1-bis. Cuarentenas activas para el Técnico (C2, C1) ---\n";
+
+    $activeQuarantinesResponse = $dispatchJson(
+        'GET',
+        '/api/sanitary-quarantines/active',
+        [],
+        $technicianToken
+    );
+    $activeQuarantinesBody = $activeQuarantinesResponse->getDecodedBody();
+    $activeQuarantines = is_array($activeQuarantinesBody)
+        ? ($activeQuarantinesBody['data']['machines'] ?? [])
+        : [];
+    $activeById = [];
+    foreach ($activeQuarantines as $activeMachine) {
+        $activeById[(int)($activeMachine['machine_id'] ?? 0)] = $activeMachine;
+    }
+
+    $assert(
+        'El Técnico lista las cuarentenas activas => 200',
+        $activeQuarantinesResponse->getStatusCode() === 200
+        && is_array($activeQuarantines),
+        'HTTP ' . $activeQuarantinesResponse->getStatusCode()
+    );
+    $assert(
+        'El listado incluye cuarentenas ajenas y excluye máquinas inactivas o fuera de cuarentena',
+        isset($activeById[$successMachine])
+        && isset($activeById[$blockedMachine])
+        && !isset($activeById[$inactiveMachine])
+        && !isset($activeById[$notQuarantineMachine])
+    );
+    $assert(
+        'C1 viaja como bloqueo explícito para la avería abierta',
+        ($activeById[$blockedMachine]['has_open_incident'] ?? false) === true
+        && (int)($activeById[$blockedMachine]['open_incident_id'] ?? 0) > 0
+        && ($activeById[$successMachine]['has_open_incident'] ?? true) === false
+    );
+    $assert(
+        'El listado de cuarentenas no publica actas ni claves financieras',
+        is_array($activeQuarantinesBody)
+        && !isset($activeQuarantinesBody['data']['records'])
+        && !$containsFinancialKey($activeQuarantinesBody['data'] ?? [])
+    );
+
+    $coordinatorActiveResponse = $dispatchJson(
+        'GET',
+        '/api/sanitary-quarantines/active',
+        [],
+        $coordinatorToken
+    );
+    $coordinatorActiveBody = $coordinatorActiveResponse->getDecodedBody();
+    $assert(
+        'Coordinación comparte el listado de cuarentenas sin importes',
+        $coordinatorActiveResponse->getStatusCode() === 200
+        && is_array($coordinatorActiveBody)
+        && !$containsFinancialKey($coordinatorActiveBody['data'] ?? [])
+    );
 
     echo "\n--- 2. Levantamiento válido, opacidad financiera y panel (C4, QA 1) ---\n";
 
@@ -519,6 +594,46 @@ try {
         && count($technicianHistoryRecords) === 1
         && (int)($technicianHistoryRecords[0]['id'] ?? 0) === $successRecordId
         && !$containsFinancialKey($technicianHistoryBody['data'] ?? [])
+    );
+
+    $successMachineCode = (string)$pdo->query(
+        'SELECT code FROM machines WHERE id = ' . $successMachine
+    )->fetchColumn();
+    $technicianByCode = $dispatchJson(
+        'GET',
+        '/api/sanitary-spoilage-records/by-machine-code/' . rawurlencode($successMachineCode),
+        [],
+        $technicianToken
+    );
+    $technicianByCodeBody = $technicianByCode->getDecodedBody();
+    $technicianByCodeRecords = is_array($technicianByCodeBody)
+        ? ($technicianByCodeBody['data']['records'] ?? [])
+        : [];
+    $assert(
+        'El Técnico localiza las actas de cualquier máquina por su código => 200',
+        $technicianByCode->getStatusCode() === 200
+        && (int)($technicianByCodeBody['data']['machine_id'] ?? 0) === $successMachine
+        && count($technicianByCodeRecords) === 1
+        && (int)($technicianByCodeRecords[0]['id'] ?? 0) === $successRecordId,
+        'HTTP ' . $technicianByCode->getStatusCode()
+    );
+    $assert(
+        'La consulta por código conserva la opacidad financiera del Técnico',
+        is_array($technicianByCodeBody)
+        && !$containsFinancialKey($technicianByCodeBody['data'] ?? [])
+    );
+
+    $missingByCode = $dispatchJson(
+        'GET',
+        '/api/sanitary-spoilage-records/by-machine-code/T29API-NO-EXISTE',
+        [],
+        $technicianToken
+    );
+    $assert(
+        'Código de máquina inexistente => 404 MACHINE_NOT_FOUND',
+        $missingByCode->getStatusCode() === 404
+        && $errorCode($missingByCode) === 'MACHINE_NOT_FOUND',
+        $errorCode($missingByCode)
     );
 
     $coordinatorHistory = $dispatchJson(

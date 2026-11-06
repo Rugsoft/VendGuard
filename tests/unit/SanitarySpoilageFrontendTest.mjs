@@ -25,6 +25,7 @@ import { api } from '../../public/assets/js/api.js';
 import { CoordinatorSanitarySpoilageTab } from '../../public/assets/js/components/CoordinatorSanitarySpoilageTab.js';
 import { SanitarySpoilageLiftModal } from '../../public/assets/js/components/SanitarySpoilageLiftModal.js';
 import { SanitarySpoilageOfficialActModal } from '../../public/assets/js/components/SanitarySpoilageOfficialActModal.js';
+import { TechnicianSanitaryQuarantineListModal } from '../../public/assets/js/components/TechnicianSanitaryQuarantineListModal.js';
 
 const PROJECT_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -59,20 +60,23 @@ console.log('===================================================================
 const TAB_PATH = 'public/assets/js/components/CoordinatorSanitarySpoilageTab.js';
 const LIFT_PATH = 'public/assets/js/components/SanitarySpoilageLiftModal.js';
 const ACT_PATH = 'public/assets/js/components/SanitarySpoilageOfficialActModal.js';
+const TECHNICIAN_LIST_PATH = 'public/assets/js/components/TechnicianSanitaryQuarantineListModal.js';
 const VIEW_PATH = 'public/assets/js/views/CoordinatorDashboardView.js';
 const SW_PATH = 'public/sw.js';
 const STYLES_PATH = 'public/assets/css/styles.css';
 
-for (const path of [TAB_PATH, LIFT_PATH, ACT_PATH, VIEW_PATH, SW_PATH, STYLES_PATH]) {
+for (const path of [TAB_PATH, LIFT_PATH, ACT_PATH, TECHNICIAN_LIST_PATH, VIEW_PATH, SW_PATH, STYLES_PATH]) {
   assert(`0.1 ${path.split('/').pop()} exists`, existsSync(join(PROJECT_ROOT, path)));
 }
 
 const tabSource = read(TAB_PATH);
 const liftSource = read(LIFT_PATH);
 const actSource = read(ACT_PATH);
+const technicianListSource = read(TECHNICIAN_LIST_PATH);
 const viewSource = read(VIEW_PATH);
 const swSource = read(SW_PATH);
 const stylesSource = read(STYLES_PATH);
+const apiSource = read('public/assets/js/api.js');
 
 // ─── 1. Component contracts ───────────────────────────────────────────────────
 
@@ -146,9 +150,50 @@ assert('1.13 The lift modal is opened as COORDINATOR with the technician list',
   tabSource.includes('user-role="COORDINATOR"')
     && tabSource.includes(':technicians="technicians"'));
 
+assert('1.14 The technician quarantine list is an accessible modal surface',
+  TechnicianSanitaryQuarantineListModal.name === 'TechnicianSanitaryQuarantineListModal'
+    && TechnicianSanitaryQuarantineListModal.components?.ModalDialog?.name === 'ModalDialog'
+    && technicianListSource.includes('data-testid="technician-quarantine-list-modal"'));
+
+assert('1.15 The list delegates to the internal active-quarantine endpoint',
+  apiSource.includes('getActiveSanitaryQuarantines')
+    && apiSource.includes("'/sanitary-quarantines/active'")
+    && technicianListSource.includes('api.technician.getActiveSanitaryQuarantines()'));
+
+assert('1.16 C1 blocks the lift action for an open corrective incident',
+  technicianListSource.includes('v-if="machine.has_open_incident"')
+    && technicianListSource.includes('v-if="!machine.has_open_incident"')
+    && technicianListSource.includes('Bloqueada por avería abierta')
+    && technicianListSource.includes('🧾 Emitir Acta y Levantar Cuarentena'));
+
+assert('1.17 The technician list carries no acts or financial fields (Art. V.4)',
+  ['estimated_merchandise_loss_eur', 'loss_adjusted_by', 'loss_adjustment_reason']
+    .every((key) => !technicianListSource.includes(key))
+    && !/records\s*:/.test(technicianListSource)
+    && !technicianListSource.includes('Registro histórico de actas'));
+
 // ─── 2. Behaviour with a mocked API ──────────────────────────────────────────
 
 console.log('\n--- 2. Behaviour: global KPIs, filters and C5 validation ---\n');
+
+function createQuarantineListVm() {
+  const vm = {
+    ...TechnicianSanitaryQuarantineListModal.data(),
+    emitted: [],
+    $emit(event, payload) {
+      this.emitted.push({ event, payload });
+    }
+  };
+
+  for (const [name, method] of Object.entries(TechnicianSanitaryQuarantineListModal.methods)) {
+    vm[name] = method.bind(vm);
+  }
+  for (const [name, getter] of Object.entries(TechnicianSanitaryQuarantineListModal.computed)) {
+    Object.defineProperty(vm, name, { configurable: true, get: () => getter.call(vm) });
+  }
+
+  return vm;
+}
 
 function createVm() {
   const vm = {
@@ -173,7 +218,8 @@ const original = {
   adjust: api.coordinator.adjustCoordinatorSpoilageLossEstimate,
   exportCsv: api.coordinator.exportCoordinatorSanitarySpoilageCsv,
   machines: api.coordinator.getMachines,
-  users: api.coordinator.getUsers
+  users: api.coordinator.getUsers,
+  activeQuarantines: api.technician.getActiveSanitaryQuarantines
 };
 
 try {
@@ -328,12 +374,44 @@ try {
   await offlineVm.exportCsv();
   assert('2.13 The CSV export succeeds online and reports the filtered workbook',
     offlineVm.successMessage.includes('CSV'));
+
+  const quarantineVm = createQuarantineListVm();
+  api.technician.getActiveSanitaryQuarantines = async () => ({
+    data: {
+      machines: [
+        { machine_id: 20, machine_code: 'M-020', machine_model: 'VendMax', location_name: 'Sede Sur', machine_type: 'COLD_DRINKS', has_open_incident: false },
+        { machine_id: 3, machine_code: 'M-003', machine_model: 'SnackPro', location_name: 'Sede Norte', machine_type: 'PERISHABLE_FOOD', has_open_incident: true, open_incident_code: 'AV-003' }
+      ]
+    }
+  });
+  await quarantineVm.loadQuarantines();
+
+  assert('2.14 The technician list sorts active quarantines by machine code',
+    quarantineVm.machines[0].machine_code === 'M-003'
+      && quarantineVm.machines[1].machine_code === 'M-020');
+
+  quarantineVm.requestLift(quarantineVm.machines[0]);
+  assert('2.15 C1 blocks the lift event while the machine has an open incident',
+    quarantineVm.emitted.length === 0);
+
+  quarantineVm.requestLift(quarantineVm.machines[1]);
+  assert('2.16 A clean quarantine emits the machine for the APPCC lift modal',
+    quarantineVm.emitted.length === 1
+      && quarantineVm.emitted[0].event === 'lift'
+      && quarantineVm.emitted[0].payload.machine_id === 20);
+
+  quarantineVm.isOnline = false;
+  quarantineVm.requestLift(quarantineVm.machines[1]);
+  assert('2.17 C3 blocks the lift event without connection',
+    quarantineVm.emitted.length === 1
+      && quarantineVm.errorMessage.includes('Sin conexión'));
 } finally {
   api.coordinator.getCoordinatorSanitarySpoilageRecords = original.records;
   api.coordinator.adjustCoordinatorSpoilageLossEstimate = original.adjust;
   api.coordinator.exportCoordinatorSanitarySpoilageCsv = original.exportCsv;
   api.coordinator.getMachines = original.machines;
   api.coordinator.getUsers = original.users;
+  api.technician.getActiveSanitaryQuarantines = original.activeQuarantines;
 }
 
 // ─── 3. Privacy and offline guarantees across the three components ───────────
@@ -368,6 +446,16 @@ assert('3.6 The thermal ceilings stay at 4.0 C and 8.0 C for refrigerated produc
   liftSource.includes('return 4.0;')
     && liftSource.includes('return 8.0;'));
 
+assert('3.7 The technician act lookup uses the machine-code route and keeps money out',
+  apiSource.includes('/sanitary-spoilage-records/by-machine-code/')
+    && !apiSource.includes('estimated_merchandise_loss_eur'));
+
+assert('3.8 The technician quarantine list blocks offline and never queues an act',
+  technicianListSource.includes('navigator.onLine')
+    && technicianListSource.includes('!this.isOnline')
+    && technicianListSource.includes('Sin conexión no es posible emitir el acta')
+    && !technicianListSource.includes('offlineQueue'));
+
 // ─── 4. App Shell registration ───────────────────────────────────────────────
 
 console.log('\n--- 4. Service worker App Shell (RF-01.2) ---\n');
@@ -391,6 +479,10 @@ assert('4.3 Every precached spoilage asset exists on disk',
     '/assets/js/components/SanitarySpoilageLiftModal.js',
     '/assets/js/components/SanitarySpoilageOfficialActModal.js']
     .every((asset) => existsSync(join(PROJECT_ROOT, 'public', asset.replace(/^\//, '')))));
+
+assert('4.4 The technician quarantine list is precached in the App Shell',
+  shellSet.has('/assets/js/components/TechnicianSanitaryQuarantineListModal.js')
+    && existsSync(join(PROJECT_ROOT, 'public/assets/js/components/TechnicianSanitaryQuarantineListModal.js')));
 
 // ─── 5. Coordinator sub-tab integration ──────────────────────────────────────
 
@@ -435,7 +527,8 @@ function retiredTokensIn(source) {
 for (const [name, source] of [
   ['CoordinatorSanitarySpoilageTab.js', tabSource],
   ['SanitarySpoilageLiftModal.js', liftSource],
-  ['SanitarySpoilageOfficialActModal.js', actSource]
+  ['SanitarySpoilageOfficialActModal.js', actSource],
+  ['TechnicianSanitaryQuarantineListModal.js', technicianListSource]
 ]) {
   assert(`6.1 ${name} declares no retired .btn token`,
     retiredTokensIn(source).length === 0,

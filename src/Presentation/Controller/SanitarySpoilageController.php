@@ -9,6 +9,8 @@ use VendGuard\Application\Service\SanitarySpoilageService;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\SanitarySpoilageValidationException;
 use VendGuard\Core\Domain\Model\User;
+use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Storage\LocalFileUploader;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -43,12 +45,16 @@ final class SanitarySpoilageController
 
     private ?LocalFileUploader $uploader;
 
+    private ?MachineRepositoryInterface $machineRepository;
+
     public function __construct(
         ?SanitarySpoilageService $service = null,
-        ?LocalFileUploader $uploader = null
+        ?LocalFileUploader $uploader = null,
+        ?MachineRepositoryInterface $machineRepository = null
     ) {
         $this->service = $service;
         $this->uploader = $uploader;
+        $this->machineRepository = $machineRepository;
     }
 
     /**
@@ -156,6 +162,64 @@ final class SanitarySpoilageController
         }
 
         return Response::json($history, 200);
+    }
+
+    /**
+     * `GET /api/sanitary-spoilage-records/by-machine-code/{code}`
+     *
+     * Localiza las actas de cualquier máquina por su código visible. Es la vía
+     * que permite al Técnico consultar el Acta A4 sin que la máquina forme
+     * parte de una avería de su ruta (QA 3.1).
+     */
+    public function getByMachineCode(Request $request): Response
+    {
+        $actor = $this->authorize($request, self::INTERNAL_ROLES);
+        if ($actor instanceof Response) {
+            return $actor;
+        }
+
+        $rawCode = $request->getRouteParam('code');
+        $code = is_string($rawCode) ? trim($rawCode) : '';
+        if ($code === '' || strlen($code) > 80) {
+            return Response::error('INVALID_MACHINE_CODE', 'El código de máquina no es válido.', 400);
+        }
+
+        $machine = $this->machines()->findByCode($code, withIncident: false, allowDeleted: true);
+        if ($machine === null) {
+            return Response::error('MACHINE_NOT_FOUND', 'No existe una máquina con ese código.', 404);
+        }
+
+        try {
+            $history = $this->service()->listByMachine($machine->getId(), $actor['role']);
+        } catch (SanitarySpoilageValidationException $exception) {
+            return $this->domainFailure($exception);
+        }
+
+        return Response::json($history, 200);
+    }
+
+    /**
+     * `GET /api/sanitary-quarantines/active`
+     *
+     * Listado transversal de cuarentenas activas para Técnicos y Coordinación
+     * (C2). Solo publica datos de máquina y el bloqueo C1; nunca actas ni
+     * importes, de modo que el Técnico puede localizar una cuarentena que no
+     * forme parte de su ruta.
+     */
+    public function listActiveQuarantines(Request $request): Response
+    {
+        $actor = $this->authorize($request, self::INTERNAL_ROLES);
+        if ($actor instanceof Response) {
+            return $actor;
+        }
+
+        try {
+            $payload = $this->service()->listActiveQuarantines($actor);
+        } catch (SanitarySpoilageValidationException $exception) {
+            return $this->domainFailure($exception);
+        }
+
+        return Response::json($payload, 200);
     }
 
     /**
@@ -426,6 +490,11 @@ final class SanitarySpoilageController
     private function service(): SanitarySpoilageService
     {
         return $this->service ??= new SanitarySpoilageService();
+    }
+
+    private function machines(): MachineRepositoryInterface
+    {
+        return $this->machineRepository ??= new PdoMachineRepository();
     }
 
     private function uploader(): LocalFileUploader

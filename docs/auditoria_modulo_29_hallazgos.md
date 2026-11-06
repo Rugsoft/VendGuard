@@ -8,7 +8,7 @@
 **Fecha de la revisión:** 2026-11-06  
 **Rama:** `spoilage-log` (commit de referencia `fd28e19`)  
 **Alcance:** revisión de solo lectura del código de dominio, API, persistencia, UI y esquema frente a los criterios EARS, decisiones `D1`–`D3`, casos `C1`–`C6` y resoluciones `QA 1`–`QA 4`.  
-**Resultado:** núcleo funcional implementado y certificado por la batería; **3 huecos funcionales abiertos**, **1 hueco resuelto** y **3 desviaciones menores** pendientes de hardening.
+**Resultado:** núcleo funcional implementado y certificado por la batería; **1 hueco funcional abierto**, **3 huecos resueltos** y **3 desviaciones menores** pendientes de hardening.
 
 > Este documento no modifica la especificación aprobada. Los hallazgos 1 a 6 son cambios de implementación; el hallazgo 7 requiere, si se mantiene la paginación, una enmienda del contrato técnico con visto bueno del Product Owner.
 
@@ -19,8 +19,8 @@
 | # | Hallazgo | Severidad | Regla afectada | Estado |
 | :---: | :--- | :---: | :--- | :---: |
 | 1 | Colisión del código de certificado higiénico | **Alta** | RF-03.1 / EARS 03.1 | Resuelto (Módulo 29) |
-| 2 | El técnico no accede al Acta A4 de cualquier máquina | **Media** | QA 3.1 | Abierto |
-| 3 | Levantamiento técnico limitado a incidencias de su ruta | **Media** | C2 / HU-01 / EARS 01.2 | Abierto |
+| 2 | El técnico no accede al Acta A4 de cualquier máquina | **Media** | QA 3.1 | Resuelto |
+| 3 | Levantamiento técnico limitado a incidencias de su ruta | **Media** | C2 / HU-01 / EARS 01.2 | Resuelto |
 | 4 | Bypass de la validación de la fotografía por la vía JSON | **Media** | EARS 02.2 / RNF-02 | Abierto |
 | 5 | Código interno de máquina vacía impreso en el Acta A4 | **Baja** | D3 / EARS 02.1 | Abierto |
 | 6 | El filtro de fechas no cubre el último segundo del día | **Baja** | QA 4.3 | Abierto |
@@ -61,7 +61,7 @@ Emitir el código del certificado con la misma disciplina que `nextRecordCode()`
 - Se añadió `nextCertificateCode(int $year)` al contrato del repositorio y a `PdoSanitarySpoilageRecordRepository`. Reserva el siguiente correlativo `CERT-AAAA-NNNN` con `pg_advisory_xact_lock`, leyendo el máximo sufijo ya emitido en `sanitary_certificates` —incluidos los certificados de los flujos preventivos y las semillas—, en lugar de sortear un número entre 1000 y 9999.
 - `SanitarySpoilageService::liftQuarantineWithSpoilageRecord()` usa esa reserva dentro de la misma transacción del acta y se eliminó `generateCertificateCode()`.
 - La prueba `SanitarySpoilageServiceIntegrationTest` siembra un certificado previo `CERT-AAAA-0001` y exige que el levantamiento emita `CERT-AAAA-0002`, verificando además que la fila exista.
-- Verificación: canal `new_engine` del módulo en verde (3 suites, 123 aserciones), validador (67), frontend (54) y guarda de dialecto (107). PHP lint sin errores.
+- Verificación: canal `new_engine` del módulo en verde (3 suites, 135 aserciones), validador (67), frontend (68) y guarda de dialecto (107). PHP lint sin errores.
 
 **Riesgo residual:** el flujo preventivo (`PdoSanitaryCertificateRepository::createCertificate`) sigue calculando su código con `MAX(id)+1` y no participa del bloqueo de asesoría. Un levantamiento y una emisión preventiva estrictamente concurrentes podrían chocar; la reserva del Módulo 29 ya evita los códigos existentes, pero cerrar esa carrera requiere que ambos flujos compartan la misma secuencia. Queda anotado para una tarea posterior. Además, `PreventiveCoexistenceBridgeService` devuelve un `certificate_code` aleatorio en la respuesta de reinspección sin persistirlo en `sanitary_certificates`; es un flujo distinto, pero conviene alinearlo cuando se aborde la secuencia compartida.
 
@@ -87,6 +87,14 @@ Un técnico que atiende una inspección en ruta no puede localizar ni imprimir e
 
 Añadir al técnico un acceso directo al Acta A4 desde el historial/buscador de máquinas (o desde la ficha de máquina), sin exponer importes. Cubrir con una prueba de navegación que un técnico abre el A4 de una máquina ajena a su ruta.
 
+**Resolución aplicada (2026-11-06)**
+
+- Se añadió `GET /api/sanitary-spoilage-records/by-machine-code/{code}` para roles `TECHNICIAN` y `COORDINATOR`. Resuelve la máquina por su código visible y reutiliza la proyección pública de `listByMachine()`, sin importes económicos.
+- `TechnicianMachineHistoryModal` incorpora un buscador de actas por código de máquina y emite `open-official-act`; `TechnicianRouteView` expone el botón «Consultar actas APPCC por código de máquina» en la cabecera, sin exigir una incidencia de la ruta.
+- La prueba HTTP cubre la consulta por código, la opacidad financiera y el 404. Las suites de interfaz cubren la normalización del código, la emisión del identificador del acta y la navegación desde la cabecera.
+- Verificación focalizada: `SanitarySpoilageApiIntegrationTest` 64 aserciones; canal `new_engine` 3 suites · 135 aserciones; `SanitarySpoilageFrontendTest` 68; `TechnicianMachineHistoryModalTest` 28; `TechnicianRouteViewTest` 181.
+- Batería global: **400 suites · 14.977 aserciones · 0 fallos**, con la cifra canónica sincronizada en README, matriz de trazabilidad y `docs/features_pendientes.md`.
+
 ---
 
 ### 2.3. Levantamiento técnico limitado a incidencias de su ruta
@@ -107,6 +115,13 @@ El técnico queda limitado a las cuarentenas que la ruta le presenta como incide
 **Recomendación**
 
 Ofrecer al técnico un listado de máquinas activas en cuarentena (similar al de Coordinación, sin datos financieros) o un acceso desde la orden preventiva no conforme. Verificar que el modal sigue exigiendo máquina activa, estado `QUARANTINE` y ausencia de averías abiertas antes de habilitar el envío.
+
+**Resolución aplicada (2026-11-06)**
+
+- Se añadió `GET /api/sanitary-quarantines/active` para `TECHNICIAN` y `COORDINATOR`. Publica las máquinas activas en `QUARANTINE` con código, modelo, sede, tipología, fechas de inspección y el bloqueo C1; no incluye actas ni claves financieras.
+- `TechnicianSanitaryQuarantineListModal` lista esas cuarentenas desde la cabecera del técnico. Una avería abierta deshabilita el levantamiento; una cuarentena limpia emite la máquina al modal APPCC existente, que revalida máquina activa, estado `QUARANTINE` y ausencia de averías abiertas antes de habilitar el envío.
+- Verificación focalizada: `SanitarySpoilageApiIntegrationTest` 64 aserciones; canal `new_engine` 3 suites · 135 aserciones; `SanitarySpoilageFrontendTest` 68; `TechnicianRouteViewTest` 181; plantillas 76; PWA 44; deuda de tokens 2268/2268.
+- Batería global: **400 suites · 14.977 aserciones · 0 fallos**, con la cifra canónica sincronizada en README, matriz de trazabilidad y `docs/features_pendientes.md`.
 
 ---
 
@@ -218,8 +233,10 @@ Se contrastaron y se consideran correctamente cubiertos:
 ## 5. Orden de remediación propuesto
 
 1. **Hallazgo 1** (Alta): **resuelto** con la reserva correlativa bajo bloqueo de asesoría y la prueba de regresión. Queda anotada la carrera residual con el flujo preventivo.
-2. **Hallazgos 2, 3 y 4** (Media): accesos del técnico al A4 y al levantamiento, y endurecimiento de la evidencia fotográfica.
-3. **Hallazgos 5, 6 y 7** (Baja): etiqueta del A4, límite superior del filtro de fechas y decisión sobre paginación.
+2. **Hallazgo 2** (Media): **resuelto** con el buscador de actas por código de máquina, accesible desde la cabecera del técnico y desde el historial de máquina, sin importes.
+3. **Hallazgo 3** (Media): **resuelto** con el listado transversal de cuarentenas activas y el acceso al levantamiento desde cuarentenas ajenas a la ruta.
+4. **Hallazgo 4** (Media): endurecimiento pendiente de la evidencia fotográfica por la vía JSON.
+5. **Hallazgos 5, 6 y 7** (Baja): etiqueta del A4, límite superior del filtro de fechas y decisión sobre paginación.
 
 Los hallazgos 1 a 6 no requieren modificar `spec.md`: son correcciones de implementación dentro de criterios ya aprobados. El hallazgo 7 sí puede requerir una enmienda del contrato técnico si se decide no paginar.
 

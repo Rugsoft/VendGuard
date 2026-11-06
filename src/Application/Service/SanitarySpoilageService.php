@@ -316,6 +316,28 @@ final class SanitarySpoilageService
     }
 
     /**
+     * Cuarentenas activas visibles para cualquier operador interno (C2).
+     *
+     * Devuelve solo datos operativos de la máquina y el bloqueo C1. No incluye
+     * actas, importes ni motivos de ajuste: el Técnico puede localizar una
+     * cuarentena ajena a su ruta sin recibir la superficie financiera.
+     *
+     * @param array<string, mixed> $actor Usuario autenticado.
+     * @return array{machines: list<array<string, mixed>>}
+     *
+     * @throws SanitarySpoilageValidationException
+     */
+    public function listActiveQuarantines(array $actor): array
+    {
+        $this->requireRole($actor, self::ALLOWED_ACTORS);
+        $this->requireActorId($actor);
+
+        return [
+            'machines' => $this->recordRepository->fetchActiveQuarantinedMachines(),
+        ];
+    }
+
+    /**
      * Panel de Coordinación: KPIs globales, máquinas en cuarentena y actas.
      *
      * @param array<string, mixed> $filters Filtros opcionales del listado.
