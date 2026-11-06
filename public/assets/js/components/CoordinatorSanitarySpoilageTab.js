@@ -584,6 +584,9 @@ export const CoordinatorSanitarySpoilageTab = {
   },
   template: `
     <section class="vg-spoilage-tab" data-testid="coordinator-spoilage-tab">
+      <!-- La tabla y los KPIs viven en styles.css; esta pestaña la carga bajo demanda. -->
+      <link rel="stylesheet" href="/assets/css/styles.css" />
+
       <header class="vg-spoilage-tab__header">
         <div>
           <h3 class="vg-spoilage-tab__title">☣️ Actas de Merma y Cuarentena Sanitaria</h3>

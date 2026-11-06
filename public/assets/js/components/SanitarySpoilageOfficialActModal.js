@@ -334,7 +334,12 @@ export const SanitarySpoilageOfficialActModal = {
       if (!value) {
         return '—';
       }
-      const parsed = new Date(String(value).replace(' ', 'T'));
+      // PostgreSQL serializes TIMESTAMPTZ offsets as '+00'; Date needs '+00:00'.
+      const normalized = String(value)
+        .trim()
+        .replace(' ', 'T')
+        .replace(/([+-]\d{2})$/, '$1:00');
+      const parsed = new Date(normalized);
       if (Number.isNaN(parsed.getTime())) {
         return String(value);
       }
