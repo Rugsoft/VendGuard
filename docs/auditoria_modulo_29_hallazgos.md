@@ -8,7 +8,7 @@
 **Fecha de la revisión:** 2026-11-06  
 **Rama:** `spoilage-log` (commit de referencia `fd28e19`)  
 **Alcance:** revisión de solo lectura del código de dominio, API, persistencia, UI y esquema frente a los criterios EARS, decisiones `D1`–`D3`, casos `C1`–`C6` y resoluciones `QA 1`–`QA 4`.  
-**Resultado:** núcleo funcional implementado y certificado por la batería; **0 huecos funcionales abiertos**, **4 huecos resueltos** y **3 desviaciones menores** pendientes de hardening.
+**Resultado:** núcleo funcional implementado y certificado por la batería; **0 huecos funcionales abiertos**, **4 huecos resueltos** y **2 desviaciones menores** pendientes de hardening.
 
 > Este documento no modifica la especificación aprobada. Los hallazgos 1 a 6 son cambios de implementación; el hallazgo 7 requiere, si se mantiene la paginación, una enmienda del contrato técnico con visto bueno del Product Owner.
 
@@ -22,7 +22,7 @@
 | 2 | El técnico no accede al Acta A4 de cualquier máquina | **Media** | QA 3.1 | Resuelto |
 | 3 | Levantamiento técnico limitado a incidencias de su ruta | **Media** | C2 / HU-01 / EARS 01.2 | Resuelto |
 | 4 | Bypass de la validación de la fotografía por la vía JSON | **Media** | EARS 02.2 / RNF-02 | Resuelto |
-| 5 | Código interno de máquina vacía impreso en el Acta A4 | **Baja** | D3 / EARS 02.1 | Abierto |
+| 5 | Código interno de máquina vacía impreso en el Acta A4 | **Baja** | D3 / EARS 02.1 | Resuelto |
 | 6 | El filtro de fechas no cubre el último segundo del día | **Baja** | QA 4.3 | Abierto |
 | 7 | El contrato promete tabla paginada y no hay paginación | **Baja** | Contrato técnico §3.4 | Abierto |
 
@@ -174,6 +174,12 @@ Es un defecto de presentación del documento oficial, no de integridad: el valor
 
 Mantener el código en la base y añadir una etiqueta de presentación para el A4 y la tabla («Sin stock afectado»). Unificar la redacción del método con la especificación.
 
+**Resolución aplicada (2026-11-06)**
+
+- El valor persistido sigue siendo `SIN_STOCK_AFECTADO`; `SanitarySpoilageOfficialActModal` y la tabla de Coordinación lo traducen a «Sin stock afectado» en la celda y en el título, sin alterar el payload.
+- La etiqueta del método vacío se unifica con la especificación: `No aplicable (máquina vacía)`, tanto en `SanitarySpoilageRecord` como en la tabla y en el aviso del modal de levantamiento. El contrato técnico se alinea.
+- Pruebas: `SanitarySpoilageFrontendTest` 71 aserciones y `SanitarySpoilageValidatorTest` 68; batería global 400 suites · 14.981 aserciones · 0 fallos.
+
 ---
 
 ### 3.2. El filtro de fechas no cubre el último segundo del día
@@ -229,6 +235,7 @@ Se contrastaron y se consideran correctamente cubiertos:
 - Techos térmicos por tipología y rango físico de ambas lecturas (Art. II, QA 3).
 - Unidades `0..500`, lotes `3..500` con bloque alfanumérico real, confirmación de máquina vacía y método de destrucción (D3, QA 4).
 - Fotografía obligatoria y verificada en ambas vías: multipart con `LocalFileUploader` y JSON contra archivos existentes en `/uploads/`, con tope de 5 MB, `finfo` y extensión coherente.
+- El A4 y la tabla presentan «Sin stock afectado» para las actas de máquina vacía y «No aplicable (máquina vacía)» como método, sin alterar los tokens persistidos.
 - Observaciones de higienización `20..1000` con tres bloques reales y aviso de privacidad visible.
 - Inmutabilidad de los hechos sanitarios y prohibición de borrado mediante disparadores; relación `1..N` ante reaperturas.
 - Coste automático a 2,50 €/ud., ajustes sucesivos con motivo real, rechazo de importes idénticos y opacidad financiera para técnico, Sede, QR y A4.
@@ -243,7 +250,7 @@ Se contrastaron y se consideran correctamente cubiertos:
 2. **Hallazgo 2** (Media): **resuelto** con el buscador de actas por código de máquina, accesible desde la cabecera del técnico y desde el historial de máquina, sin importes.
 3. **Hallazgo 3** (Media): **resuelto** con el listado transversal de cuarentenas activas y el acceso al levantamiento desde cuarentenas ajenas a la ruta.
 4. **Hallazgo 4** (Media): **resuelto** con la validación de la ruta JSON contra archivos reales de `/uploads/`.
-5. **Hallazgos 5, 6 y 7** (Baja): etiqueta del A4, límite superior del filtro de fechas y decisión sobre paginación.
+5. **Hallazgo 5** (Baja): **resuelto** con la traducción del token en el A4 y la tabla y la alineación de la etiqueta del método vacío. Quedan los hallazgos 6 y 7: límite superior del filtro de fechas y decisión sobre paginación.
 
 Los hallazgos 1 a 6 no requieren modificar `spec.md`: son correcciones de implementación dentro de criterios ya aprobados. El hallazgo 7 sí puede requerir una enmienda del contrato técnico si se decide no paginar.
 

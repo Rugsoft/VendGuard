@@ -22,6 +22,8 @@ import { api } from '../api.js';
 import { ModalDialog } from './ModalDialog.js';
 
 const PRINT_STYLE_ID = 'vg-spoilage-official-act-print-styles';
+const EMPTY_BATCH_CODES = 'SIN_STOCK_AFECTADO';
+const EMPTY_BATCH_LABEL = 'Sin stock afectado';
 
 const PRINT_STYLES = `
 .vg-spoilage-act-sheet {
@@ -245,6 +247,13 @@ export const SanitarySpoilageOfficialActModal = {
       }
       return `${units} ${units === 1 ? 'unidad destruida' : 'unidades destruidas'}`;
     },
+    batchCodesLabel() {
+      const raw = String(this.documentData?.affected_batch_codes || '').trim();
+      if (raw === '') {
+        return '—';
+      }
+      return raw.toUpperCase() === EMPTY_BATCH_CODES ? EMPTY_BATCH_LABEL : raw;
+    },
     isPhotoAvailable() {
       const url = String(this.documentData?.evidence_photo_url || '').trim();
       return url !== '';
@@ -443,7 +452,7 @@ export const SanitarySpoilageOfficialActModal = {
             </tr>
             <tr>
               <th>Lotes afectados</th>
-              <td>{{ documentData.affected_batch_codes || '—' }}</td>
+              <td>{{ batchCodesLabel }}</td>
             </tr>
             <tr>
               <th>Método de destrucción</th>

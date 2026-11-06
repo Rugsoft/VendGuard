@@ -749,7 +749,7 @@ export const SanitarySpoilageLiftModal = {
                   <span>Confirmo que la máquina no contenía producto perecedero expuesto.</span>
                 </label>
                 <div style="font-family: var(--font-body); font-size: 12px; color: var(--color-ink-muted); line-height: 1.45;">
-                  Los lotes se registrarán de oficio como «SIN_STOCK_AFECTADO» y el método como «No aplica (máquina vacía)».
+                  Los lotes se registrarán de oficio como «Sin stock afectado» y el método como «No aplicable (máquina vacía)».
                 </div>
               </template>
 

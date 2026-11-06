@@ -456,6 +456,27 @@ assert('3.8 The technician quarantine list blocks offline and never queues an ac
     && technicianListSource.includes('Sin conexión no es posible emitir el acta')
     && !technicianListSource.includes('offlineQueue'));
 
+const emptyBatchActVm = { documentData: { affected_batch_codes: 'SIN_STOCK_AFECTADO' } };
+const realBatchActVm = { documentData: { affected_batch_codes: 'LOTE-2026-11A' } };
+assert('3.9 The A4 translates the internal empty-batch token without touching the payload',
+  SanitarySpoilageOfficialActModal.computed.batchCodesLabel.call(emptyBatchActVm) === 'Sin stock afectado'
+    && SanitarySpoilageOfficialActModal.computed.batchCodesLabel.call(realBatchActVm) === 'LOTE-2026-11A'
+    && actSource.includes('{{ batchCodesLabel }}')
+    && !actSource.includes("{{ documentData.affected_batch_codes || '—' }}"));
+
+const coordinatorBatchVm = createVm();
+assert('3.10 The coordination table translates the token in both the cell and its title',
+  coordinatorBatchVm.batchLabel('SIN_STOCK_AFECTADO') === 'Sin stock afectado'
+    && coordinatorBatchVm.shortBatch('SIN_STOCK_AFECTADO') === 'Sin stock afectado'
+    && coordinatorBatchVm.shortBatch('LOTE-2026-11A') === 'LOTE-2026-11A'
+    && tabSource.includes(':title="batchLabel(record.affected_batch_codes)"')
+    && !tabSource.includes(':title="record.affected_batch_codes"'));
+
+assert('3.11 The empty method uses the approved wording and hides its internal code',
+  tabSource.includes('No aplicable (máquina vacía)')
+    && flat(liftSource).includes('Los lotes se registrarán de oficio como «Sin stock afectado» y el método como «No aplicable (máquina vacía)».')
+    && !flat(liftSource).includes('«SIN_STOCK_AFECTADO»'));
+
 // ─── 4. App Shell registration ───────────────────────────────────────────────
 
 console.log('\n--- 4. Service worker App Shell (RF-01.2) ---\n');

@@ -36,8 +36,11 @@ const DISPOSAL_OPTIONS = [
   { value: 'ON_SITE_ORGANIC_SEALED', label: 'Destrucción in situ en contenedor sellado' },
   { value: 'RETURN_TO_CENTRAL_BIOHAZARD', label: 'Retirada precintada a base central' },
   { value: 'AUTHORIZED_WASTE_MANAGER', label: 'Entrega a gestor autorizado de residuos' },
-  { value: 'NOT_APPLICABLE_EMPTY', label: 'No aplica: máquina sin stock afectado' }
+  { value: 'NOT_APPLICABLE_EMPTY', label: 'No aplicable (máquina vacía)' }
 ];
+
+const EMPTY_BATCH_CODES = 'SIN_STOCK_AFECTADO';
+const EMPTY_BATCH_LABEL = 'Sin stock afectado';
 
 const FILTER_KEYS = [
   'machine_id',
@@ -563,9 +566,17 @@ export const CoordinatorSanitarySpoilageTab = {
       return words.charAt(0).toUpperCase() + words.slice(1);
     },
 
-    shortBatch(value) {
+    batchLabel(value) {
       const text = String(value ?? '').trim();
       if (text === '') {
+        return '—';
+      }
+      return text.toUpperCase() === EMPTY_BATCH_CODES ? EMPTY_BATCH_LABEL : text;
+    },
+
+    shortBatch(value) {
+      const text = this.batchLabel(value);
+      if (text === '—') {
         return '—';
       }
       return text.length > 42 ? `${text.slice(0, 39)}…` : text;
@@ -826,7 +837,7 @@ export const CoordinatorSanitarySpoilageTab = {
                 </td>
                 <td>{{ originLabel(record.quarantine_origin) }}</td>
                 <td class="vg-spoilage-num">{{ formatInteger(record.discarded_units_count) }}</td>
-                <td><span :title="record.affected_batch_codes">{{ shortBatch(record.affected_batch_codes) }}</span></td>
+                <td><span :title="batchLabel(record.affected_batch_codes)">{{ shortBatch(record.affected_batch_codes) }}</span></td>
                 <td class="vg-spoilage-num">{{ recordTemperature(record) }}</td>
                 <td>{{ disposalMethodLabel(record.disposal_method) }}</td>
                 <td>{{ record.technician_name || '—' }}</td>

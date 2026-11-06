@@ -51,7 +51,7 @@ final class SanitarySpoilageRecord implements JsonSerializable
         self::DISPOSAL_METHOD_ON_SITE_ORGANIC_SEALED => 'Destrucción e inutilización en contenedor sellado in situ',
         self::DISPOSAL_METHOD_RETURN_TO_CENTRAL_BIOHAZARD => 'Retirada precintada a base central para baja sanitaria',
         self::DISPOSAL_METHOD_AUTHORIZED_WASTE_MANAGER => 'Entrega a gestor autorizado de residuos orgánicos',
-        self::DISPOSAL_METHOD_NOT_APPLICABLE_EMPTY => 'No aplica (Máquina verificada sin stock afectado)',
+        self::DISPOSAL_METHOD_NOT_APPLICABLE_EMPTY => 'No aplicable (máquina vacía)',
     ];
 
     public const OFFICIAL_ACT_TITLE = 'ACTA OFICIAL DE DESTRUCCIÓN DE GÉNERO PERECEDERO';

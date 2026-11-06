@@ -219,7 +219,7 @@ CREATE TRIGGER trg_immutable_sanitary_spoilage_records
 | `ON_SITE_ORGANIC_SEALED` | Destrucción e inutilización en contenedor sellado in situ | Válido solo si `discarded_units_count > 0` |
 | `RETURN_TO_CENTRAL_BIOHAZARD` | Retirada precintada a base central para baja sanitaria | Válido solo si `discarded_units_count > 0` |
 | `AUTHORIZED_WASTE_MANAGER` | Entrega a gestor autorizado de residuos orgánicos | Válido solo si `discarded_units_count > 0` |
-| `NOT_APPLICABLE_EMPTY` | No aplica (Máquina verificada sin stock afectado) | Obligatorio y exclusivo si `discarded_units_count === 0` |
+| `NOT_APPLICABLE_EMPTY` | No aplicable (máquina vacía) | Obligatorio y exclusivo si `discarded_units_count === 0` |
 
 ### 2.3. Baremo Económico Estándar (`D2`)
 * `SanitarySpoilageValidator::DEFAULT_UNIT_MERCHANDISE_COST_EUR = 2.50`

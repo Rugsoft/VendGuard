@@ -648,6 +648,35 @@ $assert(
     && $official['disposal_method_label'] === 'Destrucción e inutilización en contenedor sellado in situ'
 );
 
+$emptyRecord = new SanitarySpoilageRecord(
+    null,
+    'ACTA-MERMA-2026-0003',
+    8,
+    null,
+    null,
+    2,
+    2,
+    SanitarySpoilageRecord::QUARANTINE_ORIGIN_BIOLOGICAL_CLOCK,
+    0,
+    true,
+    SanitarySpoilageValidator::EMPTY_BATCH_CODES,
+    18.6,
+    3.0,
+    SanitarySpoilageRecord::DISPOSAL_METHOD_NOT_APPLICABLE_EMPTY,
+    $evidencePhotoUrl,
+    'Máquina vacía verificada, sin género perecedero expuesto; cabina higienizada y fotografiada antes de reabrir.',
+    0.0,
+    null,
+    null,
+    'CERT-2026-0003'
+);
+$emptyOfficial = $emptyRecord->toOfficialActArray();
+$assert(
+    '8.4-bis El acta vacía conserva el token y usa la etiqueta de método aprobada',
+    $emptyOfficial['affected_batch_codes'] === 'SIN_STOCK_AFECTADO'
+    && $emptyOfficial['disposal_method_label'] === 'No aplicable (máquina vacía)'
+);
+
 $assert(
     '8.5 La serialización JSON por defecto también oculta el coste',
     !str_contains((string)json_encode($record), 'merchandise')
