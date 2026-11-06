@@ -31,7 +31,10 @@ declare(strict_types=1);
  *      admite ajuste; el CSV lleva BOM, dos secciones, cabeceras con cero filas
  *      y neutraliza las celdas que comienzan por `=`, `+`, `-` o `@`.
  *
- *   5. **Límite superior del filtro de fechas (`QA 4.3`).** El rango incluye
+ *   5. **Restitución sin nuevas alertas (`C6`).** El levantamiento no escribe
+ *      nuevas filas en `notification_outbox`; el acta no dispara mensajería.
+ *
+ *   6. **Límite superior del filtro de fechas (`QA 4.3`).** El rango incluye
  *      el día final completo: un acta emitida a las `23:59:59.5` aparece en el
  *      listado y en el CSV de ese día, y no se arrastra al día anterior.
  *
@@ -313,6 +316,8 @@ try {
         ':technician_id' => $technicianId,
     ]);
 
+    $outboxBeforeLift = (int)$pdo->query('SELECT COUNT(*) FROM notification_outbox')->fetchColumn();
+
     $firstLift = $service->liftQuarantineWithSpoilageRecord(
         $machineA,
         $payload(),
@@ -322,6 +327,10 @@ try {
     $firstAct = $firstLift['spoilage_record'];
     $firstRecordId = (int)$firstAct['id'];
     $firstRecordCode = (string)$firstAct['record_code'];
+    $outboxAfterLift = (int)$pdo->query('SELECT COUNT(*) FROM notification_outbox')->fetchColumn();
+    $outboxForIncident = (int)$pdo->query(
+        'SELECT COUNT(*) FROM notification_outbox WHERE incident_id = ' . $incidentA
+    )->fetchColumn();
 
     $assert(
         'El Técnico emite el acta 0001 y firma como técnico y registrador',
@@ -336,6 +345,11 @@ try {
         ($firstLift['machine_sanitary_status'] ?? null) === 'OK'
         && ($firstLift['qr_unblocked'] ?? null) === true
         && (string)$pdo->query('SELECT sanitary_status FROM machines WHERE id = ' . $machineA)->fetchColumn() === 'OK'
+    );
+    $assert(
+        'C6: el levantamiento no escribe nuevas filas en notification_outbox',
+        $outboxAfterLift === $outboxBeforeLift && $outboxForIncident === 0,
+        sprintf('total %d→%d; incidencia=%d', $outboxBeforeLift, $outboxAfterLift, $outboxForIncident)
     );
 
     $certificateA = (string)($firstAct['certificate_code'] ?? '');

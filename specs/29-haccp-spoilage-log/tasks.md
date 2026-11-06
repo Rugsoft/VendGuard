@@ -43,7 +43,7 @@ flowchart LR
   - **Requisitos cubiertos:** `RF-01.1`, `RF-01.2`, `RF-02.1`–`RF-02.3`, `RF-03.1`, `RF-03.2`, `RF-04.2`, `RNF-01`, `D1`–`D3`, `C5`, `QA 1`, `QA 2`, `constitution.md` Art. III.1 y Art. III.3.
   - **Detalle de implementación:**
     1. Añadir de forma idempotente `'SANITARY_SPOILAGE_RECORD'` al tipo enumerado `audit_entity_type` (`ALTER TYPE audit_entity_type ADD VALUE IF NOT EXISTS 'SANITARY_SPOILAGE_RECORD'`).
-    2. Crear la Tabla 40 `sanitary_spoilage_records` (21 columnas: `id`, `record_code`, `machine_id`, `incident_id`, `maintenance_order_id`, `technician_id`, `registered_by`, `quarantine_origin`, `discarded_units_count`, `empty_machine_confirmed`, `affected_batch_codes`, `cabin_temp_at_removal`, `restored_stabilized_temp_c`, `disposal_method`, `evidence_photo_url`, `sanitary_notes`, `estimated_merchandise_loss_eur`, `loss_adjusted_by`, `loss_adjustment_reason`, `certificate_code`, `created_at`, `updated_at`) con clave única `uq_sanitary_spoilage_records_code UNIQUE (record_code)`, 6 claves foráneas `ON DELETE RESTRICT ON UPDATE CASCADE` y las 8 restricciones `CHECK`:
+    2. Crear la Tabla 40 `sanitary_spoilage_records` (22 columnas: `id`, `record_code`, `machine_id`, `incident_id`, `maintenance_order_id`, `technician_id`, `registered_by`, `quarantine_origin`, `discarded_units_count`, `empty_machine_confirmed`, `affected_batch_codes`, `cabin_temp_at_removal`, `restored_stabilized_temp_c`, `disposal_method`, `evidence_photo_url`, `sanitary_notes`, `estimated_merchandise_loss_eur`, `loss_adjusted_by`, `loss_adjustment_reason`, `certificate_code`, `created_at`, `updated_at`) con clave única `uq_sanitary_spoilage_records_code UNIQUE (record_code)`, 6 claves foráneas `ON DELETE RESTRICT ON UPDATE CASCADE` y las 9 restricciones `CHECK`:
        - `chk_spoilage_records_origin` (`quarantine_origin IN ('BIOLOGICAL_CLOCK_4H', 'PREVENTIVE_NON_CONFORMITY', 'MANUAL_SANITARY_LOCK')`)
        - `chk_spoilage_records_units_bounds` (`discarded_units_count BETWEEN 0 AND 500`)
        - `chk_spoilage_records_empty_coherence` (`(discarded_units_count = 0 AND empty_machine_confirmed = TRUE AND disposal_method = 'NOT_APPLICABLE_EMPTY') OR (discarded_units_count > 0 AND empty_machine_confirmed = FALSE AND disposal_method IN ('ON_SITE_ORGANIC_SEALED', 'RETURN_TO_CENTRAL_BIOHAZARD', 'AUTHORIZED_WASTE_MANAGER'))`)
@@ -89,11 +89,11 @@ flowchart LR
     2. Añadir `sanitary_spoilage_records` en el orden topológico de limpieza de `TestDataCleaner.php` (antes de `incidents`, `preventive_orders`, `machines` y `users`) y helper en `PostgresFixtureBuilder.php`.
     3. Actualizar las aserciones de número de tablas en `SchemaConvergenceParityTest.php` y `PostgresSchemaTest.php`.
     4. Crear `tests/integration/PostgresSanitarySpoilageSchemaTest.php` verificando en PostgreSQL real:
-       - Existencia de las 21 columnas, índices, claves foráneas `ON DELETE RESTRICT` y unicidad `uq_sanitary_spoilage_records_code`.
+       - Existencia de las 22 columnas, índices, claves foráneas `ON DELETE RESTRICT` y unicidad `uq_sanitary_spoilage_records_code`.
        - Bloqueo de `DELETE FROM sanitary_spoilage_records` por `trg_no_delete_sanitary_spoilage_records` (`Art. III.1`).
        - Bloqueo de `UPDATE` sobre cualquier hecho sanitario/físico por `trg_immutable_sanitary_spoilage_records` (`Art. III.3`), permitiendo solo el ajuste financiero en filas con `discarded_units_count > 0`.
        - Rechazo por restricciones `CHECK` de incoherencias en máquina vacía (`0 unidades` con `estimated_merchandise_loss_eur > 0` o `empty_machine_confirmed = FALSE`, `C5`, `D3`) y de `units > 0` con `estimated_merchandise_loss_eur = 0.00`.
-  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php tests/integration/PostgresSchemaTest.php tests/integration/SchemaCorrespondenceTest.php tests/integration/PostgresSanitarySpoilageSchemaTest.php`
+  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php tests/integration/PostgresSchemaTest.php tests/integration/PostgresSanitarySpoilageSchemaTest.php`
 
 ---
 
@@ -210,6 +210,7 @@ flowchart LR
     2. Probar el bloqueo `409 ACTIVE_INCIDENT_BLOCKS_QUARANTINE_LIFT` mientras la avería está en `ASSIGNED` / `IN_PROGRESS` / `PENDING_PARTS`, y el éxito una vez que la avería pasa a `RESOLVED` (`C1`).
     3. Probar la reapertura en garantía (`< 48h`, `QA 2`): tras resolver la avería y levantar la cuarentena con `ACTA-MERMA-...-0001`, reabrir la avería, volver a poner la máquina en cuarentena, resolver de nuevo y levantar la nueva cuarentena comprobando que se crea `ACTA-MERMA-...-0002` y que `0001` permanece intacta.
     4. Probar la exclusión de máquinas inactivas en `active_quarantined_machines_count` (`QA 3`), los ajustes financieros sucesivos y el rechazo de ajuste sobre `0 unidades` o con importe idéntico (`C5`, `QA 4`), y el escape anti-fórmulas en `exportCsvForCoordinator()` (`QA 4`).
+    5. Probar que el levantamiento no escribe nuevas filas en `notification_outbox` (`C6`).
   - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SanitarySpoilageServiceIntegrationTest.php`
 
 ---
@@ -275,25 +276,25 @@ flowchart LR
     4. Integrar en `TechnicianRouteView.js` la acción para levantar la cuarentena con Acta de Merma cuando la máquina de la parada está en `'QUARANTINE'` (habilitada una vez resuelta la avería según `C1`) y el botón para abrir e imprimir el Acta Oficial A4 (`QA 3`).
   - **Hecho cuando:** `node --check public/assets/js/api.js && node --check public/assets/js/components/SanitarySpoilageLiftModal.js && node --check public/assets/js/components/SanitarySpoilageOfficialActModal.js && node --check public/assets/js/components/TechnicianRouteView.js`
 
-- [x] **T-SPOILAGE-13 · Construir `CoordinatorSanitarySpoilageTab.js`, integrarlo en `CoordinatorPreventiveView.js`, estilizar en `styles.css`, actualizar `public/sw.js` y crear `SanitarySpoilageFrontendTest.mjs`**
+- [x] **T-SPOILAGE-13 · Construir `CoordinatorSanitarySpoilageTab.js`, integrarlo en `CoordinatorDashboardView.js`, estilizar en `styles.css`, actualizar `public/sw.js` y crear `SanitarySpoilageFrontendTest.mjs`**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-SPOILAGE-12`
   - **Archivos exactos a crear o modificar:**
     - Crear `public/assets/js/components/CoordinatorSanitarySpoilageTab.js`
-    - Modificar `public/assets/js/components/CoordinatorPreventiveView.js`
+    - Modificar `public/assets/js/views/CoordinatorDashboardView.js`
     - Modificar `public/assets/css/styles.css`
     - Modificar `public/sw.js`
     - Crear `tests/unit/SanitarySpoilageFrontendTest.mjs`
   - **Requisitos cubiertos:** `RF-04.1`, `RF-04.2`, `RF-05.1`, `RF-05.2`, `RNF-03`, `D2`, `C4`, `C5`, `QA 1`, `QA 3`, `QA 4`, `docs/design.md`.
   - **Detalle de implementación:**
-    1. Crear `public/assets/js/components/CoordinatorSanitarySpoilageTab.js` cumpliendo estrictamente `docs/design.md` (`CoordinatorButtonVariantsGuardTest`, `LegacyButtonPaletteRetirementTest` y `DesignTokenDebtRatchetTest`):
+    1. Crear `public/assets/js/components/CoordinatorSanitarySpoilageTab.js` cumpliendo estrictamente `docs/design.md` (`tests/unit/CoordinatorButtonVariantsGuardTest.mjs`, `tests/unit/LegacyButtonPaletteRetirementTest.mjs` y `tests/unit/DesignTokenDebtRatchetTest.mjs`):
        - **4 Tarjetas KPI superiores (`QA 3`):** *Máquinas en Cuarentena Activa*, *Total de Actas Emitidas*, *Unidades Perecederas Destruidas* y *Merma Económica Estimada (€)* con borde hairline `#c8cfda` (`8px` radius, **cero sombra en reposo**) e inmunes al filtrado de la tabla inferior.
        - **Bloque de Máquinas Activas en Cuarentena:** muestra cada máquina activa en `'QUARANTINE'` ordenada por código ascendente (`QA 4`); si tiene una avería abierta muestra chip informativo de bloqueo (`C1`) y si no tiene averías abiertas ofrece el botón `vg-btn vg-btn-sm vg-btn-primary` *«☣️ Emitir Acta y Levantar Cuarentena»*.
        - **Barra de filtros (`vg-action-group`) y Tabla histórica (`vg-row-actions`):** filtro por máquina, origen de cuarentena, método de destrucción, rango de fechas (`date_from` / `date_to` validando `date_from <= date_to`, `QA 4`), buscador textual y botón `vg-btn vg-btn-secondary` *«📥 Exportar CSV APPCC»*. En cada fila de la tabla, celda `vg-row-actions` con `vg-btn vg-btn-sm vg-btn-primary-outline` *«📄 Acta A4»* y, únicamente cuando `discarded_units_count > 0` (`C5`), botón `vg-btn vg-btn-sm vg-btn-secondary` *«💶 Ajustar coste»*.
        - **Modal de Ajuste Económico (`C5`, `QA 4`):** muestra unidades destruidas y coste actual, input numérico `> 0.00` distinto al actual y textarea `loss_adjustment_reason` (`20..500` chars y $\ge 3$ palabras reales).
-    2. Integrar la sub-pestaña **«☣️ Actas de Merma APPCC»** en `CoordinatorPreventiveView.js`, añadir estilos en `public/assets/css/styles.css` usando solo variables `var(--color-*)` e incorporar los 3 nuevos componentes JS en `APP_SHELL_ASSETS` de `public/sw.js` actualizando `CACHE_NAME`.
+    2. Integrar la sub-pestaña **«☣️ Actas de Merma APPCC»** en `CoordinatorDashboardView.js`, añadir estilos en `public/assets/css/styles.css` usando solo variables `var(--color-*)` e incorporar los 3 nuevos componentes JS en `APP_SHELL_ASSETS` de `public/sw.js` actualizando `CACHE_NAME`.
     3. Crear `tests/unit/SanitarySpoilageFrontendTest.mjs` verificando la estructura y lógica de los 3 componentes, la presencia del aviso de privacidad Art. V.4, el bloqueo offline (`C3`), el registro en `sw.js` y el cumplimiento de los guardas de diseño.
-  - **Hecho cuando:** `node tests/unit/SanitarySpoilageFrontendTest.mjs && node tests/unit/CoordinatorButtonVariantsGuardTest.mjs && vendor/bin/phpunit tests/unit/LegacyButtonPaletteRetirementTest.php tests/unit/DesignTokenDebtRatchetTest.php tests/unit/OfflinePwaAppShellContractTest.php`
+  - **Hecho cuando:** `node tests/unit/SanitarySpoilageFrontendTest.mjs && node tests/unit/CoordinatorButtonVariantsGuardTest.mjs && node tests/unit/LegacyButtonPaletteRetirementTest.mjs && node tests/unit/DesignTokenDebtRatchetTest.mjs && node tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs`
 
 ---
 
