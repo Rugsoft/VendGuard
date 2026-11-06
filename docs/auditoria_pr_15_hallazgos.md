@@ -9,7 +9,7 @@
 **Base verificada:** `main` en `9db60dd2e2c9c3f78495355004ab723078c2e5bc`
 **Fecha de revisión:** 2026-11-06
 **Alcance:** contraste de la rama con `main`: sintaxis, esquema PostgreSQL, persistencia, API, UI, semillas y documentación SDD.
-**Resultado:** **5 hallazgos revisados**: 3 resueltos (1 alta, 1 media y 1 media-baja) y 2 abiertos (2 bajas). La PR sigue `MERGEABLE` / `CLEAN` y `main` es ancestro de la rama; no se ha fusionado y las correcciones 1, 2 y 3 están aplicadas en el árbol de trabajo local.
+**Resultado:** **5 hallazgos revisados**: 4 resueltos (1 alta, 1 media, 1 media-baja y 1 baja) y 1 abierto (1 baja). La PR sigue `MERGEABLE` / `CLEAN` y `main` es ancestro de la rama; no se ha fusionado y las correcciones 1, 2, 3 y 4 están aplicadas en el árbol de trabajo local.
 
 > Este documento recoge únicamente los hallazgos de la revisión. No modifica la especificación aprobada ni aplica correcciones sobre la PR.
 
@@ -22,7 +22,7 @@
 | 1 | Las fotos de las actas sembradas no están versionadas en Git | **Alta** | Funcional / reproducibilidad | Resuelto |
 | 2 | El filtro de fechas usa UTC y no el día operativo de Madrid | **Media** | Funcional | Resuelto |
 | 3 | La numeración correlativa se rompe al superar 9999 | **Media-baja** | Funcional latente | Resuelto |
-| 4 | Las cifras del esquema no coinciden entre los documentos SDD | **Baja** | Documental | Abierto |
+| 4 | Las cifras del esquema no coinciden entre los documentos SDD | **Baja** | Documental | Resuelto |
 | 5 | El mensaje del coordinador pierde el código del acta | **Baja** | Cosmético | Abierto |
 
 ### Verificación ejecutada
@@ -157,6 +157,12 @@ No hay impacto en tiempo de ejecución, pero la especificación técnica, el pla
 
 Actualizar los conteos y el comentario de la migración para que todos los documentos declaren 22 columnas y 9 `CHECK`. Mantener `tasks.md` y el cuerpo de la PR como referencia correcta.
 
+**Resolución aplicada (2026-11-06)**
+
+- Se alinearon `plan.md` (dos menciones), `database_schema.md`, `schema_correspondence_contract.md`, el comentario de la migración `025` y el bloque de convergencia de `supabase_init.sql` con el DDL real: **22 columnas y 9 restricciones `CHECK`**.
+- `tasks.md` y las guardas de esquema ya declaraban 22/9; no se modificó el esquema ni el comportamiento.
+- Verificación: recuento del DDL y `git diff --check` limpios.
+
 ---
 
 ### 2.5. El mensaje del coordinador pierde el código del acta
@@ -193,9 +199,9 @@ Cambiar la lectura a `result?.spoilage_record?.record_code` y añadir una aserci
 1. **Hallazgo 1 — resuelto:** las evidencias viven ahora en `public/assets/seed/spoilage/` y las semillas apuntan a esa ruta.
 2. **Hallazgo 2 — resuelto:** los límites del filtro usan `Europe/Madrid` y los bordes horarios están cubiertos por la suite de integración.
 3. **Hallazgo 3 — resuelto:** la numeración conserva cuatro dígitos como mínimo y crece a cinco sin reutilizar códigos.
-4. **Hallazgo 4:** alinear la documentación SDD con el esquema real.
+4. **Hallazgo 4 — resuelto:** la documentación SDD y los comentarios SQL declaran las 22 columnas y las 9 restricciones `CHECK` reales.
 5. **Hallazgo 5:** corregir el mensaje de éxito y su prueba.
 
 ---
 
-**Estado final de la revisión:** PR `MERGEABLE` / `CLEAN`, sin conflictos con `main`, con tres hallazgos resueltos y dos abiertos; las correcciones 1, 2 y 3 están aplicadas en el árbol de trabajo local.
+**Estado final de la revisión:** PR `MERGEABLE` / `CLEAN`, sin conflictos con `main`, con cuatro hallazgos resueltos y uno abierto; las correcciones 1, 2, 3 y 4 están aplicadas en el árbol de trabajo local.

@@ -3201,7 +3201,7 @@ CREATE TRIGGER trg_immutable_machine_troubleshooting_guides
 --   1. El valor `SANITARY_SPOILAGE_RECORD` en el catálogo de auditoría.
 --   2. La Tabla 40 `sanitary_spoilage_records` (22 columnas) con sus seis
 --      claves foráneas `ON DELETE RESTRICT`, su clave única por código oficial
---      y sus ocho `CHECK`.
+--      y sus nueve `CHECK`.
 --   3. Los cuatro índices de consulta del libro de mermas.
 --   4. La función `enforce_sanitary_spoilage_records_immutability()` y los tres
 --      disparadores constitucionales (Art. III.1, Art. III.3, RNF-01).

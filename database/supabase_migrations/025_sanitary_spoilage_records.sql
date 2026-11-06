@@ -24,7 +24,7 @@
 --   3. La clave única `uq_sanitary_spoilage_records_code`: la numeración del
 --      acta es oficial y no admite duplicados (`QA 2`).
 --   4. Las seis claves foráneas `ON DELETE RESTRICT ON UPDATE CASCADE` y las
---      ocho restricciones `CHECK` que hacen imposible un acta incoherente
+--      nueve restricciones `CHECK` que hacen imposible un acta incoherente
 --      (máquina vacía con coste, cero unidades con lotes, temperaturas fuera
 --      del rango físico plausible o ajuste sin justificación, `C5` y `D3`).
 --   5. Los cuatro índices de consulta del libro de mermas.
