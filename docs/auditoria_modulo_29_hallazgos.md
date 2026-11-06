@@ -8,7 +8,7 @@
 **Fecha de la revisión:** 2026-11-06  
 **Rama:** `spoilage-log` (commit de referencia `fd28e19`)  
 **Alcance:** revisión de solo lectura del código de dominio, API, persistencia, UI y esquema frente a los criterios EARS, decisiones `D1`–`D3`, casos `C1`–`C6` y resoluciones `QA 1`–`QA 4`.  
-**Resultado:** núcleo funcional implementado y certificado por la batería; **1 hueco funcional abierto**, **3 huecos resueltos** y **3 desviaciones menores** pendientes de hardening.
+**Resultado:** núcleo funcional implementado y certificado por la batería; **0 huecos funcionales abiertos**, **4 huecos resueltos** y **3 desviaciones menores** pendientes de hardening.
 
 > Este documento no modifica la especificación aprobada. Los hallazgos 1 a 6 son cambios de implementación; el hallazgo 7 requiere, si se mantiene la paginación, una enmienda del contrato técnico con visto bueno del Product Owner.
 
@@ -21,7 +21,7 @@
 | 1 | Colisión del código de certificado higiénico | **Alta** | RF-03.1 / EARS 03.1 | Resuelto (Módulo 29) |
 | 2 | El técnico no accede al Acta A4 de cualquier máquina | **Media** | QA 3.1 | Resuelto |
 | 3 | Levantamiento técnico limitado a incidencias de su ruta | **Media** | C2 / HU-01 / EARS 01.2 | Resuelto |
-| 4 | Bypass de la validación de la fotografía por la vía JSON | **Media** | EARS 02.2 / RNF-02 | Abierto |
+| 4 | Bypass de la validación de la fotografía por la vía JSON | **Media** | EARS 02.2 / RNF-02 | Resuelto |
 | 5 | Código interno de máquina vacía impreso en el Acta A4 | **Baja** | D3 / EARS 02.1 | Abierto |
 | 6 | El filtro de fechas no cubre el último segundo del día | **Baja** | QA 4.3 | Abierto |
 | 7 | El contrato promete tabla paginada y no hay paginación | **Baja** | Contrato técnico §3.4 | Abierto |
@@ -144,6 +144,13 @@ Un usuario interno autenticado puede emitir un acta con una URL de evidencia inv
 
 Aceptar el levantamiento únicamente por `multipart/form-data`, o verificar en el servidor que la URL pertenece a `/uploads/`, que el archivo existe y que su contenido real es JPEG, PNG o WebP dentro del límite. Añadir una prueba negativa con `evidence_photo_url` arbitraria.
 
+**Resolución aplicada (2026-11-06)**
+
+- `LocalFileUploader::validateStoredImage()` comprueba que la ruta JSON sea interna a `/uploads/`, rechaza traversal, enlaces fuera del directorio y consultas o fragmentos, y exige un archivo regular, no vacío, de hasta 5 MB, con MIME real JPEG/PNG/WebP y extensión coherente.
+- `SanitarySpoilageController::lift()` aplica esa validación antes de invocar al servicio cuando no hay archivo multipart; cualquier rechazo se traduce a `422 INVALID_SPOILAGE_RECORD` con `field: evidence_photo_url` y no altera la cuarentena.
+- Pruebas HTTP: imagen válida fuera de `/uploads/`, ruta con traversal, archivo no gráfico existente, URL inventada y URL válida de una imagen recién almacenada (`201`).
+- Verificación: `SanitarySpoilageApiIntegrationTest` 69 aserciones; canal `new_engine` 3 suites · 140 aserciones · 0 fallos; batería global 400 suites · 14.977 aserciones · 0 fallos (la suite HTTP no forma parte de la batería hermética).
+
 ---
 
 ## 3. Desviaciones menores
@@ -221,7 +228,7 @@ Se contrastaron y se consideran correctamente cubiertos:
 - Operación estrictamente en línea (C3) y ausencia de encolado offline del acta.
 - Techos térmicos por tipología y rango físico de ambas lecturas (Art. II, QA 3).
 - Unidades `0..500`, lotes `3..500` con bloque alfanumérico real, confirmación de máquina vacía y método de destrucción (D3, QA 4).
-- Fotografía obligatoria en la rama `multipart`, con tope de 5 MB y `finfo` (el hueco 2.4 afecta solo a la vía JSON).
+- Fotografía obligatoria y verificada en ambas vías: multipart con `LocalFileUploader` y JSON contra archivos existentes en `/uploads/`, con tope de 5 MB, `finfo` y extensión coherente.
 - Observaciones de higienización `20..1000` con tres bloques reales y aviso de privacidad visible.
 - Inmutabilidad de los hechos sanitarios y prohibición de borrado mediante disparadores; relación `1..N` ante reaperturas.
 - Coste automático a 2,50 €/ud., ajustes sucesivos con motivo real, rechazo de importes idénticos y opacidad financiera para técnico, Sede, QR y A4.
@@ -235,7 +242,7 @@ Se contrastaron y se consideran correctamente cubiertos:
 1. **Hallazgo 1** (Alta): **resuelto** con la reserva correlativa bajo bloqueo de asesoría y la prueba de regresión. Queda anotada la carrera residual con el flujo preventivo.
 2. **Hallazgo 2** (Media): **resuelto** con el buscador de actas por código de máquina, accesible desde la cabecera del técnico y desde el historial de máquina, sin importes.
 3. **Hallazgo 3** (Media): **resuelto** con el listado transversal de cuarentenas activas y el acceso al levantamiento desde cuarentenas ajenas a la ruta.
-4. **Hallazgo 4** (Media): endurecimiento pendiente de la evidencia fotográfica por la vía JSON.
+4. **Hallazgo 4** (Media): **resuelto** con la validación de la ruta JSON contra archivos reales de `/uploads/`.
 5. **Hallazgos 5, 6 y 7** (Baja): etiqueta del A4, límite superior del filtro de fechas y decisión sobre paginación.
 
 Los hallazgos 1 a 6 no requieren modificar `spec.md`: son correcciones de implementación dentro de criterios ya aprobados. El hallazgo 7 sí puede requerir una enmienda del contrato técnico si se decide no paginar.
@@ -252,4 +259,4 @@ Los hallazgos 1 a 6 no requieren modificar `spec.md`: son correcciones de implem
 - **UI:** `CoordinatorSanitarySpoilageTab.js`, `SanitarySpoilageLiftModal.js`, `SanitarySpoilageOfficialActModal.js`, `TechnicianRouteView.js`.
 - **Pruebas de referencia:** `SanitarySpoilageValidatorTest.php`, `SanitarySpoilageServiceIntegrationTest.php`, `SanitarySpoilageApiIntegrationTest.php`, `PostgresSanitarySpoilageSchemaTest.php`, `SanitarySpoilageFrontendTest.mjs`.
 
-La batería global se encontraba en verde en el momento de la revisión. Este documento no altera código, pruebas ni especificaciones; las líneas citadas corresponden al commit `fd28e19` de la rama `spoilage-log`.
+La batería global se encuentra en verde tras las remediaciones. Las líneas citadas corresponden a la revisión original sobre el commit `fd28e19`; las resoluciones se aplicaron en la rama `spoilage-log`.

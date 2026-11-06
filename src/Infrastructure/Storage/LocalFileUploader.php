@@ -161,6 +161,115 @@ class LocalFileUploader
     }
 
     /**
+     * Valida una ruta pública ya almacenada y devuelve su forma normalizada.
+     *
+     * La vía JSON del levantamiento referencia una evidencia subida antes; esta
+     * comprobación impide que la URL apunte fuera de /uploads/, a un archivo
+     * inexistente, a un enlace externo o a un contenido que no sea una imagen
+     * real dentro del límite. La extensión debe ser coherente con el MIME.
+     *
+     * @throws InvalidUploadException
+     */
+    public function validateStoredImage(string $publicPath): string
+    {
+        $path = trim($publicPath);
+        $prefix = '/uploads/';
+
+        if (
+            $path === ''
+            || str_contains($path, "\0")
+            || str_contains($path, '\\')
+            || str_contains($path, '?')
+            || str_contains($path, '#')
+            || !str_starts_with($path, $prefix)
+        ) {
+            throw new InvalidUploadException(
+                'INVALID_PUBLIC_PATH',
+                'La evidencia debe ser una ruta interna de /uploads/.',
+                422
+            );
+        }
+
+        $relativePath = substr($path, strlen($prefix));
+        if ($relativePath === '') {
+            throw new InvalidUploadException(
+                'INVALID_PUBLIC_PATH',
+                'La ruta de la evidencia no es válida.',
+                422
+            );
+        }
+
+        foreach (explode('/', $relativePath) as $segment) {
+            if ($segment === '' || $segment === '.' || $segment === '..') {
+                throw new InvalidUploadException(
+                    'INVALID_PUBLIC_PATH',
+                    'La ruta de la evidencia no es válida.',
+                    422
+                );
+            }
+        }
+
+        $baseDir = realpath($this->targetDir);
+        $candidatePath = rtrim($this->targetDir, DIRECTORY_SEPARATOR)
+            . DIRECTORY_SEPARATOR
+            . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+        $realPath = realpath($candidatePath);
+
+        if (
+            $baseDir === false
+            || $realPath === false
+            || !is_file($realPath)
+            || !str_starts_with($realPath, $baseDir . DIRECTORY_SEPARATOR)
+        ) {
+            throw new InvalidUploadException(
+                'FILE_NOT_FOUND',
+                'La evidencia indicada no existe en el almacenamiento local.',
+                422
+            );
+        }
+
+        $fileSize = filesize($realPath);
+        if ($fileSize === false || $fileSize <= 0) {
+            throw new InvalidUploadException(
+                'EMPTY_FILE',
+                'El archivo de evidencia está vacío.',
+                422
+            );
+        }
+
+        if ($fileSize > $this->maxSizeBytes) {
+            throw new InvalidUploadException(
+                'FILE_TOO_LARGE',
+                'La evidencia adjunta supera el tamaño máximo permitido de 5 MB (RNF-05).',
+                422
+            );
+        }
+
+        $realMime = $this->detectRealMimeType($realPath);
+        if ($realMime === null || !array_key_exists($realMime, self::ALLOWED_MIME_TYPES)) {
+            throw new InvalidUploadException(
+                'INVALID_FILE_TYPE',
+                'La evidencia debe ser una imagen JPEG, PNG o WebP verificada.',
+                422
+            );
+        }
+
+        $extension = strtolower(pathinfo($relativePath, PATHINFO_EXTENSION));
+        $allowedExtensions = $realMime === 'image/jpeg'
+            ? ['jpg', 'jpeg']
+            : [self::ALLOWED_MIME_TYPES[$realMime]];
+        if (!in_array($extension, $allowedExtensions, true)) {
+            throw new InvalidUploadException(
+                'INVALID_FILE_TYPE',
+                'La extensión de la evidencia no corresponde a su contenido gráfico real.',
+                422
+            );
+        }
+
+        return $prefix . str_replace(DIRECTORY_SEPARATOR, '/', $relativePath);
+    }
+
+    /**
      * Detecta el tipo MIME real leyendo los números mágicos del archivo temporal.
      */
     public function detectRealMimeType(string $path): ?string

@@ -37,6 +37,7 @@ use VendGuard\Application\Service\AuthService;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
+use VendGuard\Infrastructure\Storage\LocalFileUploader;
 use VendGuard\Presentation\Controller\SanitarySpoilageController;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -217,6 +218,7 @@ try {
     $noPhotoMachine = $insertMachine($pdo, $locationId, 'T29API-NOPHOTO-' . $suffix);
     $fakeFileMachine = $insertMachine($pdo, $locationId, 'T29API-FAKE-' . $suffix);
     $bigFileMachine = $insertMachine($pdo, $locationId, 'T29API-BIG-' . $suffix);
+    $jsonPhotoMachine = $insertMachine($pdo, $locationId, 'T29API-JSON-' . $suffix);
 
     $insertOpenIncident(
         $pdo,
@@ -786,6 +788,84 @@ try {
     $assert(
         'Los rechazos de evidencia no alteran la cuarentena de la máquina',
         $fakeMachineStatus === 'QUARANTINE' && $bigMachineStatus === 'QUARANTINE'
+    );
+
+    echo "\n--- 3-bis. Evidencia JSON: ruta interna y contenido real ---\n";
+
+    $outsideUploadsResponse = $dispatchJson(
+        'POST',
+        "/api/sanitary-quarantines/machines/{$jsonPhotoMachine}/lift",
+        $basePayload + ['evidence_photo_url' => $pngPath],
+        $technicianToken
+    );
+    $assert(
+        'Una imagen válida fuera de /uploads/ => 422 INVALID_SPOILAGE_RECORD',
+        $outsideUploadsResponse->getStatusCode() === 422
+        && $errorCode($outsideUploadsResponse) === 'INVALID_SPOILAGE_RECORD',
+        $errorCode($outsideUploadsResponse)
+    );
+
+    $traversalResponse = $dispatchJson(
+        'POST',
+        "/api/sanitary-quarantines/machines/{$jsonPhotoMachine}/lift",
+        $basePayload + ['evidence_photo_url' => '/uploads/../.env'],
+        $technicianToken
+    );
+    $assert(
+        'Una ruta con traversal => 422 INVALID_SPOILAGE_RECORD',
+        $traversalResponse->getStatusCode() === 422
+        && $errorCode($traversalResponse) === 'INVALID_SPOILAGE_RECORD',
+        $errorCode($traversalResponse)
+    );
+
+    $jsonUploader = new LocalFileUploader();
+    $jsonPhotoUrl = $jsonUploader->upload($pngFile);
+    $uploadedUrls[] = $jsonPhotoUrl;
+
+    $nonImageFilename = 't29api-no-image-' . $suffix . '.jpg';
+    $nonImagePath = $projectRoot . '/public/uploads/' . $nonImageFilename;
+    file_put_contents($nonImagePath, 'Este archivo no es una imagen.');
+    $temporaryFiles[] = $nonImagePath;
+
+    $nonImageResponse = $dispatchJson(
+        'POST',
+        "/api/sanitary-quarantines/machines/{$jsonPhotoMachine}/lift",
+        $basePayload + ['evidence_photo_url' => '/uploads/' . $nonImageFilename],
+        $technicianToken
+    );
+    $assert(
+        'Un archivo no gráfico existente en /uploads/ => 422 INVALID_SPOILAGE_RECORD',
+        $nonImageResponse->getStatusCode() === 422
+        && $errorCode($nonImageResponse) === 'INVALID_SPOILAGE_RECORD',
+        $errorCode($nonImageResponse)
+    );
+
+    $arbitraryUrlResponse = $dispatchJson(
+        'POST',
+        "/api/sanitary-quarantines/machines/{$jsonPhotoMachine}/lift",
+        $basePayload + ['evidence_photo_url' => '/uploads/t29api-inexistente-' . $suffix . '.jpg'],
+        $technicianToken
+    );
+    $assert(
+        'Una URL inventada => 422 INVALID_SPOILAGE_RECORD',
+        $arbitraryUrlResponse->getStatusCode() === 422
+        && $errorCode($arbitraryUrlResponse) === 'INVALID_SPOILAGE_RECORD',
+        $errorCode($arbitraryUrlResponse)
+    );
+
+    $validJsonResponse = $dispatchJson(
+        'POST',
+        "/api/sanitary-quarantines/machines/{$jsonPhotoMachine}/lift",
+        $basePayload + ['evidence_photo_url' => $jsonPhotoUrl],
+        $technicianToken
+    );
+    $validJsonBody = $validJsonResponse->getDecodedBody();
+    $validJsonRecord = is_array($validJsonBody) ? ($validJsonBody['data']['spoilage_record'] ?? []) : [];
+    $assert(
+        'Una evidencia real almacenada en /uploads/ => 201 y conserva la URL',
+        $validJsonResponse->getStatusCode() === 201
+        && ($validJsonRecord['evidence_photo_url'] ?? null) === $jsonPhotoUrl,
+        'HTTP ' . $validJsonResponse->getStatusCode()
     );
 
     $emptyLiftResponse = $dispatchMultipart(

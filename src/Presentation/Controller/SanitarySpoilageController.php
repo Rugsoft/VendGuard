@@ -62,9 +62,10 @@ final class SanitarySpoilageController
      *
      * Acepta `multipart/form-data` con `photo` o JSON con `evidence_photo_url`.
      * La foto se valida con `LocalFileUploader` (≤ 5 MB y MIME real) antes de
-     * tocar la base de datos. Si el servicio rechaza el acta después de haber
-     * guardado la imagen, el archivo se elimina para no dejar evidencias
-     * huérfanas en `public/uploads/`.
+     * tocar la base de datos. La vía JSON solo admite una evidencia ya
+     * almacenada en `/uploads/` que supere la misma inspección de archivo. Si el
+     * servicio rechaza el acta después de haber guardado la imagen, el archivo
+     * se elimina para no dejar evidencias huérfanas en `public/uploads/`.
      */
     public function lift(Request $request): Response
     {
@@ -91,8 +92,15 @@ final class SanitarySpoilageController
 
         $body = $request->getParsedBody();
         $providedUrl = $body['evidence_photo_url'] ?? '';
-        $evidencePhotoUrl = $uploadedPath
-            ?? (is_string($providedUrl) ? trim($providedUrl) : '');
+        $evidencePhotoUrl = $uploadedPath ?? '';
+
+        if ($uploadedPath === null && is_string($providedUrl) && trim($providedUrl) !== '') {
+            try {
+                $evidencePhotoUrl = $this->uploader()->validateStoredImage($providedUrl);
+            } catch (InvalidUploadException $exception) {
+                return $this->uploadFailure($exception);
+            }
+        }
 
         try {
             $result = $this->service()->liftQuarantineWithSpoilageRecord(
