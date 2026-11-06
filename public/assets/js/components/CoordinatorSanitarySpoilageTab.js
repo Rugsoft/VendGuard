@@ -386,7 +386,7 @@ export const CoordinatorSanitarySpoilageTab = {
     },
 
     async handleLifted(result) {
-      const recordCode = String(result?.record_code ?? '').trim();
+      const recordCode = String(result?.spoilage_record?.record_code ?? '').trim();
       this.successMessage = recordCode === ''
         ? 'Acta de merma emitida y cuarentena levantada.'
         : `Acta ${recordCode} emitida y cuarentena levantada.`;

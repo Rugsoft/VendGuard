@@ -9,7 +9,7 @@
 **Base verificada:** `main` en `9db60dd2e2c9c3f78495355004ab723078c2e5bc`
 **Fecha de revisión:** 2026-11-06
 **Alcance:** contraste de la rama con `main`: sintaxis, esquema PostgreSQL, persistencia, API, UI, semillas y documentación SDD.
-**Resultado:** **5 hallazgos revisados**: 4 resueltos (1 alta, 1 media, 1 media-baja y 1 baja) y 1 abierto (1 baja). La PR sigue `MERGEABLE` / `CLEAN` y `main` es ancestro de la rama; no se ha fusionado y las correcciones 1, 2, 3 y 4 están aplicadas en el árbol de trabajo local.
+**Resultado:** **5 hallazgos revisados**: 5 resueltos (1 alta, 1 media, 1 media-baja y 2 bajas) y ninguno abierto. La PR sigue `MERGEABLE` / `CLEAN` y `main` es ancestro de la rama; no se ha fusionado y las correcciones 1, 2, 3, 4 y 5 están aplicadas en el árbol de trabajo local.
 
 > Este documento recoge únicamente los hallazgos de la revisión. No modifica la especificación aprobada ni aplica correcciones sobre la PR.
 
@@ -23,7 +23,7 @@
 | 2 | El filtro de fechas usa UTC y no el día operativo de Madrid | **Media** | Funcional | Resuelto |
 | 3 | La numeración correlativa se rompe al superar 9999 | **Media-baja** | Funcional latente | Resuelto |
 | 4 | Las cifras del esquema no coinciden entre los documentos SDD | **Baja** | Documental | Resuelto |
-| 5 | El mensaje del coordinador pierde el código del acta | **Baja** | Cosmético | Abierto |
+| 5 | El mensaje del coordinador pierde el código del acta | **Baja** | Cosmético | Resuelto |
 
 ### Verificación ejecutada
 
@@ -192,6 +192,12 @@ El levantamiento se completa correctamente, pero el aviso de éxito del coordina
 
 Cambiar la lectura a `result?.spoilage_record?.record_code` y añadir una aserción al test de la superficie de coordinación que compruebe que el mensaje incluye el código emitido.
 
+**Resolución aplicada (2026-11-06)**
+
+- `handleLifted()` lee ahora `result?.spoilage_record?.record_code`, la misma ruta anidada que devuelve el servicio y que ya usan el modal de levantamiento y el A4.
+- La aserción 2.11 del test de la superficie de coordinación simula el payload anidado real, exige el mensaje exacto con el código emitido y comprueba que se recargan el panel y los datos de referencia.
+- Verificación: frontend 74/74 aserciones.
+
 ---
 
 ## 3. Orden de corrección sugerido
@@ -200,8 +206,8 @@ Cambiar la lectura a `result?.spoilage_record?.record_code` y añadir una aserci
 2. **Hallazgo 2 — resuelto:** los límites del filtro usan `Europe/Madrid` y los bordes horarios están cubiertos por la suite de integración.
 3. **Hallazgo 3 — resuelto:** la numeración conserva cuatro dígitos como mínimo y crece a cinco sin reutilizar códigos.
 4. **Hallazgo 4 — resuelto:** la documentación SDD y los comentarios SQL declaran las 22 columnas y las 9 restricciones `CHECK` reales.
-5. **Hallazgo 5:** corregir el mensaje de éxito y su prueba.
+5. **Hallazgo 5 — resuelto:** el mensaje de éxito lee el código anidado del acta y su prueba cubre el payload real.
 
 ---
 
-**Estado final de la revisión:** PR `MERGEABLE` / `CLEAN`, sin conflictos con `main`, con cuatro hallazgos resueltos y uno abierto; las correcciones 1, 2, 3 y 4 están aplicadas en el árbol de trabajo local.
+**Estado final de la revisión:** PR `MERGEABLE` / `CLEAN`, sin conflictos con `main`, con cinco hallazgos resueltos y ninguno abierto; las correcciones 1, 2, 3, 4 y 5 están aplicadas en el árbol de trabajo local.

@@ -352,12 +352,25 @@ try {
       && guardVm.liftMachine.id === 20
       && guardVm.liftMachine.code === 'M-020');
 
-  guardVm.loadPanel = async () => true;
-  guardVm.loadReferenceData = async () => true;
-  await guardVm.handleLifted({ record_code: 'ACTA-MERMA-2026-0008' });
+  let panelReloads = 0;
+  let referenceReloads = 0;
+  guardVm.loadPanel = async () => {
+    panelReloads += 1;
+    return true;
+  };
+  guardVm.loadReferenceData = async () => {
+    referenceReloads += 1;
+    return true;
+  };
+  await guardVm.handleLifted({
+    spoilage_record: { record_code: 'ACTA-MERMA-2026-0008' },
+    machine_sanitary_status: 'OK'
+  });
 
-  assert('2.11 A lifted quarantine reports the issued act and reloads the panel',
-    guardVm.successMessage.includes('ACTA-MERMA-2026-0008'));
+  assert('2.11 A lifted quarantine reports the nested act code and reloads both sources',
+    guardVm.successMessage === 'Acta ACTA-MERMA-2026-0008 emitida y cuarentena levantada.'
+      && panelReloads === 1
+      && referenceReloads === 1);
 
   const offlineVm = createVm();
   offlineVm.isOnline = false;
