@@ -204,7 +204,7 @@ Comparar contra el inicio del día siguiente con `<` (`date_to + 1 day`) en luga
 
 - `PdoSanitarySpoilageRecordRepository::findFilteredForCoordinator()` expresa ahora el límite superior como el inicio exclusivo del día siguiente (`date_to + 1 day` a las `00:00:00`) y compara con `<`. El día final se incluye completo aunque el acta tenga microsegundos; la validación estricta `YYYY-MM-DD` y el rechazo de rangos invertidos no cambian.
 - `SanitarySpoilageServiceIntegrationTest` (§7) inserta un acta a las `2026-03-15 23:59:59.5` y certifica que aparece en el listado y en el CSV de ese día, y que no se arrastra al `2026-03-14`.
-- Verificación: canal `new_engine` 3 suites · 147 aserciones · 0 fallos (`SanitarySpoilageServiceIntegrationTest` 49, con la aserción `C6` de outbox y los límites horarios de Madrid); batería global 400 suites · 14.984 aserciones · 0 fallos (la suite PostgreSQL viaja en el canal `new_engine`).
+- Verificación: canal `new_engine` 3 suites · 153 aserciones · 0 fallos (`SanitarySpoilageServiceIntegrationTest` 55, con la aserción `C6` de outbox, los límites horarios de Madrid y la secuencia de correlativos 9999 → 10000 → 10001); batería global 400 suites · 14.984 aserciones · 0 fallos (la suite PostgreSQL viaja en el canal `new_engine`).
 
 ---
 

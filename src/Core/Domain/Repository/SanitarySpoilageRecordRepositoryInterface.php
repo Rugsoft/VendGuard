@@ -113,7 +113,8 @@ interface SanitarySpoilageRecordRepositoryInterface
      *
      * La reserva se apoya en `pg_advisory_xact_lock`, por lo que debe llamarse
      * dentro de la transacción que insertará el acta. El formato devuelto es
-     * `ACTA-MERMA-AAAA-NNNN`.
+     * `ACTA-MERMA-AAAA-NNNN`, con un mínimo de cuatro dígitos: el sufijo crece
+     * a cinco a partir de 10000 para no reutilizar códigos.
      *
      * @param int $year Año natural del acta.
      * @return string Código oficial reservado.
@@ -125,8 +126,9 @@ interface SanitarySpoilageRecordRepositoryInterface
      *
      * La reserva usa el mismo bloqueo de asesoría que `nextRecordCode()` y debe
      * invocarse dentro de la transacción que insertará el certificado. El
-     * formato devuelto es `CERT-AAAA-NNNN` y nunca reutiliza un código ya
-     * emitido, incluidos los que provengan de otros flujos de inspección.
+     * formato devuelto es `CERT-AAAA-NNNN`, con un mínimo de cuatro dígitos, y
+     * nunca reutiliza un código ya emitido, incluidos los que provengan de otros
+     * flujos de inspección.
      *
      * @param int $year Año natural del certificado.
      * @return string Código oficial reservado.

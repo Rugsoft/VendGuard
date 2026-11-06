@@ -34,14 +34,22 @@ declare(strict_types=1);
  *   5. **Restitución sin nuevas alertas (`C6`).** El levantamiento no escribe
  *      nuevas filas en `notification_outbox`; el acta no dispara mensajería.
  *
- *   6. **Límite superior del filtro de fechas (`QA 4.3`).** El rango incluye
+ *   6. **Exportación CSV (`QA 4`).** El fichero lleva BOM, dos secciones,
+ *      cabeceras incluso sin filas y neutraliza las celdas que comienzan por
+ *      `=`, `+`, `-` o `@`.
+ *
+ *   7. **Límite superior del filtro de fechas (`QA 4.3`).** El rango incluye
  *      el día final completo: un acta emitida a las `23:59:59.5` aparece en el
  *      listado y en el CSV de ese día, y no se arrastra al día anterior.
  *
- *   7. **Límites horarios del día operativo de Madrid (`QA 4.3`).** El filtro
+ *   8. **Límites horarios del día operativo de Madrid (`QA 4.3`).** El filtro
  *      usa `Europe/Madrid` y no la zona de sesión (UTC): las actas de las
  *      00:30 y 23:30 de Madrid caen en su día, y las de los días vecinos no se
  *      arrastran. Se cubre invierno y verano.
+ *
+ *   9. **Correlativos por encima de 9999 (hallazgo 3).** Actas, órdenes
+ *      preventivas y certificados pasan de `9999` a `10000` y de `10000` a
+ *      `10001` sin truncar el sufijo ni reutilizar un código.
  *
  * CATEGORÍA: `new_engine`. Exige PostgreSQL local (`deploy/local/postgres/`);
  * sin motor sale con código 2, nunca se omite en silencio. `run_all.php` la
@@ -1082,6 +1090,111 @@ try {
             sprintf('ACTA-MERMA-%04d-9015', $year),
         ],
         'actas: ' . implode(', ', $neighborCodes)
+    );
+
+    echo "\n--- 9. Correlativos por encima de 9999 (hallazgo 3) ---\n";
+
+    $recordPrefix = sprintf('ACTA-MERMA-%04d-', $year);
+    $insertDatedRecord($recordPrefix . '9999', 'CERT-T29-SEQ-R01', '2026-08-01 10:00:00+02:00');
+    $nextRecordAfter9999 = $repo->nextRecordCode($year);
+    $assert(
+        '9.1 El acta posterior a 9999 es 10000, no 0001',
+        $nextRecordAfter9999 === $recordPrefix . '10000',
+        $nextRecordAfter9999
+    );
+    $insertDatedRecord($recordPrefix . '10000', 'CERT-T29-SEQ-R02', '2026-08-01 10:01:00+02:00');
+    $nextRecordAfter10000 = $repo->nextRecordCode($year);
+    $assert(
+        '9.2 El acta posterior a 10000 es 10001',
+        $nextRecordAfter10000 === $recordPrefix . '10001',
+        $nextRecordAfter10000
+    );
+
+    $certificatePrefix = sprintf('CERT-%04d-', $year);
+    $insertCertificate = static function (string $certificateCode) use (
+        $pdo,
+        $legacyOrderId,
+        $legacyMachine,
+        $locationId,
+        $technicianId
+    ): void {
+        $stmt = $pdo->prepare("
+            INSERT INTO sanitary_certificates (
+                certificate_code, preventive_order_id, machine_id, location_id,
+                technician_id, technician_name, technician_operator_code,
+                inspection_date, valid_until, temperature_measured, result, status
+            ) VALUES (
+                :certificate_code, :preventive_order_id, :machine_id, :location_id,
+                :technician_id, 'Técnico de Certificación T29', 'T29-TEC',
+                CURRENT_TIMESTAMP, CURRENT_DATE + 15, 3.5, 'CONFORME', 'VALID'
+            )
+        ");
+        $stmt->execute([
+            ':certificate_code' => $certificateCode,
+            ':preventive_order_id' => $legacyOrderId,
+            ':machine_id' => $legacyMachine,
+            ':location_id' => $locationId,
+            ':technician_id' => $technicianId,
+        ]);
+    };
+
+    $insertCertificate($certificatePrefix . '9999');
+    $nextCertificateAfter9999 = $repo->nextCertificateCode($year);
+    $assert(
+        '9.3 El certificado posterior a 9999 es 10000',
+        $nextCertificateAfter9999 === $certificatePrefix . '10000',
+        $nextCertificateAfter9999
+    );
+    $insertCertificate($certificatePrefix . '10000');
+    $nextCertificateAfter10000 = $repo->nextCertificateCode($year);
+    $assert(
+        '9.4 El certificado posterior a 10000 es 10001',
+        $nextCertificateAfter10000 === $certificatePrefix . '10001',
+        $nextCertificateAfter10000
+    );
+
+    $preventivePrefix = sprintf('PREV-%04d-', $year);
+    $pdo->prepare("
+        INSERT INTO preventive_orders (
+            order_code, machine_id, location_id, assigned_technician_id,
+            status, order_type, scheduled_date, due_date, completed_at, result
+        ) VALUES (
+            :order_code, :machine_id, :location_id, :technician_id,
+            'COMPLETED', 'REINSPECTION', CURRENT_DATE, CURRENT_DATE, CURRENT_TIMESTAMP, 'CONFORME'
+        )
+    ")->execute([
+        ':order_code' => $preventivePrefix . '9999',
+        ':machine_id' => $machineI,
+        ':location_id' => $locationId,
+        ':technician_id' => $technicianId,
+    ]);
+
+    $machineJ = $insertMachine($pdo, $locationId, 'T29-J-SEQUENCE');
+    $firstSequenceOrder = $repo->completePendingReinspectionAndRestoreMachineOk(
+        $machineJ,
+        $technicianId,
+        3.5,
+        'CERT-T29-SEQ-P01',
+        'Reinspección de secuencia para certificar el correlativo preventivo.'
+    );
+    $assert(
+        '9.5 La orden preventiva posterior a 9999 es 10000',
+        ($firstSequenceOrder['reinspection_order_code'] ?? null) === $preventivePrefix . '10000',
+        (string)($firstSequenceOrder['reinspection_order_code'] ?? 'sin código')
+    );
+
+    $machineK = $insertMachine($pdo, $locationId, 'T29-K-SEQUENCE');
+    $secondSequenceOrder = $repo->completePendingReinspectionAndRestoreMachineOk(
+        $machineK,
+        $technicianId,
+        3.5,
+        'CERT-T29-SEQ-P02',
+        'Segunda reinspección de secuencia para certificar el correlativo preventivo.'
+    );
+    $assert(
+        '9.6 La orden preventiva posterior a 10000 es 10001',
+        ($secondSequenceOrder['reinspection_order_code'] ?? null) === $preventivePrefix . '10001',
+        (string)($secondSequenceOrder['reinspection_order_code'] ?? 'sin código')
     );
 } catch (Throwable $exception) {
     $crash = $exception;

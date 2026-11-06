@@ -9,7 +9,7 @@
 **Base verificada:** `main` en `9db60dd2e2c9c3f78495355004ab723078c2e5bc`
 **Fecha de revisión:** 2026-11-06
 **Alcance:** contraste de la rama con `main`: sintaxis, esquema PostgreSQL, persistencia, API, UI, semillas y documentación SDD.
-**Resultado:** **5 hallazgos revisados**: 2 resueltos (1 alta y 1 media) y 3 abiertos (1 media-baja y 2 bajas). La PR sigue `MERGEABLE` / `CLEAN` y `main` es ancestro de la rama; no se ha fusionado y las correcciones 1 y 2 están aplicadas en el árbol de trabajo local.
+**Resultado:** **5 hallazgos revisados**: 3 resueltos (1 alta, 1 media y 1 media-baja) y 2 abiertos (2 bajas). La PR sigue `MERGEABLE` / `CLEAN` y `main` es ancestro de la rama; no se ha fusionado y las correcciones 1, 2 y 3 están aplicadas en el árbol de trabajo local.
 
 > Este documento recoge únicamente los hallazgos de la revisión. No modifica la especificación aprobada ni aplica correcciones sobre la PR.
 
@@ -21,14 +21,14 @@
 | :---: | :--- | :---: | :--- | :---: |
 | 1 | Las fotos de las actas sembradas no están versionadas en Git | **Alta** | Funcional / reproducibilidad | Resuelto |
 | 2 | El filtro de fechas usa UTC y no el día operativo de Madrid | **Media** | Funcional | Resuelto |
-| 3 | La numeración correlativa se rompe al superar 9999 | **Media-baja** | Funcional latente | Abierto |
+| 3 | La numeración correlativa se rompe al superar 9999 | **Media-baja** | Funcional latente | Resuelto |
 | 4 | Las cifras del esquema no coinciden entre los documentos SDD | **Baja** | Documental | Abierto |
 | 5 | El mensaje del coordinador pierde el código del acta | **Baja** | Cosmético | Abierto |
 
 ### Verificación ejecutada
 
 - `php tests/run_all.php`: **400 suites · 14.984 aserciones · 0 fallos**.
-- `php tests/run_new_engine.php Spoilage`: **3 suites · 147 aserciones · 0 fallos**.
+- `php tests/run_new_engine.php Spoilage`: **3 suites · 153 aserciones · 0 fallos**.
 - `node tests/unit/SanitarySpoilageFrontendTest.mjs`: **74/74 aserciones**.
 - `php -l` y `node --check` sobre los archivos modificados: sin errores.
 - GitHub no tiene checks configurados para la rama; por tanto, `CLEAN` no equivale a una CI verde.
@@ -102,7 +102,7 @@ Añadir pruebas con actas a las `00:30` y `23:30` de Madrid, tanto en horario de
 - `findFilteredForCoordinator()` aplica `AT TIME ZONE 'Europe/Madrid'` a los dos límites, de modo que el rango se calcula sobre el día operativo y no sobre la zona de sesión UTC.
 - La prueba `SanitarySpoilageServiceIntegrationTest` (§8) inserta actas a las 00:30 y 23:30 de Madrid en marzo (CET) y julio (CEST), y verifica que las de los días vecinos no se arrastran.
 - El caso §7 existente se ajustó a `23:59:59.5+01:00` para que el límite superior siga midiendo el último instante del día de Madrid.
-- Verificación: canal Spoilage 3 suites · 147 aserciones · 0 fallos.
+- Verificación: canal Spoilage 3 suites · 153 aserciones · 0 fallos.
 
 ---
 
@@ -126,6 +126,12 @@ Al alcanzar 10.000 actas u órdenes preventivas en un año, el sistema puede gen
 **Recomendación**
 
 Usar `([0-9]+)$` y `str_pad((string)$next, 4, '0', STR_PAD_LEFT)`, o rechazar explícitamente el siguiente código si el contrato exige cuatro dígitos. Cubrir con una prueba la secuencia `9999 → 10000 → 10001` para actas, órdenes preventivas y certificados.
+
+**Resolución aplicada (2026-11-06)**
+
+- `nextRecordCode()` y `nextPreventiveOrderCode()` capturan ahora el sufijo completo con `([0-9]+)$`; los tres generadores formatean el número con `str_pad(..., 4, '0', STR_PAD_LEFT)`. El formato mantiene cuatro dígitos como mínimo y crece a cinco a partir de 10000, sin truncar el sufijo ni reutilizar códigos.
+- `SanitarySpoilageServiceIntegrationTest` §9 inserta los códigos `9999` y `10000` y certifica las secuencias `9999 → 10000 → 10001` en actas, certificados y órdenes preventivas.
+- Verificación: canal Spoilage 3 suites · 153 aserciones · 0 fallos.
 
 ---
 
@@ -186,10 +192,10 @@ Cambiar la lectura a `result?.spoilage_record?.record_code` y añadir una aserci
 
 1. **Hallazgo 1 — resuelto:** las evidencias viven ahora en `public/assets/seed/spoilage/` y las semillas apuntan a esa ruta.
 2. **Hallazgo 2 — resuelto:** los límites del filtro usan `Europe/Madrid` y los bordes horarios están cubiertos por la suite de integración.
-3. **Hallazgo 3:** corregir la numeración antes de alcanzar el límite de cuatro dígitos.
+3. **Hallazgo 3 — resuelto:** la numeración conserva cuatro dígitos como mínimo y crece a cinco sin reutilizar códigos.
 4. **Hallazgo 4:** alinear la documentación SDD con el esquema real.
 5. **Hallazgo 5:** corregir el mensaje de éxito y su prueba.
 
 ---
 
-**Estado final de la revisión:** PR `MERGEABLE` / `CLEAN`, sin conflictos con `main`, con dos hallazgos resueltos y tres abiertos; las correcciones 1 y 2 están aplicadas en el árbol de trabajo local.
+**Estado final de la revisión:** PR `MERGEABLE` / `CLEAN`, sin conflictos con `main`, con tres hallazgos resueltos y dos abiertos; las correcciones 1, 2 y 3 están aplicadas en el árbol de trabajo local.

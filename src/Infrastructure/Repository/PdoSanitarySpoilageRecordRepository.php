@@ -304,7 +304,7 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
 
         $stmtSeq = $this->pdo->prepare("
             SELECT COALESCE(
-                MAX(CAST(SUBSTRING(record_code FROM '([0-9]{4})$') AS INTEGER)),
+                MAX(CAST(SUBSTRING(record_code FROM '([0-9]+)$') AS INTEGER)),
                 0
             ) + 1
             FROM sanitary_spoilage_records
@@ -313,7 +313,11 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
         $stmtSeq->execute([':prefix' => $prefix . '%']);
         $next = (int)$stmtSeq->fetchColumn();
 
-        return sprintf('ACTA-MERMA-%04d-%04d', $year, $next);
+        return sprintf(
+            'ACTA-MERMA-%04d-%s',
+            $year,
+            str_pad((string)$next, 4, '0', STR_PAD_LEFT)
+        );
     }
 
     /**
@@ -349,7 +353,11 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
         $stmtSeq->execute([':prefix' => $prefix . '%']);
         $next = (int)$stmtSeq->fetchColumn();
 
-        return sprintf('CERT-%04d-%04d', $year, $next);
+        return sprintf(
+            'CERT-%04d-%s',
+            $year,
+            str_pad((string)$next, 4, '0', STR_PAD_LEFT)
+        );
     }
 
     /**
@@ -985,7 +993,7 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
 
         $stmtSeq = $this->pdo->prepare("
             SELECT COALESCE(
-                MAX(CAST(SUBSTRING(order_code FROM '([0-9]{4})$') AS INTEGER)),
+                MAX(CAST(SUBSTRING(order_code FROM '([0-9]+)$') AS INTEGER)),
                 0
             ) + 1
             FROM preventive_orders
@@ -994,7 +1002,11 @@ final class PdoSanitarySpoilageRecordRepository implements SanitarySpoilageRecor
         $stmtSeq->execute([':prefix' => $prefix . '%']);
         $next = (int)$stmtSeq->fetchColumn();
 
-        return sprintf('PREV-%04d-%04d', $year, $next);
+        return sprintf(
+            'PREV-%04d-%s',
+            $year,
+            str_pad((string)$next, 4, '0', STR_PAD_LEFT)
+        );
     }
 
     /**
