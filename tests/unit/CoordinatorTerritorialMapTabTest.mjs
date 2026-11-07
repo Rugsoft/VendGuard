@@ -134,6 +134,18 @@ api.map.getActiveIncidents = async (params = {}) => {
   return { success: true, data: payload };
 };
 
+// Censo de técnicos activos: el selector bebe de los usuarios de personal (RF-MAP-09)
+let technicianRequests = [];
+api.coordinator = api.coordinator || {};
+api.coordinator.getUsers = async (params = {}) => {
+  technicianRequests.push(params);
+  return [
+    { id: 2, name: 'Jordi Técnico', role: 'TECHNICIAN', is_active: true },
+    { id: 3, name: 'Marta Técnica', role: 'TECHNICIAN', is_active: true },
+    { id: 9, name: 'Técnico Dado de Baja', role: 'TECHNICIAN', is_active: false }
+  ];
+};
+
 // =========================================================================
 // BLOQUE 1: Carga del mapa territorial y agrupación por sedes (RF-MAP-09)
 // =========================================================================
@@ -250,6 +262,88 @@ reactiveTab.filters.technician_id = '3';
 // Sin el motor reactivo de Vue el watcher se invoca manualmente para verificar que delega en la carga.
 CoordinatorTerritorialMapTab.watch['filters.technician_id'].call(reactiveTab);
 assert('4.5 Cambiar el filtro de técnico relanza la carga de datos', apiCalls.length === 1 && apiCalls[0].technician_id === '3');
+
+// El desplegable «Técnico asignado» se poblaba vacío: nadie cargaba el censo.
+technicianRequests = [];
+const rosterTab = createTabInstance();
+await rosterTab.loadTechnicians();
+assert('4.6 El selector pide los técnicos activos al endpoint de personal',
+  technicianRequests.length === 1 && technicianRequests[0].role === 'TECHNICIAN' && technicianRequests[0].status === 'active');
+assert('4.7 El selector ofrece cada técnico activo con su id y su nombre',
+  rosterTab.technicians.length === 2
+    && rosterTab.technicians[0].id === 2 && rosterTab.technicians[0].name === 'Jordi Técnico'
+    && rosterTab.technicians[1].id === 3 && rosterTab.technicians[1].name === 'Marta Técnica');
+assert('4.8 La plantilla pinta una opción por técnico del censo',
+  CoordinatorTerritorialMapTab.template.includes('v-for="tech in technicians"') && CoordinatorTerritorialMapTab.template.includes('{{ tech.name }}'));
+
+api.coordinator.getUsers = async () => { throw new Error('Sin conexión'); };
+const rosterErrorTab = createTabInstance();
+await rosterErrorTab.loadTechnicians();
+assert('4.9 Un fallo del censo deja el selector en «Todos los técnicos» sin romper el mapa',
+  rosterErrorTab.technicians.length === 0);
+
+// El vacío del filtro de técnico no es el del territorio sin actividad: hay averías, pero
+// ninguna asignada al operario elegido.
+const technicianEmptyTab = createTabInstance();
+technicianEmptyTab.technicians = [{ id: 2, name: 'Jordi Técnico' }];
+technicianEmptyTab.sites = [];
+technicianEmptyTab.filters.technician_id = '2';
+assert('4.10 Un filtro de técnico sin sedes declara el vacío propio del técnico',
+  technicianEmptyTab.isTechnicianFilterEmpty === true);
+assert('4.11 El vacío nombra al técnico seleccionado', technicianEmptyTab.selectedTechnicianName === 'Jordi Técnico');
+technicianEmptyTab.sites = makeSites();
+assert('4.12 Con sedes en la foto no se declara el vacío del técnico',
+  technicianEmptyTab.isTechnicianFilterEmpty === false);
+
+const unknownTechnicianTab = createTabInstance();
+unknownTechnicianTab.filters.technician_id = '99';
+assert('4.13 Sin censo disponible el vacío usa una etiqueta genérica',
+  unknownTechnicianTab.isTechnicianFilterEmpty === true
+    && unknownTechnicianTab.selectedTechnicianName === 'El técnico seleccionado');
+assert('4.14 Sin filtro de técnico el vacío genérico sigue siendo el del territorio',
+  createTabInstance().isTechnicianFilterEmpty === false);
+assert('4.15 Plantilla: vacío propio del filtro de técnico con su testid y su copy',
+  CoordinatorTerritorialMapTab.template.includes('data-testid="territorial-technician-empty"')
+    && CoordinatorTerritorialMapTab.template.includes('technicianEmptyTitle')
+    && CoordinatorTerritorialMapTab.template.includes('Ajuste los filtros del mapa para volver a ver todo el parque.'));
+
+// Los filtros de severidad viajan al servidor: si no casan, la foto llega vacía y el mapa
+// tampoco debe decir que el territorio no tiene averías.
+const criticalEmptyTab = createTabInstance();
+criticalEmptyTab.filters.is_critical_only = true;
+assert('4.16 «Solo cadena de frío» sin resultados declara su propio vacío',
+  criticalEmptyTab.isSeverityFilterEmpty === true
+    && criticalEmptyTab.severityEmptyTitle === 'No hay avisos de cadena de frío (críticos) en el territorio.');
+
+const unassignedEmptyTab = createTabInstance();
+unassignedEmptyTab.filters.unassigned_only = true;
+assert('4.17 «Solo sin asignar» sin resultados declara su propio vacío',
+  unassignedEmptyTab.isSeverityFilterEmpty === true
+    && unassignedEmptyTab.severityEmptyTitle === 'No hay tareas sin asignar en el territorio.');
+
+const bothSeverityTab = createTabInstance();
+bothSeverityTab.filters.is_critical_only = true;
+bothSeverityTab.filters.unassigned_only = true;
+assert('4.18 Ambos filtros de severidad combinan la copy en lugar de duplicarla',
+  bothSeverityTab.severityEmptyTitle === 'No hay tareas sin asignar de cadena de frío en el territorio.');
+assert('4.19 El vacío del técnico precisa la severidad cuando ambas cosas filtran',
+  (() => {
+    const combined = createTabInstance();
+    combined.technicians = [{ id: 2, name: 'Jordi Técnico' }];
+    combined.filters.technician_id = '2';
+    combined.filters.is_critical_only = true;
+    return combined.technicianEmptyTitle === 'Jordi Técnico no tiene avisos de cadena de frío (críticos) en el territorio.';
+  })());
+assert('4.20 Con sedes en la foto no se declara el vacío de severidad',
+  (() => {
+    const populated = createTabInstance({ sites: makeSites() });
+    populated.filters.is_critical_only = true;
+    return populated.isSeverityFilterEmpty === false;
+  })());
+assert('4.21 Plantilla: vacío propio de severidad con su testid y su copy',
+  CoordinatorTerritorialMapTab.template.includes('data-testid="territorial-filter-empty"')
+    && CoordinatorTerritorialMapTab.template.includes('severityEmptyTitle')
+    && CoordinatorTerritorialMapTab.template.includes('Desactive «Solo cadena de frío (críticas)» o «Solo sin asignar»'));
 
 // =========================================================================
 // BLOQUE 5: Estados vacío y de error (RNF-MAP-02)

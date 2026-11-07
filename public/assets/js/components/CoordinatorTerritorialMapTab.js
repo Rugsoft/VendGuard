@@ -162,6 +162,58 @@ export const CoordinatorTerritorialMapTab = {
         ? null
         : (this.zoneDirectory[Number(this.filters.zone_id)] || null);
     },
+    /** Técnico elegido en el filtro, o `null` cuando se muestran todos. */
+    selectedTechnician() {
+      if (this.filters.technician_id === '' || this.filters.technician_id === null || this.filters.technician_id === undefined) {
+        return null;
+      }
+      return this.technicians.find(tech => Number(tech.id) === Number(this.filters.technician_id)) || null;
+    },
+    /**
+     * ¿El filtro de técnico ha dejado la foto sin sedes? No es lo mismo que un territorio
+     * sin actividad: aquí sí hay averías, solo que ninguna asignada a ese operario.
+     */
+    isTechnicianFilterEmpty() {
+      return this.sites.length === 0
+        && this.filters.technician_id !== ''
+        && this.filters.technician_id !== null
+        && this.filters.technician_id !== undefined;
+    },
+    /** Nombre del técnico filtrado; etiqueta genérica si el censo no está disponible. */
+    selectedTechnicianName() {
+      return this.selectedTechnician ? this.selectedTechnician.name : 'El técnico seleccionado';
+    },
+    /**
+     * Filtros de severidad activos, ya redactados para el vacío del mapa. Viajan al
+     * servidor (a diferencia de la zona), así que un filtro que no casa devuelve la foto
+     * vacía: sin esta etiqueta el mapa diría que no hay averías en el territorio.
+     */
+    severityFilterNoun() {
+      const critical = Boolean(this.filters.is_critical_only);
+      const unassigned = Boolean(this.filters.unassigned_only);
+      if (critical && unassigned) {
+        return 'tareas sin asignar de cadena de frío';
+      }
+      if (critical) {
+        return 'avisos de cadena de frío (críticos)';
+      }
+      if (unassigned) {
+        return 'tareas sin asignar';
+      }
+      return '';
+    },
+    /** ¿Los filtros de severidad han dejado la foto sin sedes? */
+    isSeverityFilterEmpty() {
+      return this.sites.length === 0 && this.severityFilterNoun !== '';
+    },
+    /** Vacío del técnico, precisando la severidad cuando también hay filtro de severidad. */
+    technicianEmptyTitle() {
+      return `${this.selectedTechnicianName} no tiene ${this.severityFilterNoun || 'tareas asignadas'} en el territorio.`;
+    },
+    /** Vacío por severidad sin filtro de técnico. */
+    severityEmptyTitle() {
+      return `No hay ${this.severityFilterNoun} en el territorio.`;
+    },
     /** ¿El filtro activo ha dejado la foto sin sedes? */
     isZoneFilterEmpty() {
       return this.sites.length > 0 && this.visibleSites.length === 0;
@@ -225,9 +277,11 @@ export const CoordinatorTerritorialMapTab = {
     }
   },
   mounted() {
-    // Las dos lecturas son independientes del motor de sugerencias: si el catálogo
-    // territorial falla, el mapa conserva sus marcadores con el color semántico habitual.
+    // Las lecturas auxiliares son independientes del motor de sugerencias: si el catálogo
+    // territorial o el censo de técnicos fallan, el mapa conserva sus marcadores con el
+    // color semántico habitual.
     this.loadZoneContext();
+    this.loadTechnicians();
     this.loadTerritorialData();
   },
   methods: {
@@ -320,6 +374,25 @@ export const CoordinatorTerritorialMapTab = {
         if (!silent) {
           this.isLoading = false;
         }
+      }
+    },
+    /**
+     * Carga el censo de técnicos activos que alimenta el filtro «Técnico asignado»
+     * (RF-MAP-09). El contrato cartográfico no publica el censo (§4.2.1), así que el
+     * selector bebe de la misma fuente que el panel de asignación
+     * —`GET /api/coordinator/users?role=TECHNICIAN&status=active`— para que dé de alta y de
+     * baja al personal sin duplicar listas. Un fallo deja el selector en «Todos los
+     * técnicos» sin impedir el resto del mapa.
+     */
+    async loadTechnicians() {
+      try {
+        const response = await api.coordinator.getUsers({ role: 'TECHNICIAN', status: 'active' });
+        const list = Array.isArray(response) ? response : (Array.isArray(response?.data) ? response.data : []);
+        this.technicians = list
+          .filter(user => user && user.id !== undefined && user.id !== null && user.is_active !== false)
+          .map(user => ({ id: user.id, name: String(user.name || `Técnico #${user.id}`) }));
+      } catch (error) {
+        this.technicians = [];
       }
     },
     /**
@@ -605,7 +678,17 @@ export const CoordinatorTerritorialMapTab = {
     </div>
 
     <template v-else>
-      <div v-if="sites.length === 0" class="territorial-empty text-center py-5">
+      <div v-if="isTechnicianFilterEmpty" class="territorial-empty text-center py-5" data-testid="territorial-technician-empty">
+        <p class="fw-bold mb-1">{{ technicianEmptyTitle }}</p>
+        <p class="text-muted small mb-0">Ajuste los filtros del mapa para volver a ver todo el parque.</p>
+      </div>
+
+      <div v-else-if="isSeverityFilterEmpty" class="territorial-empty text-center py-5" data-testid="territorial-filter-empty">
+        <p class="fw-bold mb-1">{{ severityEmptyTitle }}</p>
+        <p class="text-muted small mb-0">Desactive «Solo cadena de frío (críticas)» o «Solo sin asignar» para volver a ver todo el parque.</p>
+      </div>
+
+      <div v-else-if="sites.length === 0" class="territorial-empty text-center py-5">
         <p class="fw-bold mb-1">No hay averías ni preventivos activos en el territorio.</p>
         <p class="text-muted small mb-0">El mapa se poblará automáticamente cuando se registren intervenciones.</p>
       </div>
