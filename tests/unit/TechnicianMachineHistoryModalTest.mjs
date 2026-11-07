@@ -127,6 +127,12 @@ const buildInstance = () => {
     details: {},
     detailLoading: {},
     detailErrors: {},
+    spoilageCode: '',
+    spoilageMachine: null,
+    spoilageRecords: [],
+    spoilageLoading: false,
+    spoilageError: '',
+    spoilageSearched: false,
     machine: { id: 12, code: 'VM-012', model: 'Necta Koro' },
     modelValue: false,
     $emit: () => {}
@@ -294,6 +300,51 @@ assert('6.7 El detalle no publica costes, reintegros ni datos de sede (Art. V.4)
     && !TechnicianMachineHistoryModal.template.includes('refund')
     && !TechnicianMachineHistoryModal.template.includes('iban')
     && !TechnicianMachineHistoryModal.template.includes('phone'));
+
+// ---------------------------------------------------------------------
+// 7. BÚSQUEDA DIRECTA DE ACTAS APPCC (QA 3.1)
+// ---------------------------------------------------------------------
+console.log('\n--- Grupo 7: Búsqueda directa de actas APPCC por código (QA 3.1) ---');
+
+let spoilageLookupCalls = [];
+api.technician.getMachineSanitarySpoilageRecordsByCode = async (code) => {
+  spoilageLookupCalls.push(code);
+  return {
+    machine_code: 'VEND-0101',
+    machine_type: 'REFRIGERATED',
+    records: [{
+      id: 77,
+      record_code: 'ACTA-MERMA-2026-0077',
+      created_at: '2026-11-06 10:00:00',
+      discarded_units_count: 0,
+      certificate_code: 'CERT-2026-0077'
+    }]
+  };
+};
+
+const lookupModal = buildInstance();
+lookupModal.spoilageCode = ' vend-0101 ';
+await lookupModal.fetchSpoilageActs();
+assert('7.1 La búsqueda normaliza el código y carga las actas públicas',
+  spoilageLookupCalls.length === 1
+    && spoilageLookupCalls[0] === 'VEND-0101'
+    && lookupModal.spoilageMachine?.machine_code === 'VEND-0101'
+    && lookupModal.spoilageRecords.length === 1
+    && lookupModal.spoilageError === '');
+
+let emittedAct = null;
+lookupModal.$emit = (event, payload) => { emittedAct = { event, payload }; };
+lookupModal.openSpoilageAct(lookupModal.spoilageRecords[0]);
+assert('7.2 El botón del acta emite el identificador para abrir el A4',
+  emittedAct?.event === 'open-official-act' && emittedAct?.payload === 77);
+
+assert('7.3 La plantilla publica el buscador por código sin importes económicos',
+  TechnicianMachineHistoryModal.template.includes('machine-spoilage-code')
+    && TechnicianMachineHistoryModal.template.includes('btn-search-machine-spoilage')
+    && TechnicianMachineHistoryModal.template.includes('btn-machine-spoilage-act-')
+    && TechnicianMachineHistoryModal.template.includes('Art. V.4')
+    && !TechnicianMachineHistoryModal.template.includes('estimated_merchandise_loss_eur')
+    && !TechnicianMachineHistoryModal.template.includes('loss_adjustment_reason'));
 
 // ---------------------------------------------------------------------
 // SUMMARY

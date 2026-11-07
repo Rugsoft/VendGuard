@@ -22,7 +22,7 @@
 'use strict';
 
 /** Nombre de caché versionado (contratos §2.2). Subirlo es lo que invalida el shell. */
-const CACHE_NAME = 'vendguard-app-shell-v7';
+const CACHE_NAME = 'vendguard-app-shell-v9';
 
 /** Prefijo de la superficie HTTP que jamás entra en caché (Art. V.4). */
 const API_PATH_PREFIX = '/api/';
@@ -97,6 +97,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/components/CoordinatorRootCauseCatalogModal.js',
   '/assets/js/components/CoordinatorRootCauseParetoTab.js',
   '/assets/js/components/CoordinatorSanitarySweepPanel.js',
+  '/assets/js/components/CoordinatorSanitarySpoilageTab.js',
   '/assets/js/components/CoordinatorSparePartsAnalyticsTab.js',
   '/assets/js/components/CoordinatorSparePartsTab.js',
   '/assets/js/components/CoordinatorTerritorialMapTab.js',
@@ -125,12 +126,15 @@ const APP_SHELL_ASSETS = [
   '/assets/js/components/QrSeasonalPauseNotice.js',
   '/assets/js/components/ReopenTicketModal.js',
   '/assets/js/components/SanitaryCertificateModal.js',
+  '/assets/js/components/SanitarySpoilageLiftModal.js',
+  '/assets/js/components/SanitarySpoilageOfficialActModal.js',
   '/assets/js/components/SatisfactionSurveyModal.js',
   '/assets/js/components/ServiceSheetModal.js',
   '/assets/js/components/SiteGlobalCertificateModal.js',
   '/assets/js/components/SiteSanitaryStatusTab.js',
   '/assets/js/components/TechnicianChecklistModal.js',
   '/assets/js/components/TechnicianMachineHistoryModal.js',
+  '/assets/js/components/TechnicianSanitaryQuarantineListModal.js',
   '/assets/js/components/TechnicianOpportunisticModal.js',
   '/assets/js/components/TechnicianPreventiveRouteTab.js',
   '/assets/js/components/TechnicianReinspectionModal.js',

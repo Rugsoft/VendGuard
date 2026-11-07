@@ -116,6 +116,17 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_MACHINE_TROUBLESHOOTING_GUIDE = 'MACHINE_TROUBLESHOOTING_GUIDE';
 
     /**
+     * Acta de merma y destrucción de lotes por cuarentena sanitaria (Módulo 29, Tabla 40).
+     *
+     * El acta APPCC tiene espacio de identificadores propio: auditarla como
+     * `MACHINE` apuntaría a la máquina y no al acta, y rompería la trazabilidad
+     * que exige una inspección de Sanidad (Art. III.3). El valor existe en el
+     * enum `audit_entity_type` desde la migración 025; aquí se declara para que
+     * el dominio pueda emitirlo y el visor ofrecer el filtro.
+     */
+    public const ENTITY_SANITARY_SPOILAGE_RECORD = 'SANITARY_SPOILAGE_RECORD';
+
+    /**
      * Whitelist completa de tipos de entidad admitidos por el dominio.
      *
      * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
@@ -142,6 +153,7 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_ROOT_CAUSE_TAXONOMY,
         self::ENTITY_WORKSHOP_REPAIR_ITEM,
         self::ENTITY_MACHINE_TROUBLESHOOTING_GUIDE,
+        self::ENTITY_SANITARY_SPOILAGE_RECORD,
     ];
 
     /**

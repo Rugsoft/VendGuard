@@ -234,10 +234,12 @@ $assert(
 // propias, `technician_shift_logs` cae antes que su turno por la FK y las órdenes de carga cuelgan
 // de `users` (protegida), así que entran como raíz propia con sus líneas antes por la FK. El libro
 // de idempotencia del Módulo 24 también cuelga de `users` protegida: entra como raíz propia para
-// que una mutación de una suite no ocupe el hueco de idempotencia de la siguiente.
+// que una mutación de una suite no ocupe el hueco de idempotencia de la siguiente. Las actas de
+// merma del Módulo 29 son un libro sanitario que cualquier suite puede escribir sobre máquinas,
+// averías o preventivos ya protegidos: entran como raíz propia y su purga no arrastra maestras.
 $assert(
-    '2.7 El plan cubre las 29 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio + 1 de encuestas CSAT + 3 de ausencias/turnos/bitácora M21-M22 + 2 de órdenes de carga M23 + 1 del libro de sincronización M24 + 1 de la cadena de custodia M26 + 1 del bucle de taller M27)',
-    count($order) === 29,
+    '2.7 El plan cubre las 30 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio + 1 de encuestas CSAT + 3 de ausencias/turnos/bitácora M21-M22 + 2 de órdenes de carga M23 + 1 del libro de sincronización M24 + 1 de la cadena de custodia M26 + 1 del bucle de taller M27 + 1 de actas de merma M29)',
+    count($order) === 30,
     'obtenidas: ' . count($order)
 );
 

@@ -84,6 +84,12 @@ final class TestDataCleaner
         // `root_causes`, ambas protegidas, así que el grafo desde `incidents` no lo
         // alcanza y una guía creada por una suite sobreviviría al reinicio. Entra
         // como raíz propia; el sembrador restituye las ocho canónicas.
+        //
+        // Actas de merma APPCC (Módulo 29): cuelgan de `machines` y de `users`
+        // —ambas protegidas— y solo algunas de una avería, de modo que el grafo
+        // desde `incidents` no alcanza las de origen preventivo ni las de máquina
+        // vacía. Entra como raíz propia; el sembrador restituye las tres.
+        'sanitary_spoilage_records',
     ];
 
     /**
@@ -125,6 +131,9 @@ final class TestDataCleaner
         // Guías de diagnóstico del Módulo 28: catálogo operativo que Coordinación
         // edita y da de baja; su purga no arrastra ninguna maestra.
         'machine_troubleshooting_guides',
+        // Actas de merma del Módulo 29: libro sanitario operativo que una suite
+        // puede escribir; su purga no arrastra ninguna maestra.
+        'sanitary_spoilage_records',
         'incident_replaced_parts',
         'refund_requests',
         'spare_part_requests',

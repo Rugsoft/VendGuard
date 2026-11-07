@@ -56,6 +56,11 @@ final class PostgresFixtureBuilder
      */
     private const REQUIRED_OPTIONAL_COLUMNS = [
         'incident_service_sheets' => ['absence_reason'],
+        // El acta del Módulo 29 nace con coste 0,00 € por defecto, pero una fila
+        // con unidades destruidas exige coste positivo
+        // (`chk_spoilage_records_loss_non_negative`): el alta mínima debe
+        // declararlo o mediría un rechazo legítimo del motor.
+        'sanitary_spoilage_records' => ['estimated_merchandise_loss_eur'],
     ];
 
     /**
@@ -97,6 +102,17 @@ final class PostgresFixtureBuilder
         // por diseño. La certificación de la transición legítima de cierre tiene
         // su propio ayudante (`closeCustodySegment`).
         'incident_assignments' => ['unassigned_at', 'unassignment_reason_type', 'unassigned_by_name_snapshot', 'reassignment_reason'],
+        // Acta de merma del Módulo 29: todos los hechos sanitarios y físicos son
+        // inmutables (Art. III.3); el `UPDATE` genérico certifica el único cambio
+        // legítimo, el coste estimado que ajusta Coordinación.
+        'sanitary_spoilage_records' => [
+            'record_code', 'machine_id', 'incident_id', 'maintenance_order_id',
+            'technician_id', 'registered_by', 'quarantine_origin',
+            'discarded_units_count', 'empty_machine_confirmed', 'affected_batch_codes',
+            'cabin_temp_at_removal', 'restored_stabilized_temp_c', 'disposal_method',
+            'evidence_photo_url', 'sanitary_notes', 'loss_adjustment_reason',
+            'certificate_code', 'created_at',
+        ],
     ];
 
     // ─────────────────────────────────────────────────────────────────────
@@ -383,7 +399,15 @@ final class PostgresFixtureBuilder
         $requiredOptional = self::REQUIRED_OPTIONAL_COLUMNS[$table] ?? [];
 
         foreach ($columns as $name => $meta) {
-            if ($meta['identity'] || $meta['generated'] || $meta['default'] !== null) {
+            if ($meta['identity'] || $meta['generated']) {
+                continue;
+            }
+
+            // Una columna con valor por defecto también puede participar en un
+            // `CHECK` de rama: si el arnés no la escribe, el alta mínima nace con
+            // un valor que el motor rechaza por diseño. Las columnas declaradas en
+            // `REQUIRED_OPTIONAL_COLUMNS` se escriben aunque tengan defecto.
+            if ($meta['default'] !== null && !in_array($name, $requiredOptional, true)) {
                 continue;
             }
 
@@ -726,6 +750,14 @@ final class PostgresFixtureBuilder
                 => $variant === 'update' ? 'RC-FIXTURE-UPDATE' : 'RC-FIXTURE-INSERT',
             $table === 'standard_solutions' && $column === 'code'
                 => $variant === 'update' ? 'SOL-FIXTURE-UPDATE' : 'SOL-FIXTURE-INSERT',
+            // El acta del Módulo 29 declara dos catálogos cerrados por `CHECK`:
+            // el origen de la cuarentena y el método de destrucción. El texto
+            // sintético genérico los rechazaría y el alta mínima no certificaría
+            // la rama con producto destruido.
+            $table === 'sanitary_spoilage_records' && $column === 'quarantine_origin'
+                => $variant === 'update' ? 'PREVENTIVE_NON_CONFORMITY' : 'BIOLOGICAL_CLOCK_4H',
+            $table === 'sanitary_spoilage_records' && $column === 'disposal_method'
+                => $variant === 'update' ? 'RETURN_TO_CENTRAL_BIOHAZARD' : 'ON_SITE_ORGANIC_SEALED',
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,
             $udt === 'numeric', $udt === 'float4', $udt === 'float8' => $variant === 'update' ? '9.5000000' : '1.5000000',
             $udt === 'text' => $literal,

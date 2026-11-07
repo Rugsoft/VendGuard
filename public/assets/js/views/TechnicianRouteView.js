@@ -34,6 +34,8 @@ import { TechnicianMetricsView } from './TechnicianMetricsView.js';
 import { TechnicianPreventiveRouteTab } from '../components/TechnicianPreventiveRouteTab.js';
 import { TechnicianChecklistModal } from '../components/TechnicianChecklistModal.js';
 import { TechnicianReinspectionModal } from '../components/TechnicianReinspectionModal.js';
+import { SanitarySpoilageLiftModal } from '../components/SanitarySpoilageLiftModal.js';
+import { SanitarySpoilageOfficialActModal } from '../components/SanitarySpoilageOfficialActModal.js';
 import { TechnicianSparePartsPauseModal } from '../components/TechnicianSparePartsPauseModal.js';
 import { TechnicianResolutionPartsBlock } from '../components/TechnicianResolutionPartsBlock.js';
 import { TechnicianResolutionRefundBlock } from '../components/TechnicianResolutionRefundBlock.js';
@@ -42,6 +44,7 @@ import { TechnicianServiceSheetBlock } from '../components/TechnicianServiceShee
 import { ServiceSheetModal } from '../components/ServiceSheetModal.js';
 import { TechnicianRouteMapModal } from '../components/TechnicianRouteMapModal.js';
 import { TechnicianMachineHistoryModal } from '../components/TechnicianMachineHistoryModal.js';
+import { TechnicianSanitaryQuarantineListModal } from '../components/TechnicianSanitaryQuarantineListModal.js';
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
 import { PendingInfoPauseModal, PAUSE_REASON_CATEGORIES } from '../components/PendingInfoPauseModal.js';
 import { TechnicianOpportunisticModal } from '../components/TechnicianOpportunisticModal.js';
@@ -87,6 +90,8 @@ export const TechnicianRouteView = {
     TechnicianPreventiveRouteTab,
     TechnicianChecklistModal,
     TechnicianReinspectionModal,
+    SanitarySpoilageLiftModal,
+    SanitarySpoilageOfficialActModal,
     TechnicianSparePartsPauseModal,
     TechnicianResolutionPartsBlock,
     TechnicianResolutionRefundBlock,
@@ -95,6 +100,7 @@ export const TechnicianRouteView = {
     ServiceSheetModal,
     TechnicianRouteMapModal,
     TechnicianMachineHistoryModal,
+    TechnicianSanitaryQuarantineListModal,
     IncidentCommentThreadModal,
     PendingInfoPauseModal,
     TechnicianOpportunisticModal,
@@ -148,6 +154,16 @@ export const TechnicianRouteView = {
       resolveServiceSheetData: { isValid: false },
       showServiceSheetModal: false,
       serviceSheetIncidentId: null,
+
+      // Módulo 29: Acta de Merma APPCC y reapertura sanitaria (RF-01 a RF-05).
+      // La acción aparece cuando la ruta publica la puerta sanitaria del cierre;
+      // el modal confirma contra el servidor el estado real de cuarentena y la
+      // ausencia de averías abiertas antes de habilitar el levantamiento (C1).
+      showSpoilageLiftModal: false,
+      spoilageMachine: null,
+      spoilageIncidentId: null,
+      showSpoilageOfficialActModal: false,
+      spoilageOfficialActRecordId: null,
       // Declaraciones sanitarias del cierre (RF-03.5.2, Art. II): la puerta se abre
       // cuando la ruta publica `sanitary_resolution_required` o cuando el servidor
       // la exige al intentar cerrar (el reloj biológico pudo vencer entre medias).
@@ -184,6 +200,7 @@ export const TechnicianRouteView = {
       // Machine incident history modal (RF-07 / EARS H.1-H.6, specs/technical/technician_machine_history_contracts.md)
       showMachineHistoryModal: false,
       historyMachine: null,
+      showSanitaryQuarantineListModal: false,
 
       // Modal 5: Hilo de conversación de la parada (Módulo 10, RF-01.1, RF-02.3)
       showCommentsModal: false,
@@ -2365,9 +2382,116 @@ export const TechnicianRouteView = {
       this.showMachineHistoryModal = true;
     },
 
+    /**
+     * Abre el buscador de actas APPCC sin depender de una parada de la ruta.
+     * El modal permite localizar cualquier máquina por su código (QA 3.1).
+     */
+    openSpoilageActsLookup() {
+      this.historyMachine = null;
+      this.showMachineHistoryModal = true;
+    },
+
     closeMachineHistoryModal() {
       this.showMachineHistoryModal = false;
       this.historyMachine = null;
+    },
+
+    /**
+     * Abre el listado transversal de cuarentenas activas. Cualquier técnico
+     * activo puede localizar una máquina ajena a su ruta y certificar su
+     * reapertura (C2), sin recibir actas ni importes.
+     */
+    openSanitaryQuarantineList() {
+      this.showSanitaryQuarantineListModal = true;
+    },
+
+    closeSanitaryQuarantineList() {
+      this.showSanitaryQuarantineListModal = false;
+    },
+
+    /**
+     * Convierte una cuarentena del listado en la máquina del modal APPCC. El
+     * modal vuelve a verificar estado y averías abiertas antes de habilitar el
+     * envío, por lo que el listado no sustituye las guardas del servidor.
+     *
+     * @param {Object} machine Entrada de `/api/sanitary-quarantines/active`.
+     */
+    openSpoilageLiftFromQuarantine(machine) {
+      const machineId = Number(machine?.machine_id ?? machine?.id ?? 0);
+      if (!(machineId > 0) || machine?.has_open_incident === true) {
+        this.errorMessage = 'No se pudo identificar una cuarentena levantable.';
+        return;
+      }
+
+      this.showSanitaryQuarantineListModal = false;
+      this.spoilageMachine = {
+        id: machineId,
+        code: String(machine.machine_code || machine.code || ''),
+        model: String(machine.machine_model || machine.model || ''),
+        machine_type: String(machine.machine_type || ''),
+        location_name: String(machine.location_name || '')
+      };
+      this.spoilageIncidentId = machine.open_incident_id ?? null;
+      this.showSpoilageLiftModal = true;
+    },
+
+    /**
+     * Abre el Acta de Merma APPCC de la parada (Módulo 29, RF-01, C1).
+     *
+     * La ruta no publica `sanitary_status`, solo la puerta sanitaria del cierre;
+     * por eso el modal confirma en el servidor si la máquina sigue en cuarentena
+     * y si conserva alguna avería abierta antes de habilitar el levantamiento.
+     * @param {Object} incident Parada de la ruta.
+     */
+    openSpoilageLiftModal(incident) {
+      const machineId = Number(incident?.machine?.id ?? incident?.machine_id ?? 0);
+      if (!(machineId > 0)) {
+        this.errorMessage = 'No se pudo identificar la máquina para tramitar el acta de merma.';
+        return;
+      }
+
+      this.spoilageMachine = {
+        ...(incident.machine || {}),
+        id: machineId,
+        machine_type: incident?.machine?.machine_type || incident?.machine_type_snapshot || ''
+      };
+      this.spoilageIncidentId = incident?.id ?? null;
+      this.showSpoilageLiftModal = true;
+    },
+
+    closeSpoilageLiftModal() {
+      this.showSpoilageLiftModal = false;
+      this.spoilageMachine = null;
+      this.spoilageIncidentId = null;
+    },
+
+    /**
+     * El acta ya está emitida: la ruta se recarga para retirar la cuarentena de
+     * la parada y se conserva el acuse en el aviso de la vista.
+     */
+    handleSpoilageLifted(result) {
+      const record = result?.spoilage_record || {};
+      this.feedbackMessage = record.record_code
+        ? `Acta ${record.record_code} emitida: cuarentena levantada y máquina restituida a servicio.`
+        : 'Acta de merma emitida: cuarentena levantada y máquina restituida a servicio.';
+      this.loadRoute();
+    },
+
+    /** Abre el Acta Oficial A4 sin importes (QA 3, Art. V.4). */
+    openSpoilageOfficialAct(recordId) {
+      const id = Number(recordId);
+      if (!(id > 0)) {
+        return;
+      }
+      this.showSpoilageLiftModal = false;
+      this.showMachineHistoryModal = false;
+      this.spoilageOfficialActRecordId = id;
+      this.showSpoilageOfficialActModal = true;
+    },
+
+    closeSpoilageOfficialAct() {
+      this.showSpoilageOfficialActModal = false;
+      this.spoilageOfficialActRecordId = null;
     },
 
     /**
@@ -3552,6 +3676,28 @@ export const TechnicianRouteView = {
               type="button"
               class="vg-btn vg-btn-secondary"
               style="height: 36px; padding: 0 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;"
+              title="Consultar actas APPCC por código de máquina"
+              aria-label="Consultar actas APPCC por código de máquina"
+              data-testid="btn-spoilage-acts-lookup"
+              @click="openSpoilageActsLookup"
+            >
+              <span>☣️</span>
+            </button>
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              style="height: 36px; padding: 0 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;"
+              title="Cuarentenas sanitarias activas"
+              aria-label="Cuarentenas sanitarias activas"
+              data-testid="btn-sanitary-quarantines"
+              @click="openSanitaryQuarantineList"
+            >
+              <span>🧾</span>
+            </button>
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              style="height: 36px; padding: 0 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;"
               title="Actualizar ruta"
               @click="loadRoute"
               :disabled="isLoading"
@@ -4375,6 +4521,20 @@ export const TechnicianRouteView = {
                   ⏸️ Pausar por falta de acceso
                 </button>
               </div>
+
+              <!-- Módulo 29: Acta de Merma y reapertura sanitaria. La puerta
+                   sanitaria de la ruta anuncia cuarentena o reloj vencido; el
+                   modal verifica el estado real antes de permitir el alta. -->
+              <div v-if="incident.sanitary_resolution_required && (incident.machine?.id || incident.machine_id)" style="margin-top: 8px;">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  data-testid="btn-spoilage-lift"
+                  @click="openSpoilageLiftModal(incident)"
+                >
+                  🧾 Acta de Merma APPCC y reapertura sanitaria
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -4393,6 +4553,16 @@ export const TechnicianRouteView = {
         v-model="showMachineHistoryModal"
         :machine="historyMachine"
         @close="closeMachineHistoryModal"
+        @open-official-act="openSpoilageOfficialAct"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 0-ter: CUARENTENAS ACTIVAS PARA EL TÉCNICO (C2, C1, C3)       -->
+      <!-- =================================================================== -->
+      <TechnicianSanitaryQuarantineListModal
+        v-model="showSanitaryQuarantineListModal"
+        @close="closeSanitaryQuarantineList"
+        @lift="openSpoilageLiftFromQuarantine"
       />
 
       <!-- =================================================================== -->
@@ -5300,6 +5470,28 @@ export const TechnicianRouteView = {
           <button type="button" class="vg-btn vg-btn-secondary" @click="closeMyHours">Cerrar</button>
         </template>
       </ModalDialog>
+
+      <!-- =================================================================== -->
+      <!-- MODAL 29-A: ACTA DE MERMA Y LEVANTAMIENTO DE CUARENTENA (Módulo 29) -->
+      <!-- =================================================================== -->
+      <SanitarySpoilageLiftModal
+        v-model="showSpoilageLiftModal"
+        :machine="spoilageMachine"
+        :incident-id="spoilageIncidentId"
+        :user-role="currentUser?.role || 'TECHNICIAN'"
+        @close="closeSpoilageLiftModal"
+        @lifted="handleSpoilageLifted"
+        @open-official-act="openSpoilageOfficialAct"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 29-B: ACTA OFICIAL A4 PARA SANIDAD (Módulo 29, QA 3)          -->
+      <!-- =================================================================== -->
+      <SanitarySpoilageOfficialActModal
+        v-model="showSpoilageOfficialActModal"
+        :record-id="spoilageOfficialActRecordId"
+        @close="closeSpoilageOfficialAct"
+      />
     </div>
   `
 };

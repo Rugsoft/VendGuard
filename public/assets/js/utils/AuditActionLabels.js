@@ -80,7 +80,10 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   WORKSHOP_REPAIR_ITEM: 'Expediente de Taller',
   // Entidad del Módulo 28: el catálogo de guías rápidas se audita con tipo
   // propio y el visor necesita su etiqueta para no perder esas filas.
-  MACHINE_TROUBLESHOOTING_GUIDE: 'Guía de Diagnóstico'
+  MACHINE_TROUBLESHOOTING_GUIDE: 'Guía de Diagnóstico',
+  // Entidad del Módulo 29: el alta del acta, la lectura del documento oficial
+  // y el ajuste financiero se auditan bajo el tipo propio del registro APPCC.
+  SANITARY_SPOILAGE_RECORD: 'Acta de Merma APPCC'
 });
 
 /**
@@ -167,6 +170,12 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'SANITARY_QUARANTINE_AUTO_TRIGGERED', label: 'Cuarentena Sanitaria Automática', tone: 'danger', group: 'sanitary' },
   { code: 'SANITARY_QUARANTINE_REPORT_SAFEGUARDED', label: 'Parte Técnico Salvaguardado por Cuarentena', tone: 'warning', group: 'sanitary' },
   { code: 'COLD_CHAIN_ROUTE_POSTPONED_CONFIRMED', label: 'Postergación de Parada Crítica Confirmada', tone: 'danger', group: 'sanitary' },
+  // Módulo 29: el registro APPCC deja un evento por alta, lectura del acta
+  // oficial, ajuste económico y exportación del libro de mermas.
+  { code: 'CREATE_SPOILAGE_RECORD_AND_LIFT_QUARANTINE', label: 'Acta de Merma y Levantamiento de Cuarentena', tone: 'success', group: 'sanitary' },
+  { code: 'VIEW_SANITARY_SPOILAGE_ACT', label: 'Consulta del Acta Oficial de Merma', tone: 'info', group: 'sanitary' },
+  { code: 'ADJUST_SPOILAGE_MERCHANDISE_LOSS', label: 'Ajuste del Coste de Merma', tone: 'warning', group: 'sanitary' },
+  { code: 'EXPORT_SPOILAGE_RECORDS_CSV', label: 'Exportación CSV de Actas de Merma', tone: 'neutral', group: 'sanitary' },
   { code: 'REFUND_CASE_CREATED', label: 'Alta de Expediente de Reintegro', tone: 'primary', group: 'refund' },
   { code: 'REFUND_CONTACT_RECTIFIED', label: 'Contacto del Reintegro Rectificado', tone: 'warning', group: 'refund' },
   { code: 'REFUND_INSPECTED', label: 'Inspección de Reintegro', tone: 'info', group: 'refund' },

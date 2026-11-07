@@ -1662,6 +1662,27 @@ export class ApiClient {
       return this.get(`/coordinator/users${q ? `?${q}` : ''}`);
     },
 
+    // Libro registro de Actas de Merma APPCC (Módulo 29, RF-05.2, QA 4).
+    // El panel y el CSV son exclusivos de Coordinación; el ajuste económico
+    // exige justificación y se audita con el valor anterior y el nuevo.
+    getCoordinatorSanitarySpoilageRecords: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/sanitary-spoilage-records${q ? `?${q}` : ''}`);
+    },
+    adjustCoordinatorSpoilageLossEstimate: (recordId, payload) => {
+      return this.patch(
+        `/coordinator/sanitary-spoilage-records/${encodeURIComponent(recordId)}/loss-estimate`,
+        payload
+      );
+    },
+    exportCoordinatorSanitarySpoilageCsv: (params = {}) => {
+      return this.downloadFile(
+        '/coordinator/sanitary-spoilage-records/export-csv',
+        'actas_merma_appcc.csv',
+        params
+      );
+    },
+
     // Gestión de Repuestos (Módulo 06 - RF-REP-01, RF-REP-02, RF-REP-08, RF-REP-09)
     getSparePartsCatalog: (params = {}) => {
       const q = new URLSearchParams(params).toString();
@@ -2198,6 +2219,30 @@ export class ApiClient {
     },
     reinspectPreventiveOrder: (orderId, payload) => {
       return this.post(`/technician/preventive/orders/${orderId}/reinspect`, payload);
+    },
+
+    // Acta de Merma y levantamiento de cuarentena sanitaria (Módulo 29).
+    // El alta viaja como multipart cuando hay fotografía de evidencia y como
+    // JSON cuando la imagen ya fue subida; el servidor decide el rol y calcula
+    // el coste, que el cliente nunca envía (D2, Art. V.4).
+    liftSanitaryQuarantineWithSpoilage: (machineId, payload, photoFile = null, photoName = null) => {
+      const endpoint = `/sanitary-quarantines/machines/${encodeURIComponent(machineId)}/lift`;
+
+      return photoFile
+        ? this.upload(endpoint, buildMultipartBody(payload, photoFile, photoName))
+        : this.post(endpoint, payload);
+    },
+    getSanitarySpoilageOfficialAct: (recordId) => {
+      return this.get(`/sanitary-spoilage-records/${encodeURIComponent(recordId)}/official-act`);
+    },
+    getMachineSanitarySpoilageRecords: (machineId) => {
+      return this.get(`/sanitary-spoilage-records/by-machine/${encodeURIComponent(machineId)}`);
+    },
+    getMachineSanitarySpoilageRecordsByCode: (machineCode) => {
+      return this.get(`/sanitary-spoilage-records/by-machine-code/${encodeURIComponent(machineCode)}`);
+    },
+    getActiveSanitaryQuarantines: () => {
+      return this.get('/sanitary-quarantines/active');
     },
 
     // Gestión de Repuestos en Movilidad (Módulo 06: RF-REP-03, RF-REP-04)
