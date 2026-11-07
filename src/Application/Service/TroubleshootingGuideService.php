@@ -164,7 +164,10 @@ final class TroubleshootingGuideService
         $vanStock = $this->fetchVanStock($technicianId);
 
         // Una sola lectura del catálogo activo con sus soluciones por petición:
-        // la ruta resuelve varias paradas y no debe repetirla (H-28-05).
+        // la ruta resuelve varias paradas y no debe repetirla (H-28-05). El caché
+        // se reinicia aquí para que una causa dada de baja en el catálogo deje de
+        // viajar en la guía aunque el servicio sobreviva a la petición (`C2`).
+        $this->rootCauseCatalog = null;
         $rootCauses = $this->activeRootCauseCatalog();
 
         // Los repuestos de todas las guías se resuelven en una sola consulta:
