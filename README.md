@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-400%20Suites%20%7C%2014.984%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-401%20Suites%20%7C%2015.013%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -218,6 +218,32 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 
 ---
 
+### 24. Historial Completo de Reasignaciones y Cadena de Custodia (Módulo 26)
+* **Tramos inmutables con snapshots de identidad:** `incident_assignments` (tabla 37) abre un tramo por asignación y lo cierra con `unassigned_at`, `unassigned_by` y motivo de 1 a 1000 caracteres; congela el nombre y el código del técnico y de quien asigna o desasigna, de modo que un cambio posterior de ficha no reescribe el histórico (Art. III.3). Un índice parcial único garantiza **un solo custodio técnico activo simultáneo** por avería (Art. V.3) y el borrado físico está prohibido (Art. III.1).
+* **Apertura y cierre automático en las cuatro vías:** asignación, reasignación, desasignación y relevo de turno cierran el tramo vigente y abren el siguiente en la misma transacción; una colisión de asignación simultánea responde `409` y el tramo cerrado no admite reescritura.
+* **Ficha de coordinación:** el detalle del expediente publica la línea de tiempo **«Cadena de Custodia»** con el tiempo de retención y la espera en bandeja, y las métricas de resumen por técnico. El portal de sede, el canal QR y el albarán no reciben ninguna identidad ni el histórico de custodia (Art. V.4).
+* **Motor:** migración `022_incident_assignments_custody_chain.sql`, con los enumerados `incident_assignment_source` (9 canales) e `incident_unassignment_reason_type` (10 causas). La asignación sigue entrando por `PATCH /api/coordinator/incidents/{id}/assign`, que ahora deja el tramo escrito.
+
+### 25. Bandeja de Taller Central para Piezas Recuperadas (Módulo 27)
+* **Generación por unidad física:** cuando la resolución declara destino `TALLER`, cada pieza genera su fila en `workshop_repair_items` (tabla 38, 34 columnas) con el snapshot de coste y el vínculo al expediente y a la máquina de origen, sin agrupar piezas distintas en una sola línea.
+* **Ciclo de taller con diagnóstico real:** la bandeja registra la recepción, el inicio en banco y el dictamen de resolución con diagnóstico obligatorio (≥ 20 caracteres reales), controla la concurrencia sobre la misma pieza y permite reincorporarla al inventario o declararla baja. Ni el técnico ve importes ni la sede ve la bandeja (Art. V.4).
+* **Economía circular y recordatorio móvil:** el panel calcula el ahorro por reacondicionamiento frente a la compra, ordena la bandeja y exporta el CSV; el técnico recibe el recordatorio de la pieza pendiente de entregar en taller.
+* **Motor:** migración `023_workshop_repair_items.sql`, con baja lógica, auditoría de cada transición y exportación tabular auditada.
+
+### 26. Guías Rápidas de Diagnóstico por Modelo (Módulo 28)
+* **Catálogo emparejado por modelo y categoría:** `machine_troubleshooting_guides` (tabla 39, 14 columnas) declara el modelo visible y su clave plegada (`machine_model_key`), la categoría de avería y los tres bloques `JSONB` acotados —códigos de error 0–20, pasos 2–10 y repuestos 0–10—, con una sola guía viva por pareja modelo/categoría (baja lógica, Art. III.1).
+* **Uso en ruta:** el técnico conmuta el modelo cuando la ficha no lo declara y despliega la guía en acordeón; los repuestos de la guía se cruzan con el stock de su furgoneta, la guía enlaza con la causa raíz sugerida y se sincroniza en el paquete sin conexión. Queda excluida de las inspecciones preventivas y advierte de la cadena de frío en máquinas perecederas o averías de refrigeración (Art. II).
+* **Gobierno en coordinación:** alta, edición y cambio de estado con instrucciones de ≥ 20 caracteres reales por paso, `CHECK` de tamaño de los bloques, inmutabilidad de modelo y categoría y auditoría del estado anterior y el nuevo (Art. III.3). Las semillas cubren los modelos reales del parque.
+* **Motor:** migración `024_machine_troubleshooting_guides.sql`, con el enumerado de auditoría `MACHINE_TROUBLESHOOTING_GUIDE`.
+
+### 27. Acta de Merma y Destrucción de Lotes por Cuarentena Sanitaria (Módulo 29)
+* **Documento oficial e inmutable:** `sanitary_spoilage_records` (tabla 40, 22 columnas) emite un `record_code` único `ACTA-MERMA-AAAA-NNNN` que distingue al **técnico certificador in situ** del usuario que tramita el alta, y congela origen de la cuarentena (reloj biológico de 4 h, no conformidad preventiva o bloqueo sanitario manual), temperaturas de retirada y reapertura, método de destrucción, fotografía obligatoria (≤ 5 MB, Art. V.5) y observaciones de higienización de 20 a 1000 caracteres. Tras la emisión solo cabe el ajuste económico auditado (Art. III.1).
+* **Coherencia de las dos ramas:** el acta declara máquina vacía o los lotes reales (3–500 caracteres alfanuméricos) con las unidades destruidas (0–500) y sus `CHECK` de coherencia; el levantamiento es atómico, desbloquea el QR de la máquina, determina el origen y conserva la relación `1..N` cuando la avería se reabre en la ventana de 48 h (Art. V.6).
+* **Segregación financiera (Art. V.4):** el coste estimado y su ajuste son exclusivos de Coordinación, con motivo obligatorio y rastro de quién ajustó; la sede y el técnico no ven importes.
+* **Superficie operativa:** pestaña **APPCC** de coordinación con la bandeja de actas, filtros y exportación CSV, histórico por máquina en la ficha técnica, y **Acta Oficial A4** imprimible con la firma de higienización. Migración `025_sanitary_spoilage_records.sql`, con el enumerado `SANITARY_SPOILAGE_RECORD`.
+
+---
+
 ## 👥 Actores del Sistema y Credenciales de Demostración
 
 La aplicación cuenta con un conmutador de perfiles en la barra superior para alternar de forma inmediata entre roles:
@@ -225,8 +251,8 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 | Perfil / Actor | Identificador / Email | Contraseña / Código | Función Principal |
 | :--- | :--- | :--- | :--- |
 | **🏢 1. Responsable de Sede** | `SEDE-BCN-01` *(Hospital del Mar)*<br>`SEDE-BCN-02` *(Torre Glòries)* | Código + `DEV-<site_code>` *(clave de desarrollo, ver nota)* | Supervisa máquinas del edificio, reporta averías (< 2 min), anexa evidencias y reabre en garantía. |
-| **📊 2. Coordinador de Operaciones** | `coordinacion@vendguard.internal` | `Password123!` | Triaje central, supervisión 24/7 de SLAs, administración del parque y personal, preventivos y certificados sanitarios, catálogo y analítica de repuestos, cuadro de mando de métricas y visor de auditoría, gobierno del catálogo de causas raíz y análisis Pareto 80/20 de garantías. Supervisa además la pausa de espera de sede (reanudación manual y cancelación por inactividad) y la superficie operativa del barrido sanitario. |
-| **📱 3. Técnico de Ruta de Campo** | `jordi.ruta@vendguard.internal`<br>`marta.ruta@vendguard.internal` | `Password123!` | Interfaz vertical *mobile-first*, gestión de averías en ruta, inicio de intervención, pausa estructurada por repuestos o por falta de acceso al inmueble (pausa de sede), resolución justificada con piezas sustituidas y causa raíz, hilo de conversación del expediente, inspecciones preventivas, consulta del historial de la máquina y métricas individuales. |
+| **📊 2. Coordinador de Operaciones** | `coordinacion@vendguard.internal` | `Password123!` | Triaje central, supervisión 24/7 de SLAs, administración del parque y personal, preventivos y certificados sanitarios, catálogo y analítica de repuestos, cuadro de mando de métricas y visor de auditoría, gobierno del catálogo de causas raíz y análisis Pareto 80/20 de garantías. Supervisa además la pausa de espera de sede (reanudación manual y cancelación por inactividad), la superficie operativa del barrido sanitario, la cadena de custodia, la bandeja de taller, el catálogo de guías de diagnóstico y el libro APPCC de mermas. |
+| **📱 3. Técnico de Ruta de Campo** | `jordi.ruta@vendguard.internal`<br>`marta.ruta@vendguard.internal` | `Password123!` | Interfaz vertical *mobile-first*, gestión de averías en ruta, inicio de intervención, pausa estructurada por repuestos o por falta de acceso al inmueble (pausa de sede), resolución justificada con piezas sustituidas y causa raíz, guías rápidas de diagnóstico, hilo de conversación del expediente, inspecciones preventivas, consulta del historial de la máquina y métricas individuales. |
 | **🤳 4. Usuario / Consumidor Final** | Enlace QR (`?code=VEND-0101`) | *Público / Sin registro* | Reporte inmediato in situ escaneando la pegatina de la máquina, con feedback de estado si ya estaba reportada. |
 
 > **Clave de centro de desarrollo (cierre de S-4).** En pruebas, las semillas emiten una clave determinista por sede; para el trabajo manual en local hay que pedirla de forma explícita (`VENDGUARD_DEV_SITE_KEYS=1 php bin/seed.php`). La regla es `DEV-<site_code>` (p. ej. `DEV-SEDE-BCN-01`). En producción el campo no se siembra jamás: cada sede recibe su clave aleatoria al alta o al reemitirse desde coordinación, se muestra una sola vez y solo se guarda su huella bcrypt. Sin clave emitida, el acceso de la sede falla en cerrado.
@@ -260,7 +286,7 @@ php bin/seed_demo_map.php
 ```
 
 #### Entorno Cloud / Producción (Render + Supabase PostgreSQL):
-El script [`bin/init_cloud_db.php`](bin/init_cloud_db.php) es el único punto de convergencia del esquema y no es tolerante a medias: aplica el DDL base (`database/supabase_init.sql`), **todas las migraciones incrementales** de `database/supabase_migrations/` (hoy 001–021, de ahí que una base ya desplegada converja en cada arranque), el catálogo maestro (`database/supabase_seeds.sql`) y el histórico de demostración. Todo está declarado con `IF NOT EXISTS` y semillas «insertar si no existe», así que reejecutarlo no duplica nada. Si cualquier paso falla, el script reintenta con espera progresiva y, agotados los intentos, **sale con código distinto de cero**: con el `&&` del arranque, el contenedor no levanta y no se sirve tráfico contra un esquema sin verificar (EARS-02.5).
+El script [`bin/init_cloud_db.php`](bin/init_cloud_db.php) es el único punto de convergencia del esquema y no es tolerante a medias: aplica el DDL base (`database/supabase_init.sql`), **todas las migraciones incrementales** de `database/supabase_migrations/` (hoy 001–025, de ahí que una base ya desplegada converja en cada arranque), el catálogo maestro (`database/supabase_seeds.sql`) y el histórico de demostración. Todo está declarado con `IF NOT EXISTS` y semillas «insertar si no existe», así que reejecutarlo no duplica nada. Si cualquier paso falla, el script reintenta con espera progresiva y, agotados los intentos, **sale con código distinto de cero**: con el `&&` del arranque, el contenedor no levanta y no se sirve tráfico contra un esquema sin verificar (EARS-02.5).
 ```powershell
 DATABASE_URL="postgres://usuario:clave@aws-0-<region>.pooler.supabase.com:6543/postgres?sslmode=verify-full" php bin/init_cloud_db.php
 ```
@@ -575,6 +601,33 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/coordinator/metrics/root-causes-pareto/export` | `COORDINATOR` | CSV UTF-8 BOM en dos secciones (resumen y detalle nominal) con nombres vigente y congelado; registra la exportación. |
 | `POST` | `/api/coordinator/incidents/{id}/resolve` | `COORDINATOR` | Cierre desde triaje con `require_taxonomy`: exige causa y solución para pasar a `RESOLVED`. |
 
+#### Bandeja de Taller Central (Módulo 27)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/coordinator/workshop-items` | `COORDINATOR` | Bandeja de piezas recuperadas con custodia física, estado y ahorro por reacondicionamiento. |
+| `GET` | `/api/coordinator/workshop-items/export` | `COORDINATOR` | Exportación CSV de la bandeja y sus indicadores de economía circular. |
+| `POST` | `/api/coordinator/workshop-items/{id}/receive` | `COORDINATOR` | Recepción física de la pieza en el taller central. |
+| `POST` | `/api/coordinator/workshop-items/{id}/start-bench` | `COORDINATOR` | Inicio del trabajo en banco con control de concurrencia sobre la pieza. |
+| `POST` | `/api/coordinator/workshop-items/{id}/resolve` | `COORDINATOR` | Dictamen con diagnóstico real (≥ 20 caracteres): reincorporación al inventario o baja. |
+
+#### Guías Rápidas de Diagnóstico por Modelo (Módulo 28)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET/POST` | `/api/coordinator/troubleshooting-guides` | `COORDINATOR` | Catálogo completo y alta de una guía por pareja modelo/categoría (`409` si ya existe una viva). |
+| `PUT` | `/api/coordinator/troubleshooting-guides/{id}` | `COORDINATOR` | Edición de bloques y vigencia; el modelo y la categoría permanecen inmutables. |
+| `PATCH` | `/api/coordinator/troubleshooting-guides/{id}/status` | `COORDINATOR` | Baja lógica y reactivación de la guía sin borrado físico (Art. III.1). |
+| `GET` | `/api/troubleshooting-guides/by-model` | `TECHNICIAN` · `COORDINATOR` | Guía vigente del modelo y la categoría del aviso para la ruta y la copia sin conexión. La sede recibe `403`. |
+
+#### Acta de Merma y Cuarentena Sanitaria APPCC (Módulo 29)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/sanitary-quarantines/active` | `TECHNICIAN` · `COORDINATOR` | Cuarentenas activas con su origen, el reloj biológico y el bloqueo de QR vigente. |
+| `POST` | `/api/sanitary-quarantines/machines/{machineId}/lift` | `TECHNICIAN` · `COORDINATOR` | Levantamiento atómico de la cuarentena con emisión del acta y desbloqueo del QR. |
+| `GET` | `/api/sanitary-spoilage-records/by-machine/{machineId}` y `/by-machine-code/{code}` | `TECHNICIAN` · `COORDINATOR` | Histórico de actas de la máquina y sus reaperturas (`1..N`). |
+| `GET` | `/api/sanitary-spoilage-records/{id}/official-act` | `TECHNICIAN` · `COORDINATOR` | Acta Oficial A4 imprimible con firma de higienización. |
+| `GET` | `/api/coordinator/sanitary-spoilage-records[/export-csv]` | `COORDINATOR` | Libro APPCC de mermas con filtros y exportación CSV auditada. |
+| `PATCH` | `/api/coordinator/sanitary-spoilage-records/{id}/loss-estimate` | `COORDINATOR` | Ajuste económico auditado con motivo obligatorio (Art. V.4). |
+
 ---
 
 ## 🧪 Batería Completa de Pruebas Automatizadas (T-39)
@@ -586,24 +639,24 @@ La integridad de VendGuard está certificada mediante un ejecutor de pruebas aut
 php tests/run_all.php
 ```
 
-### Resumen de Ejecución Global (Octubre 2026)
+### Resumen de Ejecución Global (Noviembre 2026)
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 400 suites · 14.984 aserciones
+batería global: 401 suites · 15.013 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
  Tiempo de ejecución total : 299.00 segundos  (variable en cada corrida)
- Suites de pruebas PHP Unit : 172 / 172 pasadas
+ Suites de pruebas PHP Unit : 173 / 173 pasadas
  Suites de pruebas JS Unit  : 96 / 96 pasadas
  Suites de Integración PHP  : 130 / 130 pasadas
  Suites E2E Manuales (T-40): 2 / 2 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 400
- Total Aserciones Evaluadas : 14.984
+ Total Suites Ejecutadas    : 401
+ Total Aserciones Evaluadas : 15.013
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -649,23 +702,28 @@ php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 
 El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla. La medición del pooler remoto sigue siendo la evidencia de RNF-01: si el enlace del proveedor incumple el presupuesto de 250 ms en alguna operación, el canal publica el fallo con su mediana y su p95, sin convertirlo en omisión.
 
-Corrida de certificación del 30 de octubre de 2026:
+Corrida del 7 de noviembre de 2026 (el canal no cierra en verde y los fallos se publican sin omitirse):
 
 ```text
 ======================================================================
  RESUMEN DEL CANAL new_engine
- Suites evaluadas    : 32
- Suites en verde     : 32
+ Suites evaluadas    : 40
+ Suites en verde     : 39
  No ejecutables      : 0
- Aserciones          : 963
- Fallos              : 0
- RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
+ Aserciones          : 1.308
+ Fallos              : 1
+ RESULTADO: FALLO. Revisa: PoolerLatencyMeasurementTest.php
 ======================================================================
 ```
 
+El único fallo que queda, con su causa medida:
+
+* **`PoolerLatencyMeasurementTest`** mide contra el motor remoto real (Supavisor, puerto 6543, TLS `verify-full`): la mediana de «crear» quedó en **261,0 ms** (p95 326,7 ms) y la de «asignar» en **322,4 ms** (p95 407,4 ms), por encima del presupuesto de 250 ms de RNF-01. Es una medición del enlace del proveedor, no del motor local, y por eso no se sustituye ni se omite.
+
+
 El canal incluye además `OfflineSyncLockBrowserTest`, única suite que exige **navegador real**: abre dos pestañas de Chromium sobre el mismo perfil, comparte `IndexedDB` entre ambas y comprueba con un servidor de pruebas que el cerrojo `vendguard-offline-sync` impide dos envíos en vuelo y que el control negativo sin cerrojo sí los detecta. La quinta sección oculta `navigator.locks` en las dos pestañas —lo que ve una PWA servida por HTTP plano— y verifica que el arriendo en `localStorage` sostiene la misma exclusión (16 aserciones en total).
 
-Entre las suites específicas de este canal se encuentran `PostgresTimeTrackingSchemaTest` (Módulo 22 · integridad relacional de `technician_shifts` y `technician_shift_logs`), `PostgresConstitutionalTest` (Art. III.1 en 33 tablas relacionales), `PostgresAbsenceShiftSchemaTest` (Módulo 21), `PostgresSatisfactionSurveySchemaTest` (Módulo 20), `PostgresServiceSheetSchemaTest` (Módulo 19), `PostgresVanRestockSchemaTest` (Módulo 23 · órdenes de carga y baja lógica), `PostgresVanStockSchemaTest` (Módulo 18), `PostgresZoneSchemaTest` (Módulo 17), `PostgresRootCauseTaxonomySchemaTest` (Módulo 25 · tablas 35/36, columnas congeladas, predeterminada única e inmutabilidad) y `RootCauseParetoPerformanceTest` (Módulo 25 · 10.000 averías bajo el umbral).
+Entre las suites específicas de este canal se encuentran `PostgresTimeTrackingSchemaTest` (Módulo 22 · integridad relacional de `technician_shifts` y `technician_shift_logs`), `PostgresConstitutionalTest` (Art. III.1 en las 40 tablas de su contrato de correspondencia, Módulos 14 y 17–29), `PostgresAbsenceShiftSchemaTest` (Módulo 21), `PostgresSatisfactionSurveySchemaTest` (Módulo 20), `PostgresServiceSheetSchemaTest` (Módulo 19), `PostgresVanRestockSchemaTest` (Módulo 23 · órdenes de carga y baja lógica), `PostgresVanStockSchemaTest` (Módulo 18), `PostgresZoneSchemaTest` (Módulo 17), `PostgresRootCauseTaxonomySchemaTest` (Módulo 25 · tablas 35/36, columnas congeladas, predeterminada única e inmutabilidad) y `RootCauseParetoPerformanceTest` (Módulo 25 · 10.000 averías bajo el umbral).
 
 ---
 
@@ -682,14 +740,16 @@ gestor-incidencias-vending/
 │   ├── init_cloud_db.php         # Inicializador del arranque desplegado (una sola ruta: DDL base, migraciones, catálogo, histórico de demostración)
 │   ├── migrate.php               # Migrador incremental del motor único (PostgresMigrationRunner)
 │   ├── seed_demo_history.php     # Histórico de demostración (17 averías INC-DEMO-*, traza y auditoría)
+│   ├── seed_demo_map.php         # Averías demo repartidas entre técnicos para el Mapa Territorial (8 INC-MAPA-*)
 │   ├── create_bizum_case.php     # Script CLI de caso demo de reintegro por Bizum
 │   ├── sanitary_clock_sweep.php  # Barrido CLI del Reloj Sanitario Biológico (mismo reloj que el endpoint cron)
 │   └── send_notifications.php    # Worker CLI del despachador de notificaciones (mismo grafo que el endpoint cron)
 ├── database/
-│   ├── supabase_init.sql         # DDL canónico de PostgreSQL (36 tablas, 30 enumerados, disparadores)
+│   ├── supabase_init.sql         # DDL canónico de PostgreSQL (41 tablas, 35 enumerados, disparadores)
 │   ├── supabase_migrations/      # Migraciones incrementales canónicas del motor único
 │   ├── supabase_seeds.sql        # Catálogo maestro de semillas del motor único
-│   └── DemoHistorySeeder.php     # Histórico de demostración portable: 17 averías (13 cerradas y 4 en garantía, dos reabiertas; diez clasificadas con causa raíz), traza y auditoría
+│   ├── DemoHistorySeeder.php     # Histórico de demostración portable: 17 averías (13 cerradas y 4 en garantía, dos reabiertas; diez clasificadas con causa raíz), traza y auditoría
+│   └── DemoMapSeeder.php         # Sembrador demo del Mapa Territorial: 8 averías INC-MAPA-* con reparto multi-técnico, una sin asignar y un técnico sin trabajo
 ├── deploy/
 │   ├── cron/                     # Crontab interno del contenedor (barrido sanitario y despachador de notificaciones)
 │   ├── cloudflare/               # Relé gratuito de Cloudflare Worker para el Webhook de Telegram y Cron opcional
@@ -731,6 +791,10 @@ gestor-incidencias-vending/
 │   ├── 23-van-restock-stock-aware-triage/# Especificación de órdenes de carga y cruce de stock en triaje
 │   ├── 24-offline-pwa/           # Especificación del modo sin conexión e instalabilidad móvil
 │   ├── 25-root-cause-taxonomy/   # Especificación de taxonomía de causas raíz y análisis de Pareto
+│   ├── 26-reassignment-history-custody-chain/# Historial de reasignaciones y cadena de custodia
+│   ├── 27-workshop-refurbishment-loop/# Bandeja de taller central para piezas recuperadas
+│   ├── 28-troubleshooting-guides/# Guías rápidas de diagnóstico por modelo
+│   ├── 29-haccp-spoilage-log/    # Acta de merma y destrucción de lotes (APPCC/HACCP)
 │   ├── functional/               # Especificaciones funcionales EARS transversales
 │   └── technical/                # Contratos de API, DDL y esquemas de base de datos
 ├── src/
@@ -756,7 +820,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 400 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 401 suites (100% verde)
     ├── run_new_engine.php        # Canal propio de la categoría new_engine (PG_TEST_DSN)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
