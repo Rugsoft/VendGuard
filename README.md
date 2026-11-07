@@ -253,6 +253,10 @@ php bin/migrate.php
 
 # Cargar el histórico de demostración portable (17 averías canónicas INC-DEMO-*; diez de ellas llegan clasificadas para el Pareto):
 php bin/seed_demo_history.php
+
+# Sembrar averías activas repartidas entre técnicos para probar el filtro del Mapa Territorial
+# (ocho averías INC-MAPA-*, una sede multi-técnico, una sin asignar y un técnico sin trabajo):
+php bin/seed_demo_map.php
 ```
 
 #### Entorno Cloud / Producción (Render + Supabase PostgreSQL):
