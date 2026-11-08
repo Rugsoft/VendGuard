@@ -146,3 +146,45 @@ Cuando el usuario solicite un avance o nueva funcionalidad, el agente seguirá e
 2. **Consultar la documentación base:** Verificar que la petición encaja con `docs/manual_0_analisis_problema.md` y con los límites del MVP.
 3. **Documentar primero:** Proponer la especificación o cambio en `specs/` antes de escribir código ejecutable.
 4. **Solicitar feedback explícito:** Indicar con claridad al usuario las decisiones tomadas y los siguientes pasos antes de ejecutar cambios estructurales.
+
+---
+
+## 8. Memoria Persistente con Engram (Uso Obligatorio)
+
+**Herramienta:** Engram v3.7.0 (`engram` disponible en el PATH; almacén local `~/.engram/engram.db`).
+**Proyecto canónico en Engram:** `vendguard` (no `gestor-incidencias-vending`).
+**Registro MCP (Freebuff):** `.agents/mcp.json` declara el servidor `engram` (stdio, perfil `agent`, proyecto `vendguard`); tras crearlo o modificarlo hay que reiniciar el cliente para que exponga las herramientas `mem_*`.
+
+La memoria de Engram aporta contexto de sesiones anteriores. Complementa a este manual y **nunca lo sustituye ni lo anula** (ver *Jerarquía Normativa*).
+
+### 8.1 Recuperación de contexto (inicio de cada interacción)
+
+1. Antes de proponer o escribir código, recuperar contexto del proyecto:
+   * `engram context` → sesiones, prompts y observaciones recientes.
+   * `engram search "<tema>" --limit 5` → decisiones, descubrimientos o correcciones previas sobre el área a tocar.
+   * `engram timeline <obs_id>` → solo si se necesita el detalle completo de una observación concreta.
+2. Si el cliente expone las herramientas MCP de Engram, se usan en lugar de la CLI: `mem_current_project` (primera llamada), `mem_context`, `mem_search`, `mem_get_observation`.
+3. **Contraste obligatorio:** toda memoria recuperada se verifica contra `constitution.md`, las especificaciones vigentes en `specs/` y el código actual. Si hay contradicción, prevalece el repositorio y se corrige la memoria, nunca al revés.
+4. Si Engram no responde o no reconoce el proyecto, continuar el trabajo con normalidad y avisarlo al usuario; no es un bloqueante.
+
+### 8.2 Guardado de contexto (hitos y cierre de interacción)
+
+* Guardar cuando exista una conclusión **verificada y duradera**, costosa de reconstruir: decisión de arquitectura, especificación aprobada, hallazgo de investigación, causa raíz de un fallo o corrección de rumbo.
+* Formato: título corto y cuerpo **What / Why / Where** (qué se hizo, por qué y dónde quedó: rutas, módulo, PR).
+* CLI: `engram save "<título>" "What: … Why: … Where: …" --type <tipo> --scope project`
+  * Tipos ya usados en este proyecto: `decision`, `architecture`, `discovery` (elegir el que corresponda al contenido).
+* Equivalentes MCP: `mem_save` (preferido) y `mem_session_summary` solo para cierres o traspasos significativos; el final de una tarea normal no lo requiere.
+* Agrupar conclusiones relacionadas en una sola memoria; no registrar cada comando ni cada mensaje.
+* Antes de guardar, buscar con `mem_search` / `engram search` y ampliar la memoria existente en lugar de duplicarla.
+
+### 8.3 Qué NO debe guardarse nunca
+
+* Secretos y credenciales: tokens, contraseñas, claves de API, cadenas de conexión o el contenido de `.env.local` y de cualquier archivo de entorno.
+* Datos personales o internos de usuarios y responsables de ubicación (restricciones de privacidad del MVP).
+* Volcados íntegros de especificaciones, código o conversaciones: la fuente de verdad es `specs/` y el repositorio.
+* Hipótesis sin confirmar; si se registra una sospecha, marcarla como tal y sustituirla cuando se verifique.
+
+### 8.4 Prohibiciones
+
+* Usar la memoria como atajo del ciclo SDD: una especificación recordada no equivale a una especificación aprobada en `specs/`.
+* Ejecutar operaciones destructivas sobre el almacén (`delete --hard`, `projects merge`, `consolidate`) sin autorización explícita del usuario.
