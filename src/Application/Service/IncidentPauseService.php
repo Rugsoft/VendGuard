@@ -27,6 +27,7 @@ use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
@@ -1342,8 +1343,8 @@ final class IncidentPauseService
     }
 
     /**
-     * Cierra el intervalo de pausa vivo: transición, acumulación de segundos, desplazamiento
-     * comercial del vencimiento y rastro inmutable en `incident_history` (RF-02.4, RF-03.3, Art. III).
+     * Cierra el intervalo de pausa vivo: transición, acumulación de segundos, recálculo
+     * continuo del vencimiento y rastro inmutable en `incident_history` (RF-02.4, RF-03.3, Art. III).
      *
      * Los dos caminos que reanudan una pausa —la del técnico in situ y la del coordinador—
      * comparten este cierre para que
@@ -1351,9 +1352,10 @@ final class IncidentPauseService
      * desplazado no puedan divergir entre caminos. La única diferencia es quién queda
      * anotado como actor y qué nota viaja al historial.
      *
-     * El desplazamiento se calcula DESPUÉS de cerrar el intervalo porque necesita la
-     * duración ya consolidada y el calendario de la sede; si el expediente no tenía
-     * compromiso de SLA, ambas fechas viajan nulas sin fingir un vencimiento.
+     * El vencimiento se calcula DESPUÉS de cerrar el intervalo porque necesita el
+     * acumulador ya consolidado: `created_at + sla_target_minutes * 60 +
+     * total_pending_info_seconds` (C2). Si el expediente no tiene alta legible, la
+     * fecha viaja nula sin fingir un compromiso.
      *
      * @param Incident $incident Expediente pausado que se reanuda.
      * @param IncidentStatus $targetStatus Estado operativo de destino.
@@ -1377,41 +1379,29 @@ final class IncidentPauseService
         DateTimeImmutable $now,
         string $failureContext
     ): array {
-        $originalSlaTargetAt = $incident->getSlaTargetAt();
         $shiftedSlaTargetAt = null;
 
-        // Desplazamiento = tiempo HÁBIL realmente perdido durante la pausa (RF-03.3, enmendado
-        // en el cierre de F-3). Se mide la ventana de la pausa (paused_at -> reanudación) en el
-        // calendario comercial de la sede, NO la duración de pared: una espera que cae de
-        // viernes 18:00 a lunes 08:00 no mueve el compromiso contractual porque la jornada de
-        // la sede no corrió ni un segundo. Con la duración de pared reinterpretada como horas
-        // comerciales, el vencimiento se dilataba hasta 4× justo en el caso más habitual de la
-        // pausa (noche y fin de semana). El acumulador `total_pending_info_seconds` y la
-        // auditoría del intervalo siguen en segundos de pared, que es lo que RF-03.1 descuenta
-        // del MTTR contractual.
-        $slaShiftSeconds = $this->pauseBusinessSecondsSince($incident->getPausedAt(), $now);
-
-        // El agregado cierra el intervalo y acumula sus segundos; la fecha límite se
-        // graba aparte porque el desplazamiento comercial depende del calendario de sede.
+        // El agregado cierra el intervalo y consolida sus segundos. El vencimiento
+        // contractual se recalcula en segundos continuos desde el alta original
+        // (C2): created_at + sla_target_minutes + total_pending_info_seconds.
         $resumed = $incident->resumePendingInfo($targetStatus, $now);
 
-        if ($originalSlaTargetAt !== null) {
-            $originalDeadline = $this->parseDateTime($originalSlaTargetAt);
-            if ($originalDeadline !== null) {
-                $shiftedDeadline = $this->shiftSlaTargetInBusinessHours(
-                    $originalDeadline,
-                    $slaShiftSeconds,
-                    $resumed->getLocationId()
-                );
-                // El anuncio —la nota inmutable y la respuesta de la pausa— viaja en **pared de sede**:
-                // es la hora de la jornada la que documenta el compromiso contractual (08:00 a 18:00,
-                // lunes a viernes). El instante que se persiste justo debajo es el ancla de esa pared, y
-                // la pared es su lectura en la zona operativa, nunca una segunda forma de escribirla.
-                $shiftedSlaTargetAt = $shiftedDeadline
-                    ->setTimezone($this->madridTimezone())
-                    ->format('Y-m-d H:i:s');
-                $resumed = $resumed->shiftSlaTarget($shiftedDeadline);
-            }
+        $createdAt = $this->parseDateTime($resumed->getCreatedAt());
+        if ($createdAt !== null) {
+            $shiftedDeadline = SlaTargetCalculator::computeEffectiveTargetAt(
+                $createdAt,
+                $resumed->getSlaTargetMinutes(),
+                $resumed->getTotalPendingInfoSeconds()
+            );
+            // La nota y la respuesta viajan en pared de sede; el instante persistido
+            // conserva su ancla y es la única forma de escribir la marca.
+            $shiftedSlaTargetAt = $shiftedDeadline
+                ->setTimezone($this->madridTimezone())
+                ->format('Y-m-d H:i:s');
+            $resumed = $resumed->withRecalculatedSlaTarget(
+                $resumed->getSlaTargetMinutes(),
+                $shiftedDeadline
+            );
         }
 
         if (!$this->incidents()->update($resumed)) {

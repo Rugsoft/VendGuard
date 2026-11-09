@@ -15,10 +15,13 @@ use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\OldPartDestination;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\OpportunisticMode;
 use VendGuard\Core\Domain\ValueObject\OpportunisticOriginReason;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\ResolutionTaxonomyHistoryParser;
 
@@ -160,7 +163,7 @@ final class CoordinatorIncidentDetailService
         $sla = $this->computeSlaStatus($incident, $machine, $timeline, $now);
 
         return new CoordinatorIncidentDetailDto(
-            incident: $this->buildIncidentBlock($incident, $history),
+            incident: $this->buildIncidentBlock($incident, $history, $machine),
             location: $this->buildLocationBlock($incident, $raw['location'], $machine),
             machine: $this->buildMachineBlock($incident, $machine),
             technician: $this->buildTechnicianBlock($incident, $raw['technician'], $history),
@@ -364,12 +367,17 @@ final class CoordinatorIncidentDetailService
     /**
      * @param array<string, mixed> $incident
      * @param list<array<string, mixed>> $history
+     * @param array<string, mixed>|null $machine
      * @return array<string, mixed>
      */
-    private function buildIncidentBlock(array $incident, array $history): array
+    private function buildIncidentBlock(array $incident, array $history, ?array $machine): array
     {
         $status = IncidentStatus::tryFrom((string)($incident['status'] ?? ''));
         $urgency = UrgencyLevel::tryFrom((string)($incident['urgency'] ?? ''));
+        $category = IncidentCategory::tryFrom((string)($incident['category'] ?? ''));
+        $machineType = $this->resolveMachineType($incident, $machine);
+        $slaTier = SlaTier::tryFrom((string)($incident['sla_tier_snapshot'] ?? ''));
+        $slaTargetMinutes = (int)($incident['sla_target_minutes'] ?? 1440);
         $opportunisticMode = OpportunisticMode::tryFrom((string)($incident['opportunistic_mode'] ?? ''));
         $opportunisticOrigin = OpportunisticOriginReason::tryFrom(
             (string)($incident['opportunistic_origin_reason'] ?? '')
@@ -382,6 +390,18 @@ final class CoordinatorIncidentDetailService
             'status_label' => $status?->label() ?? (string)($incident['status'] ?? ''),
             'urgency' => (string)($incident['urgency'] ?? ''),
             'urgency_label' => $urgency?->label() ?? (string)($incident['urgency'] ?? ''),
+            // Contrato de SLA sellado (Módulo 30, D2/C5): el detalle de
+            // Coordinación publica el perfil histórico y el objetivo efectivo;
+            // el riesgo de frío se deriva de la matriz, nunca de la sede actual.
+            'sla_tier_snapshot' => $slaTier?->value ?? (string)($incident['sla_tier_snapshot'] ?? SlaTier::STANDARD->value),
+            'sla_tier_label' => $slaTier?->label() ?? SlaTier::STANDARD->label(),
+            'sla_target_minutes' => $slaTargetMinutes,
+            'sla_target_hours' => (float)($slaTargetMinutes / 60),
+            'sla_target_at' => $incident['sla_target_at'] ?? null,
+            'is_cold_chain_risk' => $machineType !== null
+                && $category !== null
+                && $urgency !== null
+                && SlaTargetCalculator::isColdChainRisk($machineType, $category, $urgency),
             'is_reopened' => ($incident['reopened_at'] ?? null) !== null,
             'reopened_at' => $incident['reopened_at'] ?? null,
             'reopened_reason' => $incident['reopen_reason'] ?? null,

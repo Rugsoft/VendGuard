@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace VendGuard\Application\Service;
 
+use DateTimeImmutable;
 use InvalidArgumentException;
+use RuntimeException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;
@@ -17,6 +19,7 @@ use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
@@ -175,6 +178,7 @@ class QrReportService
                 $machine,
                 $location,
                 $description,
+                $category,
                 $reporterName,
                 $reporterEmail,
                 $retainedMoney,
@@ -184,6 +188,15 @@ class QrReportService
 
         // 7. Cálculo automático de urgencia (Constitución Art. II, RF-03 / EARS 3.2-3.7)
         $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $category);
+        // El perfil contractual de la sede se congela en el alta y la matriz
+        // resuelve el objetivo, incluido el techo sanitario del Art. II.
+        $slaTier = $location->getSlaTier();
+        $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+            $slaTier,
+            $machine->getMachineType(),
+            $category,
+            $urgency
+        );
 
         // 8-10. Alta atómica con un código de ticket único. El asignador reconstruye el
         //       expediente y repite la unidad de trabajo completa si el índice único del
@@ -191,7 +204,7 @@ class QrReportService
         //       única notificación, y nunca responde un 500 por una colisión de azar.
         try {
             $enqueuer = $this->notificationEnqueuer;
-            $created = $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $location, $category, $description, $urgency, $reporterName, $reporterPhone, $retainedMoney, $photoPath, $reporterEmail, $enqueuer): Incident {
+            $created = $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $location, $category, $description, $urgency, $slaTier, $slaTargetMinutes, $reporterName, $reporterPhone, $retainedMoney, $photoPath, $reporterEmail, $enqueuer): Incident {
                 $newIncident = new Incident(
                     id: null,
                     ticketCode: $ticketCode,
@@ -206,7 +219,9 @@ class QrReportService
                     reporterPhone: $reporterPhone,
                     retainedMoneyAmount: $retainedMoney,
                     photoPath: $photoPath,
-                    reporterEmail: $reporterEmail
+                    reporterEmail: $reporterEmail,
+                    slaTierSnapshot: $slaTier,
+                    slaTargetMinutes: $slaTargetMinutes
                 );
 
                 if ($enqueuer === null) {
@@ -258,6 +273,7 @@ class QrReportService
                     $machine,
                     $location,
                     $description,
+                    $category,
                     $reporterName,
                     $reporterEmail,
                     $retainedMoney,
@@ -279,12 +295,65 @@ class QrReportService
         Machine $machine,
         Location $location,
         string $description,
+        IncidentCategory $incomingCategory,
         ?string $reporterName,
         ?string $reporterEmail,
         ?float $retainedMoney,
         ?string $photoPath,
         bool $isRaceCondition = false
     ): array {
+        // Absorción QR (C4, QA 1): el ticket conserva su perfil sellado, pero
+        // una categoría entrante puede elevar la prioridad o revelar un fallo
+        // térmico. Sólo entonces se endurece el objetivo, sin reiniciar el reloj.
+        $incomingUrgency = UrgencyCalculator::calculate($machine->getMachineType(), $incomingCategory);
+        $incomingTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+            $incident->getSlaTierSnapshot(),
+            $machine->getMachineType(),
+            $incomingCategory,
+            $incomingUrgency
+        );
+
+        if ($incomingUrgency->priorityRank() > $incident->getUrgency()->priorityRank()
+            || $incomingTargetMinutes < $incident->getSlaTargetMinutes()
+        ) {
+            // La urgencia sólo puede subir: una categoría entrante menos severa
+            // nunca relaja la prioridad ya declarada en el expediente.
+            $effectiveUrgency = $incomingUrgency->priorityRank() > $incident->getUrgency()->priorityRank()
+                ? $incomingUrgency
+                : $incident->getUrgency();
+            $createdAt = $this->parseDateTime($incident->getCreatedAt()) ?? new DateTimeImmutable('now');
+            $targetAt = SlaTargetCalculator::computeEffectiveTargetAt(
+                $createdAt,
+                $incomingTargetMinutes,
+                $incident->getTotalPendingInfoSeconds()
+            );
+            $escalated = $incident
+                ->withUrgency($effectiveUrgency)
+                ->withRecalculatedSlaTarget($incomingTargetMinutes, $targetAt);
+
+            if (!$this->incidentRepo->update($escalated)) {
+                throw new RuntimeException(
+                    'No se pudo persistir la reclasificación del expediente fusionado por QR.'
+                );
+            }
+
+            $this->incidentRepo->insertHistory(
+                (int)$incident->getId(),
+                null,
+                $incident->getStatus()->value,
+                $incident->getStatus()->value,
+                sprintf(
+                    'Objetivo de SLA actualizado de %d min a %d min (Contrato sellado: %s) tras cambio de prioridad a %s.',
+                    $incident->getSlaTargetMinutes(),
+                    $incomingTargetMinutes,
+                    $incident->getSlaTierLabel(),
+                    $effectiveUrgency->label()
+                )
+            );
+
+            $incident = $escalated;
+        }
+
         $prefix = $isRaceCondition
             ? 'Aviso adicional recibido de forma concurrente mediante código QR: '
             : 'Aviso adicional recibido mediante código QR: ';
@@ -344,6 +413,22 @@ class QrReportService
             ],
             'message' => "Otro usuario acaba de reportar una avería en esta máquina hace un momento (Ticket {$incident->getTicketCode()}). Hemos registrado tus observaciones en dicho ticket.",
         ];
+    }
+
+    /**
+     * Interpreta una marca temporal persistida o ISO-8601 sin imponer zona.
+     */
+    private function parseDateTime(?string $value): ?DateTimeImmutable
+    {
+        if ($value === null || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return new DateTimeImmutable($value);
+        } catch (\Exception) {
+            return null;
+        }
     }
 
     /**

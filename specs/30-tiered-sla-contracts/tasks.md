@@ -158,7 +158,7 @@ flowchart LR
 
 ## Fase 4: Capa de Aplicación (Sedes, Absorción QR, Pausa, Ruta, Recomendador y Métricas)
 
-- [ ] **T-SLA-08 · Actualizar `AdminLocationService`, `QrReportService`, `OpportunisticInterventionService`, `IncidentPauseService` y `CoordinatorIncidentDetailService`**
+- [x] **T-SLA-08 · Actualizar `AdminLocationService`, `QrReportService`, `OpportunisticInterventionService`, `IncidentPauseService` y `CoordinatorIncidentDetailService`**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-SLA-07`
   - **Archivos exactos a crear o modificar:**

@@ -435,6 +435,20 @@ class Incident implements ArrayAccess, JsonSerializable
         return $clone;
     }
 
+    /**
+     * Recalcula la urgencia conservando el resto del agregado (C4).
+     *
+     * La operación es inmutable: la absorción QR necesita elevar la prioridad
+     * sin perder las marcas, la pausa ni el contexto enriquecido del expediente.
+     */
+    public function withUrgency(UrgencyLevel $urgency): self
+    {
+        $clone = clone $this;
+        $clone->urgency = $urgency;
+
+        return $clone;
+    }
+
     public function getId(): ?int
     {
         return $this->id;

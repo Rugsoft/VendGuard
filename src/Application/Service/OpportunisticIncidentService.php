@@ -30,10 +30,10 @@ use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\OpportunisticMode;
 use VendGuard\Core\Domain\ValueObject\OpportunisticOriginReason;
-use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\OpportunisticCoexistencePolicy;
 use VendGuard\Core\Service\OpportunisticColdChainGuardPolicy;
 use VendGuard\Core\Service\OpportunisticLocationEligibilityPolicy;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
 
 /**
@@ -85,23 +85,6 @@ final class OpportunisticIncidentService
 
     /** Reincidencias que hacen crónica la siguiente reapertura (RF-05.4.2). */
     private const CHRONIC_REOPEN_THRESHOLD = 2;
-
-    /**
-     * Bandas de vencimiento contractual por urgencia.
-     *
-     * El ejemplo del contrato técnico (§4.3) fija un `HIGH` a +8 h y el umbral
-     * de frío del Art. II usa 4 h para `CRITICAL` (el mismo valor que
-     * `KpiSummary` y `CoordinatorIncidentDetailService`). Las bandas media y baja
-     * siguen el Manual 0 (24-48 h).
-     *
-     * @var array<string, int>
-     */
-    private const SLA_HOURS_BY_URGENCY = [
-        'CRITICAL' => 4,
-        'HIGH' => 8,
-        'MEDIUM' => 24,
-        'LOW' => 48,
-    ];
 
     private OpportunisticIncidentRepositoryInterface $opportunistic;
     private MachineRepositoryInterface $machines;
@@ -296,7 +279,19 @@ final class OpportunisticIncidentService
             );
 
             $location = $this->locations->findById($locationId);
+            if ($location === null) {
+                throw new LocationNotFoundException($locationId);
+            }
+
             $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $dto->category);
+            $slaTier = $location->getSlaTier();
+            $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+                $slaTier,
+                $machine->getMachineType(),
+                $dto->category,
+                $urgency
+            );
+            $slaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt($now, $slaTargetMinutes);
             $stamp = $now->format('Y-m-d\TH:i:sP');
             $informantName = $dto->effectiveInformantName();
 
@@ -315,7 +310,9 @@ final class OpportunisticIncidentService
                 assignedAt: $stamp,
                 startedAt: $stamp,
                 cycleStartedAt: $stamp,
-                slaTargetAt: $this->slaTargetFor($urgency, $now),
+                slaTargetAt: $slaTargetAt->format(DATE_ATOM),
+                slaTierSnapshot: $slaTier,
+                slaTargetMinutes: $slaTargetMinutes,
                 opportunisticMode: OpportunisticMode::NEW,
                 opportunisticOriginReason: $dto->originReason,
                 opportunisticInformantName: $informantName
@@ -836,6 +833,15 @@ final class OpportunisticIncidentService
         }
 
         $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $incident->getCategory());
+        $location = $this->locations->findById($incident->getLocationId());
+        $slaTier = $location?->getSlaTier() ?? $incident->getSlaTierSnapshot();
+        $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+            $slaTier,
+            $machine->getMachineType(),
+            $incident->getCategory(),
+            $urgency
+        );
+        $slaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt($now, $slaTargetMinutes);
         $stamp = $now->format('Y-m-d\TH:i:sP');
 
         // El código llega de la política de alta: si el índice único rechaza el
@@ -856,7 +862,9 @@ final class OpportunisticIncidentService
             assignedAt: $stamp,
             startedAt: $stamp,
             cycleStartedAt: $stamp,
-            slaTargetAt: $this->slaTargetFor($urgency, $now),
+            slaTargetAt: $slaTargetAt->format(DATE_ATOM),
+            slaTierSnapshot: $slaTier,
+            slaTargetMinutes: $slaTargetMinutes,
             opportunisticMode: OpportunisticMode::NEW,
             opportunisticOriginReason: OpportunisticOriginReason::WARRANTY_REOPEN_IN_SITU,
             chronicPredecessorIncidentId: (int)$incident->getId()
@@ -895,7 +903,6 @@ final class OpportunisticIncidentService
 
         $predecessor = $incident;
         $notifications = $this->notifications;
-        $location = $this->locations->findById($incident->getLocationId());
 
         return [
             'incident' => $created,
@@ -1045,16 +1052,6 @@ final class OpportunisticIncidentService
         if ($violating !== []) {
             throw new CashRefundPrivacyViolationException($violating);
         }
-    }
-
-    /**
-     * Vencimiento contractual del expediente recién abierto.
-     */
-    private function slaTargetFor(UrgencyLevel $urgency, DateTimeImmutable $now): string
-    {
-        $hours = self::SLA_HOURS_BY_URGENCY[$urgency->value] ?? self::SLA_HOURS_BY_URGENCY['MEDIUM'];
-
-        return $now->modify('+' . $hours . ' hours')->format(DATE_ATOM);
     }
 
     /**
