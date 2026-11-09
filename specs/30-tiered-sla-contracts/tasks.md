@@ -52,7 +52,7 @@ flowchart LR
     6. Reflejar exactamente las mismas definiciones en `database/supabase_init.sql`.
   - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php`
 
-- [ ] **T-SLA-02 · Enriquecer semillas del parque en `database/supabase_seeds.sql` y `SeedRunner.php`**
+- [x] **T-SLA-02 · Enriquecer semillas del parque en `database/supabase_seeds.sql` y `SeedRunner.php`**
   - **Tiempo estimado:** 15 min
   - **Dependencias previas:** `T-SLA-01`
   - **Archivos exactos a crear o modificar:**

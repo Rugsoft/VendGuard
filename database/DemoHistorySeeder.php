@@ -678,7 +678,7 @@ final class DemoHistorySeeder
                     continue;
                 }
 
-                $this->upsertIncident($fixture, $machine, $technicianId, $timeline, $rootCauses);
+                $this->upsertIncident($fixture, $machine, $technicianId, $timeline, $existingId, $rootCauses);
                 $incidentCount++;
 
                 $incidentId = $this->incidentId($fixture['ticket_code']);
@@ -748,7 +748,7 @@ final class DemoHistorySeeder
      * sintaxis (EARS-01.5).
      *
      * @param array<string, mixed> $fixture
-     * @param array{id: int, location_id: int, machine_type: string} $machine
+     * @param array{id: int, location_id: int, machine_type: string, sla_tier: string} $machine
      * @param array<string, string> $timeline
      * @param array<string, array<string, mixed>> $rootCauses
      */
@@ -757,6 +757,7 @@ final class DemoHistorySeeder
         array $machine,
         int $technicianId,
         array $timeline,
+        ?int $existingId = null,
         array $rootCauses = []
     ): void
     {
@@ -765,7 +766,9 @@ final class DemoHistorySeeder
             'assigned_technician_id', 'reporter_name', 'reporter_phone', 'category',
             'description', 'urgency', 'status', 'assigned_at', 'started_at',
             'resolved_at', 'closed_at', 'reopened_at', 'reopen_reason',
-            'resolution_diagnosis', 'resolution_action', 'created_at', 'updated_at',
+            'resolution_diagnosis', 'resolution_action',
+            'sla_tier_snapshot', 'sla_target_minutes', 'sla_target_at',
+            'created_at', 'updated_at',
         ];
 
         $causeCode = self::DEMO_TAXONOMY_MAP[$fixture['ticket_code']] ?? null;
@@ -785,15 +788,35 @@ final class DemoHistorySeeder
             ]);
         }
 
+        // El perfil sellado es inmutable tras el alta (Art. III.3, D2, C1): el
+        // reencuentro reafirma fechas y objetivo, pero jamás reescribe el snapshot.
         $refresh = array_values(array_filter(
             $columns,
-            static fn (string $column): bool => $column !== 'ticket_code'
+            static fn (string $column): bool => !in_array($column, ['ticket_code', 'sla_tier_snapshot'], true)
         ));
 
         $sql = 'INSERT INTO incidents (' . implode(', ', $columns) . ') VALUES ('
             . implode(', ', array_map(static fn (string $column): string => ':' . $column, $columns))
             . ') '
             . $this->dialect->upsertFromInsertedRow(['ticket_code'], $refresh);
+
+        // El objetivo se calcula sobre el perfil con el que nació el expediente,
+        // no sobre el contrato vigente de la sede: un cambio comercial posterior
+        // no reescribe el histórico ya sembrado (C1, C5).
+        $slaTier = $machine['sla_tier'];
+        if ($existingId !== null) {
+            $storedTier = $this->storedSlaTierSnapshot($existingId);
+            if ($storedTier !== null) {
+                $slaTier = $storedTier;
+            }
+        }
+        $slaTargetMinutes = $this->resolveSlaTargetMinutes(
+            $machine['machine_type'],
+            (string)$fixture['category'],
+            (string)$fixture['urgency'],
+            $slaTier
+        );
+        $slaCreatedAt = new DateTimeImmutable($timeline['created'], new DateTimeZone(self::PARK_TIMEZONE));
 
         $params = [
             ':ticket_code' => $fixture['ticket_code'],
@@ -815,6 +838,9 @@ final class DemoHistorySeeder
             ':reopen_reason' => $this->reopenReason($fixture),
             ':resolution_diagnosis' => $this->effectiveDiagnosis($fixture),
             ':resolution_action' => $this->effectiveAction($fixture),
+            ':sla_tier_snapshot' => $machine['sla_tier'],
+            ':sla_target_minutes' => $slaTargetMinutes,
+            ':sla_target_at' => $this->stamp($slaCreatedAt->modify(sprintf('+%d minutes', $slaTargetMinutes))),
             ':created_at' => $timeline['created'],
             ':updated_at' => $timeline['closed'] ?? $timeline['resolved'],
         ];
@@ -1592,12 +1618,14 @@ final class DemoHistorySeeder
     /**
      * Parque de máquinas del catálogo maestro, indexado por código.
      *
-     * @return array<string, array{id: int, location_id: int, machine_type: string}>
+     * @return array<string, array{id: int, location_id: int, machine_type: string, sla_tier: string}>
      */
     private function machineCatalog(): array
     {
         $statement = $this->pdo->query(
-            'SELECT id, code, location_id, machine_type FROM machines WHERE deleted_at IS NULL'
+            'SELECT m.id, m.code, m.location_id, m.machine_type, l.sla_tier'
+            . ' FROM machines m JOIN locations l ON l.id = m.location_id'
+            . ' WHERE m.deleted_at IS NULL'
         );
 
         $catalog = [];
@@ -1606,10 +1634,51 @@ final class DemoHistorySeeder
                 'id' => (int)$row['id'],
                 'location_id' => (int)$row['location_id'],
                 'machine_type' => (string)$row['machine_type'],
+                'sla_tier' => (string)$row['sla_tier'],
             ];
         }
 
         return $catalog;
+    }
+
+    /** Perfil contractual sellado en el expediente, o `null` si aún no existe. */
+    private function storedSlaTierSnapshot(int $incidentId): ?string
+    {
+        $statement = $this->pdo->prepare('SELECT sla_tier_snapshot FROM incidents WHERE id = :id');
+        $statement->execute([':id' => $incidentId]);
+        $tier = $statement->fetchColumn();
+
+        return $tier === false ? null : (string)$tier;
+    }
+
+    /**
+     * Objetivo de resolución de la matriz RF-01 con el techo sanitario del Art. II.
+     *
+     * T-SLA-04 centralizará esta regla en `SlaTargetCalculator`; hasta entonces el
+     * sembrador la replica aquí para poder sellar el histórico de demostración sin
+     * depender de una capa de dominio que aún no existe. El techo de 240 minutos
+     * manda sobre cualquier perfil contractual y cualquier prioridad.
+     */
+    private function resolveSlaTargetMinutes(string $machineType, string $category, string $urgency, string $slaTier): int
+    {
+        if ($machineType === 'PERISHABLE_FOOD'
+            || ($machineType === 'COMBO' && ($category === 'TEMPERATURE_COLD' || $urgency === 'CRITICAL'))) {
+            return 240;
+        }
+
+        return match ($slaTier) {
+            'PRIORITY_CORPORATE' => match ($urgency) {
+                'CRITICAL' => 360,
+                'HIGH' => 480,
+                default => 720,
+            },
+            'CRITICAL_INFRASTRUCTURE_24_7' => in_array($urgency, ['CRITICAL', 'HIGH'], true) ? 240 : 480,
+            default => match ($urgency) {
+                'CRITICAL' => 480,
+                'HIGH' => 720,
+                default => 1440,
+            },
+        };
     }
 
     /**
