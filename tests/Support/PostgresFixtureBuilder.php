@@ -87,6 +87,9 @@ final class PostgresFixtureBuilder
         // El `UPDATE` genérico escribiría texto sintético y el motor lo rechazaría por
         // diseño; la modificación se certifica sobre la marca temporal.
         'offline_sync_mutations' => ['client_mutation_id', 'stop_type', 'operation_type', 'outcome_status'],
+        // El perfil sellado del Módulo 30 es inmutable por disparador: el
+        // UPDATE genérico nunca debe elegirlo como columna de certificación.
+        'incidents' => ['sla_tier_snapshot'],
         // Catálogo maestro del Módulo 25: `code` es inmutable por Constitución
         // (Art. III.3, C4) y su disparador rechaza la reescritura. El `UPDATE`
         // genérico certifica el CRUD sobre una columna descriptiva mutable.
@@ -758,6 +761,12 @@ final class PostgresFixtureBuilder
                 => $variant === 'update' ? 'PREVENTIVE_NON_CONFORMITY' : 'BIOLOGICAL_CLOCK_4H',
             $table === 'sanitary_spoilage_records' && $column === 'disposal_method'
                 => $variant === 'update' ? 'RETURN_TO_CENTRAL_BIOHAZARD' : 'ON_SITE_ORGANIC_SEALED',
+            // El objetivo de SLA (Módulo 30) sólo admite los cinco valores de
+            // la matriz RF-01: el entero genérico (7/9) violaría
+            // `chk_incidents_sla_target_minutes` y el alta mínima de incidents
+            // dejaría de certificarse.
+            $table === 'incidents' && $column === 'sla_target_minutes'
+                => $variant === 'update' ? 720 : 1440,
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,
             $udt === 'numeric', $udt === 'float4', $udt === 'float8' => $variant === 'update' ? '9.5000000' : '1.5000000',
             $udt === 'text' => $literal,

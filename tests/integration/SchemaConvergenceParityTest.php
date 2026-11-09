@@ -535,6 +535,28 @@ try {
         (string)$d6IndexStmt->fetchColumn() === DIFFERENCE_D6_INDEX
     );
 
+    // Módulo 30: el índice de vencimiento y el disparador de inmutabilidad del
+    // perfil sellado forman parte del contrato convergente en el motor único.
+    $slaIndexStmt = $pgPdo->prepare(
+        "SELECT indexname FROM pg_indexes WHERE schemaname = :schema AND tablename = 'incidents' AND indexname = :idx"
+    );
+    $slaIndexStmt->execute([':schema' => $schema, ':idx' => 'idx_incidents_sla_target_lookup']);
+    $assert(
+        'Índice idx_incidents_sla_target_lookup presente en incidents (Módulo 30)',
+        (string)$slaIndexStmt->fetchColumn() === 'idx_incidents_sla_target_lookup'
+    );
+
+    $slaTriggerStmt = $pgPdo->prepare(
+        "SELECT trigger_name FROM information_schema.triggers
+          WHERE trigger_schema = :schema AND event_object_table = 'incidents'
+            AND trigger_name = 'trg_incidents_protect_sla_tier_snapshot'"
+    );
+    $slaTriggerStmt->execute([':schema' => $schema]);
+    $assert(
+        'Disparador trg_incidents_protect_sla_tier_snapshot vinculado a incidents (Módulo 30)',
+        (string)$slaTriggerStmt->fetchColumn() === 'trg_incidents_protect_sla_tier_snapshot'
+    );
+
     // Sin tablas inesperadas
     $undeclaredPg = array_values(array_diff($convergedTables, CONTRACT_TABLES, [ADDITION_LEDGER]));
     $assert('Sin deriva en el motor único: ninguna tabla que el contrato no declare', $undeclaredPg === [], $listSample($undeclaredPg));

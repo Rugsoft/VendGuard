@@ -64,7 +64,7 @@ flowchart LR
     2. Sellar `sla_tier_snapshot`, `sla_target_minutes` y `sla_target_at` coherentes en las incidencias semilla manteniendo idempotencia en ejecuciones repetidas.
   - **Hecho cuando:** `php database/run_seeds.php && vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php`
 
-- [ ] **T-SLA-03 · Actualizar contratos de esquema (`25 ENUMs`), utilidades de test y crear `PostgresTieredSlaSchemaTest.php`**
+- [x] **T-SLA-03 · Actualizar contratos de esquema (`25 ENUMs`), utilidades de test y crear `PostgresTieredSlaSchemaTest.php`**
   - **Tiempo estimado:** 20 min
   - **Dependencias previas:** `T-SLA-01`, `T-SLA-02`
   - **Archivos exactos a crear o modificar:**
