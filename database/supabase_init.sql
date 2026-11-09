@@ -106,7 +106,7 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 -- el ordinal, que en el motor local sí importa para las comparaciones.
 --
 -- -----------------------------------------------------------------------------
--- TABLA DE CORRESPONDENCIA DE LOS 24 CONJUNTOS (25 columnas locales)
+-- TABLA DE CORRESPONDENCIA DE LOS 25 CONJUNTOS (27 columnas locales)
 -- -----------------------------------------------------------------------------
 -- | # | Tipo nativo en PostgreSQL         | Conjunto local (mismo orden)                                  | Columna(s) local(es)                                                             | Declarado en  |
 -- |--:|:----------------------------------|:--------------------------------------------------------------|:---------------------------------------------------------------------------------|:--------------|
@@ -147,9 +147,11 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 -- |   |                                   |  'OPERATIONAL_ZONE','TECHNICIAN_ZONE',                       |                                                                                  |               |
 -- |   |                                   |  'TECHNICIAN_VAN_STOCK','VAN_RESTOCK_ORDER')                 |                                                                                  |               |
 -- | 24| certificate_status                | ('VALID','SUSPENDED','REVOKED')                              | sanitary_certificates.status                                                     | Parte 2       |
+-- | 25| sla_tier                          | ('STANDARD','PRIORITY_CORPORATE',                            | locations.sla_tier, incidents.sla_tier_snapshot                                  | Parte 1       |
+-- |   |                                   |  'CRITICAL_INFRASTRUCTURE_24_7')                              |                                                                                  |               |
 --
--- Reparto del trabajo: 12 conjuntos (13 columnas) se declaran en la Parte 1 y los
--- 12 restantes en la Parte 2, y los 24 están materializados en este mismo fichero.
+-- Reparto del trabajo: 13 conjuntos (15 columnas) se declaran en la Parte 1 y los
+-- 12 restantes en la Parte 2, y los 25 están materializados en este mismo fichero.
 --
 -- -----------------------------------------------------------------------------
 -- MOTIVO DEL BLOQUE `DO`: PostgreSQL no tiene `CREATE TYPE IF NOT EXISTS`
@@ -180,6 +182,15 @@ END $do$;
 DO $do$
 BEGIN
     CREATE TYPE urgency_level AS ENUM ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+-- Módulo 30 · perfil contractual de la sede y del expediente (25.º tipo nativo).
+-- El objetivo se obtiene de la matriz RF-01 y el techo de 240 min del Art. II se
+-- aplica en el dominio y en el backfill, no como un cuarto valor del tipo.
+DO $do$
+BEGIN
+    CREATE TYPE sla_tier AS ENUM ('STANDARD', 'PRIORITY_CORPORATE', 'CRITICAL_INFRASTRUCTURE_24_7');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
@@ -531,6 +542,7 @@ CREATE TABLE IF NOT EXISTS locations (
     zone_id                 BIGINT,
     is_manual_override      BOOLEAN NOT NULL DEFAULT FALSE,
     postal_code             VARCHAR(5),
+    sla_tier                sla_tier NOT NULL DEFAULT 'STANDARD',
     is_active               BOOLEAN NOT NULL DEFAULT TRUE,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -555,10 +567,14 @@ CREATE TABLE IF NOT EXISTS locations (
 ALTER TABLE locations
     ADD COLUMN IF NOT EXISTS zone_id BIGINT,
     ADD COLUMN IF NOT EXISTS is_manual_override BOOLEAN NOT NULL DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS postal_code VARCHAR(5);
+    ADD COLUMN IF NOT EXISTS postal_code VARCHAR(5),
+    ADD COLUMN IF NOT EXISTS sla_tier sla_tier NOT NULL DEFAULT 'STANDARD';
 
 CREATE INDEX IF NOT EXISTS idx_locations_active ON locations (is_active, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_locations_lat_lng ON locations (latitude, longitude, is_active);
+CREATE INDEX IF NOT EXISTS idx_locations_sla_tier
+    ON locations (sla_tier)
+    WHERE deleted_at IS NULL;
 
 -- Los índices territoriales se declaran en un bloque que tolera `undefined_column`:
 -- la columna la garantiza la declaración idempotente de arriba, pero una base ajena con
@@ -882,6 +898,13 @@ CREATE TABLE IF NOT EXISTS incidents (
     pending_info_reason_category VARCHAR(64),
     pending_info_reason_text    TEXT,
     total_pending_info_seconds  BIGINT NOT NULL DEFAULT 0,
+    -- Módulo 30 · sellado contractual inmutable del expediente: el perfil
+    -- vigente en la sede al abrirse y los minutos objetivo de la matriz RF-01
+    -- (Art. III.3, D2, C1). `sla_target_at` se desplaza con las pausas
+    -- imputables a la sede y con el intervalo cerrado de una reapertura en
+    -- garantía (C2, QA 3).
+    sla_tier_snapshot           sla_tier NOT NULL DEFAULT 'STANDARD',
+    sla_target_minutes          INTEGER NOT NULL DEFAULT 1440,
     sla_target_at               TIMESTAMPTZ,
     -- Módulo 16 · metadatos de la avería oportunista in situ. Opcionales a
     -- propósito: ningún expediente anterior al módulo inventa una modalidad.
@@ -977,6 +1000,30 @@ CREATE TABLE IF NOT EXISTS incidents (
         REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
+-- Módulo 30 · convergencia de bases preexistentes: `CREATE TABLE IF NOT EXISTS`
+-- no añade columnas a una tabla que ya existía, así que esta declaración
+-- idempotente mantiene el paso 3/6 y el ejecutor de migraciones en la misma
+-- forma. La restricción se añade solo si falta, porque PostgreSQL no admite
+-- `ADD CONSTRAINT IF NOT EXISTS` y recrearla en cada arranque revalidaría la
+-- tabla completa sin necesidad.
+ALTER TABLE incidents
+    ADD COLUMN IF NOT EXISTS sla_tier_snapshot sla_tier NOT NULL DEFAULT 'STANDARD',
+    ADD COLUMN IF NOT EXISTS sla_target_minutes INTEGER NOT NULL DEFAULT 1440;
+
+DO $do$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conname = 'chk_incidents_sla_target_minutes'
+           AND conrelid = 'incidents'::regclass
+    ) THEN
+        ALTER TABLE incidents
+            ADD CONSTRAINT chk_incidents_sla_target_minutes
+            CHECK (sla_target_minutes IN (240, 360, 480, 720, 1440));
+    END IF;
+END $do$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_machine_active_ticket
     ON incidents (machine_id)
     WHERE status NOT IN ('CLOSED', 'CANCELLED');
@@ -985,6 +1032,11 @@ CREATE INDEX IF NOT EXISTS idx_incidents_created_at ON incidents (created_at);
 CREATE INDEX IF NOT EXISTS idx_incidents_location ON incidents (location_id);
 CREATE INDEX IF NOT EXISTS idx_incidents_status_urgency ON incidents (status, urgency);
 CREATE INDEX IF NOT EXISTS idx_incidents_technician ON incidents (assigned_technician_id);
+-- Vencimiento contractual vivo por estado (Módulo 30): alimenta la promoción
+-- `<= 4,0 h` de la hoja de ruta sin recorrer el histórico cerrado.
+CREATE INDEX IF NOT EXISTS idx_incidents_sla_target_lookup
+    ON incidents (status, sla_target_at, sla_target_minutes)
+    WHERE deleted_at IS NULL;
 -- Universo del Pareto 80/20: expedientes vivos resueltos o cerrados, por fecha
 -- de resolución vigente y causa raíz (Módulo 25, QA 2, C3).
 -- En bases preexistentes anteriores al Módulo 25, `CREATE TABLE IF NOT EXISTS
@@ -1022,6 +1074,26 @@ CREATE OR REPLACE TRIGGER trg_no_delete_incidents
 CREATE OR REPLACE TRIGGER trg_touch_incidents
     BEFORE UPDATE ON incidents
     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+-- Inmutabilidad del perfil sellado (Módulo 30, Art. III.3, D2, C1): un cambio
+-- comercial en la sede no reescribe expedientes abiertos ni cerrados. El
+-- objetivo (`sla_target_minutes`) sí puede recalcularse hacia un valor más
+-- estricto en el triaje o por absorción QR (C4, QA 1).
+CREATE OR REPLACE FUNCTION trg_fn_incidents_protect_sla_tier_snapshot()
+RETURNS TRIGGER AS $fn$
+BEGIN
+    IF OLD.sla_tier_snapshot IS DISTINCT FROM NEW.sla_tier_snapshot THEN
+        RAISE EXCEPTION 'IMMUTABLE_SLA_TIER_SNAPSHOT: incidents.sla_tier_snapshot cannot be modified after incident creation (Art. III.3).'
+            USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NEW;
+END;
+$fn$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER trg_incidents_protect_sla_tier_snapshot
+    BEFORE UPDATE ON incidents
+    FOR EACH ROW EXECUTE FUNCTION trg_fn_incidents_protect_sla_tier_snapshot();
 
 
 -- -----------------------------------------------------------------------------

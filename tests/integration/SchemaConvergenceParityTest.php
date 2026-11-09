@@ -309,6 +309,7 @@ try {
             '023_workshop_repair_items.sql',
             '024_machine_troubleshooting_guides.sql',
             '025_sanitary_spoilage_records.sql',
+            '026_tiered_sla_contracts.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -324,7 +325,7 @@ try {
     $ledgerRows = $pgPdo->query('SELECT filename, checksum FROM ' . ADDITION_LEDGER . ' ORDER BY filename')->fetchAll();
     $assert(
         'El libro registra las migraciones con su huella de 64 caracteres',
-        count($ledgerRows) === 25
+        count($ledgerRows) === 26
         && $ledgerRows[0]['filename'] === '001_initial_baseline.sql'
         && strlen((string)$ledgerRows[0]['checksum']) === 64
         && $ledgerRows[1]['filename'] === '002_notification_center_outbox.sql'
@@ -374,6 +375,8 @@ try {
         && strlen((string)$ledgerRows[23]['checksum']) === 64
         && $ledgerRows[24]['filename'] === '025_sanitary_spoilage_records.sql'
         && strlen((string)$ledgerRows[24]['checksum']) === 64
+        && $ledgerRows[25]['filename'] === '026_tiered_sla_contracts.sql'
+        && strlen((string)$ledgerRows[25]['checksum']) === 64
         && strlen((string)$ledgerRows[20]['checksum']) === 64
     );
 
@@ -409,8 +412,8 @@ try {
         count($pgColumns) >= 40
     );
     $assert(
-        'incidents declara las 50 columnas del contrato (43 + 7 de taxonomía)',
-        count($pgColumns['incidents'] ?? []) === 50,
+        'incidents declara las 52 columnas del contrato (43 + 7 de taxonomía + 2 de SLA)',
+        count($pgColumns['incidents'] ?? []) === 52,
         'columnas: ' . count($pgColumns['incidents'] ?? [])
     );
     $assert(
@@ -490,8 +493,8 @@ try {
         && ($pgEnums['workshop_repair_items.restock_destination'] ?? []) === ['CENTRAL_WAREHOUSE', 'TECHNICIAN_VAN']
     );
     $assert(
-        'El esquema declara los 39 conjuntos ENUM nativos del dominio (34 tipos)',
-        count($pgEnums) === 39,
+        'El esquema declara los 41 conjuntos ENUM nativos del dominio (35 tipos)',
+        count($pgEnums) === 41,
         'conjuntos: ' . count($pgEnums)
     );
 

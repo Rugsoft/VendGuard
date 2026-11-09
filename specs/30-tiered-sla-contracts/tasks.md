@@ -34,7 +34,7 @@ flowchart LR
 
 ## Fase 1: Esquema de Base de Datos PostgreSQL / Supabase y Guardas de Esquema
 
-- [ ] **T-SLA-01 · Crear migración incremental `026_tiered_sla_contracts.sql` y converger `database/supabase_init.sql`**
+- [x] **T-SLA-01 · Crear migración incremental `026_tiered_sla_contracts.sql` y converger `database/supabase_init.sql`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** Ninguna
   - **Archivos exactos a crear o modificar:**
