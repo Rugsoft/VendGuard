@@ -239,7 +239,7 @@ Para mantener el principio de foco exclusivo en el valor operativo inmediato y a
 
 La especificación se considerará formalmente cumplida cuando:
 1. El Técnico y el Coordinador puedan pausar una incidencia en `ASSIGNED`, `IN_PROGRESS` o `PENDING_PARTS` seleccionando una causa tipificada y redactando un motivo de $\ge 20$ caracteres.
-2. El reloj contractual de SLA se congele visualmente y su fecha límite se aplace exactamente en la cantidad de minutos que dure la pausa, computados en horario comercial de la sede.
+2. El reloj contractual de SLA se congele visualmente y su fecha límite se aplace exactamente la duración natural de la pausa, computada en segundos continuos 24/7 (EARS 02.3.1, C6).
 3. En las máquinas bajo vigilancia sanitaria (`MachineType::requiresSanitaryWatch() = true`: alimentos perecederos `PERISHABLE_FOOD` y mixtas `COMBO`), el Reloj Sanitario Biológico active la cuarentena automática a las 4 horas naturales continuas sin frío confirmado y exija la retirada y destrucción del producto perecedero antes de cerrar la avería (Art. II). La activación automática se materializa mediante el barrido periódico de fondo de RF-03.5, con la latencia de hasta 15 minutos declarada en su criterio de contrato.
 4. El Responsable de Sede visualice el banner explicativo en su tarjeta de máquina y pueda responder en el hilo con un comentario público ($\ge 5$ caracteres) sin que el sistema altere el estado ni el reloj: el mensaje marca la respuesta y la parada queda con el aviso de respuesta pendiente (RF-05.6) hasta la reanudación explícita del técnico o del coordinador.
 5. El Técnico y el Coordinador dispongan de la opción manual de *"Reanudar intervención"*.

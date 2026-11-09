@@ -38,8 +38,8 @@ use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
  * Información" (`PENDING_INFO`) con pausa de SLA (Módulo 11).
  *
  * Esta primera entrega (T-PAUSE-06) implementa el **Algoritmo 3: recálculo del
- * vencimiento contractual en ventana de horario hábil comercial** (RF-03.3),
- * aislado como función pura de calendario: sin persistencia, sin red y sin
+ * vencimiento contractual en segundos naturales continuos** (RF-03.3),
+ * aislado como función pura de cálculo: sin persistencia, sin red y sin
  * dependencias externas, de modo que el cálculo sea verificable al segundo.
  * Las tareas siguientes (T-PAUSE-07 a T-PAUSE-09) añadirán a esta misma clase la
  * orquestación con repositorios (reloj sanitario, reanudación manual y
@@ -49,10 +49,10 @@ use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
  *
  * > Cuando una incidencia se reanuda, su fecha límite contractual
  * > (`sla_target_at`) se desplaza hacia adelante la duración exacta de la pausa,
- * > computada **únicamente** dentro de la ventana comercial de la sede
- * > (08:00 a 18:00, lunes a viernes). Nunca puede vencer de madrugada, en
- * > sábado ni en domingo: un cliente que cierra a las 18:00 no recibe un
- * > compromiso que expire un sábado a las 03:00 (RF-03.3).
+ * > computada en **segundos naturales continuos**: noches, fines de semana y
+ * > festivos también cuentan (EARS 02.3.1 y C6 de la Spec 30). La pausa congela
+ * > el compromiso; al reanudar se devuelve el tiempo de pared que estuvo
+ * > detenido, sin reinterpretarlo como jornada comercial.
  *
  * Decisiones de diseño anotadas para las tareas siguientes:
  *
@@ -60,24 +60,20 @@ use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
  *    que el cómputo es aritmética de segundos y no de minutos. El pseudocódigo
  *    del `plan.md` §3.3 trabaja en minutos por legibilidad; convertirlo a
  *    segundos es lo que exige el requisito no funcional, no una desviación.
- * 2. **Zona horaria de la sede:** el calendario comercial se resuelve en
- *    `Europe/Madrid`, que es la zona operativa del sistema (la misma que usan
- *    `AuditEvent`, `MetricFilter` y `CoordinatorPreventiveDetailService`). La
- *    fecha devuelta viaja en esa zona y se persiste **anclada** (con su desfase),
- *    que es la forma que el motor devuelve al leer; la **pared de sede** —la hora de
- *    la jornada— es lo que se publica y lo que documenta la nota inmutable, y es
- *    siempre una lectura del instante en la zona operativa, nunca otra forma de
+ * 2. **Zona horaria de la sede:** el instante se calcula sobre la marca absoluta
+ *    (`getTimestamp`) y la fecha devuelta viaja en `Europe/Madrid`, la zona
+ *    operativa del sistema (la misma que usan `AuditEvent`, `MetricFilter` y
+ *    `CoordinatorPreventiveDetailService`). La fecha se persiste **anclada** (con
+ *    su desfase), que es la forma que el motor devuelve al leer; la **pared de
+ *    sede** es una lectura del instante en la zona operativa, nunca otra forma de
  *    escribirla (Contrato del Reloj Operativo).
- * 3. **Ventana cerrada por arriba:** el intervalo legal es `[08:00, 18:00]`; un
- *    vencimiento exactamente a las 18:00 es el borde del último segundo hábil
- *    del día y se acepta. Cualquier instante posterior salta al siguiente día
- *    hábil a las 08:00.
- * 4. **La ventana es hoy uniforme para toda la red** (08:00-18:00, lunes a
- *    viernes), tal y como fija el requisito ("por defecto" en `plan.md` §3.3).
- *    El parámetro `$locationId` identifica la sede de forma explícita y se
- *    valida, para que un identificador inválido no aplique en silencio el
- *    calendario por defecto; es además el punto de extensión previsto para
- *    admitir calendarios por sede sin romper la firma.
+ * 3. **Sin ventana comercial:** el vencimiento puede caer de madrugada, en sábado
+ *    o en domingo; lo que cuenta es el tiempo natural que la pausa mantuvo
+ *    congelado el reloj. No se normaliza a las 08:00 ni a las 18:00.
+ * 4. **El parámetro `$locationId` se conserva por compatibilidad con la firma
+ *    publicada y se valida para no aceptar identificadores inválidos; ya no
+ *    selecciona un calendario comercial. El umbral de inactividad de 72 horas
+ *    hábiles conserva su propio cómputo en `pauseBusinessSecondsSince()`.
  * 5. **Pausa de duración cero:** devuelve el vencimiento original intacto. Sin
  *    tiempo pausado no hay nada que desplazar y normalizar la fecha alteraría
  *    el contrato sin causa (caso límite §6.1 de la especificación funcional).
@@ -208,30 +204,29 @@ final class IncidentPauseService
     private const LAST_BUSINESS_WEEKDAY = 5;
 
     /**
-     * Desplaza el vencimiento contractual sumando exclusivamente segundos hábiles
-     * comerciales (08:00 a 18:00, lunes a viernes), saltando noches, fines de
-     * semana y festivos semanales (RF-03.3, RNF-01).
+     * Desplaza el vencimiento contractual sumando segundos naturales continuos.
      *
-     * Ejemplos con la ventana por defecto:
-     * - Jueves 12:15 con 90 minutos de pausa -> Jueves 13:45 (mismo día hábil).
-     * - Jueves 17:30 con 60 minutos de pausa -> Viernes 08:30 (salto nocturno).
-     * - Viernes 17:00 con 120 minutos de pausa -> Lunes 09:00 (salto de fin de semana).
+     * La pausa congela el reloj contractual; al reanudar se devuelve a la cuenta
+     * atrás exactamente el tiempo de pared que estuvo detenida, sin descontar
+     * noches, fines de semana ni festivos (EARS 02.3.1, C6). El cálculo se hace
+     * sobre el instante absoluto (`getTimestamp`) para que un cambio de horario
+     * estacional no altere la duración.
      *
      * @param DateTimeImmutable $currentDeadline Vencimiento contractual vigente.
      * @param int $pauseDurationSeconds Duración exacta de la pausa, en segundos.
-     * @param int $locationId Sede cuyo calendario comercial rige el cómputo.
+     * @param int $locationId Sede del expediente; se valida por compatibilidad con la firma publicada.
      * @return DateTimeImmutable Nuevo vencimiento, expresado en la zona horaria de la sede.
      *
      * @throws InvalidArgumentException Si la sede no es válida o la duración es negativa.
      */
-    public function shiftSlaTargetInBusinessHours(
+    public function shiftSlaTargetBySeconds(
         DateTimeImmutable $currentDeadline,
         int $pauseDurationSeconds,
         int $locationId
     ): DateTimeImmutable {
         if ($locationId <= 0) {
             throw new InvalidArgumentException(sprintf(
-                'El identificador de sede debe ser un entero positivo para resolver el calendario comercial; se recibió %d.',
+                'El identificador de sede debe ser un entero positivo; se recibió %d.',
                 $locationId
             ));
         }
@@ -247,45 +242,22 @@ final class IncidentPauseService
             return $currentDeadline;
         }
 
-        $cursor = $currentDeadline->setTimezone($this->madridTimezone());
-        $remainingSeconds = $pauseDurationSeconds;
+        return $currentDeadline
+            ->setTimestamp($currentDeadline->getTimestamp() + $pauseDurationSeconds)
+            ->setTimezone($this->madridTimezone());
+    }
 
-        // Cada iteración consume, como máximo, una jornada comercial. El bucle
-        // avanza un día hábil por vuelta como tope, así que su coste es
-        // proporcional a los días hábiles abarcados por la pausa (para el umbral
-        // de 72 horas hábiles, tres vueltas).
-        while ($remainingSeconds > 0) {
-            if (!$this->isBusinessDay($cursor)) {
-                $cursor = $this->openingOfNextBusinessDay($cursor);
-                continue;
-            }
-
-            $secondOfDay = $this->secondOfDay($cursor);
-            $openingSecond = self::BUSINESS_OPEN_HOUR * 3600;
-            $closingSecond = self::BUSINESS_CLOSE_HOUR * 3600;
-
-            if ($secondOfDay < $openingSecond) {
-                // Madrugada: el reloj arranca a la apertura del mismo día hábil.
-                $cursor = $cursor->setTime(self::BUSINESS_OPEN_HOUR, 0, 0);
-                continue;
-            }
-
-            if ($secondOfDay >= $closingSecond) {
-                $cursor = $this->openingOfNextBusinessDay($cursor);
-                continue;
-            }
-
-            $secondsUntilClosing = $closingSecond - $secondOfDay;
-
-            if ($remainingSeconds <= $secondsUntilClosing) {
-                return $cursor->modify(sprintf('+%d seconds', $remainingSeconds));
-            }
-
-            $remainingSeconds -= $secondsUntilClosing;
-            $cursor = $this->openingOfNextBusinessDay($cursor);
-        }
-
-        return $cursor;
+    /**
+     * Alias de compatibilidad con la firma publicada por T-PAUSE-06.
+     *
+     * @deprecated El cálculo ya no usa el calendario comercial; usa `shiftSlaTargetBySeconds()`.
+     */
+    public function shiftSlaTargetInBusinessHours(
+        DateTimeImmutable $currentDeadline,
+        int $pauseDurationSeconds,
+        int $locationId
+    ): DateTimeImmutable {
+        return $this->shiftSlaTargetBySeconds($currentDeadline, $pauseDurationSeconds, $locationId);
     }
 
     /**
@@ -694,7 +666,7 @@ final class IncidentPauseService
      *    que el controlador traduce a `422`.
      *
      * El vencimiento contractual no se toca al pausar: `sla_target_at` viaja intacto
-     * como extremo "original" de la respuesta y el desplazamiento comercial de RF-03.3
+     * como extremo "original" de la respuesta y el desplazamiento continuo de RF-03.3
      * se aplica al cerrar el intervalo, que es cuando ya se conoce su duración exacta.
      *
      * @param int $incidentId Incidencia que se pausa.
@@ -811,7 +783,7 @@ final class IncidentPauseService
      * RF-02.3, RF-03.3, Art. III).
      *
      * Cierra el intervalo vivo, acumula sus segundos exactos en el agregado, desplaza
-     * el vencimiento contractual en horario comercial de la sede (Algoritmo 3) y sella
+     * el vencimiento contractual en segundos naturales continuos (Algoritmo 3) y sella
      * el rastro inmutable. No hay heurística de "calor" ni inferencia de estado: el
      * destino lo decide quien reanuda (RF-02.2/RF-02.3) y es su declaración la que
      * queda auditada.
@@ -1008,6 +980,29 @@ final class IncidentPauseService
             $pauseStartedAt,
             $now ?? new DateTimeImmutable()
         );
+    }
+
+    /**
+     * Segundos naturales continuos transcurridos desde el inicio de la pausa viva.
+     *
+     * Es la medida que desplaza `sla_target_at` al reanudar (EARS 02.3.1, C6):
+     * noches, fines de semana y festivos cuentan igual que la jornada. Se mantiene
+     * separada de `pauseBusinessSecondsSince()`, que sigue midiendo las 72 horas
+     * hábiles del protocolo de inactividad de sede. Sin marca de pausa devuelve
+     * cero y nunca devuelve un intervalo negativo.
+     *
+     * @param string|null $pausedAt Marca del intervalo de pausa vivo, en formato de base de datos.
+     * @param DateTimeImmutable|null $now Instante de referencia (inyectable en pruebas).
+     * @return int Segundos de pared acumulados en pausa; cero sin pausa viva.
+     */
+    public function pauseSecondsSince(?string $pausedAt, ?DateTimeImmutable $now = null): int
+    {
+        $pauseStartedAt = $this->parseDateTime($pausedAt);
+        if ($pauseStartedAt === null) {
+            return 0;
+        }
+
+        return max(0, ($now ?? new DateTimeImmutable())->getTimestamp() - $pauseStartedAt->getTimestamp());
     }
 
     /**
@@ -1352,11 +1347,10 @@ final class IncidentPauseService
      * anotado como actor y qué nota viaja al historial.
      *
      * El vencimiento se desplaza DESPUÉS de cerrar el intervalo: se toma el ancla
-     * original y se le suma el tiempo hábil realmente transcurrido durante la pausa
-     * (calendario comercial 08:00–18:00, lunes–viernes; RF-03.3). El acumulador
-     * `total_pending_info_seconds` sigue midiendo pared para el MTTR. Si el
-     * expediente no tiene un vencimiento legible, la fecha viaja nula sin fingir un
-     * compromiso.
+     * original y se le suma la duración de pared exacta del intervalo (EARS 02.3.1,
+     * C6; RF-03.3). El acumulador `total_pending_info_seconds` usa la misma duración
+     * para el MTTR. Si el expediente no tiene un vencimiento legible, la fecha viaja
+     * nula sin fingir un compromiso.
      *
      * @param Incident $incident Expediente pausado que se reanuda.
      * @param IncidentStatus $targetStatus Estado operativo de destino.
@@ -1383,33 +1377,29 @@ final class IncidentPauseService
         $originalSlaTargetAt = $incident->getSlaTargetAt();
         $shiftedSlaTargetAt = null;
 
-        // Desplazamiento = tiempo HÁBIL realmente perdido durante la pausa (RF-03.3, enmendado
-        // en el cierre de F-3). Se mide la ventana de la pausa (paused_at -> reanudación) en el
-        // calendario comercial de la sede, NO la duración de pared: una espera que cae de
-        // viernes 18:00 a lunes 08:00 no mueve el compromiso contractual porque la jornada de
-        // la sede no corrió ni un segundo. Con la duración de pared reinterpretada como horas
-        // comerciales, el vencimiento se dilataba hasta 4× justo en el caso más habitual de la
-        // pausa (noche y fin de semana). El acumulador `total_pending_info_seconds` y la
-        // auditoría del intervalo siguen en segundos de pared, que es lo que RF-03.1 descuenta
-        // del MTTR contractual.
-        $slaShiftSeconds = $this->pauseBusinessSecondsSince($incident->getPausedAt(), $now);
+        // Desplazamiento = duración de pared exacta del intervalo (EARS 02.3.1, C6). La
+        // pausa congela el reloj contractual; al reanudar se devuelve el tiempo natural
+        // que estuvo detenido, sin descontar noches ni fines de semana. La misma cifra
+        // alimenta `total_pending_info_seconds` y el descuento de MTTR (RF-03.1), de modo
+        // que el vencimiento y el acumulador no puedan divergir.
+        $slaShiftSeconds = $pauseDurationSeconds;
 
         // El agregado cierra el intervalo y acumula sus segundos; la fecha límite se
-        // graba aparte porque el desplazamiento comercial depende del calendario de sede.
+        // graba aparte con la misma duración natural que acaba de acumular.
         $resumed = $incident->resumePendingInfo($targetStatus, $now);
 
         if ($originalSlaTargetAt !== null) {
             $originalDeadline = $this->parseDateTime($originalSlaTargetAt);
             if ($originalDeadline !== null) {
-                $shiftedDeadline = $this->shiftSlaTargetInBusinessHours(
+                $shiftedDeadline = $this->shiftSlaTargetBySeconds(
                     $originalDeadline,
                     $slaShiftSeconds,
                     $resumed->getLocationId()
                 );
                 // El anuncio —la nota inmutable y la respuesta de la pausa— viaja en **pared de sede**:
-                // es la hora de la jornada la que documenta el compromiso contractual (08:00 a 18:00,
-                // lunes a viernes). El instante que se persiste justo debajo es el ancla de esa pared, y
-                // la pared es su lectura en la zona operativa, nunca una segunda forma de escribirla.
+                // es la lectura del instante en la zona operativa, nunca una segunda forma de escribirla.
+                // Ya no se normaliza a una jornada comercial: el vencimiento puede caer de madrugada
+                // o en fin de semana porque el reloj contractual estuvo congelado ese tiempo exacto.
                 $shiftedSlaTargetAt = $shiftedDeadline
                     ->setTimezone($this->madridTimezone())
                     ->format('Y-m-d H:i:s');
@@ -1442,8 +1432,9 @@ final class IncidentPauseService
      *
      * Suma exclusivamente el tiempo que cae dentro de la ventana de la sede
      * (08:00-18:00, lunes a viernes) en la zona horaria operativa, recorriendo el
-     * calendario día a día. Es el gemelo de `shiftSlaTargetInBusinessHours()`:
-     * aquel desplaza un vencimiento sumando segundos hábiles y éste los cuenta.
+     * calendario día a día. Se usa exclusivamente para el umbral de inactividad de
+     * 72 horas hábiles; el desplazamiento de `sla_target_at` usa segundos naturales
+     * continuos y no pasa por este contador.
      *
      * @param DateTimeImmutable $from Inicio del intervalo.
      * @param DateTimeImmutable $to Fin del intervalo.

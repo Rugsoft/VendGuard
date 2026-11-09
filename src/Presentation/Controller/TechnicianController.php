@@ -1637,8 +1637,8 @@ class TechnicianController
      *
      * Reanuda manualmente una pausa por bloqueo de sede (RF-02.2, RF-02.3, RF-03.3): el
      * técnico ya está delante de la máquina, así que el destino es forzosamente
-     * "En curso" y el vencimiento contractual se desplaza en horario comercial la
-     * duración exacta que estuvo congelado.
+     * "En curso" y el vencimiento contractual se desplaza la duración natural exacta
+     * que estuvo congelado (EARS 02.3.1, C6).
      *
      * El cuerpo acepta una nota opcional (`resume_note`) que viaja al historial inmutable.
      * Un `target_status` explícito distinto de `IN_PROGRESS` se rechaza con `422`: devolver

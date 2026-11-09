@@ -53,7 +53,7 @@ final class CoordinatorIncidentDetailService
     private const COLD_CHAIN_SLA_HOURS = 4;
 
     /**
-     * Zona operativa del parque: la de la jornada comercial (08:00-18:00) y la de las marcas que
+     * Zona operativa del parque y la de las marcas que
      * esta ficha publica. Es la misma que aplican el calendario del módulo 11 y el reloj del arnés
      * (Contrato del Reloj Operativo).
      */
@@ -606,12 +606,12 @@ final class CoordinatorIncidentDetailService
      * para el monitor) y, cuando la pausa es de sede, todo lo que la ficha necesita para
      * pintarla sin volver a preguntar al servidor: instante de inicio, minutos vivos y
      * acumulados, umbral de inactividad, vencimiento contractual congelado, vencimiento
-     * recalculado en horario comercial de la sede y las dos acciones supervisadas.
+     * recalculado y las dos acciones supervisadas.
      *
      * El vencimiento **congelado** es la fecha límite vigente cuando el técnico se topó con
      * la puerta cerrada; el **recalculado** proyecta ese vencimiento desplazándolo por los
-     * segundos hábiles ya consumidos en pausa (Algoritmo 3), que es exactamente lo que hará
-     * la reanudación real al cerrar el intervalo (RF-03.3, RNF-01).
+     * segundos naturales ya consumidos en pausa (Algoritmo 3), que es exactamente lo que hará
+     * la reanudación real al cerrar el intervalo (RF-03.3, EARS 02.3.1, C6, RNF-01).
      *
      * @param array<string, mixed> $incident Raw incident row.
      * @param list<array<string, mixed>> $requestedParts Requested spare parts of the pause.
@@ -688,16 +688,14 @@ final class CoordinatorIncidentDetailService
      *
      * Devuelve `null` cuando no hay pausa contractual viva, cuando el expediente no tiene
      * objetivo de cadena de frío derivado (máquina no perecedera) o cuando la fila no trae
-     * sede: sin calendario comercial no se inventa una fecha. El desplazamiento lo calcula
-     * el servicio del módulo 11, que es la única autoridad del horario hábil 08:00-18:00.
+     * sede: sin objetivo no se inventa una fecha. El desplazamiento lo calcula el servicio
+     * del módulo 11, que es la única autoridad del cálculo.
      *
-     * **Qué se desplaza (RF-03.3, enmendado en el cierre de F-3).** El vencimiento vigente
-     * (el congelado al pausar) se desplaza por el **tiempo hábil realmente perdido en el
-     * intervalo de pausa vivo**, no por su duración de pared: es la misma regla que aplica
-     * la reanudación al persistir el nuevo vencimiento, de modo que la ficha y la escritura
-     * no puedan discrepar (la discrepancia entre ambas caras fue justo el patrón que produjo
-     * F-1). Con la duración de pared reinterpretada como horas comerciales, una pausa de
-     * viernes a lunes dilataba el compromiso de SLA hasta 4×.
+     * **Qué se desplaza (RF-03.3, EARS 02.3.1, C6).** El vencimiento vigente (el congelado
+     * al pausar) se desplaza por la **duración de pared exacta del intervalo de pausa vivo**:
+     * es la misma regla que aplica la reanudación al persistir el nuevo vencimiento, de modo
+     * que la ficha y la escritura no puedan discrepar. Noches, fines de semana y festivos
+     * cuentan porque el reloj contractual estuvo congelado ese tiempo natural.
      *
      * @param array<string, mixed> $incident Raw incident row.
      * @param array<string, mixed> $sla Already derived cold-chain SLA block.
@@ -724,10 +722,10 @@ final class CoordinatorIncidentDetailService
             return null;
         }
 
-        $businessPauseSeconds = $this->pauses()->pauseBusinessSecondsSince($pausedAtRaw, $now);
+        $pauseSeconds = $this->pauses()->pauseSecondsSince($pausedAtRaw, $now);
 
         return $this->siteWall(
-            $this->pauses()->shiftSlaTargetInBusinessHours($targetAt, $businessPauseSeconds, $locationId)
+            $this->pauses()->shiftSlaTargetBySeconds($targetAt, $pauseSeconds, $locationId)
         );
     }
 
@@ -1016,7 +1014,7 @@ final class CoordinatorIncidentDetailService
     }
 
     /**
-     * Zona operativa del parque: la de la jornada comercial y la de las marcas que esta ficha publica.
+     * Zona operativa del parque y la de las marcas que esta ficha publica.
      */
     private function operationalTimezone(): DateTimeZone
     {

@@ -151,7 +151,7 @@ foreach ($pdo->query("SELECT id FROM incidents WHERE deleted_at IS NULL AND stat
 // booleana: el literal numérico frente a un `boolean` no es una comparación que el motor admita
 // (clase D-3 del porte), y la sonda mide el módulo, no su dialecto.
 $pdo->exec(
-    "UPDATE machines m SET m.is_blocked_no_access = FALSE, m.is_active = TRUE
+    "UPDATE machines m SET is_blocked_no_access = FALSE, is_active = TRUE
       WHERE m.is_blocked_no_access = TRUE
         AND m.deleted_at IS NULL
         AND NOT EXISTS (
@@ -996,9 +996,9 @@ $cleanProbe();
 
 // D.3 RF-03.2/03.3/RNF-01 — Medición del desplazamiento cuando la pausa atraviesa la
 //         noche y el fin de semana, que es el escenario real de RF-01.1 (sede cerrada).
-//         Esta es la medición que descubrió F-3 (dilatación de 4,15×) y hoy certifica su
-//         cierre: el vencimiento avanza EXACTAMENTE el tiempo hábil perdido en la ventana
-//         de la pausa, contado por el calendario independiente del arnés.
+//         La sonda certifica desde H-02 que el vencimiento avanza EXACTAMENTE la duración
+//         natural acumulada: noches, fines de semana y festivos cuentan igual que la jornada
+//         (EARS 02.3.1, C6).
 $weekend = $createTicket($techId);
 $zone = new DateTimeZone('Europe/Madrid');
 $fridayDeadline = (new DateTimeImmutable('now', $zone))->modify('next friday')->setTime(17, 0, 0);
@@ -1014,61 +1014,43 @@ $declared = $pauseTicket($weekend['id'], 'BUILDING_CLOSED_NO_ACCESS', $reason, $
 $declaredData = $declared->getDecodedBody()['data'] ?? [];
 $pauseSecondsSeeded = 62 * 3600; // De viernes 18:00 a lunes 08:00: dos días y medio de espera real.
 $pdo->exec("UPDATE incidents SET paused_at = NOW() - INTERVAL '62 hours' WHERE id = " . $weekend['id']);
-$f3PausedAt = (string)$pdo->query("SELECT paused_at FROM incidents WHERE id = " . $weekend['id'])->fetchColumn();
-// Orillas del reloj real: el servicio lee su instante entre ambas (cierre de F-3).
-$f3Before = new DateTimeImmutable('now', $zone);
 $resumedWeekend = $resumeTicket($weekend['id'], $techToken);
-$f3After = new DateTimeImmutable('now', $zone);
 $resumedData = $resumedWeekend->getDecodedBody()['data'] ?? [];
 $shiftedAt = $resumedData['sla_target_at_shifted'] ?? ($declaredData['sla_target_at_original'] ?? null);
 $shiftedMoment = is_string($shiftedAt) ? (new DateTimeImmutable($shiftedAt, $zone)) : null;
-$shiftedBusinessDay = $shiftedMoment !== null && (int)$shiftedMoment->format('N') <= 5;
-// El cierre de jornada (18:00) es el último segundo hábil del día y se admite como borde
-// legal; lo que no se admite es un vencimiento de madrugada ni en fin de semana.
-$shiftedSecondOfDay = $shiftedMoment !== null
-    ? (int)$shiftedMoment->format('G') * 3600 + (int)$shiftedMoment->format('i') * 60 + (int)$shiftedMoment->format('s')
+$f3WallSeconds = (int)($row($weekend['id'])['total_pending_info_seconds'] ?? 0);
+$f3ShiftedSeconds = $shiftedMoment !== null
+    ? $shiftedMoment->getTimestamp() - $fridayDeadline->getTimestamp()
     : -1;
 
 $assert(
-    'D.3.1 RF-01.2/RNF-01: la pausa arranca con el vencimiento comercial intacto como extremo original',
+    'D.3.1 RF-01.2/RNF-01: la pausa arranca con el vencimiento intacto como extremo original',
     ($declaredData['sla_target_at_original'] ?? '') === $fridayDeadline->format('Y-m-d H:i:s') && ($declaredData['is_sla_paused'] ?? false) === true,
     'original=' . json_encode($declaredData['sla_target_at_original'] ?? null)
 );
 $assert(
-    'D.3.2 RF-03.3: el vencimiento desplazado cae en día hábil y dentro de la jornada 08:00-18:00 (nunca en horario inhábil)',
+    'D.3.2 RF-03.3/EARS 02.3.1/C6: el vencimiento avanza los segundos naturales de la espera sin normalizar a jornada',
     $resumedWeekend->getStatusCode() === 200 && $shiftedMoment !== null
-        && $shiftedBusinessDay && $shiftedSecondOfDay >= 28800 && $shiftedSecondOfDay <= 64800,
-    'desplazado a=' . ($shiftedAt ?? 'n/a')
+        && $f3ShiftedSeconds === $f3WallSeconds,
+    sprintf('desplazado a=%s, esperado=%d s, avanzado=%d s', $shiftedAt ?? 'n/a', $f3WallSeconds, $f3ShiftedSeconds)
 );
 $assert(
     'D.3.3 RF-03.3: el vencimiento desplazado siempre avanza (nunca retrocede respecto al original)',
     $shiftedMoment !== null && $shiftedMoment->getTimestamp() >= $fridayDeadline->getTimestamp()
 );
-// Cierre de F-3: el vencimiento avanza el tiempo HÁBIL realmente perdido, nunca la duración
-// de pared de la espera. La expectativa la calcula el calendario independiente del arnés
-// contando los segundos de jornada que hay entre el vencimiento original y el desplazado,
-// que es la comprobación inversa de la que destapó la dilatación de 4,15×.
-$f3WallSeconds = (int)($row($weekend['id'])['total_pending_info_seconds'] ?? 0);
-$f3BusinessLostMin = BusinessCalendar::secondsBetween(new DateTimeImmutable($f3PausedAt, $zone), $f3Before);
-$f3BusinessLostMax = BusinessCalendar::secondsBetween(new DateTimeImmutable($f3PausedAt, $zone), $f3After);
-$f3BusinessMoved = $shiftedMoment !== null
-    ? BusinessCalendar::secondsBetween($fridayDeadline, $shiftedMoment)
-    : -1;
-
+// La igualdad exacta es la comprobación inversa de la dilatación de 4,15× que destapó F-3:
+// el reloj contractual devuelve la espera completa, no una reinterpretación en horas hábiles.
 $assert(
-    'D.3.4 (cierre de F-3) El vencimiento avanza el tiempo hábil perdido y nunca la duración de pared de la espera',
+    'D.3.4 El vencimiento avanza exactamente la duración natural acumulada de la pausa',
     $shiftedMoment !== null
-        && $f3BusinessMoved >= $f3BusinessLostMin
-        && $f3BusinessMoved <= $f3BusinessLostMax
-        && $f3BusinessMoved <= $f3WallSeconds,
+        && $f3ShiftedSeconds === $f3WallSeconds
+        && $f3WallSeconds >= $pauseSecondsSeeded,
     sprintf(
-        'espera de pared=%d s (%d h), tiempo hábil perdido=[%d..%d] s, vencimiento avanzado=%d s (%.2f× la espera de pared)',
-        $f3WallSeconds,
+        'espera sembrada=%d s (%d h), acumulada=%d s, vencimiento avanzado=%d s',
+        $pauseSecondsSeeded,
         $pauseSecondsSeeded / 3600,
-        $f3BusinessLostMin,
-        $f3BusinessLostMax,
-        $f3BusinessMoved,
-        $f3WallSeconds > 0 ? $f3BusinessMoved / $f3WallSeconds : 0
+        $f3WallSeconds,
+        $f3ShiftedSeconds
     )
 );
 $cleanProbe();
@@ -1250,7 +1232,7 @@ TestDataCleaner::purge($pdo);
 // (`deleted_at` sellado) queda fuera del restablecimiento a propósito.
 // Las dos marcas y el predicado, en la forma del motor único (clase D-3 del porte).
 $pdo->exec(
-    "UPDATE machines m SET m.is_blocked_no_access = FALSE, m.is_active = TRUE
+    "UPDATE machines m SET is_blocked_no_access = FALSE, is_active = TRUE
       WHERE m.is_blocked_no_access = TRUE
         AND m.deleted_at IS NULL
         AND NOT EXISTS (

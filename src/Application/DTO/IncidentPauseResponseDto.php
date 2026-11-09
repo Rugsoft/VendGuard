@@ -22,7 +22,8 @@ use VendGuard\Core\Domain\ValueObject\IncidentStatus;
  *   al minuto para la interfaz sobre la precisión de segundos que guarda la base
  *   de datos (RNF-01).
  * - `sla_target_at_original` y `sla_target_at_shifted`: la fecha límite antes y
- *   después de desplazarla en horario comercial de la sede (RF-03.3). El nombre
+ *   después de desplazarla por los segundos naturales de la pausa (RF-03.3,
+ *   EARS 02.3.1, C6). El nombre
  *   `sla_target_at_shifted` es el que fija la tarea T-PAUSE-03; equivale al
  *   `new_sla_target_at` que el plan ilustra en el ejemplo de reanudación.
  *

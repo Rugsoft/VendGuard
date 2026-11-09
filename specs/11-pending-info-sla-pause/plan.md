@@ -447,9 +447,22 @@ FIN ALGORITMO
 
 ---
 
-### 3.3. Algoritmo 3: Recálculo de SLA en Ventana de Horario Hábil Comercial
+### 3.3. Algoritmo 3: Recálculo de SLA por Segundos Naturales Continuos
 
-Aplica el aplazamiento de la fecha límite respetando los horarios reales de apertura del cliente, impidiendo vencimientos de madrugada (Punto 3 de QA).
+La pausa congela el reloj contractual; la reanudación le devuelve exactamente la duración natural transcurrida, sin ventanas comerciales (EARS 02.3.1, C6).
+
+> **Cierre de H-02 (2026-11-09).** `IncidentPauseService::pauseSecondsSince()` mide la duración de pared del intervalo vivo y `shiftSlaTargetBySeconds()` la suma al vencimiento mediante aritmética de instantes. Noches, fines de semana y festivos cuentan igual que la jornada; el resultado no se normaliza a 08:00-18:00. La ventana comercial se conserva únicamente para el umbral de inactividad de 72 horas hábiles de RF-04.2/RF-04.3.
+
+```text
+ALGORITMO DesplazarSlaPorSegundosNaturales(fechaObjetivoOriginal, segundosPausa, locationId)
+    SI locationId <= 0 ENTONCES RECHAZAR
+    SI segundosPausa < 0 ENTONCES RECHAZAR
+    SI segundosPausa == 0 ENTONCES RETORNAR fechaObjetivoOriginal
+    RETORNAR fechaObjetivoOriginal + segundosPausa en tiempo absoluto
+FIN ALGORITMO
+```
+
+> **Histórico revocado (F-3, 2026-10-10).** La nota y el pseudocódigo comerciales que siguen se conservan como evidencia de la decisión entonces aprobada; no describen el comportamiento vigente.
 
 > **Qué se le entrega como `minutosPausa` (2026-10-10, cierre de F-3).** El parámetro no es la duración de pared de la pausa sino el **tiempo hábil realmente perdido** durante ella: la pausa congela el reloj contractual (RF-03.2) y la reanudación sólo devuelve a la cuenta atrás lo que la jornada de la sede dejó de correr. El pseudocódigo recorre la jornada comercial hacia adelante, de modo que reinterpretar los segundos de pared como horas comerciales dilataba el compromiso hasta 4× en el caso más habitual (la parada de viernes a lunes de RF-01.1). La cifra la mide `IncidentPauseService::pauseBusinessSecondsSince()` —el gemelo inverso de este algoritmo— tanto al persistir el nuevo vencimiento como al publicar la fecha recalculada de la ficha, para que lectura y escritura no puedan discrepar. La duración de pared sigue siendo la que se audita en el intervalo y descuenta el MTTR (RF-03.1).
 
@@ -769,7 +782,7 @@ FIN ALGORITMO
 | **RF-02.3** | Reanudación in situ transiciona a `IN_PROGRESS`. | `TechnicianController::resumePendingInfo()` | Test verificando estado resultante `IN_PROGRESS`. |
 | **RF-03.1** | Descuento exacto de intervalos de pausa en MTTR. | `PdoMetricsRepository.php` | Test evaluando MTTR restando `total_pending_info_seconds`. |
 | **RF-03.2** | Reloj contractual visualmente congelado (`⏸️ SLA pausado`). | `CoordinatorIncidentDetailModal.js` | Test JS comprobando renderizado de insignia de pausa. |
-| **RF-03.3** | Desplazamiento de `sla_target_at` en horario comercial de sede por el **tiempo hábil realmente perdido** (nota de cierre de F-3 en §3.3). | `IncidentPauseService::shiftSlaTargetInBusinessHours()` + `pauseBusinessSecondsSince()` | Test calculando salto de fin de semana y noches, y pausa de fin de semana que no mueve el vencimiento. |
+| **RF-03.3** | Desplazamiento de `sla_target_at` por los **segundos naturales acumulados** (EARS 02.3.1, C6; cierre de H-02 en §3.3). | `IncidentPauseService::shiftSlaTargetBySeconds()` + `pauseSecondsSince()` | `IncidentPauseServiceSlaShiftTest` 28/28; `PendingInfoApiTest` 44/44; `PendingInfoTechnicianEndpointsTest` 60/60; `PendingInfoConcurrencyTest` 23/23; `PendingInfoCoordinatorEndpointsTest` 55/55. |
 | **RF-03.4** | Reloj Sanitario Biológico continuo 24/7 en las máquinas bajo vigilancia sanitaria —perecederas `PERISHABLE_FOOD` y mixtas `COMBO` (Art. II, ratificado en T-PAUSE-26). | `IncidentPauseService::evaluateSanitaryBiologicalClock()` | Test simulando 4 horas naturales continuas. |
 | **RF-03.5** | Cuarentena automática a las 4h (activada por el barrido de fondo de §2.5, sin intento de cierre) y bloqueo en resolución (Art. II). | `SanitaryClockSweepService`, `CronController`, `PdoPreventiveSettingsRepository` (transición idempotente), validador de resolución | Test verificando modo `QUARANTINE` y rechazo de resolución sin checklist; `SanitaryClockSweepEndpointTest` certifica la activación **sin intento de cierre** y el rastro único. |
 | **RF-04.1** | Pausas múltiples acumulativas en un mismo ticket. | `PdoIncidentRepository.php` | Test acumulando dos pausas sucesivas en `total_pending_info_seconds`. |

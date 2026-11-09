@@ -921,11 +921,13 @@ try {
         json_encode($prolongedBoardRow)
     );
 
+    $detailBefore = new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'));
     $detailRes = $router->dispatch(new Request(
         method: 'GET',
         path: "/api/coordinator/incidents/{$frozenIncidentId}/detail",
         headers: $authHeader($coordinatorToken)
     ));
+    $detailAfter = new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'));
     $detailData = $detailRes->getDecodedBody()['data'] ?? [];
     $detailPause = $detailData['technical_intervention']['pause'] ?? [];
 
@@ -943,17 +945,23 @@ try {
 
     $frozenTarget = $detailPause['sla_target_frozen_at'] ?? null;
     $recalculatedTarget = $detailPause['sla_target_recalculated_at'] ?? null;
-    $recalculatedAt = is_string($recalculatedTarget) ? new DateTimeImmutable($recalculatedTarget) : null;
-    // La fecha recalculada es la proyección del vencimiento con el tiempo HÁBIL del intervalo
-    // vivo (cierre de F-3), que es exactamente lo que grabará la reanudación al cerrar la pausa.
-    // Cae siempre dentro de la jornada 08:00-18:00; el borde de cierre es legal cuando el
-    // desplazamiento agota la jornada (una espera larga aterriza en las 18:00 exactas), así
-    // que se mide en segundos del día y se admite el cierre, no se exige abrir un día más.
-    $recalculatedSecondOfDay = $recalculatedAt !== null
-        ? (int)$recalculatedAt->format('G') * 3600 + (int)$recalculatedAt->format('i') * 60 + (int)$recalculatedAt->format('s')
+    $recalculatedAt = is_string($recalculatedTarget)
+        ? new DateTimeImmutable($recalculatedTarget, new DateTimeZone('Europe/Madrid'))
+        : null;
+    $frozenAt = is_string($frozenTarget)
+        ? new DateTimeImmutable($frozenTarget, new DateTimeZone('Europe/Madrid'))
+        : null;
+    $recalculatedShift = ($recalculatedAt !== null && $frozenAt !== null)
+        ? $recalculatedAt->getTimestamp() - $frozenAt->getTimestamp()
         : -1;
+    $pauseClock = new IncidentPauseService();
+    $pauseStartedAtRaw = (string)($prolongedBoardRow['paused_at'] ?? '');
+    $pauseMin = $pauseClock->pauseSecondsSince($pauseStartedAtRaw, $detailBefore);
+    $pauseMax = $pauseClock->pauseSecondsSince($pauseStartedAtRaw, $detailAfter);
+    // La fecha recalculada es la proyección del vencimiento con la duración natural del
+    // intervalo vivo, exactamente lo que grabará la reanudación al cerrar la pausa.
     $assert(
-        '6.5 El SLA queda congelado al pausar y la fecha recalculada cae en la jornada hábil 08:00-18:00 (RF-03.2, RF-03.3, RNF-01)',
+        '6.5 El SLA queda congelado al pausar y la fecha recalculada suma los segundos naturales del intervalo (RF-03.2, RF-03.3, RNF-01)',
         ($detailData['sla']['is_frozen'] ?? false) === true
             // La ficha publica la pared de sede del instante en que se congeló el reloj y el tablero
             // trae la marca del motor con su desfase: la comparación es de instantes, no de formas
@@ -963,10 +971,10 @@ try {
             && $recalculatedAt !== null
             && $recalculatedTarget !== $frozenTarget
             && $recalculatedTarget > $frozenTarget
-            && (int)$recalculatedAt->format('N') <= 5
-            && $recalculatedSecondOfDay >= 28800
-            && $recalculatedSecondOfDay <= 64800,
-        json_encode([$frozenTarget, $recalculatedTarget])
+            && $recalculatedShift >= $pauseMin
+            && $recalculatedShift <= $pauseMax
+            && $recalculatedShift >= 72 * 3600,
+        json_encode([$frozenTarget, $recalculatedTarget, $pauseMin, $pauseMax])
     );
 
     $resumeRes = $router->dispatch(new Request(

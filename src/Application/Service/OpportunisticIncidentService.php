@@ -634,7 +634,7 @@ final class OpportunisticIncidentService
      * Conserva la modalidad previa —una parada ordinaria asignada a este técnico
      * no se convierte en oportunista por empezarla in situ— y reanuda la pausa de
      * información con `IncidentPauseService`, que acumula los segundos y desplaza
-     * el vencimiento contractual en horario comercial (RF-03.3).
+     * el vencimiento contractual por esa misma duración natural (RF-03.3, C6).
      *
      * @return array{incident: Incident, notification: ?callable}
      */

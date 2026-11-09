@@ -811,7 +811,7 @@ $assert(
     'acumulado=' . ($resumedPausedModel?->getTotalPendingInfoSeconds() ?? -1)
 );
 $assert(
-    '11.8 El vencimiento contractual se desplaza en horario comercial (RF-03.3)',
+    '11.8 El vencimiento contractual se desplaza por los segundos naturales de la pausa (RF-03.3, C6)',
     $resumedPausedModel !== null
         && $resumedPausedModel->getSlaTargetAt() !== null
         && strtotime((string)$resumedPausedModel->getSlaTargetAt()) > strtotime($stamp(28800))

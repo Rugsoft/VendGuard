@@ -757,8 +757,9 @@ class Incident implements ArrayAccess, JsonSerializable
     }
 
     /**
-     * Fecha límite contractual persistida, ya desplazada en horario comercial de la
-     * sede (RF-03.3). `null` mientras el ticket nunca haya sufrido una pausa.
+     * Fecha límite contractual persistida, ya desplazada por los segundos naturales
+     * de las pausas acumuladas (RF-03.3, EARS 02.3.1, C6). `null` mientras el ticket
+     * nunca haya sufrido una pausa.
      */
     public function getSlaTargetAt(): ?string
     {
@@ -1004,9 +1005,9 @@ class Incident implements ArrayAccess, JsonSerializable
      * puede disfrazarse de `REGISTERED`: la reanudación debe devolverlo a la operación
      * (`IN_PROGRESS`/`ASSIGNED`).
      *
-     * No desplaza `sla_target_at`: el cálculo del horario comercial depende del
-     * calendario de la sede y vive en `IncidentPauseService` (T-PAUSE-06), que
-     * encadena este método con `shiftSlaTarget()`. La causa y el texto de la pausa
+     * No desplaza `sla_target_at`: el desplazamiento por segundos naturales vive en
+     * `IncidentPauseService` (T-PAUSE-06), que encadena este método con
+     * `shiftSlaTarget()`. La causa y el texto de la pausa
      * se conservan como último bloqueo conocido; la auditoría inmutable de cada
      * intervalo la graba el repositorio en `incident_history` (Art. III).
      *

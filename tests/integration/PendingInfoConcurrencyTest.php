@@ -320,8 +320,6 @@ $pdoA->exec(sprintf(
     $manualIncidentId,
     $commentIncidentId
 ));
-$manualPausedAt = (string)($incidentRow($manualIncidentId)['paused_at'] ?? '');
-
 // La conexión perdedora falla rápido en lugar de quedarse 50 segundos esperando la fila.
 $pdoB->exec("SET SESSION lock_timeout = '1s'");
 
@@ -362,16 +360,13 @@ $assert(
 
 // La operación ganadora se ejecuta sobre la MISMA conexión que sostiene el bloqueo: el
 // servicio participa en esa transacción (no la confirma) porque su dueño es quien la abrió.
-// Las dos orillas del reloj real acotan el tiempo hábil que la reanudación puede haber
-// medido (cierre de F-3: el vencimiento avanza jornada perdida, no duración de pared).
-$manualBefore = new DateTimeImmutable('now', BusinessCalendar::zone());
+// El vencimiento debe avanzar la duración natural exacta del intervalo, una sola vez.
 $winnerDto = $serviceA->resumePendingInfoManually(
     $manualIncidentId,
     $technicianId,
     IncidentStatus::IN_PROGRESS,
     'Reanudación de la petición ganadora.'
 );
-$manualAfter = new DateTimeImmutable('now', BusinessCalendar::zone());
 
 $assert(
     '1.3 La operación ganadora entra en la transacción viva y no la confirma por su cuenta',
@@ -398,27 +393,17 @@ $assert(
 // La espera se sembró con 3 minutos exactos, pero el intervalo sigue vivo mientras la
 // suite orquesta la carrera, así que la duración acumulada es 180 s más lo que tarde la
 // operación. Lo que se certifica no es una cifra mágica, sino que el vencimiento se
-// desplaza EXACTAMENTE el tiempo hábil de la pausa y UNA sola vez (una segunda transición
-// habría desplazado el doble). El tiempo hábil lo cuenta el calendario independiente del
-// arnés, de modo que la aserción no depende del día ni de la hora de la corrida.
+// desplaza EXACTAMENTE la duración natural de la pausa y UNA sola vez (una segunda
+// transición habría desplazado el doble).
 $manualAccumulated = (int)($manualRow['total_pending_info_seconds'] ?? 0);
-$manualShifted     = (new DateTimeImmutable((string)($manualRow['sla_target_at'] ?? ''), BusinessCalendar::zone()))->getTimestamp()
-    - (new DateTimeImmutable('2026-10-13 15:00:00', BusinessCalendar::zone()))->getTimestamp();
-[$shiftBusinessMin, $shiftBusinessMax] = BusinessCalendar::shiftRange($manualPausedAt, $manualBefore, $manualAfter);
+$manualShifted     = (new DateTimeImmutable((string)($manualRow['sla_target_at'] ?? ''), new DateTimeZone('Europe/Madrid')))->getTimestamp()
+    - (new DateTimeImmutable('2026-10-13 15:00:00', new DateTimeZone('Europe/Madrid')))->getTimestamp();
 
 $assert(
     '1.5 La espera se descuenta del reloj contractual exactamente una vez (RF-03.1, RF-03.3)',
     $manualAccumulated >= 180 && $manualAccumulated <= 195
-    && $manualShifted >= $shiftBusinessMin
-    && $manualShifted <= $shiftBusinessMax
-    && $manualShifted <= $manualAccumulated,
-    sprintf(
-        'acumulado=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
-        $manualAccumulated,
-        $manualShifted,
-        $shiftBusinessMin,
-        $shiftBusinessMax
-    )
+    && $manualShifted === $manualAccumulated,
+    sprintf('acumulado=%d s, desplazamiento=%d s', $manualAccumulated, $manualShifted)
 );
 
 $loserRetry = $captureThrowable(static fn () => $serviceB->resumePendingInfoManually(
