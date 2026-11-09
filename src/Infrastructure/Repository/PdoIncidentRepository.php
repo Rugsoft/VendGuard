@@ -177,21 +177,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $this->pdo->exec('SAVEPOINT ' . $savepoint);
         }
 
-        // El objetivo sellado se ancla a la apertura efectiva. Si el llamador ya trae un
-        // vencimiento (por ejemplo, el alta oportunista), se conserva tal cual; en caso
-        // contrario se calcula desde created_at/cycle_started_at más los descuentos ya
-        // acumulados, sin depender del CURRENT_TIMESTAMP del motor.
+        // El alta sin compromiso de SLA conserva su vencimiento nulo: el repositorio no
+        // inventa un objetivo que el dominio no declaró (Módulo 11, RNF-01). Los canales
+        // del Módulo 30 sellan su objetivo antes de llegar aquí.
         $slaTargetAt = $incident->getSlaTargetAt();
-        if ($slaTargetAt === null) {
-            $effectiveCreatedAt = $incident->getCreatedAt()
-                ?? $incident->getCycleStartedAt()
-                ?? date('Y-m-d H:i:sP');
-            $slaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt(
-                new DateTimeImmutable($effectiveCreatedAt),
-                $incident->getSlaTargetMinutes(),
-                $incident->getTotalPendingInfoSeconds()
-            )->format('Y-m-d\TH:i:sP');
-        }
 
         try {
             if ($this->dialect->isPostgres()) {
@@ -373,9 +362,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     if ($isOwnTransaction) {
                         $this->pdo->commit();
                     }
-                    return $incident
-                        ->withRecalculatedSlaTarget($incident->getSlaTargetMinutes(), new DateTimeImmutable($slaTargetAt))
-                        ->withId((int)$row['created_id']);
+                    $createdIncident = $incident->withId((int)$row['created_id']);
+                    if ($slaTargetAt !== null) {
+                        $createdIncident = $createdIncident->withRecalculatedSlaTarget(
+                            $incident->getSlaTargetMinutes(),
+                            new DateTimeImmutable($slaTargetAt)
+                        );
+                    }
+
+                    return $createdIncident;
                 }
 
                 if ($isOwnTransaction && $this->pdo->inTransaction()) {

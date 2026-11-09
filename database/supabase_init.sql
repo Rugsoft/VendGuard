@@ -1022,6 +1022,7 @@ BEGIN
             ADD CONSTRAINT chk_incidents_sla_target_minutes
             CHECK (sla_target_minutes IN (240, 360, 480, 720, 1440));
     END IF;
+EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_machine_active_ticket

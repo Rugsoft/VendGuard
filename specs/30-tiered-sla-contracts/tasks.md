@@ -284,7 +284,7 @@ flowchart LR
 
 ## Fase 7: Verificación Integral, Matriz de Trazabilidad y Cierre Documental
 
-- [ ] **T-SLA-14 · Ejecutar batería global (`php tests/run_all.php`), sincronizar `DocMetricsGuard`, generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
+- [x] **T-SLA-14 · Ejecutar batería global (`php tests/run_all.php`), sincronizar `DocMetricsGuard`, generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SLA-01` a `T-SLA-13`
   - **Archivos exactos a crear o modificar:**
