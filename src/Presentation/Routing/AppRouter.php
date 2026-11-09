@@ -138,6 +138,9 @@ class AppRouter
         $router->get('/api/coordinator/map/active-incidents', [CoordinatorRouteMapController::class, 'getActiveIncidents'], [$coordinatorAuth]);
         $router->get('/api/coordinator/route/settings', [CoordinatorRouteMapController::class, 'getRouteSettings'], [$coordinatorAuth]);
         $router->put('/api/coordinator/route/settings', [CoordinatorRouteMapController::class, 'updateRouteSettings'], [$coordinatorAuth]);
+        // Alta de avisos desde Coordinación (EARS 02.1.1): comparte el sellado
+        // contractual del Portal/QR, pero con la puerta RBAC de Coordinación.
+        $router->post('/api/coordinator/incidents', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'createIncident'], [$coordinatorAuth]);
         $router->get('/api/coordinator/incidents', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getIncidents'], [$coordinatorAuth]);
         // Recomendador de idoneidad (Módulo 17, T-ZONE-10): ranking explicado del
         // despacho asistido. Comparte puerta con la asignación, porque el panel y la
@@ -407,7 +410,8 @@ class AppRouter
         $router->patch('/api/technician/incidents/{id}/pause', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pauseIntervention'], [$technicianAuth]);
         // Pausa por bloqueo de sede y reanudación manual in situ (Módulo 11: T-PAUSE-12).
         // La pausa congela el reloj contractual de SLA; la reanudación lo reactiva con el
-        // vencimiento desplazado en horario comercial y devuelve el ticket a "En curso".
+        // vencimiento desplazado por los segundos naturales de la espera y devuelve el
+        // ticket a "En curso".
         $router->post('/api/technician/incidents/{id}/pause-pending-info', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pausePendingInfo'], [$technicianAuth]);
         $router->post('/api/technician/incidents/{id}/resume-pending-info', [\VendGuard\Presentation\Controller\TechnicianController::class, 'resumePendingInfo'], [$technicianAuth]);
         // Hilo de conversación del expediente (Módulo 10: T-COM-08). El técnico de la

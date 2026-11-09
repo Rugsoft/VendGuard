@@ -538,6 +538,20 @@ Devuelve el listado de sedes incluyendo `sla_tier` y `sla_tier_label`:
 
 ### 4.2. Bandeja de Triaje, Detalle de Incidencia y Asignación (`CoordinatorController`)
 
+#### `POST /api/coordinator/incidents`
+Alta de un aviso desde Coordinación, reservada al rol `COORDINATOR`. A diferencia del Portal, exige `machine_id` y deriva la urgencia de la matriz máquina/categoría; no acepta una urgencia ni un perfil de sede impuestos por el cliente.
+```json
+{
+  "machine_id": 42,
+  "category": "PAYMENT_SYSTEM",
+  "description": "El datáfono de la máquina no acepta tarjetas.",
+  "reporter_name": "Coordinación"
+}
+```
+* **Sellado (EARS 02.1.1):** en una sola transacción persiste `sla_tier_snapshot` con el perfil vigente de la sede, `sla_target_minutes` con el objetivo de la matriz RF-01 y `sla_target_at = created_at + (sla_target_minutes * 60)`; la urgencia se calcula con `UrgencyCalculator` y no puede rebajar el techo de 240 min si hay riesgo de cadena de frío.
+* **Respuesta `201 Created`:** devuelve el expediente con `id`, `ticket_code`, `machine_id`, `location_id`, `category`, `urgency`, `status`, `sla_tier_snapshot`, `sla_target_minutes` y `sla_target_at`, más `machine_code`, `machine_model`, `machine_type`, `location_site_code` y `location_name`.
+* **Errores:** `400` por `machine_id`, `category` o `description` inválidos; `404 MACHINE_NOT_FOUND`; `422 MACHINE_INACTIVE` / `LOCATION_INACTIVE`; `409 MACHINE_HAS_ACTIVE_INCIDENT` con `ticket_code` y `ticket_status`; `401`/`403` los aplica el middleware de Coordinación.
+
 #### `GET /api/coordinator/incidents` y `GET /api/coordinator/incidents/{id}`
 Cada objeto de incidencia para el rol `COORDINATOR` expone el contrato sellado en el expediente:
 ```json

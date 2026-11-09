@@ -415,6 +415,82 @@ try {
     );
 
     // ─────────────────────────────────────────────────────────────────────
+    // 1.b Alta desde Coordinación y sellado SLA (H-01)
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 1.b Alta desde Coordinación y sellado SLA ---\n";
+
+    $coordLocation = $createLocation(
+        'SEDE-SLA11-COORD',
+        'Sede Alta Coordinación SLA 11',
+        'PRIORITY_CORPORATE',
+        41.3920,
+        2.1820
+    );
+    $coordMachine = $createMachine($coordLocation['id'], 'SLA11-COORD-HOT', 'HOT_DRINKS');
+
+    $coordAnonymous = $call('POST', '/api/coordinator/incidents', [
+        'machine_id' => $coordMachine,
+        'category' => 'PAYMENT_SYSTEM',
+        'description' => 'El datáfono de la máquina no acepta tarjetas.',
+    ]);
+    $assert(
+        '1.11 El alta desde Coordinación exige token de Coordinación (401)',
+        $coordAnonymous->getStatusCode() === 401
+            && ($json($coordAnonymous)['error']['code'] ?? '') === 'UNAUTHORIZED'
+    );
+
+    $coordTechnician = $call('POST', '/api/coordinator/incidents', [
+        'machine_id' => $coordMachine,
+        'category' => 'PAYMENT_SYSTEM',
+        'description' => 'El datáfono de la máquina no acepta tarjetas.',
+    ], $routeTechToken);
+    $assert(
+        '1.12 Un técnico no puede abrir avisos desde Coordinación (403)',
+        $coordTechnician->getStatusCode() === 403
+            && ($json($coordTechnician)['error']['code'] ?? '') === 'FORBIDDEN'
+    );
+
+    $coordResponse = $call('POST', '/api/coordinator/incidents', [
+        'machine_id' => $coordMachine,
+        'category' => 'PAYMENT_SYSTEM',
+        'description' => 'El datáfono de la máquina no acepta tarjetas.',
+    ], $coordinatorToken);
+    $coordBody = $json($coordResponse);
+    $coordId = (int)($coordBody['data']['id'] ?? 0);
+    $coordRow = $fetchIncident($coordId);
+    $coordCreatedAt = strtotime((string)($coordRow['created_at'] ?? ''));
+    $coordTargetAt = strtotime((string)($coordRow['sla_target_at'] ?? ''));
+    $assert(
+        '1.13 El alta desde Coordinación responde 201 y sella PRIORITY_CORPORATE / 480 min',
+        $coordResponse->getStatusCode() === 201
+            && ($coordRow['sla_tier_snapshot'] ?? '') === 'PRIORITY_CORPORATE'
+            && (int)($coordRow['sla_target_minutes'] ?? 0) === 480
+            && (string)($coordRow['sla_target_at'] ?? '') !== '',
+        'HTTP ' . $coordResponse->getStatusCode() . ' · ' . json_encode($coordBody['error'] ?? null)
+    );
+    $assert(
+        '1.14 La hora límite inicial equivale a created_at + 480 min (±2 s)',
+        $coordCreatedAt !== false
+            && $coordTargetAt !== false
+            && abs(($coordTargetAt - $coordCreatedAt) - (480 * 60)) <= 2,
+        "created_at={$coordRow['created_at']} · target_at={$coordRow['sla_target_at']}"
+    );
+
+    $coordDuplicate = $call('POST', '/api/coordinator/incidents', [
+        'machine_id' => $coordMachine,
+        'category' => 'PAYMENT_SYSTEM',
+        'description' => 'Segundo intento sobre la misma máquina.',
+    ], $coordinatorToken);
+    $coordDuplicateBody = $json($coordDuplicate);
+    $assert(
+        '1.15 El alta desde Coordinación rechaza duplicados con 409',
+        $coordDuplicate->getStatusCode() === 409
+            && ($coordDuplicateBody['error']['code'] ?? '') === 'MACHINE_HAS_ACTIVE_INCIDENT'
+            && (string)($coordDuplicateBody['error']['details']['ticket_code'] ?? '') !== '',
+        'HTTP ' . $coordDuplicate->getStatusCode() . ' · ' . json_encode($coordDuplicateBody['error'] ?? null)
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
     // 2. Reclasificación en Coordinación y reapertura en garantía
     // ─────────────────────────────────────────────────────────────────────
     echo "\n--- 2. Reclasificación en Coordinación y reapertura en garantía ---\n";

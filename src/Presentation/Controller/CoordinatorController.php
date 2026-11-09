@@ -12,12 +12,14 @@ use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\CoordinatorIncidentDetailService;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
+use VendGuard\Application\Service\IncidentTicketAllocator;
 use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Application\Service\SuggestedTechniciansService;
 use VendGuard\Application\Service\VanStockService;
 use VendGuard\Application\Service\VanStockReadinessCalculator;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
+use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\InactivityThresholdNotReachedException;
 use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
@@ -39,10 +41,12 @@ use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\ColdChainOverridePolicy;
 use VendGuard\Core\Service\SlaTargetCalculator;
+use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Core\Service\ResolutionTaxonomyValidator;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
@@ -109,6 +113,7 @@ class CoordinatorController
     private ?IncidentPauseService $pauseService;
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
     private ?TransactionManagerInterface $transactionManager;
+    private ?IncidentTicketAllocator $ticketAllocator = null;
 
     /** Ausencias vigentes del saliente para derivar el canal de cobertura (F-04). */
     private ?TechnicianAbsenceRepositoryInterface $absenceRepo;
@@ -245,6 +250,18 @@ class CoordinatorController
     }
 
     /**
+     * Asignador de códigos de ticket, resuelto bajo demanda.
+     *
+     * Comparte la política de reintento de EARS 2.4 con el Portal, el QR y el
+     * flujo oportunista: una colisión del índice único no debe convertir un alta
+     * válida en un 500.
+     */
+    private function tickets(): IncidentTicketAllocator
+    {
+        return $this->ticketAllocator ??= new IncidentTicketAllocator();
+    }
+
+    /**
      * Servicio de aplicación del hilo de comentarios, resuelto bajo demanda.
      *
      * La nota interna con fotografía la publica el servicio, que es el punto único de las
@@ -287,6 +304,210 @@ class CoordinatorController
             incidentRepo: $this->incidentRepo,
             machineRepo: $this->machineRepo,
             notificationEnqueuer: $this->notifications()
+        );
+    }
+
+    /**
+     * POST /api/coordinator/incidents
+     *
+     * Alta de un aviso desde Coordinación con el mismo sellado contractual que
+     * el Portal y el QR (EARS 02.1.1): el perfil vigente de la sede, el objetivo
+     * de la matriz RF-01 y la hora límite inicial quedan congelados en el
+     * expediente. La urgencia se deriva de la máquina y la categoría; el cliente
+     * no puede relajar el techo sanitario del Art. II ni el perfil contractual.
+     *
+     * Respuestas: 201 con el expediente creado; 400 por campos obligatorios o
+     * formato inválido; 403/401 los aplica el middleware de Coordinación; 404 si
+     * la máquina no existe; 409 si la máquina ya tiene un aviso activo o está en
+     * garantía; 422 si la máquina o su sede están inactivas.
+     */
+    public function createIncident(Request $request): Response
+    {
+        // 1. Máquina obligatoria y existente.
+        $machineIdRaw = $request->getBodyParam('machine_id');
+        if ($machineIdRaw === null || trim((string)$machineIdRaw) === '') {
+            return Response::error(
+                'MISSING_MACHINE_ID',
+                'El identificador de la máquina (machine_id) es obligatorio.',
+                400
+            );
+        }
+
+        if (!is_numeric($machineIdRaw) || (int)$machineIdRaw <= 0) {
+            return Response::error(
+                'INVALID_MACHINE_ID',
+                'El identificador de la máquina (machine_id) debe ser un número entero positivo.',
+                400
+            );
+        }
+
+        $machine = $this->machineRepo->findById((int)$machineIdRaw);
+        if ($machine === null) {
+            return Response::error(
+                'MACHINE_NOT_FOUND',
+                'No se encontró ninguna máquina con el identificador indicado.',
+                404
+            );
+        }
+
+        if (!$machine->isActive()) {
+            return Response::error(
+                'MACHINE_INACTIVE',
+                'La máquina seleccionada no se encuentra activa en el catálogo.',
+                422
+            );
+        }
+
+        $location = $this->locationRepo->findById($machine->getLocationId());
+        if ($location === null || !$location->isActive()) {
+            return Response::error(
+                'LOCATION_INACTIVE',
+                'La sede de la máquina no existe o está inactiva; no es posible abrir un aviso sobre ella.',
+                422
+            );
+        }
+
+        // 2. Categoría y descripción con las mismas reglas del Portal.
+        $categoryRaw = $request->getBodyParam('category');
+        if ($categoryRaw === null || trim((string)$categoryRaw) === '') {
+            return Response::error(
+                'MISSING_CATEGORY',
+                'La categoría de la avería (category) es obligatoria.',
+                400
+            );
+        }
+
+        $categoryNormalized = strtoupper(trim((string)$categoryRaw));
+        if (!IncidentCategory::isValid($categoryNormalized)) {
+            return Response::error(
+                'INVALID_CATEGORY',
+                "Categoría de avería no válida: '{$categoryRaw}'. Valores permitidos: "
+                    . implode(', ', IncidentCategory::values()),
+                400
+            );
+        }
+        $category = IncidentCategory::fromString($categoryNormalized);
+
+        $description = trim((string)($request->getBodyParam('description') ?? ''));
+        if ($description === '') {
+            return Response::error(
+                'MISSING_DESCRIPTION',
+                'La descripción de la avería es obligatoria.',
+                400
+            );
+        }
+        if (mb_strlen($description) < 5) {
+            return Response::error(
+                'DESCRIPTION_TOO_SHORT',
+                'La descripción de la avería debe contener al menos 5 caracteres.',
+                422
+            );
+        }
+
+        // 3. Urgencia automática y sellado contractual. El perfil sale de la
+        //    sede en este instante; el objetivo, de la matriz RF-01 y del techo
+        //    sanitario. El vencimiento se ancla al mismo reloj que la apertura.
+        $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $category);
+        $slaTier = $location->getSlaTier();
+        $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+            $slaTier,
+            $machine->getMachineType(),
+            $category,
+            $urgency
+        );
+        $now = new \DateTimeImmutable('now');
+        $slaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt($now, $slaTargetMinutes);
+
+        $reporterName = trim((string)($request->getBodyParam('reporter_name') ?? ''));
+        if ($reporterName === '') {
+            $reporterName = 'Coordinación';
+        }
+        $userId = $request->getAttribute('user_id');
+        $userId = $userId !== null ? (int)$userId : null;
+
+        try {
+            $created = $this->tickets()->persistWithUniqueTicket(
+                function (string $ticketCode) use (
+                    $machine,
+                    $location,
+                    $category,
+                    $description,
+                    $urgency,
+                    $slaTier,
+                    $slaTargetMinutes,
+                    $now,
+                    $slaTargetAt,
+                    $reporterName,
+                    $userId
+                ): Incident {
+                    $incident = new Incident(
+                        id: null,
+                        ticketCode: $ticketCode,
+                        machineId: $machine->getId(),
+                        locationId: $location->getId(),
+                        category: $category,
+                        description: $description,
+                        urgency: $urgency,
+                        status: IncidentStatus::REGISTERED,
+                        assignedTechnicianId: null,
+                        reporterName: $reporterName,
+                        cycleStartedAt: $now->format(DATE_ATOM),
+                        slaTargetAt: $slaTargetAt->format(DATE_ATOM),
+                        slaTierSnapshot: $slaTier,
+                        slaTargetMinutes: $slaTargetMinutes
+                    );
+
+                    $enqueuer = $this->notifications();
+                    if ($enqueuer === null) {
+                        return $this->incidentRepo->create(
+                            $incident,
+                            $userId,
+                            'Aviso registrado desde Coordinación'
+                        );
+                    }
+
+                    return $this->transactions()->runInTransaction(
+                        function () use ($incident, $enqueuer, $machine, $location, $userId): Incident {
+                            $created = $this->incidentRepo->create(
+                                $incident,
+                                $userId,
+                                'Aviso registrado desde Coordinación'
+                            );
+                            $enqueuer->enqueueIncidentOpened(
+                                $created,
+                                $machine,
+                                $location,
+                                NotificationOutboxEnqueuerService::ORIGIN_LOCATION_PORTAL
+                            );
+
+                            return $created;
+                        }
+                    );
+                }
+            );
+        } catch (DuplicateIncidentException $e) {
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                [
+                    'ticket_code' => $e->getTicketCode(),
+                    'ticket_status' => $e->getTicketStatus(),
+                ]
+            );
+        }
+
+        $payload = $created->toArray();
+        $payload['machine_code'] = $machine->getCode();
+        $payload['machine_model'] = $machine->getModel();
+        $payload['machine_type'] = $machine->getMachineType()->value;
+        $payload['location_site_code'] = $location->getSiteCode();
+        $payload['location_name'] = $location->getName();
+
+        return Response::json(
+            $payload,
+            201,
+            'Incidencia registrada con éxito'
         );
     }
 
@@ -1229,7 +1450,7 @@ class CoordinatorController
      * diferencia real con el técnico in situ: `ASSIGNED` cuando el profesional debe
      * desplazarse de nuevo (valor por defecto) o `IN_PROGRESS` cuando confirma que ya
      * está trabajando en la máquina. En ambos casos el vencimiento contractual se
-     * desplaza en horario comercial la duración exacta que estuvo congelado.
+     * desplaza la duración natural exacta que estuvo congelado (EARS 02.3.1, C6).
      *
      * Cuerpo opcional: `target_status` (`ASSIGNED`/`IN_PROGRESS`/`REGISTERED`) y
      * `resume_note`. Un destino fuera de esos tres valores se rechaza con `422` en lugar
