@@ -178,7 +178,7 @@ flowchart LR
     5. En `CoordinatorIncidentDetailService`: exponer `sla_tier_snapshot`, `sla_tier_label`, `sla_target_minutes`, `sla_target_hours`, `sla_target_at` e `is_cold_chain_risk` en el detalle de Coordinación.
   - **Hecho cuando:** `php -l src/Application/Service/AdminLocationService.php && php -l src/Application/Service/QrReportService.php && php -l src/Application/Service/OpportunisticInterventionService.php && php -l src/Application/Service/IncidentPauseService.php && php -l src/Application/Service/CoordinatorIncidentDetailService.php`
 
-- [ ] **T-SLA-09 · Actualizar `RouteOptimizationService`, `TechnicianAssignmentSuggester`, `SuggestedTechniciansService`, `MetricsCalculationService` y `MetricsExportService` y ampliar `TieredSlaDomainTest.php`**
+- [x] **T-SLA-09 · Actualizar `RouteOptimizationService`, `TechnicianAssignmentSuggester`, `SuggestedTechniciansService`, `MetricsCalculationService` y `MetricsExportService` y ampliar `TieredSlaDomainTest.php`**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-SLA-08`
   - **Archivos exactos a crear o modificar:**

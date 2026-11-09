@@ -125,7 +125,7 @@ try {
     $stops = $route->getStops();
     $siteCodes = array_map(static fn($stop): string => $stop->getLocation()->getSiteCode(), $stops);
     assertRouteOptimizationCondition(
-        $siteCodes === ['SEDE-TEST-10', 'SEDE-TEST-21', 'SEDE-TEST-22', 'SEDE-TEST-31', 'SEDE-TEST-33', 'SEDE-TEST-34', 'SEDE-TEST-32'],
+        $siteCodes === ['SEDE-TEST-10', 'SEDE-TEST-21', 'SEDE-TEST-22', 'SEDE-TEST-34', 'SEDE-TEST-33', 'SEDE-TEST-31', 'SEDE-TEST-32'],
         'Route order pins in-progress first, sorts critical SLA deadlines, then uses nearest neighbor for ordinary stops: ' . implode(',', array_map(static fn($stop): string => $stop->getLocation()->getSiteCode() . '=' . $stop->getPriority()->value . '/' . $stop->getStatus()->value, $stops))
     );
     assertRouteOptimizationCondition(count($stops) === 7, 'Tasks at one site are consolidated and PENDING_PARTS tasks are excluded');
@@ -142,15 +142,21 @@ try {
         'Perishable tasks with SLA under four hours inherit critical stop priority'
     );
     assertRouteOptimizationCondition(
-        $stops[3]->getPriority() === StopPriority::ORDINARY
-            && !$stops[3]->isCritical()
-            && $stops[3]->getTotalTasks() === 2
-            && $stops[3]->getCompletedTasks() === 1,
+        $stops[3]->getPriority() === StopPriority::CRITICAL
+            && $stops[3]->isColdChainCritical()
+            && $stops[3]->getSlaTier() === VendGuard\Core\Domain\ValueObject\SlaTier::STANDARD,
+        'A perishable task with more than four hours remaining is still critical under Art. II'
+    );
+    assertRouteOptimizationCondition(
+        $stops[5]->getPriority() === StopPriority::ORDINARY
+            && !$stops[5]->isCritical()
+            && $stops[5]->getTotalTasks() === 2
+            && $stops[5]->getCompletedTasks() === 1,
         'A resolved perishable task does not keep remaining ordinary work critical'
     );
     assertRouteOptimizationCondition(
         $stops[6]->getPriority() === StopPriority::ORDINARY,
-        'A perishable task with more than four hours remaining is not classified as critical'
+        'A non-perishable task beyond four hours remains ordinary'
     );
     assertRouteOptimizationCondition(
         str_contains($stops[1]->getNavigationUrl(), 'destination=41.41,2.19')

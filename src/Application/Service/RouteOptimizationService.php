@@ -7,18 +7,24 @@ use DateTimeImmutable;
 use DateTimeInterface;
 use InvalidArgumentException;
 use VendGuard\Core\Domain\Model\Location;
+use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\RouteSettings;
 use VendGuard\Core\Domain\Model\RouteStop;
 use VendGuard\Core\Domain\Model\StopPriority;
 use VendGuard\Core\Domain\Model\StopStatus;
 use VendGuard\Core\Domain\Model\TechnicianRouteMap;
+use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Core\Service\SlaTargetCalculator;
 
 /**
  * Builds a deterministic technician route from assigned corrective and preventive tasks.
  */
 final class RouteOptimizationService
 {
-    private const CRITICAL_SLA_HOURS = 4;
+    /** Frontera inclusiva de la ventana crítica: 240 min = 14.400 s (D3, QA 1). */
+    private const CRITICAL_SLA_SECONDS = 14400.0;
+
     private const MAX_GOOGLE_MAPS_WAYPOINTS = 9;
 
     public function __construct(private readonly GeoDistanceService $geoDistanceService)
@@ -73,7 +79,12 @@ final class RouteOptimizationService
                 $stopData['completed_tasks'],
                 $stopData['tasks'],
                 $distance,
-                $this->individualNavigationUrl($latitude, $longitude)
+                $this->individualNavigationUrl($latitude, $longitude),
+                $location->getSlaTier(),
+                $location->getSlaTierLabel(),
+                $stopData['critical_reason'],
+                $stopData['is_cold_chain_critical'],
+                $stopData['is_contractual_critical']
             );
             $previousPoint = [$latitude, $longitude];
         }
@@ -115,16 +126,29 @@ final class RouteOptimizationService
     }
 
     /**
+     * Resume una parada bajo la tarea correctiva pendiente más restrictiva (C3, EARS 04.4).
+     *
+     * Las órdenes preventivas se agrupan para la visita, pero nunca gobiernan la
+     * prioridad ni el vencimiento. Una tarea con riesgo de cadena de frío entra
+     * siempre en el bloque crítico; una tarea sin ese riesgo entra si su ventana
+     * efectiva es de 240 min o menos, con frontera inclusiva.
+     *
      * @param array{location: Location, tasks: array<array<string, mixed>>} $group
-     * @return array{location: Location, tasks: array<array<string, mixed>>, completed_tasks: int, status: StopStatus, priority: StopPriority, sla_due_at: ?DateTimeImmutable, created_at: ?DateTimeImmutable}
+     * @return array{location: Location, tasks: array<array<string, mixed>>, completed_tasks: int, status: StopStatus, priority: StopPriority, sla_due_at: ?DateTimeImmutable, created_at: ?DateTimeImmutable, critical_reason: ?string, is_cold_chain_critical: bool, is_contractual_critical: bool}
      */
     private function summarizeGroup(array $group, DateTimeInterface $referenceTime): array
     {
+        $reference = $referenceTime instanceof DateTimeImmutable
+            ? $referenceTime
+            : DateTimeImmutable::createFromInterface($referenceTime);
         $completedTasks = 0;
         $hasInProgress = false;
         $isCritical = false;
+        $isColdChainCritical = false;
+        $isContractualCritical = false;
         $criticalDeadlines = [];
         $creationTimes = [];
+        $criticalCreationTimes = [];
         $pendingTasks = [];
 
         foreach ($group['tasks'] as $task) {
@@ -137,32 +161,61 @@ final class RouteOptimizationService
                 }
                 continue;
             }
+
             if ($status === 'IN_PROGRESS') {
                 $hasInProgress = true;
             }
             $pendingTasks[] = $task;
+
             $createdAt = $this->parseDate($task['created_at'] ?? null);
             if ($createdAt !== null) {
                 $creationTimes[] = $createdAt;
             }
 
-            $machineType = strtoupper(trim((string)($task['machine_type'] ?? '')));
-            $urgency = strtoupper(trim((string)($task['urgency'] ?? '')));
-            $slaDueAt = $this->parseDate($task['sla_due_at'] ?? null);
-            $isPerishableCritical = $machineType === 'PERISHABLE_FOOD'
-                && ($urgency === 'CRITICAL' || (bool)($task['is_critical'] ?? false));
+            if (!$this->isCorrectiveTask($task)) {
+                continue;
+            }
 
-            if ($isPerishableCritical && $slaDueAt !== null) {
-                $hoursRemaining = ((float)$slaDueAt->format('U.u') - (float)$referenceTime->format('U.u')) / 3600;
-                if ($hoursRemaining < self::CRITICAL_SLA_HOURS) {
-                    $isCritical = true;
-                    $criticalDeadlines[] = $slaDueAt;
-                }
+            $taskIsColdChainCritical = $this->isColdChainCritical($task);
+            $slaDueAt = $this->resolveSlaDeadline(
+                $task,
+                $createdAt,
+                $reference,
+                $taskIsColdChainCritical
+            );
+            $evaluationAt = $status === 'PENDING_INFO'
+                ? ($this->parseDate($task['paused_at'] ?? null) ?? $reference)
+                : $reference;
+            $remainingSeconds = $slaDueAt !== null
+                ? (float)$slaDueAt->format('U.u') - (float)$evaluationAt->format('U.u')
+                : null;
+            $taskIsContractualCritical = $remainingSeconds !== null
+                && $remainingSeconds <= self::CRITICAL_SLA_SECONDS;
+
+            if (!$taskIsColdChainCritical && !$taskIsContractualCritical) {
+                continue;
+            }
+
+            $isCritical = true;
+            $isColdChainCritical = $isColdChainCritical || $taskIsColdChainCritical;
+            $isContractualCritical = $isContractualCritical || $taskIsContractualCritical;
+            if ($slaDueAt !== null) {
+                $criticalDeadlines[] = $slaDueAt;
+            }
+            if ($createdAt !== null) {
+                $criticalCreationTimes[] = $createdAt;
             }
         }
 
         $earliestSla = $criticalDeadlines === [] ? null : min($criticalDeadlines);
         $earliestCreation = $creationTimes === [] ? null : min($creationTimes);
+        $orderingCreation = $isCritical
+            ? ($criticalCreationTimes === [] ? null : min($criticalCreationTimes))
+            : $earliestCreation;
+        $criticalReason = $isCritical
+            ? ($isColdChainCritical ? 'COLD_CHAIN' : 'CONTRACTUAL_SLA')
+            : null;
+
         if ($pendingTasks === []) {
             return [
                 'location' => $group['location'],
@@ -173,6 +226,9 @@ final class RouteOptimizationService
                 'priority' => StopPriority::ORDINARY,
                 'sla_due_at' => null,
                 'created_at' => $earliestCreation,
+                'critical_reason' => null,
+                'is_cold_chain_critical' => false,
+                'is_contractual_critical' => false,
             ];
         }
 
@@ -184,8 +240,94 @@ final class RouteOptimizationService
             'status' => $hasInProgress ? StopStatus::IN_PROGRESS : StopStatus::PENDING,
             'priority' => $isCritical ? StopPriority::CRITICAL : StopPriority::ORDINARY,
             'sla_due_at' => $earliestSla,
-            'created_at' => $earliestCreation,
+            'created_at' => $orderingCreation,
+            'critical_reason' => $criticalReason,
+            'is_cold_chain_critical' => $isColdChainCritical,
+            'is_contractual_critical' => $isContractualCritical,
         ];
+    }
+
+    /**
+     * Vencimiento efectivo de una tarea correctiva, con respaldo determinista (C2, C4).
+     *
+     * La pausa no se descuenta aquí: el vencimiento ya la incorpora en el objetivo
+     * sellado y, para la promoción, la referencia se congela en `paused_at`.
+     */
+    private function resolveSlaDeadline(
+        array $task,
+        ?DateTimeImmutable $createdAt,
+        DateTimeImmutable $reference,
+        bool $isColdChainCritical
+    ): ?DateTimeImmutable {
+        $slaDueAt = $this->parseDate($task['sla_due_at'] ?? null);
+        if ($slaDueAt !== null) {
+            return $slaDueAt;
+        }
+
+        if ($createdAt === null) {
+            return $isColdChainCritical ? $reference : null;
+        }
+
+        $targetMinutes = isset($task['sla_target_minutes']) && is_numeric($task['sla_target_minutes'])
+            ? max(0, (int)$task['sla_target_minutes'])
+            : null;
+
+        // Sin objetivo sellado no se inventa una ventana contractual: la foto
+        // antigua conserva su comportamiento y T-SLA-10 entrega el campo. El
+        // riesgo de frío sí tiene un techo conocido de 240 min.
+        if ($targetMinutes === null) {
+            return $isColdChainCritical ? $createdAt->modify('+240 minutes') : null;
+        }
+
+        $discountSeconds = max(0, (int)($task['total_pending_info_seconds'] ?? 0));
+
+        return $createdAt->modify('+' . (($targetMinutes * 60) + $discountSeconds) . ' seconds');
+    }
+
+    /**
+     * La tarea correctiva es la única que puede promover o retrasar la parada.
+     */
+    private function isCorrectiveTask(array $task): bool
+    {
+        return strtoupper(trim((string)($task['type'] ?? 'CORRECTIVE'))) !== 'PREVENTIVE';
+    }
+
+    /**
+     * Riesgo de cadena de frío explícito o derivado del catálogo del Art. II.
+     */
+    private function isColdChainCritical(array $task): bool
+    {
+        if (array_key_exists('is_cold_chain_critical', $task)
+            && filter_var($task['is_cold_chain_critical'], FILTER_VALIDATE_BOOLEAN)) {
+            return true;
+        }
+
+        $machineType = $this->machineType($task);
+        if ($machineType === null) {
+            return false;
+        }
+
+        return SlaTargetCalculator::isColdChainRisk(
+            $machineType,
+            $this->incidentCategory($task),
+            $this->urgency($task) ?? UrgencyLevel::MEDIUM
+        );
+    }
+
+    private function machineType(array $task): ?MachineType
+    {
+        return MachineType::tryFrom(strtoupper(trim((string)($task['machine_type'] ?? ''))));
+    }
+
+    private function urgency(array $task): ?UrgencyLevel
+    {
+        return UrgencyLevel::tryFrom(strtoupper(trim((string)($task['urgency'] ?? ''))));
+    }
+
+    private function incidentCategory(array $task): IncidentCategory
+    {
+        return IncidentCategory::tryFrom(strtoupper(trim((string)($task['category'] ?? ''))))
+            ?? IncidentCategory::OTHER;
     }
 
     /**
@@ -225,12 +367,7 @@ final class RouteOptimizationService
             }
         }
 
-        usort($critical, static function (array $left, array $right): int {
-            $leftDeadline = (float)$left['sla_due_at']->format('U.u');
-            $rightDeadline = (float)$right['sla_due_at']->format('U.u');
-            $deadlineComparison = $leftDeadline <=> $rightDeadline;
-            return $deadlineComparison !== 0 ? $deadlineComparison : self::compareAgeAndLocation($left, $right);
-        });
+        usort($critical, fn(array $left, array $right): int => $this->compareCriticalStops($left, $right));
         array_push($ordered, ...$critical);
 
         $currentLatitude = $ordered !== []
@@ -366,6 +503,38 @@ final class RouteOptimizationService
     private function isCompletedTask(string $status): bool
     {
         return in_array($status, ['COMPLETED', 'RESOLVED', 'CLOSED'], true);
+    }
+
+    /**
+     * Prelación sanitaria dentro del bloque crítico (Art. II.2, QA 1).
+     *
+     * Primero las paradas con cadena de frío, después las puramente
+     * contractuales; dentro de cada sub-bloque manda el vencimiento más próximo y,
+     * en empate, la antigüedad y el identificador de sede.
+     *
+     * @param array<string, mixed> $left
+     * @param array<string, mixed> $right
+     */
+    private function compareCriticalStops(array $left, array $right): int
+    {
+        $leftRank = $left['is_cold_chain_critical'] ? 0 : 1;
+        $rightRank = $right['is_cold_chain_critical'] ? 0 : 1;
+        $rankComparison = $leftRank <=> $rightRank;
+        if ($rankComparison !== 0) {
+            return $rankComparison;
+        }
+
+        $leftDeadline = $left['sla_due_at'] instanceof DateTimeInterface
+            ? (float)$left['sla_due_at']->format('U.u')
+            : INF;
+        $rightDeadline = $right['sla_due_at'] instanceof DateTimeInterface
+            ? (float)$right['sla_due_at']->format('U.u')
+            : INF;
+        $deadlineComparison = $leftDeadline <=> $rightDeadline;
+
+        return $deadlineComparison !== 0
+            ? $deadlineComparison
+            : self::compareAgeAndLocation($left, $right);
     }
 
     /**

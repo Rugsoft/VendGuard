@@ -9,6 +9,7 @@ use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\MetricFilter;
 use VendGuard\Core\Domain\Model\MttrMetric;
 use VendGuard\Core\Domain\Repository\MetricsRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Infrastructure\Repository\PdoMetricsRepository;
 
 /**
@@ -125,11 +126,41 @@ class MetricsCalculationService
     public function getBreakdown(MetricFilter $filter): array
     {
         return [
-            'by_location'     => $this->discountBreakdownRows($this->metricsRepo->getBreakdownByLocation($filter)),
+            'by_location'     => $this->discountBreakdownRows(
+                $this->enrichLocationSlaRows($this->metricsRepo->getBreakdownByLocation($filter))
+            ),
             'by_technician'   => $this->discountBreakdownRows($this->metricsRepo->getBreakdownByTechnician($filter)),
             'by_machine_type' => $this->discountBreakdownRows($this->metricsRepo->getBreakdownByMachineType($filter)),
             'by_category'     => $this->discountBreakdownRows($this->metricsRepo->getBreakdownByCategory($filter)),
         ];
+    }
+
+    /**
+     * Fija en cada fila de sede el perfil vigente, su etiqueta, las horas
+     * nominales y el conteo real de brechas (RF-06, D6, QA 3).
+     *
+     * La fuente de horas es el catálogo SlaTier y no el valor genérico que
+     * pudiera traer el repositorio: el objetivo de referencia del desglose es
+     * siempre el nominal del contrato, no el umbral sanitario de cada ticket.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function enrichLocationSlaRows(array $rows): array
+    {
+        foreach ($rows as $index => $row) {
+            $tier = SlaTier::tryFrom(strtoupper(trim((string)($row['sla_tier'] ?? ''))))
+                ?? SlaTier::STANDARD;
+
+            $row['sla_tier'] = $tier->value;
+            $row['sla_tier_label'] = $tier->label();
+            $row['sla_target_hours'] = $tier->nominalReferenceHours();
+            $row['sla_breaches'] = max(0, (int)($row['sla_breaches'] ?? 0));
+
+            $rows[$index] = $row;
+        }
+
+        return $rows;
     }
 
     /**
@@ -249,11 +280,17 @@ class MetricsCalculationService
             $row['mttr_formatted'] = $mttr->getFormatted();
             $row['mttr_hours'] = $mttr->getHours();
 
-            if (array_key_exists('sla_target_hours', $row)) {
-                $targetHours = (float)$row['sla_target_hours'];
-                $row['sla_status'] = !$mttr->hasData()
-                    ? 'NO_DATA'
-                    : (($mttr->getHours() > $targetHours) ? 'BREACHED' : 'COMPLIANT');
+            if (array_key_exists('sla_target_hours', $row) || array_key_exists('sla_breaches', $row)) {
+                $targetHours = isset($row['sla_target_hours']) ? (float)$row['sla_target_hours'] : null;
+                $breaches = max(0, (int)($row['sla_breaches'] ?? 0));
+
+                if (!$mttr->hasData()) {
+                    $row['sla_status'] = 'NO_DATA';
+                } elseif ($breaches > 0 || ($targetHours !== null && $mttr->getHours() > $targetHours)) {
+                    $row['sla_status'] = 'BREACHED';
+                } else {
+                    $row['sla_status'] = 'COMPLIANT';
+                }
             }
 
             $rows[$index] = $row;

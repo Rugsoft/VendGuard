@@ -8,7 +8,12 @@ use DateTimeImmutable;
 use InvalidArgumentException;
 use Throwable;
 use VendGuard\Application\DTO\SuggestedTechnicianDto;
+use VendGuard\Core\Domain\Model\MachineType;
+use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
+use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Domain\ValueObject\ZoneAffinityType;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\TechnicianWorkloadScorer;
 
 /**
@@ -122,6 +127,12 @@ final class TechnicianAssignmentSuggester
     /** Insignia de técnico no disponible (RF-08.3, Módulo 21). */
     public const BADGE_NOT_AVAILABLE = 'NO_DISPONIBLE';
 
+    /** Motivo de prelación del escalado contractual 24/7 (RF-05, QA 2). */
+    public const CONTRACTUAL_ESCALATION_REASON = 'Escalado contractual 24/7';
+
+    /** Motivo de prelación del escalado sanitario del Art. II. */
+    public const COLD_CHAIN_ESCALATION_REASON = 'Guardia 24/7 por cadena de frío';
+
     /** Nivel de evaluación del cruce: referencias solicitadas en la avería (`QA 2`). */
     public const VAN_STOCK_LEVEL_EXPLICIT_REQUESTS = 'EXPLICIT_REQUESTS';
 
@@ -173,6 +184,8 @@ final class TechnicianAssignmentSuggester
     {
         $location = self::readLocation($incident['location'] ?? null, 'location');
         $isColdChainRisk = self::readColdChainRisk($incident);
+        $slaTier = self::readSlaTier($incident);
+        $slaTargetMinutes = self::readSlaTargetMinutes($incident, $slaTier);
         $base = self::readBase((string)($options['base_latitude'] ?? ''), (string)($options['base_longitude'] ?? ''));
 
         $candidates = [];
@@ -214,7 +227,42 @@ final class TechnicianAssignmentSuggester
         $unattendedZone = $freeZoneTechnicians === [];
         $zoneAtCapacity = $unattendedZone && $zoneTechnicians !== [];
 
-        $hasOnCall = array_filter($candidates, static fn (array $candidate): bool => $candidate['is_on_call']) !== [];
+        $onCallAvailable = array_filter(
+            $candidates,
+            static fn (array $candidate): bool => $candidate['is_on_call'] && $candidate['active_absence'] === null
+        ) !== [];
+        $zoneOnShift = array_values(array_filter(
+            $zoneTechnicians,
+            static fn (array $candidate): bool => $candidate['is_on_shift']
+        ));
+        $freeZoneOnShift = array_filter(
+            $zoneOnShift,
+            static fn (array $candidate): bool => self::liveStops($candidate) === 0
+        ) !== [];
+
+        // D4 / QA 2: el escalado contractual es de sede crítica 24/7 y queda
+        // subordinado al sanitario. La condición A cubre cualquier prioridad;
+        // la B exige objetivo de 4 h o menos y ausencia de un efectivo libre.
+        $contractualEscalation = !$coldChainEscalation
+            && $slaTier === SlaTier::CRITICAL_INFRASTRUCTURE_24_7
+            && (
+                $zoneOnShift === []
+                || ($slaTargetMinutes !== null && $slaTargetMinutes <= 240 && !$freeZoneOnShift)
+            );
+
+        // EARS 05.4: con objetivo de hasta 8 h y todo el cuadrante en turno con
+        // tres o más paradas vivas, la menor carga manda sobre la afinidad.
+        $saturationActive = !$coldChainEscalation
+            && !$contractualEscalation
+            && $slaTargetMinutes !== null
+            && $slaTargetMinutes <= 480
+            && $zoneOnShift !== []
+            && array_filter(
+                $zoneOnShift,
+                static fn (array $candidate): bool => self::liveStops($candidate) < 3
+            ) === [];
+
+        $hasOnCall = $onCallAvailable;
 
         // Módulo 23: el cruce de furgoneta sólo se evalúa si la foto lo trae. Sin
         // contexto, la forma del ranking permanece intacta (D2, retrocompatibilidad).
@@ -234,6 +282,7 @@ final class TechnicianAssignmentSuggester
                 'preventive_orders_today' => $candidate['preventive_orders_today'],
                 'is_cold_chain_risk' => $isColdChainRisk,
                 'cold_chain_escalation_active' => $coldChainEscalation,
+                'contractual_24_7_escalation_active' => $contractualEscalation,
                 'is_on_call' => $candidate['is_on_call'],
             ]);
 
@@ -245,10 +294,21 @@ final class TechnicianAssignmentSuggester
                     + $candidate['pending_info_incidents']
                     + $candidate['preventive_orders_today'],
                 'distance_km' => $this->referenceDistance($candidate, $location, $base),
+                'selection_reason' => $coldChainEscalation && $candidate['is_on_call']
+                    ? self::COLD_CHAIN_ESCALATION_REASON
+                    : ($contractualEscalation && $candidate['is_on_call']
+                        ? self::CONTRACTUAL_ESCALATION_REASON
+                        : null),
             ];
         }
 
-        usort($rows, $this->comparator($coldChainEscalation, $hasOnCall, $unattendedZone));
+        usort($rows, $this->comparator(
+            $coldChainEscalation,
+            $hasOnCall,
+            $unattendedZone,
+            $contractualEscalation,
+            $saturationActive
+        ));
 
         $ranked = [];
         foreach ($rows as $index => $row) {
@@ -263,13 +323,27 @@ final class TechnicianAssignmentSuggester
                 'ticket_code' => isset($incident['ticket_code']) ? (string)$incident['ticket_code'] : null,
                 'priority' => self::readPriority($incident),
                 'is_cold_chain_risk' => $isColdChainRisk,
+                'sla_tier_snapshot' => $slaTier?->value,
+                'sla_tier_label' => $slaTier?->label(),
+                'sla_target_minutes' => $slaTargetMinutes,
                 'location' => $location,
             ],
             [
                 'top_technician_id' => $top['technician_id'] ?? null,
                 'is_cold_chain_escalation' => $coldChainEscalation,
+                'contractual_24_7_escalation_active' => $contractualEscalation,
+                'on_call_available' => $onCallAvailable,
                 'unattended_zone' => $unattendedZone,
-                'explanation' => $this->explain($coldChainEscalation, $hasOnCall, $unattendedZone, $top, $zoneAtCapacity),
+                'selection_reason' => $top['current_status']['selection_reason'] ?? null,
+                'explanation' => $this->explain(
+                    $coldChainEscalation,
+                    $hasOnCall,
+                    $unattendedZone,
+                    $top,
+                    $zoneAtCapacity,
+                    $contractualEscalation,
+                    $saturationActive
+                ),
             ],
             $ranked
         );
@@ -280,7 +354,13 @@ final class TechnicianAssignmentSuggester
      *
      * @return callable(array<string, mixed>, array<string, mixed>): int
      */
-    private function comparator(bool $coldChainEscalation, bool $hasOnCall, bool $unattendedZone): callable
+    private function comparator(
+        bool $coldChainEscalation,
+        bool $hasOnCall,
+        bool $unattendedZone,
+        bool $contractualEscalation = false,
+        bool $saturationActive = false
+    ): callable
     {
         if ($coldChainEscalation && $hasOnCall) {
             // Art. II: la guardia va delante (persiste incluso en OFF_SHIFT por RF-08.5 / R6)
@@ -298,6 +378,44 @@ final class TechnicianAssignmentSuggester
             // QA 9: sin guardia, disponibles primero, menor carga viva y, a igual carga, la más próxima.
             return static function (array $left, array $right): int {
                 return ($right['technician']['is_available'] <=> $left['technician']['is_available'])
+                    ?: ($left['workload'] <=> $right['workload'])
+                    ?: ($left['distance_km'] <=> $right['distance_km'])
+                    ?: ($right['score'] <=> $left['score'])
+                    ?: self::compareLastAssignment($left, $right)
+                    ?: ($left['technician']['technician_id'] <=> $right['technician']['technician_id']);
+            };
+        }
+
+        if ($contractualEscalation && $hasOnCall) {
+            // D4: la guardia contractual encabeza aunque esté fuera de turno; el
+            // +60 ya distingue el motivo en el desglose y nunca se suma al sanitario.
+            return static function (array $left, array $right): int {
+                return ($right['technician']['is_on_call'] <=> $left['technician']['is_on_call'])
+                    ?: ($right['technician']['is_available'] <=> $left['technician']['is_available'])
+                    ?: ($right['score'] <=> $left['score'])
+                    ?: ($left['distance_km'] <=> $right['distance_km'])
+                    ?: self::compareLastAssignment($left, $right)
+                    ?: ($left['technician']['technician_id'] <=> $right['technician']['technician_id']);
+            };
+        }
+
+        if ($contractualEscalation) {
+            // QA 2: sin guardia, respaldo por menor carga viva y después proximidad.
+            return static function (array $left, array $right): int {
+                return ($right['technician']['is_available'] <=> $left['technician']['is_available'])
+                    ?: ($left['workload'] <=> $right['workload'])
+                    ?: ($left['distance_km'] <=> $right['distance_km'])
+                    ?: ($right['score'] <=> $left['score'])
+                    ?: self::compareLastAssignment($left, $right)
+                    ?: ($left['technician']['technician_id'] <=> $right['technician']['technician_id']);
+            };
+        }
+
+        if ($saturationActive) {
+            // EARS 05.4: en turno primero; después, menor carga viva y distancia.
+            return static function (array $left, array $right): int {
+                return ($right['technician']['is_available'] <=> $left['technician']['is_available'])
+                    ?: ($right['technician']['is_on_shift'] <=> $left['technician']['is_on_shift'])
                     ?: ($left['workload'] <=> $right['workload'])
                     ?: ($left['distance_km'] <=> $right['distance_km'])
                     ?: ($right['score'] <=> $left['score'])
@@ -384,6 +502,10 @@ final class TechnicianAssignmentSuggester
             'in_progress_location_name' => $technician['in_progress_location']['location_name'] ?? null,
             'distance_km' => $row['distance_km'],
         ];
+
+        if (($row['selection_reason'] ?? null) !== null) {
+            $currentStatus['selection_reason'] = $row['selection_reason'];
+        }
 
         if ($technician['shift_status'] !== null || $technician['active_absence'] !== null || $technician['has_explicit_availability']) {
             $currentStatus['is_available'] = $technician['is_available'];
@@ -761,7 +883,9 @@ final class TechnicianAssignmentSuggester
         bool $hasOnCall,
         bool $unattendedZone,
         ?array $top,
-        bool $zoneAtCapacity
+        bool $zoneAtCapacity,
+        bool $contractualEscalation = false,
+        bool $saturationActive = false
     ): string {
         if ($top === null) {
             return '⚠️ No hay técnicos activos disponibles en el parque: el despacho requiere incorporar o reactivar un técnico.';
@@ -779,6 +903,29 @@ final class TechnicianAssignmentSuggester
             return sprintf(
                 '🚨 Prioridad Sanitaria Art. II: sin técnico de guardia disponible, se antepone a %s por menor carga viva '
                     . 'y, a igual carga, por proximidad.',
+                $top['name']
+            );
+        }
+
+        if ($contractualEscalation && $hasOnCall) {
+            return sprintf(
+                '🕒 Escalado contractual 24/7: la sede crítica no tiene cobertura libre en turno; '
+                    . 'se antepone al técnico de guardia %s con el bono específico de +60 puntos.',
+                $top['name']
+            );
+        }
+
+        if ($contractualEscalation) {
+            return sprintf(
+                '🕒 Escalado contractual 24/7 sin guardia disponible: %s encabeza el respaldo por menor carga viva '
+                    . 'y, a igual carga, por proximidad.',
+                $top['name']
+            );
+        }
+
+        if ($saturationActive) {
+            return sprintf(
+                '⚖️ Cuadrante de zona saturado: %s encabeza por menor carga viva y, a igual carga, por proximidad.',
                 $top['name']
             );
         }
@@ -943,6 +1090,7 @@ final class TechnicianAssignmentSuggester
             'unavailability_reason' => $unavailabilityReason,
             'shift_status' => $shiftStatus,
             'active_absence' => $activeAbsence,
+            'is_on_shift' => $shiftStatus === 'ON_SHIFT' && $activeAbsence === null,
             'has_explicit_availability' => array_key_exists('is_available', $technician),
             'affinity' => $affinity instanceof ZoneAffinityType
                 ? $affinity
@@ -1025,9 +1173,69 @@ final class TechnicianAssignmentSuggester
         }
 
         $priority = self::readPriority($incident);
-        $machineType = mb_strtoupper(trim((string)($incident['machine_type'] ?? '')));
+        $machineType = MachineType::tryFrom(mb_strtoupper(trim((string)($incident['machine_type'] ?? ''))));
 
-        return $priority === 'CRITICAL' || in_array($machineType, ['PERISHABLE_FOOD', 'COMBO'], true);
+        if ($machineType !== null) {
+            $urgency = UrgencyLevel::tryFrom($priority) ?? UrgencyLevel::MEDIUM;
+
+            return SlaTargetCalculator::isColdChainRisk(
+                $machineType,
+                self::readIncidentCategory($incident),
+                $urgency
+            );
+        }
+
+        return $priority === 'CRITICAL';
+    }
+
+    /**
+     * Perfil contractual sellado en el expediente, si la foto lo trae.
+     *
+     * @param array<string, mixed> $incident
+     */
+    private static function readSlaTier(array $incident): ?SlaTier
+    {
+        $value = mb_strtoupper(trim((string)($incident['sla_tier_snapshot'] ?? '')));
+
+        return $value === '' ? null : SlaTier::tryFrom($value);
+    }
+
+    /**
+     * Objetivo sellado o derivado de la matriz cuando la foto no lo trae.
+     *
+     * @param array<string, mixed> $incident
+     */
+    private static function readSlaTargetMinutes(array $incident, ?SlaTier $slaTier): ?int
+    {
+        if (isset($incident['sla_target_minutes']) && is_numeric($incident['sla_target_minutes'])) {
+            return max(1, (int)$incident['sla_target_minutes']);
+        }
+
+        if ($slaTier === null) {
+            return null;
+        }
+
+        $machineType = MachineType::tryFrom(mb_strtoupper(trim((string)($incident['machine_type'] ?? ''))));
+        $urgency = UrgencyLevel::tryFrom(self::readPriority($incident));
+        if ($machineType === null || $urgency === null) {
+            return null;
+        }
+
+        return SlaTargetCalculator::calculateTargetMinutes(
+            $slaTier,
+            $machineType,
+            self::readIncidentCategory($incident),
+            $urgency
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $incident
+     */
+    private static function readIncidentCategory(array $incident): IncidentCategory
+    {
+        return IncidentCategory::tryFrom(mb_strtoupper(trim((string)($incident['category'] ?? ''))))
+            ?? IncidentCategory::OTHER;
     }
 
     /**
