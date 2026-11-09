@@ -820,6 +820,58 @@ $assert(
         && $coldWithoutUrgencyStop->getCriticalReason() === 'COLD_CHAIN'
 );
 
+$tieOlderLocation = tieredSlaLocation(71, SlaTier::CRITICAL_INFRASTRUCTURE_24_7, 41.4010, 2.2010);
+$tieNewerLocation = tieredSlaLocation(72, SlaTier::CRITICAL_INFRASTRUCTURE_24_7, 41.4020, 2.2020);
+
+// Dos paradas contractuales con vencimiento idéntico (12:00): gana la más antigua (07:30 vs 08:30)
+$tieRouteAge = $routeService->optimizeRoute([
+    tieredSlaTask($tieNewerLocation, 720, [
+        'machine_type' => 'HOT_DRINKS',
+        'urgency' => 'HIGH',
+        'sla_due_at' => '2026-11-09T12:00:00+01:00',
+        'created_at' => '2026-11-09T08:30:00+01:00',
+    ]),
+    tieredSlaTask($tieOlderLocation, 710, [
+        'machine_type' => 'HOT_DRINKS',
+        'urgency' => 'HIGH',
+        'sla_due_at' => '2026-11-09T12:00:00+01:00',
+        'created_at' => '2026-11-09T07:30:00+01:00',
+    ]),
+], $routeOrigin, $routeSettings, $routeReference);
+
+$tieStopsAge = array_map(fn($s) => $s->getLocation()->getSiteCode(), $tieRouteAge->getStops());
+$assert(
+    '6.10 EARS 03.2: Con empate exacto de vencimiento, antepone la parada más antigua',
+    $tieStopsAge[0] === 'SLA-71' && $tieStopsAge[1] === 'SLA-72',
+    implode(', ', $tieStopsAge)
+);
+
+// Dos paradas contractuales con vencimiento idéntico (12:00) y creación idéntica (08:00): gana menor id de sede (73 vs 74)
+$tieLocA = tieredSlaLocation(73, SlaTier::CRITICAL_INFRASTRUCTURE_24_7, 41.4030, 2.2030);
+$tieLocB = tieredSlaLocation(74, SlaTier::CRITICAL_INFRASTRUCTURE_24_7, 41.4040, 2.2040);
+
+$tieRouteId = $routeService->optimizeRoute([
+    tieredSlaTask($tieLocB, 740, [
+        'machine_type' => 'HOT_DRINKS',
+        'urgency' => 'HIGH',
+        'sla_due_at' => '2026-11-09T12:00:00+01:00',
+        'created_at' => '2026-11-09T08:00:00+01:00',
+    ]),
+    tieredSlaTask($tieLocA, 730, [
+        'machine_type' => 'HOT_DRINKS',
+        'urgency' => 'HIGH',
+        'sla_due_at' => '2026-11-09T12:00:00+01:00',
+        'created_at' => '2026-11-09T08:00:00+01:00',
+    ]),
+], $routeOrigin, $routeSettings, $routeReference);
+
+$tieStopsId = array_map(fn($s) => $s->getLocation()->getSiteCode(), $tieRouteId->getStops());
+$assert(
+    '6.11 EARS 03.2: Con empate exacto de vencimiento y antigüedad, antepone el menor identificador de sede',
+    $tieStopsId[0] === 'SLA-73' && $tieStopsId[1] === 'SLA-74',
+    implode(', ', $tieStopsId)
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. Recomendador: escalado contractual 24/7 y respaldos deterministas
 // ─────────────────────────────────────────────────────────────────────────────

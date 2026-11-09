@@ -413,6 +413,10 @@ final class OpportunisticIncidentService
                 'assigned_at' => $created->getAssignedAt(),
                 'started_at' => $created->getStartedAt(),
                 'sla_target_at' => $created->getSlaTargetAt(),
+                'sla_tier_snapshot' => $created->getSlaTierSnapshot()->value,
+                'sla_tier_label' => $created->getSlaTierSnapshot()->label(),
+                'sla_target_minutes' => $created->getSlaTargetMinutes(),
+                'sla_target_hours' => $created->getSlaTargetHours(),
                 'cold_chain_override_alerted' => $flaggedStops !== [],
             ];
         });

@@ -386,6 +386,14 @@ $assert(
         && ($created['opportunistic_origin_reason'] ?? null) === 'TECHNICIAN_DETECTION'
 );
 $assert(
+    '3.7.b El alta oportuna entrega el sellado contractual de SLA (EARS 02.1.1)',
+    ($created['sla_tier_snapshot'] ?? null) === 'CRITICAL_INFRASTRUCTURE_24_7'
+        && ($created['sla_tier_label'] ?? null) === 'Infraestructura Crítica 24x7'
+        && (int)($created['sla_target_minutes'] ?? 0) === 480
+        && (float)($created['sla_target_hours'] ?? 0) === 8.0
+        && !empty($created['sla_target_at'])
+);
+$assert(
     '3.8 El alta queda firmada en auditoría y avisa a la Sede una sola vez',
     $auditCount('TICKET', $createdId, 'INCIDENT_CREATED_OPPORTUNISTIC') === 1
         && count($ticketCodes($createdId)) >= 1

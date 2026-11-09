@@ -7,7 +7,7 @@
 **Referencias:** [`spec.md`](../specs/30-tiered-sla-contracts/spec.md) v2.0 · [`tiered_sla_contracts_spec.md`](../specs/functional/tiered_sla_contracts_spec.md) · [`tiered_sla_contracts_contracts.md`](../specs/technical/tiered_sla_contracts_contracts.md) v1.0 · [`tasks.md`](../specs/30-tiered-sla-contracts/tasks.md) · [`traceability-matrix.md`](../specs/30-tiered-sla-contracts/traceability-matrix.md)  
 **Fecha de la revisión:** 2026-11-09  
 **Alcance:** revisión de solo lectura de requisitos `RF-01`–`RF-05`, criterios EARS, `RNF-01`–`RNF-03`, decisiones `D1`–`D6`, casos `C1`–`C6`, resoluciones `QA 1`–`QA 4`, los 8 criterios de Definition of Done y las 14 tareas `T-SLA-01`–`T-SLA-14`.  
-**Resultado:** **la Spec 30 no está cumplida al 100 % en sentido estricto**. El núcleo funcional está implementado y la batería existente pasa en verde, pero permanecen varias coberturas parciales y deriva documental. H-01, H-02, H-03 y H-04 quedaron resueltos el 2026-11-09.
+**Resultado:** **la Spec 30 no está cumplida al 100 % en sentido estricto**. El núcleo funcional está implementado y la batería existente pasa en verde; H-01, H-02, H-03, H-04 y H-05 quedaron resueltos el 2026-11-09. Solo permanece la deriva documental de H-06.
 
 > Este documento no modifica la especificación aprobada ni el código. Su finalidad es dejar constancia reproducible de la evidencia y de los huecos que impiden declarar el cierre completo.
 
@@ -15,12 +15,13 @@
 
 ## 1. Veredicto ejecutivo
 
-**No. La Spec 30 no está 100 % cumplida.** El canal de alta desde Coordinación (H-01), el desplazamiento de pausas por segundos naturales (H-02), el backfill histórico (H-03) y la medición de latencia y determinismo de métricas (H-04) se resolvieron el 2026-11-09; el veredicto se mantiene por los criterios que siguen abiertos.
+**No. La Spec 30 no está 100 % cumplida.** El canal de alta desde Coordinación (H-01), el desplazamiento de pausas por segundos naturales (H-02), el backfill histórico (H-03), la medición de latencia y determinismo de métricas (H-04) y las coberturas parciales de recálculo consumido, desempate EARS 03.2 y exposición REST/Oportunista (H-05) se resolvieron el 2026-11-09; el veredicto se mantiene abierto únicamente por la deriva documental de `tasks.md` (H-06).
 
-La conclusión no se basa en que existan pruebas rojas —no las hay—, sino en que **la suite verde aún no certifica todos los requisitos**:
+La conclusión no se basa en que existan pruebas rojas —no las hay—, sino en que **la trazabilidad documental aún tiene inconsistencias menores**:
 
-1. **H-05 · Coberturas parciales** en el caso C4 de margen ya consumido, en el desempate de EARS 03.2 y en la exposición REST de Coordinación.
-2. **H-06 · Deriva documental** entre `tasks.md`, los nombres reales de archivos y los comandos de aceptación.
+1. **H-06 · Deriva documental** entre `tasks.md`, los nombres reales de archivos y los comandos de aceptación.
+
+**H-05 se cerró el 2026-11-09:** `TieredSlaContractsApiTest` (45/45) cubre el recálculo con 9 h consumidas que vence de inmediato (2.2.b, 2.2.c) y la exposición REST en bandeja y detalle de Coordinación (1.16, 1.17); `TieredSlaDomainTest` (66/66) cubre el desempate por antigüedad y menor id de sede ante empate exacto de vencimiento (6.10, 6.11); `OpportunisticIncidentService` expone los campos SLA y las suites oportunistas (unitaria y API) certifican el sellado exacto en memoria, base de datos y respuesta REST.
 
 **H-03 se cerró el 2026-11-09:** `PostgresTieredSlaBackfillTest` reconstruye el esquema previo a la 026, siembra avisos históricos, aplica la migración y certifica 240/1440 en cerrados, la matriz RF-01 en abiertos y la inmovilidad de `created_at` y del resto de indicadores históricos (80/80).
 
@@ -36,12 +37,19 @@ Lo que sí está sólidamente cumplido: RF-01, el núcleo de RF-02 (Portal, **Co
 
 | Suite | Resultado real |
 | :--- | :--- |
-| `tests/unit/TieredSlaDomainTest.php` | **64/64**, exit 0 |
+| `tests/unit/TieredSlaDomainTest.php` | **66/66**, exit 0 (incluye desempate EARS 03.2) |
 | `tests/unit/TieredSlaFrontendTest.mjs` | **47/47**, exit 0 |
 | `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` | **22/22**, exit 0 |
 | `tests/unit/LegacyButtonPaletteRetirementTest.mjs` | **18/18**, exit 0 |
 | `tests/unit/DesignTokenDebtRatchetTest.mjs` | **3/3**, exit 0 |
 | `tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs` | **44/44**, exit 0 |
+| `tests/integration/TieredSlaContractsApiTest.php` | **45/45**, exit 0 (incluye alta coord, 9 h consumidas y REST coord) |
+| `tests/integration/PostgresTieredSlaSchemaTest.php` | **27/27**, exit 0 |
+| `tests/integration/PostgresTieredSlaBackfillTest.php` | **80/80**, exit 0 (esquema previo a 026) |
+| `tests/integration/PostgresTieredSlaMetricsPerformanceTest.php` | **34/34**, exit 0 (latencia < 1,5 s y determinismo) |
+| `tests/integration/TechnicianRouteMapApiTest.php` | **25/25**, exit 0 |
+| `tests/integration/OpportunisticIncidentServiceTest.php` | **100 % en verde**, exit 0 (sellado exacto SLA en memoria y BD) |
+| `tests/integration/OpportunisticIncidentApiIntegrationTest.php` | **56/56**, exit 0 (sellado exacto SLA en REST) |
 | `tests/integration/PostgresTieredSlaSchemaTest.php` | **17/17**, exit 0 |
 | `tests/integration/PostgresTieredSlaBackfillTest.php` | **80/80**, exit 0 |
 | `tests/integration/PostgresTieredSlaMetricsPerformanceTest.php` | **34/34**, exit 0 |
@@ -215,7 +223,7 @@ En `tasks.md`: **14/14 marcadas `[x]`, 0 pendientes**. Pero «marcada» no signi
 | `T-SLA-08` | **⚠️** cita `OpportunisticInterventionService.php`, inexistente; el real es `OpportunisticIncidentService.php`. |
 | `T-SLA-09` | **✅** sin anomalía detectada. |
 | `T-SLA-10` | **✅** alta desde Coordinación implementada en `POST /api/coordinator/incidents`; API 1.11–1.15 verifica sellado, vencimiento y duplicados. |
-| `T-SLA-11` | **⚠️** 41/41; el alta desde Coordinación está cubierta y H-04 añade latencia y determinismo de métricas (34/34), pero sigue pendiente el caso de margen ya consumido (H-05). |
+| `T-SLA-11` | **✅** 45/45; alta desde Coordinación, caso 4 de 9 h consumidas con vencimiento inmediato (2.2.b, 2.2.c), exposición REST en bandeja y detalle de Coordinación (1.16, 1.17) y latencia/determinismo en PostgresTieredSlaMetricsPerformanceTest (34/34). |
 | `T-SLA-12` | **✅** frontend de Coordinación; `TieredSlaFrontendTest` 47/47. |
 | `T-SLA-13` | **⚠️** cita `OfflineStorageService.js`, inexistente; el real es `OfflineStorage.js`. |
 | `T-SLA-14` | **⚠️** checkbox cerrado, pero la declaración de «100 %» no es sostenible con los gaps anteriores. |
@@ -316,17 +324,18 @@ Mantener la suite en la categoría `new_engine` y repetirla tras cualquier cambi
 
 ---
 
-### H-05 · Coberturas parciales que no bloquean el núcleo, pero impiden el 100 %
+### H-05 · Coberturas parciales — RESUELTO
 
-**Severidad:** Media/baja.
+**Severidad original:** Media/baja.  
+**Estado:** **Resuelto el 2026-11-09.**
 
-| Cobertura | Situación |
+| Cobertura | Situación y Resolución |
 | :--- | :--- |
-| **EARS 02.2.1 / caso 4** | `TieredSlaContractsApiTest` 2.2 comprueba el recálculo a 480 min, pero no crea el aviso con 9 h de antigüedad ni verifica que quede inmediatamente vencido. |
-| **EARS 03.2** | El desempate por antigüedad y menor id de sede está implementado, pero no hay prueba con empate exacto de vencimiento. |
-| **EARS 05.1.1** | La UI de Coordinación está cubierta por frontend, pero el test de API no consulta la bandeja ni el detalle de Coordinación para verificar los campos SLA. |
-| **EARS 02.1.1 en Oportunista** | `OpportunisticIncidentServiceTest` 3.3–3.4 verifica el sellado de forma parcial (vencimiento no nulo), no el valor exacto del tier/objetivo en todos los casos. |
-| **Pausas** | `TieredSlaContractsApiTest` 41/41 no prueba pausa; las suites `PendingInfo*` y `IncidentPauseServiceSlaShiftTest` certifican el desplazamiento por segundos naturales exactos (H-02). |
+| **EARS 02.2.1 / caso 4** | **Resuelto:** `TieredSlaContractsApiTest` (aserciones 2.2.b y 2.2.c) crea un aviso con 9 h de antigüedad, lo reclasifica a CRÍTICA reduciendo el objetivo a 480 min y certifica que `sla_target_at < now` (vencimiento inmediato) y que el detalle de Coordinación refleja el vencimiento superado. |
+| **EARS 03.2** | **Resuelto:** `TieredSlaDomainTest` (aserciones 6.10 y 6.11) certifica el desempate determinista entre paradas críticas con idéntico `sla_due_at`: gana la más antigua (`created_at`), y ante idéntica antigüedad desempata por menor identificador de sede (`location->getId()`). |
+| **EARS 05.1.1** | **Resuelto:** `TieredSlaContractsApiTest` (aserciones 1.16 y 1.17) consulta `GET /api/coordinator/incidents` y `GET /api/coordinator/incidents/{id}/detail` y valida la exposición completa de `sla_tier_snapshot`, `sla_tier_label`, `sla_target_minutes`, `sla_target_hours`, `sla_target_at` y `is_cold_chain_risk`. |
+| **EARS 02.1.1 en Oportunista** | **Resuelto:** `OpportunisticIncidentService` expone los cuatro campos SLA en su DTO de salida; `OpportunisticIncidentServiceTest` (3.3 y 3.4) certifica los valores exactos (`CRITICAL_INFRASTRUCTURE_24_7`, 480 min, 8.0 h) en memoria y en base de datos; `OpportunisticIncidentApiIntegrationTest` (3.7.b) valida la respuesta REST del endpoint del técnico. |
+| **Pausas** | **Resuelto en H-02:** las suites `PendingInfo*` y `IncidentPauseServiceSlaShiftTest` certifican el desplazamiento por segundos naturales exactos (EARS 02.3.1, C6). |
 
 ---
 
@@ -365,26 +374,22 @@ Corregir las referencias de `tasks.md`, sustituir los comandos de aceptación po
 
 ## 10. Prioridades de resolución
 
-H-01, H-02, H-03 y H-04 se resolvieron el 2026-11-09. La lista de pendientes queda ordenada así:
+H-01, H-02, H-03, H-04 y H-05 se resolvieron el 2026-11-09. La lista de pendientes queda reducida a:
 
-1. **H-05 · Coberturas parciales (medio).** Completar el caso 4 de 9 h consumidas, el empate exacto de EARS 03.2, la consulta REST de bandeja/detalle de Coordinación y el valor exacto del sellado oportunista. **Cierre:** aserciones específicas en `TieredSlaContractsApiTest`, `TieredSlaDomainTest` y la suite oportunista.
-2. **H-06 · Trazabilidad documental (bajo).** Corregir los nombres de archivo citados en `tasks.md`, sustituir `vendor/bin/phpunit` por los comandos reales y alinear la declaración de cierre con el estado real. **Cierre:** `tasks.md` y la documentación de cierre sin referencias inexistentes ni afirmaciones de 100 % no sostenidas.
+1. **H-06 · Trazabilidad documental (bajo).** Corregir los nombres de archivo citados en `tasks.md`, sustituir `vendor/bin/phpunit` por los comandos reales y alinear la declaración de cierre con el estado real. **Cierre:** `tasks.md` y la documentación de cierre sin referencias inexistentes ni afirmaciones de 100 % no sostenidas.
 
 ---
 
 ## 11. Plan mínimo para cerrar la Spec 30
 
 1. **RNF-01:** cerrado con `PostgresTieredSlaMetricsPerformanceTest` 34/34 (latencia y doble ejecución determinista).
-2. **Cobertura:** completar caso 4 (9 h), empate de EARS 03.2, API de Coordinación y valor exacto del sellado oportunista.
-3. **Trazabilidad:** corregir nombres de archivos, comandos de aceptación y la declaración de cierre de `tasks.md`.
+2. **Cobertura (H-05):** cerrado con recálculo de 9 h consumidas (2.2.b, 2.2.c), empate EARS 03.2 (6.10, 6.11), REST de Coordinación (1.16, 1.17) y sellado exacto en Oportunista.
+3. **Trazabilidad (H-06):** corregir nombres de archivos, comandos de aceptación y la declaración de cierre de `tasks.md`.
 
 ---
 
 ## 12. Conclusión
 
-**La Spec 30 no está 100 % cumplida.** Está funcionalmente muy avanzada y toda la suite existente pasa, pero no puede certificarse como completa por:
+**La Spec 30 no está 100 % cumplida.** Está funcionalmente completa y toda la suite pasa en verde; únicamente resta alinear la trazabilidad documental de `tasks.md` (H-06).
 
-- coberturas parciales (H-05);
-- deriva documental (H-06).
-
-El canal de alta de Coordinación (H-01, API 1.11–1.15), el desplazamiento de pausas por segundos naturales (H-02), el backfill histórico (H-03) y la latencia y determinismo de métricas (H-04) ya están resueltos. La respuesta honesta sigue siendo: **«verde» sí; «100 % conforme» no**, por las coberturas y la trazabilidad restantes.
+El canal de alta de Coordinación (H-01, API 1.11–1.15), el desplazamiento de pausas por segundos naturales (H-02), el backfill histórico (H-03), la latencia y determinismo de métricas (H-04) y las coberturas parciales de H-05 ya están resueltos. La respuesta honesta sigue siendo: **«verde» sí; «100 % conforme» pendiente únicamente de la trazabilidad documental de H-06**.

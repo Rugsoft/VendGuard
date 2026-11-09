@@ -491,6 +491,56 @@ try {
     );
 
     // ─────────────────────────────────────────────────────────────────────
+    // 1.c Exposición REST en bandeja y detalle de Coordinación (EARS 05.1.1)
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 1.c Exposición REST en bandeja y detalle de Coordinación ---\n";
+
+    $boardResponse = $call('GET', '/api/coordinator/incidents', [], $coordinatorToken);
+    $boardData = $json($boardResponse)['data'] ?? [];
+    $coordInBoard = null;
+    foreach ($boardData as $bIncident) {
+        if ((int)($bIncident['id'] ?? 0) === $coordId) {
+            $coordInBoard = $bIncident;
+            break;
+        }
+    }
+    $assert(
+        '1.16 La bandeja de Coordinación expone el contrato de SLA sellado (EARS 05.1.1)',
+        $boardResponse->getStatusCode() === 200
+            && $coordInBoard !== null
+            && ($coordInBoard['sla_tier_snapshot'] ?? null) === 'PRIORITY_CORPORATE'
+            && ($coordInBoard['sla_tier_label'] ?? null) === 'Prioritario Corporativo'
+            && (int)($coordInBoard['sla_target_minutes'] ?? 0) === 480
+            && (float)($coordInBoard['sla_target_hours'] ?? 0) === 8.0
+            && is_string($coordInBoard['sla_target_at'] ?? null)
+            && ($coordInBoard['is_cold_chain_risk'] ?? null) === false,
+        json_encode([
+            'snapshot' => $coordInBoard['sla_tier_snapshot'] ?? null,
+            'target' => $coordInBoard['sla_target_minutes'] ?? null,
+            'risk' => $coordInBoard['is_cold_chain_risk'] ?? null,
+        ])
+    );
+
+    $detailResponse = $call('GET', '/api/coordinator/incidents/' . $coordId . '/detail', [], $coordinatorToken);
+    $detailData = $json($detailResponse)['data'] ?? [];
+    $detailIncident = $detailData['incident'] ?? [];
+    $assert(
+        '1.17 El detalle de Coordinación expone el contrato de SLA sellado (EARS 05.1.1)',
+        $detailResponse->getStatusCode() === 200
+            && ($detailIncident['sla_tier_snapshot'] ?? null) === 'PRIORITY_CORPORATE'
+            && ($detailIncident['sla_tier_label'] ?? null) === 'Prioritario Corporativo'
+            && (int)($detailIncident['sla_target_minutes'] ?? 0) === 480
+            && (float)($detailIncident['sla_target_hours'] ?? 0) === 8.0
+            && is_string($detailIncident['sla_target_at'] ?? null)
+            && ($detailIncident['is_cold_chain_risk'] ?? null) === false,
+        json_encode([
+            'snapshot' => $detailIncident['sla_tier_snapshot'] ?? null,
+            'target' => $detailIncident['sla_target_minutes'] ?? null,
+            'risk' => $detailIncident['is_cold_chain_risk'] ?? null,
+        ])
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
     // 2. Reclasificación en Coordinación y reapertura en garantía
     // ─────────────────────────────────────────────────────────────────────
     echo "\n--- 2. Reclasificación en Coordinación y reapertura en garantía ---\n";
@@ -515,6 +565,59 @@ try {
             'urgency' => $ticketOneAssigned['urgency'] ?? null,
             'target' => $ticketOneAssigned['sla_target_minutes'] ?? null,
         ])
+    );
+
+    // Caso 4 (EARS 02.2.1 / C4): aviso con 9 h de antigüedad reclasificado a CRITICAL
+    $consumedMachine = $createMachine($standardId, 'SLA11-STD-CONSUMED', 'COLD_DRINKS');
+    $nineHoursAgo = $now->modify('-9 hours');
+    $consumedTargetAt = $nineHoursAgo->modify('+1440 minutes');
+    $consumedIncidentId = $insertIncident([
+        'ticket_code' => 'INC-SLA11-CONSUMED',
+        'machine_id' => $consumedMachine,
+        'machine_type' => 'COLD_DRINKS',
+        'location_id' => $standardId,
+        'category' => 'PRODUCT_JAM',
+        'description' => 'Aviso abierto hace 9 horas para certificar recálculo con margen consumido.',
+        'urgency' => 'MEDIUM',
+        'status' => 'REGISTERED',
+        'sla_tier' => 'STANDARD',
+        'sla_target_minutes' => 1440,
+        'sla_target_at' => $iso($consumedTargetAt),
+        'created_at' => $iso($nineHoursAgo),
+    ]);
+
+    $reclassifyConsumed = $call('PATCH', '/api/coordinator/incidents/' . $consumedIncidentId . '/assign', [
+        'technician_id' => $routeTechId,
+        'urgency_override' => 'CRITICAL',
+        'urgency_override_reason' => 'Subida a CRÍTICA tras 9 horas consumidas; objetivo pasa a 480 min.',
+    ], $coordinatorToken);
+
+    $consumedAssigned = $fetchIncident($consumedIncidentId);
+    $consumedTargetTimestamp = strtotime((string)($consumedAssigned['sla_target_at'] ?? ''));
+    $nowTimestamp = $now->getTimestamp();
+
+    $assert(
+        '2.2.b Recálculo con 9 h consumidas reduce objetivo a 480 min y vence inmediatamente (EARS 02.2.1, C4)',
+        $reclassifyConsumed->getStatusCode() === 200
+            && (int)($consumedAssigned['sla_target_minutes'] ?? 0) === 480
+            && ($consumedAssigned['sla_tier_snapshot'] ?? '') === 'STANDARD'
+            && $consumedTargetTimestamp !== false
+            && $consumedTargetTimestamp < $nowTimestamp
+            && abs(($consumedTargetTimestamp - $nineHoursAgo->getTimestamp()) - (480 * 60)) <= 2,
+        'target_at=' . ($consumedAssigned['sla_target_at'] ?? 'null') . ' · now=' . $iso($now)
+    );
+
+    $consumedDetailResp = $call('GET', '/api/coordinator/incidents/' . $consumedIncidentId . '/detail', [], $coordinatorToken);
+    $consumedDetailIncident = $json($consumedDetailResp)['data']['incident'] ?? [];
+    $consumedDetailTargetAt = strtotime((string)($consumedDetailIncident['sla_target_at'] ?? ''));
+    $assert(
+        '2.2.c El detalle de Coordinación refleja el vencimiento superado tras el recálculo (EARS 02.2.1, EARS 05.1.1)',
+        $consumedDetailResp->getStatusCode() === 200
+            && (int)($consumedDetailIncident['sla_target_minutes'] ?? 0) === 480
+            && ($consumedDetailIncident['sla_tier_snapshot'] ?? '') === 'STANDARD'
+            && $consumedDetailTargetAt !== false
+            && $consumedDetailTargetAt < $nowTimestamp,
+        'target_at=' . ($consumedDetailIncident['sla_target_at'] ?? 'null') . ' · now=' . $iso($now)
     );
 
     $resolvedAt = $now->modify('-20 hours');
