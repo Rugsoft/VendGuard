@@ -2332,6 +2332,12 @@ export const CoordinatorDashboardView = {
                     <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 2px;">
                       {{ inc.floor_wing || 'Ubicación no especificada' }}
                     </div>
+                    <div v-if="inc.sla_tier_label" class="mt-1" data-testid="row-sla-tier" style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                      <span class="vg-chip">{{ inc.sla_tier_label }}</span>
+                      <span v-if="inc.sla_target_minutes" style="font-size: 11px; color: var(--color-ink-muted);">
+                        Objetivo {{ inc.sla_target_minutes / 60 }} h
+                      </span>
+                    </div>
                   </td>
 
                   <!-- 3. Máquina -->

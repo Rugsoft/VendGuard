@@ -52,7 +52,8 @@ export const AdminLocationsTab = {
         contact_phone: '',
         contact_email: '',
         latitude: '',
-        longitude: ''
+        longitude: '',
+        sla_tier: 'STANDARD'
       },
       createErrors: {},
       isSubmittingCreate: false,
@@ -70,6 +71,7 @@ export const AdminLocationsTab = {
         contact_email: '',
         latitude: '',
         longitude: '',
+        sla_tier: 'STANDARD',
         // '' = heredar del CP, 'none' = sin zona forzada, '<id>' = forzada a esa zona
         zone_selection: ''
       },
@@ -420,7 +422,8 @@ export const AdminLocationsTab = {
         contact_phone: '',
         contact_email: '',
         latitude: '',
-        longitude: ''
+        longitude: '',
+        sla_tier: 'STANDARD'
       };
       this.createErrors = {};
       this.createSuggestion = null;
@@ -479,7 +482,8 @@ export const AdminLocationsTab = {
           contact_phone: this.createForm.contact_phone ? this.createForm.contact_phone.trim().replace(/\s+/g, '') : null,
           contact_email: this.createForm.contact_email.trim().toLowerCase(),
           latitude: Number(this.createForm.latitude),
-          longitude: Number(this.createForm.longitude)
+          longitude: Number(this.createForm.longitude),
+          sla_tier: this.createForm.sla_tier
         };
 
         const res = await (api.admin ? api.admin.createLocation(payload) : api.post('/coordinator/locations', payload));
@@ -520,6 +524,7 @@ export const AdminLocationsTab = {
         contact_email: location.contact_email || '',
         latitude: location.latitude ?? '',
         longitude: location.longitude ?? '',
+        sla_tier: location.sla_tier || 'STANDARD',
         // La excepción manual se muestra como una selección explícita; la herencia
         // por CP es el estado por defecto (RF-03.2 / RF-03.3).
         zone_selection: location.is_manual_override
@@ -602,7 +607,8 @@ export const AdminLocationsTab = {
           contact_phone: this.editForm.contact_phone ? this.editForm.contact_phone.trim().replace(/\s+/g, '') : null,
           contact_email: this.editForm.contact_email.trim().toLowerCase(),
           latitude: Number(this.editForm.latitude),
-          longitude: Number(this.editForm.longitude)
+          longitude: Number(this.editForm.longitude),
+          sla_tier: this.editForm.sla_tier
         };
 
         await (api.admin ? api.admin.updateLocation(this.editForm.id, payload) : api.put(`/coordinator/locations/${this.editForm.id}`, payload));
@@ -929,6 +935,9 @@ export const AdminLocationsTab = {
                   <div v-if="loc.postal_code" class="small text-muted font-monospace" data-testid="location-postal-code">
                     📮 CP {{ loc.postal_code }}
                   </div>
+                  <div v-if="loc.sla_tier_label" class="mt-1" data-testid="location-sla-tier">
+                    <span class="vg-chip">{{ loc.sla_tier_label }}</span>
+                  </div>
                 </td>
 
                 <!-- Contacto -->
@@ -1098,6 +1107,23 @@ export const AdminLocationsTab = {
                     required
                   />
                   <div v-if="createErrors.address" class="invalid-feedback small">{{ createErrors.address }}</div>
+                </div>
+
+                <!-- Nivel de SLA (Módulo 30, RF-02.2): perfil contractual que se sella
+                     en cada aviso abierto desde esta sede. -->
+                <div class="mb-3">
+                  <label class="form-label small fw-bold" for="create-sla-tier">Nivel de SLA</label>
+                  <select
+                    id="create-sla-tier"
+                    class="form-select"
+                    v-model="createForm.sla_tier"
+                    data-testid="create-sla-tier"
+                  >
+                    <option value="STANDARD">Estándar · objetivo nominal 24 h</option>
+                    <option value="PRIORITY_CORPORATE">Prioritario Corporativo · objetivo nominal 12 h</option>
+                    <option value="CRITICAL_INFRASTRUCTURE_24_7">Infraestructura Crítica 24x7 · objetivo nominal 8 h</option>
+                  </select>
+                  <small class="text-muted form-text">El contrato se sella al abrir cada aviso: cambiarlo aquí no altera los tickets ya emitidos.</small>
                 </div>
 
                 <!-- Código postal (QA 7): llave de la herencia territorial de la sede.
@@ -1293,6 +1319,23 @@ export const AdminLocationsTab = {
                   />
                   <div v-if="editErrors.postal_code" class="invalid-feedback small">{{ editErrors.postal_code }}</div>
                   <small class="text-muted form-text">Si la sede tiene una zona forzada a mano, el CP no la recoloca.</small>
+                </div>
+
+                <!-- Nivel de SLA (Módulo 30, RF-02.2): cambiarlo no reescribe el
+                     contrato ya sellado en los avisos previos. -->
+                <div class="mb-3">
+                  <label class="form-label small fw-bold" for="edit-sla-tier">Nivel de SLA</label>
+                  <select
+                    id="edit-sla-tier"
+                    class="form-select"
+                    v-model="editForm.sla_tier"
+                    data-testid="edit-sla-tier"
+                  >
+                    <option value="STANDARD">Estándar · objetivo nominal 24 h</option>
+                    <option value="PRIORITY_CORPORATE">Prioritario Corporativo · objetivo nominal 12 h</option>
+                    <option value="CRITICAL_INFRASTRUCTURE_24_7">Infraestructura Crítica 24x7 · objetivo nominal 8 h</option>
+                  </select>
+                  <small class="text-muted form-text">Solo afecta a los avisos abiertos tras el cambio; los tickets existentes conservan su contrato sellado.</small>
                 </div>
 
                 <!-- Zona operativa: herencia o excepción manual (Módulo 17, RF-03.2) -->

@@ -79,6 +79,16 @@ export const AssignSuggestionPanel = {
         && Boolean(this.suggestions?.recommendation?.is_cold_chain_escalation);
     },
 
+    /** Escalado contractual 24/7 activo: sede crítica sin cobertura de zona en turno (D4, QA 2). */
+    isContractualEscalation() {
+      return Boolean(this.suggestions?.recommendation?.contractual_24_7_escalation_active);
+    },
+
+    /** Aviso contractual: solo con recomendación y bandera activa. */
+    hasContractualEscalationBanner() {
+      return this.isContractualEscalation && Boolean(this.suggestions?.recommendation);
+    },
+
     /** Banner de emergencia sanitaria (RF-05.1). */
     hasSanitarySuggestionBanner() {
       return this.isColdChainSuggestion && Boolean(this.suggestions?.recommendation);
@@ -130,8 +140,20 @@ export const AssignSuggestionPanel = {
 
       <!-- Banner de emergencia sanitaria (Art. II, RF-05.1) -->
       <div v-if="hasSanitarySuggestionBanner" class="mb-3" role="alert" data-testid="assign-sanitary-banner" style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); border-left: 3px solid var(--color-error); color: var(--color-error-text); padding: 12px 14px; border-radius: var(--radius-interactive); font-size: 13px;">
-        <div class="fw-bold">🚨 Prioridad Sanitaria Art. II: Atención requerida en &lt; 4 horas.</div>
+        <div class="fw-bold">🚨 Prioridad Sanitaria Art. II · +100 pts: Atención requerida en &lt; 4 horas.</div>
         <div>Se sugiere técnico de guardia.</div>
+        <div v-if="suggestions?.recommendation?.explanation" class="mt-1" style="font-size: 12px;">
+          {{ suggestions.recommendation.explanation }}
+        </div>
+      </div>
+
+      <!-- Escalado contractual 24/7 (D4, QA 2): aviso distinto del bono sanitario de cadena de frío. -->
+      <div v-if="hasContractualEscalationBanner" class="mb-3" role="alert" data-testid="assign-contractual-escalation-banner" style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-left: 3px solid var(--color-warning); color: var(--color-warning-text); padding: 12px 14px; border-radius: var(--radius-interactive); font-size: 13px;">
+        <div class="fw-bold">🛡️ Escalado contractual 24/7 · +60 pts</div>
+        <div v-if="suggestions?.recommendation?.on_call_available === false">
+          Sin guardia 24/7 disponible: se ordena por menor carga viva y menor distancia.
+        </div>
+        <div v-else>Sede de infraestructura crítica sin cobertura de zona en turno: se prioriza al técnico de guardia 24/7.</div>
         <div v-if="suggestions?.recommendation?.explanation" class="mt-1" style="font-size: 12px;">
           {{ suggestions.recommendation.explanation }}
         </div>
@@ -165,6 +187,9 @@ export const AssignSuggestionPanel = {
             <div class="vg-suggestion-badges" data-testid="assign-suggested-badges">
               <span v-for="badge in suggestedBadges" :key="badge" class="vg-chip">
                 {{ suggestionBadgeLabel(badge) }}
+              </span>
+              <span v-if="isContractualEscalation" class="vg-chip vg-chip-warning" data-testid="assign-contractual-escalation-badge">
+                🛡️ Escalado contractual 24/7 · +60 pts
               </span>
             </div>
           </div>

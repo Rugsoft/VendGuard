@@ -243,7 +243,7 @@ flowchart LR
 
 ## Fase 6: Frontend Vue 3, Modo Offline PWA y Guardas de Diseño (`docs/design.md`)
 
-- [ ] **T-SLA-12 · Actualizar componentes de Coordinación (`AdminLocationsTab.js`, `CoordinatorDashboardView.js`, `CoordinatorIncidentDetailModal.js`, `AssignSuggestionPanel.js`, `MetricBreakdownTable.js`, `CoordinatorMetricsView.js`)**
+- [x] **T-SLA-12 · Actualizar componentes de Coordinación (`AdminLocationsTab.js`, `CoordinatorDashboardView.js`, `CoordinatorIncidentDetailModal.js`, `AssignSuggestionPanel.js`, `MetricBreakdownTable.js`, `CoordinatorMetricsView.js`)**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-SLA-11`
   - **Archivos exactos a crear o modificar:**

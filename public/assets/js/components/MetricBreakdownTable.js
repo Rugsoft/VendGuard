@@ -99,7 +99,7 @@ export const MetricBreakdownTable = {
     getSlaBadge(status, hours, target) {
       if (status === 'BREACHED') {
         return {
-          label: 'Incumplido (> ' + target + 'h)',
+          label: 'Incumple',
           bg: '#fee2e2',
           color: '#b91c1c',
           border: '#fca5a5'
@@ -107,7 +107,7 @@ export const MetricBreakdownTable = {
       }
       if (status === 'COMPLIANT') {
         return {
-          label: 'Cumple (≤ ' + target + 'h)',
+          label: 'Cumple',
           bg: '#dcfce7',
           color: '#15803d',
           border: '#86efac'
@@ -197,7 +197,9 @@ export const MetricBreakdownTable = {
               </th>
               <th style="padding: 12px 16px; font-weight: 700;">MTTR Formateado</th>
               <th style="padding: 12px 16px; font-weight: 700;">MTTR (Horas)</th>
-              <th v-if="activeTab !== 'category' && activeTab !== 'technician'" style="padding: 12px 16px; font-weight: 700;">Objetivo SLA</th>
+              <th v-if="activeTab === 'location'" style="padding: 12px 16px; font-weight: 700;">Nivel SLA</th>
+              <th v-if="activeTab !== 'category' && activeTab !== 'technician'" style="padding: 12px 16px; font-weight: 700;">Objetivo Nominal</th>
+              <th v-if="activeTab === 'location'" style="padding: 12px 16px; font-weight: 700; text-align: center;">Brechas SLA</th>
               <th v-if="activeTab !== 'category' && activeTab !== 'technician'" style="padding: 12px 16px; font-weight: 700;">Estado SLA</th>
             </tr>
           </thead>
@@ -206,7 +208,7 @@ export const MetricBreakdownTable = {
           <tbody>
             
             <tr v-if="filteredItems.length === 0">
-              <td :colspan="activeTab === 'technician' ? 5 : (activeTab === 'category' ? 4 : 6)" style="padding: 32px; text-align: center; color: #6c7e9d;">
+              <td :colspan="activeTab === 'location' ? 8 : (activeTab === 'technician' ? 5 : (activeTab === 'category' ? 4 : 6))" style="padding: 32px; text-align: center; color: #6c7e9d;">
                 No se encontraron registros para el filtro seleccionado.
               </td>
             </tr>
@@ -237,8 +239,14 @@ export const MetricBreakdownTable = {
                 <td style="padding: 12px 16px; color: #434c5f;">
                   {{ item.mttr_hours !== null && item.mttr_hours !== undefined ? item.mttr_hours + 'h' : 'N/A' }}
                 </td>
+                <td style="padding: 12px 16px;">
+                  <span class="vg-chip" data-testid="breakdown-sla-tier">{{ item.sla_tier_label || item.sla_tier || 'Sin contrato' }}</span>
+                </td>
                 <td style="padding: 12px 16px; color: #6c7e9d;">
                   {{ item.sla_target_hours || 24.0 }}h
+                </td>
+                <td style="padding: 12px 16px; text-align: center; font-weight: 700;" :style="{ color: Number(item.sla_breaches || 0) > 0 ? 'var(--color-error-text)' : 'var(--color-ink-muted)' }" data-testid="breakdown-sla-breaches">
+                  {{ item.sla_breaches ?? 0 }}
                 </td>
                 <td style="padding: 12px 16px;">
                   <span
