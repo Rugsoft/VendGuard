@@ -95,6 +95,19 @@ export const LocationPortalView = {
     location() {
       return store.state.location;
     },
+    /** Nivel contractual de la sede autenticada (Módulo 30, RF-07.3). */
+    locationSlaLabel() {
+      const direct = this.location?.sla_tier_label;
+      if (typeof direct === 'string' && direct.trim() !== '') {
+        return direct;
+      }
+      const labels = {
+        STANDARD: 'Estándar',
+        PRIORITY_CORPORATE: 'Prioritario Corporativo',
+        CRITICAL_INFRASTRUCTURE_24_7: 'Infraestructura Crítica 24x7'
+      };
+      return labels[this.location?.sla_tier] || '';
+    },
     filteredMachines() {
       if (this.activeFilter === 'incident') {
         return this.machines.filter(m => m.active_incident !== null);
@@ -227,6 +240,31 @@ export const LocationPortalView = {
         this.isLoggingIn = false;
         store.setLoading(false);
       }
+    },
+
+    /** Plazo objetivo comprometido del aviso, en horas/minutos (RF-07.3). */
+    slaTargetLabel(minutes) {
+      const total = Number(minutes);
+      if (!Number.isFinite(total) || total <= 0) {
+        return '—';
+      }
+      const hours = Math.floor(total / 60);
+      const rest = total % 60;
+      return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+    },
+
+    /** Fecha de vencimiento legible para el Responsable de Sede. */
+    formatPortalDeadline(value) {
+      const date = new Date(String(value ?? ''));
+      if (Number.isNaN(date.getTime())) {
+        return '';
+      }
+      return date.toLocaleString('es-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
     },
 
     /**
@@ -525,6 +563,10 @@ export const LocationPortalView = {
             <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate, #2c333f); margin: 0;">
               📍 {{ location.address }} · Contacto: {{ location.contact_name || 'No especificado' }}
             </p>
+            <!-- Contrato de la propia sede (Módulo 30, RF-07.3): nunca datos de otras sedes. -->
+            <div v-if="locationSlaLabel" class="vg-sla-contract-row" data-testid="location-portal-sla-tier" style="margin-top: 6px;">
+              <span class="vg-sla-contract-badge">Contrato de sede: {{ locationSlaLabel }}</span>
+            </div>
           </div>
 
           <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
@@ -777,14 +819,26 @@ export const LocationPortalView = {
             class="vg-machine-grid"
             style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;"
           >
-            <MachineCard
-              v-for="m in filteredMachines"
-              :key="m.id"
-              :machine="m"
-              @report="onReport"
-              @open-comments="onOpenComments"
-              @reopen="onReopen"
-            />
+            <div v-for="m in filteredMachines" :key="m.id" class="vg-machine-card-wrap">
+              <!-- Plazo comprometido de cada aviso de la sede (Módulo 30, RF-07.3). -->
+              <div
+                v-if="m.active_incident"
+                class="vg-sla-contract-row vg-portal-incident-sla"
+                data-testid="location-portal-incident-sla"
+              >
+                <span class="vg-sla-contract-badge">{{ m.active_incident.sla_tier_label || locationSlaLabel || 'Contrato de sede' }}</span>
+                <span>Plazo objetivo: <strong>{{ slaTargetLabel(m.active_incident.sla_target_minutes) }}</strong></span>
+                <span v-if="m.active_incident.sla_target_at" class="vg-sla-contract-deadline">
+                  · Vence: {{ formatPortalDeadline(m.active_incident.sla_target_at) }}
+                </span>
+              </div>
+              <MachineCard
+                :machine="m"
+                @report="onReport"
+                @open-comments="onOpenComments"
+                @reopen="onReopen"
+              />
+            </div>
           </div>
         </div>
 

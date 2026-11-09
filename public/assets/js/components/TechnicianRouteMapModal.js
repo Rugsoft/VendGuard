@@ -30,6 +30,7 @@
 import { api } from '../api.js';
 import { Mercator, computeTileWindow, buildMapTiles, projectToWindow } from '../utils/Mercator.js';
 import { mapZoomPanState, MapZoomPanMethods, MAP_ZOOM_PAN_DEFAULTS } from '../utils/MapZoomPan.js';
+import { describeStopSlaContract } from '../utils/OfflineStorage.js';
 
 const STOP_COLORS = {
   inProgress: '#f8b60f',
@@ -309,6 +310,32 @@ export const TechnicianRouteMapModal = {
     progressLabel(stop) {
       return `${stop.completed_tasks || 0} de ${stop.total_tasks || 0} completadas`;
     },
+    /** Contrato SLA de la parada o tarea (Módulo 30, RF-07.4). */
+    stopSlaContract(stop) {
+      return describeStopSlaContract(stop);
+    },
+    taskSlaContract(task) {
+      return describeStopSlaContract(task);
+    },
+    /** Clase visual del motivo crítico: sanitario rojo, contractual ámbar. */
+    slaReasonClass(contract) {
+      return contract?.critical_reason === 'COLD_CHAIN'
+        ? 'vg-sla-reason-badge--cold'
+        : 'vg-sla-reason-badge--contractual';
+    },
+    /** Hora límite efectiva en formato corto de ruta móvil. */
+    formatSlaDeadline(value) {
+      const date = new Date(String(value ?? ''));
+      if (Number.isNaN(date.getTime())) {
+        return '';
+      }
+      return date.toLocaleString('es-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    },
     /**
      * Returns marker canvas coordinates (percent of the effective zoomed/panned canvas).
      */
@@ -502,6 +529,17 @@ export const TechnicianRouteMapModal = {
                   <strong>{{ stop.location.name }}</strong>
                   <small class="text-muted d-block">{{ stop.location.address }}</small>
                   <small class="d-block">{{ progressLabel(stop) }} · {{ stopStatusLabel(stop) }}</small>
+                  <small class="d-block route-stop-sla" data-testid="route-map-stop-sla">
+                    <span class="vg-sla-contract-badge">{{ stopSlaContract(stop).tier_label || 'Sin contrato' }}</span>
+                    <span v-if="stopSlaContract(stop).due_at"> · Vence {{ formatSlaDeadline(stopSlaContract(stop).due_at) }}</span>
+                    <span
+                      v-if="stopSlaContract(stop).critical_reason"
+                      class="vg-sla-reason-badge"
+                      :class="slaReasonClass(stopSlaContract(stop))"
+                    >
+                      {{ stopSlaContract(stop).critical_reason_label }}
+                    </span>
+                  </small>
                 </span>
                 <span class="route-stop-distance text-muted small" v-if="stop.distance_from_previous_km !== null && stop.distance_from_previous_km !== undefined">
                   {{ stop.distance_from_previous_km }} km
@@ -523,12 +561,33 @@ export const TechnicianRouteMapModal = {
                     </span>
                     <span class="ms-2">{{ progressLabel(selectedStop) }}</span>
                   </p>
+                  <p class="small mb-1" data-testid="route-map-selected-sla">
+                    <span class="vg-sla-contract-badge">{{ stopSlaContract(selectedStop).tier_label || 'Sin contrato' }}</span>
+                    <span v-if="stopSlaContract(selectedStop).due_at" class="ms-2">
+                      Vence: <strong>{{ formatSlaDeadline(stopSlaContract(selectedStop).due_at) }}</strong>
+                    </span>
+                    <span
+                      v-if="stopSlaContract(selectedStop).critical_reason"
+                      class="vg-sla-reason-badge ms-2"
+                      :class="slaReasonClass(stopSlaContract(selectedStop))"
+                    >
+                      {{ stopSlaContract(selectedStop).critical_reason_label }}
+                    </span>
+                  </p>
                 </div>
                 <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" aria-label="Cerrar ficha" @click="clearSelection"></button>
               </div>
               <ul class="small text-muted ps-3 mb-2">
                 <li v-for="task in selectedStop.tasks" :key="task.type + '-' + task.id">
                   {{ task.type === 'PREVENTIVE' ? 'Preventivo' : 'Avería' }} · {{ task.machine_code }} · {{ task.floor_location || selectedStop.location.name }}
+                  <span class="vg-sla-contract-badge" data-testid="route-map-task-sla">{{ taskSlaContract(task).tier_label || 'Sin contrato' }}</span>
+                  <span
+                    v-if="taskSlaContract(task).critical_reason"
+                    class="vg-sla-reason-badge"
+                    :class="slaReasonClass(taskSlaContract(task))"
+                  >
+                    {{ taskSlaContract(task).critical_reason_label }}
+                  </span>
                 </li>
               </ul>
               <button type="button" class="vg-btn vg-btn-primary w-100" @click="navigateToStop(selectedStop)">

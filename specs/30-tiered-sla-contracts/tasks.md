@@ -261,7 +261,7 @@ flowchart LR
     4. En `MetricBreakdownTable.js` y `CoordinatorMetricsView.js`: mostrar en el desglose por sede el **Nivel SLA**, el **Objetivo Nominal (`24h` / `12h` / `8h`)**, las **Brechas SLA (`sla_breaches`)** y el **Estado SLA (`Cumple` / `Incumple` / `Sin datos`)**.
   - **Hecho cuando:** `node --check public/assets/js/components/AdminLocationsTab.js && node --check public/assets/js/views/CoordinatorDashboardView.js && node --check public/assets/js/components/CoordinatorIncidentDetailModal.js && node --check public/assets/js/components/AssignSuggestionPanel.js && node --check public/assets/js/components/MetricBreakdownTable.js && node --check public/assets/js/views/CoordinatorMetricsView.js`
 
-- [ ] **T-SLA-13 · Actualizar Ruta Móvil del Técnico (`TechnicianRouteView.js`, `TechnicianRouteMapModal.js`), `OfflineStorageService.js`, `LocationPortalView.js`, `styles.css` y crear `TieredSlaFrontendTest.mjs`**
+- [x] **T-SLA-13 · Actualizar Ruta Móvil del Técnico (`TechnicianRouteView.js`, `TechnicianRouteMapModal.js`), `OfflineStorageService.js`, `LocationPortalView.js`, `styles.css` y crear `TieredSlaFrontendTest.mjs`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SLA-12`
   - **Archivos exactos a crear o modificar:**
