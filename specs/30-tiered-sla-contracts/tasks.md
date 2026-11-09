@@ -108,7 +108,7 @@ flowchart LR
     6. En `TechnicianWorkloadScorer`: añadir constante `BONUS_ON_CALL_CONTRACTUAL_24_7 = 60` y clave `contractual_24_7_on_call_bonus` en `score_breakdown`, subordinada a `on_call_cold_bonus` (`+100`) (`D4`, `QA 2`).
   - **Hecho cuando:** `php -l src/Core/Domain/ValueObject/SlaTier.php && php -l src/Core/Service/SlaTargetCalculator.php && php -l src/Core/Domain/Model/Location.php && php -l src/Core/Domain/Model/Incident.php && php -l src/Core/Domain/Model/RouteStop.php && php -l src/Core/Service/TechnicianWorkloadScorer.php`
 
-- [ ] **T-SLA-05 · Crear suite unitaria de dominio `TieredSlaDomainTest.php` (Matriz `RF-01`, Techo Art. II y Scorer `+60`)**
+- [x] **T-SLA-05 · Crear suite unitaria de dominio `TieredSlaDomainTest.php` (Matriz `RF-01`, Techo Art. II y Scorer `+60`)**
   - **Tiempo estimado:** 20 min
   - **Dependencias previas:** `T-SLA-04`
   - **Archivos exactos a crear o modificar:**
