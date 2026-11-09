@@ -6,6 +6,7 @@ namespace VendGuard\Core\Domain\Model;
 
 use InvalidArgumentException;
 use JsonSerializable;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
 
 /**
  * Immutable physical stop consolidating all assigned tasks at one location.
@@ -25,7 +26,12 @@ final readonly class RouteStop implements JsonSerializable
         private int $completedTasks,
         private array $tasks,
         private float $distanceFromPreviousKm,
-        private string $navigationUrl
+        private string $navigationUrl,
+        private ?SlaTier $slaTier = null,
+        private ?string $slaTierLabel = null,
+        private ?string $criticalReason = null,
+        private bool $isColdChainCritical = false,
+        private bool $isContractualCritical = false
     ) {
         if ($order < 1) {
             throw new InvalidArgumentException('El orden de la parada debe ser mayor que cero.');
@@ -59,6 +65,10 @@ final readonly class RouteStop implements JsonSerializable
 
         if (trim($navigationUrl) === '') {
             throw new InvalidArgumentException('La parada requiere una URL de navegación.');
+        }
+
+        if ($criticalReason !== null && !in_array($criticalReason, ['COLD_CHAIN', 'CONTRACTUAL_SLA'], true)) {
+            throw new InvalidArgumentException('El motivo crítico de la parada no pertenece al catálogo del Módulo 30.');
         }
     }
 
@@ -120,6 +130,31 @@ final readonly class RouteStop implements JsonSerializable
         return $this->navigationUrl;
     }
 
+    public function getSlaTier(): ?SlaTier
+    {
+        return $this->slaTier;
+    }
+
+    public function getSlaTierLabel(): ?string
+    {
+        return $this->slaTierLabel ?? $this->slaTier?->label();
+    }
+
+    public function getCriticalReason(): ?string
+    {
+        return $this->criticalReason;
+    }
+
+    public function isColdChainCritical(): bool
+    {
+        return $this->isColdChainCritical;
+    }
+
+    public function isContractualCritical(): bool
+    {
+        return $this->isContractualCritical;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -128,6 +163,11 @@ final readonly class RouteStop implements JsonSerializable
         return [
             'order' => $this->order,
             'location' => $this->location->toArray(),
+            'sla_tier' => $this->slaTier?->value,
+            'sla_tier_label' => $this->getSlaTierLabel(),
+            'critical_reason' => $this->criticalReason,
+            'is_cold_chain_critical' => $this->isColdChainCritical,
+            'is_contractual_critical' => $this->isContractualCritical,
             'status' => $this->status->value,
             'priority' => $this->priority->value,
             'is_critical' => $this->isCritical,

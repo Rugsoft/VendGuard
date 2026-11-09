@@ -88,7 +88,7 @@ flowchart LR
 
 ## Fase 2: Modelos de Dominio, Matriz de SLA y Calculador Determinista
 
-- [ ] **T-SLA-04 · Implementar `SlaTier`, `SlaTargetCalculator` y actualizar entidades `Location`, `Incident`, `RouteStop` y `TechnicianWorkloadScorer`**
+- [x] **T-SLA-04 · Implementar `SlaTier`, `SlaTargetCalculator` y actualizar entidades `Location`, `Incident`, `RouteStop` y `TechnicianWorkloadScorer`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SLA-03`
   - **Archivos exactos a crear o modificar:**

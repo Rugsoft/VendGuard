@@ -289,6 +289,7 @@ $expectedMartaBreakdown = [
     'active_workload_penalty' => -10,
     'inter_location_penalty' => 0,
     'cold_chain_on_call_bonus' => 100,
+    'contractual_24_7_on_call_bonus' => 0,
 ];
 $assert(
     '6.1 El caso de guardia del contrato puntúa 140 con su desglose exacto',
@@ -310,7 +311,7 @@ $assert(
 );
 
 $assert(
-    '6.3 El desglose declara siempre las seis claves del contrato',
+    '6.3 El desglose declara siempre las siete claves del contrato',
     array_keys(TechnicianWorkloadScorer::computeBreakdown($jordi)) === TechnicianWorkloadScorer::BREAKDOWN_KEYS,
     implode(', ', array_keys(TechnicianWorkloadScorer::computeBreakdown($jordi)))
 );

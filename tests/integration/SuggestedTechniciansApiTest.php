@@ -15,7 +15,7 @@ declare(strict_types=1);
  *   1. **RBAC y validación de la ruta (Art. V.4, RF-07.1):** sin token `401`,
  *      con token de técnico `403`, id no numérico `400` y expediente inexistente
  *      `404`. El identificador de ticket (`INC-...`) también resuelve.
- *   2. **Contrato §3.6:** los tres bloques, las seis claves del desglose, la
+ *   2. **Contrato §3.6:** los tres bloques, las siete claves del desglose, la
  *      identidad recomendación ↔ primer puesto, las insignias y las etiquetas de
  *      afinidad. Los técnicos inactivos no aparecen.
  *   3. **Algoritmo contra datos reales:** el titular saturado no está libre; el
@@ -476,7 +476,7 @@ try {
     );
 
     $assert(
-        '2.7 El desglose publica exactamente las seis claves del contrato',
+        '2.7 El desglose publica exactamente las siete claves del contrato',
         array_keys($ranked[0]['score_breakdown'] ?? []) === [
             'territorial_affinity',
             'onsite_presence',
@@ -484,6 +484,7 @@ try {
             'active_workload_penalty',
             'inter_location_penalty',
             'cold_chain_on_call_bonus',
+            'contractual_24_7_on_call_bonus',
         ],
         json_encode(array_keys($ranked[0]['score_breakdown'] ?? []))
     );
@@ -518,6 +519,7 @@ try {
                 'active_workload_penalty' => -10,
                 'inter_location_penalty' => -15,
                 'cold_chain_on_call_bonus' => 0,
+                'contractual_24_7_on_call_bonus' => 0,
             ]
             && ($primaryRow['active_workload']['active_tickets_count'] ?? null) === 2
             && in_array('TITULAR_ZONA', $primaryRow['badges'] ?? [], true)
