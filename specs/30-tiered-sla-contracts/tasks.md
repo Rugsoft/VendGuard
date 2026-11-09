@@ -40,6 +40,7 @@ flowchart LR
   - **Archivos exactos a crear o modificar:**
     - Crear `database/supabase_migrations/026_tiered_sla_contracts.sql`
     - Modificar `database/supabase_init.sql`
+    - Crear `tests/integration/PostgresTieredSlaBackfillTest.php`
   - **Requisitos cubiertos:** `RF-01.1`–`RF-01.3`, `RF-02.1`, `RF-03.1`, `RF-03.2`, `RNF-02`, `D1`, `D2`, `C1`, `C5`, `QA 1`, `constitution.md` Art. II y Art. III.3.
   - **Detalle de implementación:**
     1. Crear de forma idempotente el tipo enumerado nativo `sla_tier AS ENUM ('STANDARD', 'PRIORITY_CORPORATE', 'CRITICAL_INFRASTRUCTURE_24_7')`.
@@ -50,7 +51,7 @@ flowchart LR
        - Para expedientes abiertos/activos: sellar `sla_tier_snapshot = COALESCE(l.sla_tier, 'STANDARD')`, calcular `sla_target_minutes` aplicando la matriz `RF-01` y poblar `sla_target_at = i.created_at + make_interval(mins => sla_target_minutes) + make_interval(secs => COALESCE(i.total_pending_info_seconds, 0))`.
     5. Crear la función `trg_fn_incidents_protect_sla_tier_snapshot()` y el disparador `trg_incidents_protect_sla_tier_snapshot` (`BEFORE UPDATE ON incidents`) que rechaza con `ERRCODE = '23514'` (`IMMUTABLE_SLA_TIER_SNAPSHOT`) cualquier intento de modificar `sla_tier_snapshot` tras la creación del expediente (`Art. III.3`, `D2`).
     6. Reflejar exactamente las mismas definiciones en `database/supabase_init.sql`.
-  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php`
+  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php` y `php tests/integration/PostgresTieredSlaBackfillTest.php`
 
 - [x] **T-SLA-02 · Enriquecer semillas del parque en `database/supabase_seeds.sql` y `SeedRunner.php`**
   - **Tiempo estimado:** 15 min
@@ -231,13 +232,15 @@ flowchart LR
   - **Dependencias previas:** `T-SLA-10`
   - **Archivos exactos a crear o modificar:**
     - Crear `tests/integration/TieredSlaContractsApiTest.php`
+    - Crear `tests/integration/PostgresTieredSlaMetricsPerformanceTest.php`
   - **Requisitos cubiertos:** `RF-01` a `RF-07`, `RNF-01` a `RNF-04`, `D1`–`D6`, `C1`–`C6`, `QA 1`–`QA 4`, `constitution.md` Art. II, Art. III.3, Art. V.4 y Art. V.6.
   - **Detalle de implementación:**
     1. Probar CRUD de sedes (`POST`/`PUT`/`PATCH /api/coordinator/locations`): alta sin `sla_tier` toma `'STANDARD'`; valor inválido responde `422 INVALID_SLA_TIER`; cambio de contrato en sede existente no modifica `sla_tier_snapshot` ni `sla_target_minutes` de tickets previos (`C1`); edición de sede sin cambiar `sla_tier` no registra cambio de contrato espurio (`QA 4`).
     2. Probar apertura de tickets, cambio de prioridad en triaje (`PATCH /api/coordinator/incidents/{id}/assign` con `urgency_override`, `C4`) y absorción QR (`POST /api/qr/report` sobre máquina `COMBO` con ticket activo que revela `TEMPERATURE_COLD`, `QA 1`), verificando el recálculo de `sla_target_minutes` y `sla_target_at` desde `created_at`.
     3. Probar reapertura en garantía (`< 48 h`, `QA 3`, `Art. V.6`): verificar que el intervalo cerrado `reopened_at - resolved_at` se acumula en `total_pending_info_seconds` y desplaza `sla_target_at` sin reiniciar `created_at`.
     4. Probar sugerencias de asignación (`GET /api/coordinator/incidents/{id}/suggested-technicians`), ruta del técnico (`GET /api/technician/route/map`), paquete offline (`GET /api/technician/offline/bootstrap`), métricas (`GET /api/coordinator/metrics/summary`, `/breakdown` y `/export`) y segregación de visibilidad en Portal de Sede vs opacidad total en QR público (`Art. V.4`, `D5`, `QA 4`).
-  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/TieredSlaContractsApiTest.php`
+    5. Certificar RNF-01 en `PostgresTieredSlaMetricsPerformanceTest.php`: 20 muestras por endpoint tras calentamiento, mediana y p95 inferiores a 1,5 s, doble ejecución idéntica de `summary`, `breakdown` y `export`, y comparación del servicio con el mismo `DateTimeImmutable` de referencia.
+  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/TieredSlaContractsApiTest.php` y `source deploy/local/postgres/.env.local && php tests/integration/PostgresTieredSlaMetricsPerformanceTest.php`
 
 ---
 

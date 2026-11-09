@@ -40,17 +40,15 @@
 -- ----------------------------------------------------------------------------
 -- 1. Tipo enumerado nativo del perfil contractual
 -- ----------------------------------------------------------------------------
-DO $$
+DO $do$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'sla_tier') THEN
-        CREATE TYPE sla_tier AS ENUM (
-            'STANDARD',
-            'PRIORITY_CORPORATE',
-            'CRITICAL_INFRASTRUCTURE_24_7'
-        );
-    END IF;
-END
-$$;
+    CREATE TYPE sla_tier AS ENUM (
+        'STANDARD',
+        'PRIORITY_CORPORATE',
+        'CRITICAL_INFRASTRUCTURE_24_7'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
 
 -- ----------------------------------------------------------------------------
 -- 2. Perfil vigente de la sede (RF-01, C5)
