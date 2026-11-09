@@ -141,7 +141,7 @@ flowchart LR
        - En `reopenWithLifecycleNotifications()`: antes de limpiar `resolved_at`, calcular el intervalo cerrado $\Delta t_{\text{closed}} = \max(0, \text{reopened\_at} - \text{resolved\_at})$, sumarlo a `total_pending_info_seconds` y desplazar `sla_target_at` en $+\Delta t_{\text{closed}}$ segundos sin reiniciar `created_at` (`QA 3`, `Art. V.6`).
   - **Hecho cuando:** `php -l src/Infrastructure/Repository/PdoLocationRepository.php && php -l src/Infrastructure/Repository/PdoIncidentRepository.php`
 
-- [ ] **T-SLA-07 · Actualizar `PdoMetricsRepository` (evaluación ticket a ticket vs `sla_target_minutes`) y `PdoOfflineSyncMutationRepository`**
+- [x] **T-SLA-07 · Actualizar `PdoMetricsRepository` (evaluación ticket a ticket vs `sla_target_minutes`) y `PdoOfflineSyncMutationRepository`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SLA-06`
   - **Archivos exactos a crear o modificar:**

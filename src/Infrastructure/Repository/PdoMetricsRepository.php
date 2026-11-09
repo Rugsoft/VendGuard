@@ -235,19 +235,24 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
      */
     public function countCriticalSlaBreaches(MetricFilter $filter): int
     {
+        // QA 3 / RF-06: el umbral se decide ticket a ticket. El techo sanitario
+        // prevalece para perecederos y para mixtas con fallo térmico o urgencia
+        // crítica; el resto se mide contra los minutos sellados en el expediente,
+        // nunca contra el perfil actual de la sede (C5, Art. III.3).
         $sql = "SELECT COUNT(*) FROM incidents i
                 INNER JOIN machines m ON i.machine_id = m.id
                 WHERE i.resolved_at IS NOT NULL
                   AND i.status IN ('RESOLVED', 'CLOSED')
                   AND i.resolved_at >= :from_date
                   AND i.resolved_at <= :to_date
-                  AND (
-                    (m.machine_type = 'PERISHABLE_FOOD'
-                     AND GREATEST(0, {$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')} - i.total_pending_info_seconds) > 240 * 60)
-                    OR
-                    (m.machine_type != 'PERISHABLE_FOOD'
-                     AND GREATEST(0, {$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')} - i.total_pending_info_seconds) > 1440 * 60)
-                  )";
+                  AND GREATEST(0, {$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')} - COALESCE(i.total_pending_info_seconds, 0)) >
+                      CASE
+                        WHEN m.machine_type = 'PERISHABLE_FOOD'
+                          OR (m.machine_type = 'COMBO'
+                              AND (i.category = 'TEMPERATURE_COLD' OR i.urgency = 'CRITICAL'))
+                        THEN 240 * 60
+                        ELSE i.sla_target_minutes * 60
+                      END";
 
         try {
             $stmt = $this->pdo->prepare($sql);
@@ -270,17 +275,31 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     l.id AS location_id,
                     l.site_code,
                     l.name AS location_name,
+                    l.sla_tier,
                     l.is_active,
                     COUNT(i.id) AS tickets_resolved,
                     ROUND(AVG({$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')})) AS avg_gross_seconds,
-                    ROUND(AVG(i.total_pending_info_seconds)) AS avg_pause_seconds
+                    ROUND(AVG(i.total_pending_info_seconds)) AS avg_pause_seconds,
+                    SUM(CASE
+                        WHEN i.id IS NOT NULL
+                         AND GREATEST(0, {$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')} - COALESCE(i.total_pending_info_seconds, 0)) >
+                             CASE
+                               WHEN m.machine_type = 'PERISHABLE_FOOD'
+                                 OR (m.machine_type = 'COMBO'
+                                     AND (i.category = 'TEMPERATURE_COLD' OR i.urgency = 'CRITICAL'))
+                               THEN 240 * 60
+                               ELSE i.sla_target_minutes * 60
+                             END
+                        THEN 1 ELSE 0
+                    END) AS sla_breaches
                 FROM locations l
                 LEFT JOIN incidents i ON i.location_id = l.id
                     AND i.resolved_at IS NOT NULL
                     AND i.status IN ('RESOLVED', 'CLOSED')
                     AND i.resolved_at >= :from_date
                     AND i.resolved_at <= :to_date
-                GROUP BY l.id, l.site_code, l.name, l.is_active
+                LEFT JOIN machines m ON m.id = i.machine_id
+                GROUP BY l.id, l.site_code, l.name, l.sla_tier, l.is_active
                 ORDER BY tickets_resolved DESC, l.name ASC";
 
         try {
@@ -302,10 +321,12 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     'location_id' => (int)$row['location_id'],
                     'site_code' => (string)$row['site_code'],
                     'location_name' => (string)$row['location_name'],
+                    'sla_tier' => (string)$row['sla_tier'],
                     'is_active' => (bool)$row['is_active'],
                     'tickets_resolved' => $count,
                     'mttr_gross_seconds' => $grossSeconds,
                     'mttr_pending_info_seconds' => $pauseSeconds,
+                    'sla_breaches' => (int)($row['sla_breaches'] ?? 0),
                     'sla_target_hours' => KpiSummary::SLA_GENERAL_HOURS,
                 ];
             }
