@@ -15,6 +15,7 @@ use VendGuard\Core\Domain\Repository\LocationContactEmailRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationZoneRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\PostalCode;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
@@ -87,6 +88,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 postal_code,
                 zone_id,
                 is_manual_override,
+                sla_tier,
                 is_active, 
                 created_at, 
                 updated_at, 
@@ -140,6 +142,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 postal_code,
                 zone_id,
                 is_manual_override,
+                sla_tier,
                 is_active, 
                 created_at, 
                 updated_at, 
@@ -217,6 +220,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 postal_code,
                 zone_id,
                 is_manual_override,
+                sla_tier,
                 is_active, 
                 created_at, 
                 updated_at, 
@@ -263,6 +267,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 postal_code,
                 zone_id,
                 is_manual_override,
+                sla_tier,
                 is_active, 
                 created_at, 
                 updated_at, 
@@ -303,6 +308,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 l.postal_code,
                 l.zone_id,
                 l.is_manual_override,
+                l.sla_tier,
                 l.access_code_issued_at,
                 (l.access_code_hash IS NOT NULL) AS has_access_code,
                 l.is_active, 
@@ -370,6 +376,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
             'postal_code' => $row['postal_code'] !== null ? (string)$row['postal_code'] : null,
             'zone_id' => $row['zone_id'] !== null ? (int)$row['zone_id'] : null,
             'is_manual_override' => (bool)$row['is_manual_override'],
+            'sla_tier' => (string)$row['sla_tier'],
             'has_access_code' => (bool)$row['has_access_code'],
             'access_code_issued_at' => $row['access_code_issued_at'] !== null ? (string)$row['access_code_issued_at'] : null,
             'is_active' => (bool)$row['is_active'],
@@ -402,6 +409,9 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
             $postalCode = (new PostalCode((string)$data['postal_code']))->value();
         }
         $zoneId = $postalCode !== null ? $this->findInheritedZoneByPostalCode($postalCode) : null;
+        $slaTier = array_key_exists('sla_tier', $data) && trim((string)($data['sla_tier'] ?? '')) !== ''
+            ? SlaTier::fromString((string)$data['sla_tier'])
+            : SlaTier::STANDARD;
 
         // La clave canónica acompaña al código desde el alta (A-2, EARS-08.5): donde el motor la
         // exige como columna `NOT NULL` con índice único, una fila sin clave no sería un duplicado
@@ -428,6 +438,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 contact_email,
                 postal_code,
                 zone_id,
+                sla_tier,
                 has_physical_reception,
                 is_active,
                 created_at,
@@ -444,6 +455,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 :contact_email,
                 :postal_code,
                 :zone_id,
+                :sla_tier,
                 :has_physical_reception,
                 :is_active,
                 CURRENT_TIMESTAMP,
@@ -490,6 +502,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
         } else {
             $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
         }
+        $stmt->bindValue(':sla_tier', $slaTier->value, PDO::PARAM_STR);
         $stmt->bindValue(':has_physical_reception', array_key_exists('has_physical_reception', $data)
             ? (bool)$data['has_physical_reception']
             : true, PDO::PARAM_BOOL);
@@ -549,6 +562,11 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
             }
             $fields[] = "contact_email = :contact_email";
             $params[':contact_email'] = $contactEmail;
+        }
+
+        if (array_key_exists('sla_tier', $data)) {
+            $fields[] = 'sla_tier = :sla_tier';
+            $params[':sla_tier'] = SlaTier::fromString((string)$data['sla_tier'])->value;
         }
 
         if (array_key_exists('postal_code', $data)) {

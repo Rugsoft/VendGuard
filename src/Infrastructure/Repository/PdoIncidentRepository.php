@@ -43,6 +43,7 @@ use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\ResolutionTaxonomyHistoryParser;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\OpportunisticLocationEligibilityPolicy;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\UniqueViolationDetector;
@@ -176,6 +177,22 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $this->pdo->exec('SAVEPOINT ' . $savepoint);
         }
 
+        // El objetivo sellado se ancla a la apertura efectiva. Si el llamador ya trae un
+        // vencimiento (por ejemplo, el alta oportunista), se conserva tal cual; en caso
+        // contrario se calcula desde created_at/cycle_started_at más los descuentos ya
+        // acumulados, sin depender del CURRENT_TIMESTAMP del motor.
+        $slaTargetAt = $incident->getSlaTargetAt();
+        if ($slaTargetAt === null) {
+            $effectiveCreatedAt = $incident->getCreatedAt()
+                ?? $incident->getCycleStartedAt()
+                ?? date('Y-m-d H:i:sP');
+            $slaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt(
+                new DateTimeImmutable($effectiveCreatedAt),
+                $incident->getSlaTargetMinutes(),
+                $incident->getTotalPendingInfoSeconds()
+            )->format('Y-m-d\TH:i:sP');
+        }
+
         try {
             if ($this->dialect->isPostgres()) {
                 $sql = "
@@ -219,6 +236,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             cancellation_reason,
                             cancelled_at,
                             sla_target_at,
+                            sla_tier_snapshot,
+                            sla_target_minutes,
                             opportunistic_mode,
                             opportunistic_origin_reason,
                             opportunistic_informant_name,
@@ -258,6 +277,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             :cancellation_reason,
                             :cancelled_at,
                             :sla_target_at,
+                            :sla_tier_snapshot,
+                            :sla_target_minutes,
                             :opportunistic_mode,
                             :opportunistic_origin_reason,
                             :opportunistic_informant_name,
@@ -315,10 +336,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $stmt->bindValue(':description', $incident->getDescription(), PDO::PARAM_STR);
                 $stmt->bindValue(':retained_money_amount', $incident->getRetainedMoneyAmount(), $incident->getRetainedMoneyAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':photo_path', $incident->getPhotoPath(), $incident->getPhotoPath() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
-                // Vencimiento contractual (Módulo 16, RF-04.2): el alta oportunista lo calcula
-                // en el dominio y viaja con el expediente; los demás canales siguen insertando
-                // `NULL` sin cambiar su comportamiento.
-                $stmt->bindValue(':sla_target_at', $incident->getSlaTargetAt(), $incident->getSlaTargetAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                // Vencimiento contractual (Módulo 30): el perfil y el objetivo quedan
+                // sellados en el alta; si el llamador no trae vencimiento, se ancla al
+                // created_at efectivo más el descuento ya acumulado.
+                $stmt->bindValue(':sla_target_at', $slaTargetAt, PDO::PARAM_STR);
+                $stmt->bindValue(':sla_tier_snapshot', $incident->getSlaTierSnapshot()->value, PDO::PARAM_STR);
+                $stmt->bindValue(':sla_target_minutes', $incident->getSlaTargetMinutes(), PDO::PARAM_INT);
                 $stmt->bindValue(':urgency', $incident->getUrgency()->value, PDO::PARAM_STR);
                 $stmt->bindValue(':status', $incident->getStatus()->value, PDO::PARAM_STR);
                 $stmt->bindValue(':assigned_at', $incident->getAssignedAt(), $incident->getAssignedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
@@ -350,7 +373,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     if ($isOwnTransaction) {
                         $this->pdo->commit();
                     }
-                    return $incident->withId((int)$row['created_id']);
+                    return $incident
+                        ->withRecalculatedSlaTarget($incident->getSlaTargetMinutes(), new DateTimeImmutable($slaTargetAt))
+                        ->withId((int)$row['created_id']);
                 }
 
                 if ($isOwnTransaction && $this->pdo->inTransaction()) {
@@ -433,6 +458,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     cancellation_reason,
                     cancelled_at,
                     sla_target_at,
+                    sla_tier_snapshot,
+                    sla_target_minutes,
                     opportunistic_mode,
                     opportunistic_origin_reason,
                     opportunistic_informant_name,
@@ -471,6 +498,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     :cancellation_reason,
                     :cancelled_at,
                     :sla_target_at,
+                    :sla_tier_snapshot,
+                    :sla_target_minutes,
                     :opportunistic_mode,
                     :opportunistic_origin_reason,
                     :opportunistic_informant_name,
@@ -548,7 +577,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             }
 
             // Evitar round-trip redundante de relectura completa tras inserción (T-HYBRID-27)
-            return $incident->withId($newId);
+            return $incident
+                ->withRecalculatedSlaTarget($incident->getSlaTargetMinutes(), new DateTimeImmutable($slaTargetAt))
+                ->withId($newId);
         } catch (PDOException $e) {
             if ($savepoint !== null) {
                 // Deshacer sólo lo intentado por esta alta y devolver la transacción del
@@ -2388,6 +2419,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 m.machine_type AS machine_type,
                 l.name AS location_name,
                 l.site_code AS location_site_code,
+                l.sla_tier AS board_location_sla_tier,
                 m.id AS board_machine_id,
                 m.location_id AS board_machine_location_id,
                 m.floor_wing AS board_machine_floor_wing,
@@ -2529,6 +2561,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             'id' => $row['board_location_id'],
             'site_code' => $row['location_site_code'],
             'name' => $row['location_name'],
+            'sla_tier' => $row['board_location_sla_tier'] ?? null,
             'address' => $row['board_location_address'],
             'latitude' => $row['board_location_latitude'],
             'longitude' => $row['board_location_longitude'],
@@ -2632,7 +2665,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     [':machine_id' => (int)$incident['machine_id']]
                 ),
                 'location' => $this->fetchSingleRow(
-                    "SELECT id, site_code, name, address, has_physical_reception, latitude, longitude\r\n                     FROM locations WHERE id = :location_id LIMIT 1",
+                    "SELECT id, site_code, name, address, has_physical_reception, latitude, longitude, sla_tier\r\n                     FROM locations WHERE id = :location_id LIMIT 1",
                     [':location_id' => (int)$incident['location_id']]
                 ),
                 'technician' => $technicianId === null ? null : $this->fetchSingleRow(
@@ -2770,6 +2803,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 paused_at = :paused_at,
                 total_pending_info_seconds = :total_pending_info_seconds,
                 sla_target_at = :sla_target_at,
+                sla_target_minutes = :sla_target_minutes,
                 root_cause_id = :root_cause_id,
                 standard_solution_id = :standard_solution_id,
                 root_cause_code_snapshot = :root_cause_code_snapshot,
@@ -2821,6 +2855,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         $stmt->bindValue(':paused_at', $incident->getPausedAt(), $incident->getPausedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
         $stmt->bindValue(':total_pending_info_seconds', $incident->getTotalPendingInfoSeconds(), PDO::PARAM_INT);
         $stmt->bindValue(':sla_target_at', $incident->getSlaTargetAt(), $incident->getSlaTargetAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':sla_target_minutes', $incident->getSlaTargetMinutes(), PDO::PARAM_INT);
         $this->bindResolutionTaxonomy($stmt, $incident);
 
         return $stmt->execute();
@@ -3607,12 +3642,44 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 }
             }
 
+            $recalculatedSlaTargetMinutes = null;
+            $recalculatedSlaTargetAt = null;
+            if ($urgencyChanged) {
+                $machineTypeValue = $incident->getMachineType();
+                if ($machineTypeValue === null || $machineTypeValue === '') {
+                    throw new DomainException('No se pudo resolver la tipología de la máquina para recalcular el SLA.');
+                }
+
+                $recalculatedSlaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+                    $incident->getSlaTierSnapshot(),
+                    MachineType::fromString($machineTypeValue),
+                    $incident->getCategory(),
+                    UrgencyLevel::fromString($finalUrgency)
+                );
+                $createdAt = $incident->getCreatedAt();
+                if ($createdAt === null) {
+                    throw new DomainException('No se pudo recalcular el SLA de una incidencia sin fecha de apertura.');
+                }
+                $recalculatedSlaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt(
+                    new DateTimeImmutable($createdAt),
+                    $recalculatedSlaTargetMinutes,
+                    $incident->getTotalPendingInfoSeconds()
+                )->format('Y-m-d\TH:i:sP');
+            }
+
             // 3. Actualizar incidencia: técnico asociado y urgencia final. En la asignación
             //    inicial se fija además el estado ASSIGNED y la fecha oficial; en la
             //    reasignación se preservan estado y fecha para no reescribir hitos auditados.
             $setClause = $isReassignment
                 ? "assigned_technician_id = :technician_id,\n                    urgency = :urgency"
                 : "status = 'ASSIGNED',\n                    assigned_technician_id = :technician_id,\n                    assigned_at = CURRENT_TIMESTAMP,\n                    urgency = :urgency";
+            $slaRecalculationSet = $recalculatedSlaTargetMinutes !== null
+                ? ",\n                    sla_target_minutes = :sla_target_minutes,\n                    sla_target_at = :sla_target_at"
+                : '';
+            $setClause .= $slaRecalculationSet;
+            $slaTargetNote = $recalculatedSlaTargetMinutes !== null
+                ? " Objetivo SLA recalculado a {$recalculatedSlaTargetMinutes} min (vence {$recalculatedSlaTargetAt})."
+                : '';
 
             // ── Cadena de custodia (Módulo 26) ─────────────────────────────────────
             // El cierre del tramo saliente y la apertura del entrante viajan en esta
@@ -3660,12 +3727,14 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     if ($urgencyChanged) {
                         $actionNote .= " Reclasificación de urgencia de {$incident->getUrgency()->value} a {$finalUrgency}.";
                     }
+                    $actionNote .= $slaTargetNote;
                     $actionNote .= ' Motivo: ' . $cleanReassignmentReason;
                 } else {
                     $actionNote = "Incidencia asignada al técnico ID {$technicianId}.";
                     if ($urgencyChanged) {
                         $actionNote .= " Urgencia reclasificada de {$incident->getUrgency()->value} a {$finalUrgency}. Motivo: " . trim((string)$urgencyReason);
                     }
+                    $actionNote .= $slaTargetNote;
                 }
 
                 $sql = "
@@ -3727,6 +3796,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $stmt = $this->pdo->prepare($sql);
                 $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
                 $stmt->bindValue(':urgency', $finalUrgency, PDO::PARAM_STR);
+                if ($recalculatedSlaTargetMinutes !== null) {
+                    $stmt->bindValue(':sla_target_minutes', $recalculatedSlaTargetMinutes, PDO::PARAM_INT);
+                    $stmt->bindValue(':sla_target_at', $recalculatedSlaTargetAt, PDO::PARAM_STR);
+                }
                 $stmt->bindValue(':id', $numericId, PDO::PARAM_INT);
                 $stmt->bindValue(':user_id', $coordinatorId, $coordinatorId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
                 $stmt->bindValue(':from_status', $incident->getStatus()->value, PDO::PARAM_STR);
@@ -3819,7 +3892,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     pendingInfoReasonText: $incident->getPendingInfoReasonText(),
                     pausedAt: $incident->getPausedAt(),
                     totalPendingInfoSeconds: $incident->getTotalPendingInfoSeconds(),
-                    slaTargetAt: $incident->getSlaTargetAt()
+                    slaTargetAt: $recalculatedSlaTargetAt ?? $incident->getSlaTargetAt(),
+                    slaTierSnapshot: $incident->getSlaTierSnapshot(),
+                    slaTargetMinutes: $recalculatedSlaTargetMinutes ?? $incident->getSlaTargetMinutes()
                 );
             }
 
@@ -3833,6 +3908,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $stmt = $this->pdo->prepare($sql);
             $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
             $stmt->bindValue(':urgency', $finalUrgency, PDO::PARAM_STR);
+            if ($recalculatedSlaTargetMinutes !== null) {
+                $stmt->bindValue(':sla_target_minutes', $recalculatedSlaTargetMinutes, PDO::PARAM_INT);
+                $stmt->bindValue(':sla_target_at', $recalculatedSlaTargetAt, PDO::PARAM_STR);
+            }
             $stmt->bindValue(':id', $numericId, PDO::PARAM_INT);
             $stmt->execute();
 
@@ -3847,12 +3926,14 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 if ($urgencyChanged) {
                     $actionNote .= " Reclasificación de urgencia de {$incident->getUrgency()->value} a {$finalUrgency}.";
                 }
+                $actionNote .= $slaTargetNote;
                 $actionNote .= ' Motivo: ' . $cleanReassignmentReason;
             } else {
                 $actionNote = "Incidencia asignada al técnico ID {$technicianId}.";
                 if ($urgencyChanged) {
                     $actionNote .= " Urgencia reclasificada de {$incident->getUrgency()->value} a {$finalUrgency}. Motivo: " . trim((string)$urgencyReason);
                 }
+                $actionNote .= $slaTargetNote;
             }
             $this->insertHistory(
                 $numericId,
@@ -3928,7 +4009,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     pendingInfoReasonText: $incident->getPendingInfoReasonText(),
                     pausedAt: $incident->getPausedAt(),
                     totalPendingInfoSeconds: $incident->getTotalPendingInfoSeconds(),
-                    slaTargetAt: $incident->getSlaTargetAt()
+                    slaTargetAt: $recalculatedSlaTargetAt ?? $incident->getSlaTargetAt(),
+                    slaTierSnapshot: $incident->getSlaTierSnapshot(),
+                    slaTargetMinutes: $recalculatedSlaTargetMinutes ?? $incident->getSlaTargetMinutes()
                 );
             }
 
@@ -4056,15 +4139,40 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 null,
                 'Sellado defensivo del tramo heredado al reabrir la avería desde el portal de sede.'
             );
+            $reopenedAt = new DateTimeImmutable('now');
+            $resolvedAt = $incident->getResolvedAt();
+            $closedSeconds = 0;
+            if ($resolvedAt !== null) {
+                $resolvedTimestamp = strtotime($resolvedAt);
+                if ($resolvedTimestamp !== false) {
+                    $closedSeconds = max(0, $reopenedAt->getTimestamp() - $resolvedTimestamp);
+                }
+            }
+            $newTotalPendingInfoSeconds = $incident->getTotalPendingInfoSeconds() + $closedSeconds;
+            $newSlaTargetAt = $incident->getSlaTargetAt();
+            if ($newSlaTargetAt !== null) {
+                $newSlaTargetAt = (new DateTimeImmutable($newSlaTargetAt))
+                    ->modify("+{$closedSeconds} seconds")
+                    ->format('Y-m-d\TH:i:sP');
+            } elseif ($incident->getCreatedAt() !== null) {
+                $newSlaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt(
+                    new DateTimeImmutable($incident->getCreatedAt()),
+                    $incident->getSlaTargetMinutes(),
+                    $newTotalPendingInfoSeconds
+                )->format('Y-m-d\TH:i:sP');
+            }
+
             // 4. Actualizar registro: status = REOPENED, desasignar técnico, reiniciar reloj 48h (resolved_at = NULL)
             $sql = "
                 UPDATE incidents
                 SET status = 'REOPENED',
                     assigned_technician_id = NULL,
                     assigned_at = NULL,
-                    reopened_at = CURRENT_TIMESTAMP,
+                    reopened_at = :reopened_at,
                     reopen_reason = :reopen_reason,
                     resolved_at = NULL,
+                    total_pending_info_seconds = :total_pending_info_seconds,
+                    sla_target_at = :sla_target_at,
                     cycle_started_at = CURRENT_TIMESTAMP,
                     cold_alert_sent_at = NULL,
                     sla_2h_alert_sent_at = NULL,
@@ -4076,6 +4184,13 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $stmt = $this->pdo->prepare($sql);
             $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
             $stmt->bindValue(':reopen_reason', trim($reasonText), PDO::PARAM_STR);
+            $stmt->bindValue(':reopened_at', $reopenedAt->format('Y-m-d H:i:sP'), PDO::PARAM_STR);
+            $stmt->bindValue(':total_pending_info_seconds', $newTotalPendingInfoSeconds, PDO::PARAM_INT);
+            $stmt->bindValue(
+                ':sla_target_at',
+                $newSlaTargetAt,
+                $newSlaTargetAt !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+            );
             $stmt->execute();
 
             // 5. Insertar evento en incident_history

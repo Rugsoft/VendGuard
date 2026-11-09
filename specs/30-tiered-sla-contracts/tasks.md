@@ -124,7 +124,7 @@ flowchart LR
 
 ## Fase 3: Capa de Infraestructura y Repositorios PDO
 
-- [ ] **T-SLA-06 · Actualizar `PdoLocationRepository` y `PdoIncidentRepository` (persistencia de snapshot, recálculo en triaje `C4` y descuento de intervalo cerrado en reapertura `< 48h` `QA 3`)**
+- [x] **T-SLA-06 · Actualizar `PdoLocationRepository` y `PdoIncidentRepository` (persistencia de snapshot, recálculo en triaje `C4` y descuento de intervalo cerrado en reapertura `< 48h` `QA 3`)**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-SLA-05`
   - **Archivos exactos a crear o modificar:**
