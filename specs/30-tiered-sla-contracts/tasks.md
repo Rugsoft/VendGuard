@@ -208,7 +208,7 @@ flowchart LR
 
 ## Fase 5: Capa de Presentación REST, Segregación de Privacidad y Suite de Integración API
 
-- [ ] **T-SLA-10 · Actualizar Controladores REST (`CoordinatorAdminController`, `CoordinatorController`, `TechnicianRouteMapController`, `LocationPortalController`) y blindar `QrScanController`**
+- [x] **T-SLA-10 · Actualizar Controladores REST (`CoordinatorAdminController`, `CoordinatorController`, `TechnicianRouteMapController`, `LocationPortalController`) y blindar `QrScanController`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SLA-09`
   - **Archivos exactos a crear o modificar:**

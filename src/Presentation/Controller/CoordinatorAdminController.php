@@ -621,6 +621,13 @@ class CoordinatorAdminController
             // contrato (400/422), no como un 500 de validación de dominio.
             return $this->errorResponse($e->getHttpStatusCode(), $e->getErrorCode(), $e->getMessage(), $e->getDetails());
         } catch (InvalidArgumentException $e) {
+            if (str_starts_with($e->getMessage(), 'INVALID_SLA_TIER:')) {
+                return $this->errorResponse(
+                    422,
+                    'INVALID_SLA_TIER',
+                    'El nivel de SLA indicado no es válido. Valores permitidos: Estándar (STANDARD), Prioritario Corporativo (PRIORITY_CORPORATE) o Infraestructura Crítica 24x7 (CRITICAL_INFRASTRUCTURE_24_7).'
+                );
+            }
             if (str_contains($e->getMessage(), 'La sede original de la máquina está dada de baja')) {
                 return $this->errorResponse(422, 'MACHINE_REACTIVATION_REQUIRES_NEW_LOCATION', $e->getMessage());
             }

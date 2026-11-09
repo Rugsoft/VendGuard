@@ -11,6 +11,7 @@ use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\MachineBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
@@ -71,6 +72,9 @@ class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRe
                 i.status AS inc_status,
                 i.category AS inc_category,
                 i.urgency AS inc_urgency,
+                i.sla_tier_snapshot AS inc_sla_tier_snapshot,
+                i.sla_target_minutes AS inc_sla_target_minutes,
+                i.sla_target_at AS inc_sla_target_at,
                 i.created_at AS inc_created_at,
                 i.resolved_at AS inc_resolved_at,
                 i.pending_info_reason_category AS inc_pending_info_reason_category,
@@ -130,6 +134,9 @@ class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRe
                 i.status AS inc_status,
                 i.category AS inc_category,
                 i.urgency AS inc_urgency,
+                i.sla_tier_snapshot AS inc_sla_tier_snapshot,
+                i.sla_target_minutes AS inc_sla_target_minutes,
+                i.sla_target_at AS inc_sla_target_at,
                 i.created_at AS inc_created_at,
                 i.resolved_at AS inc_resolved_at,
                 i.pending_info_reason_category AS inc_pending_info_reason_category,
@@ -193,6 +200,9 @@ class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRe
                 i.status AS inc_status,
                 i.category AS inc_category,
                 i.urgency AS inc_urgency,
+                i.sla_tier_snapshot AS inc_sla_tier_snapshot,
+                i.sla_target_minutes AS inc_sla_target_minutes,
+                i.sla_target_at AS inc_sla_target_at,
                 i.created_at AS inc_created_at,
                 i.resolved_at AS inc_resolved_at,
                 i.pending_info_reason_category AS inc_pending_info_reason_category,
@@ -282,6 +292,9 @@ class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRe
                 i.status AS inc_status,
                 i.category AS inc_category,
                 i.urgency AS inc_urgency,
+                i.sla_tier_snapshot AS inc_sla_tier_snapshot,
+                i.sla_target_minutes AS inc_sla_target_minutes,
+                i.sla_target_at AS inc_sla_target_at,
                 i.created_at AS inc_created_at,
                 i.resolved_at AS inc_resolved_at,
                 i.pending_info_reason_category AS inc_pending_info_reason_category,
@@ -853,12 +866,19 @@ class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRe
             ? IncidentPauseReasonCategory::tryFrom($categoryValue)
             : null;
 
+        $slaTier = SlaTier::tryFrom((string)($row['inc_sla_tier_snapshot'] ?? '')) ?? SlaTier::STANDARD;
+
         return [
             'id'                                 => (int)$row['inc_id'],
             'ticket_code'                        => (string)$row['inc_ticket_code'],
             'status'                             => $status,
             'category'                           => (string)$row['inc_category'],
             'urgency'                            => (string)$row['inc_urgency'],
+            'sla_tier'                           => $slaTier->value,
+            'sla_tier_snapshot'                  => $slaTier->value,
+            'sla_tier_label'                     => $slaTier->label(),
+            'sla_target_minutes'                 => (int)($row['inc_sla_target_minutes'] ?? 1440),
+            'sla_target_at'                      => $row['inc_sla_target_at'] !== null ? (string)$row['inc_sla_target_at'] : null,
             'created_at'                         => (string)$row['inc_created_at'],
             'resolved_at'                        => $row['inc_resolved_at'] !== null ? (string)$row['inc_resolved_at'] : null,
             'is_in_warranty'                     => $isInWarranty,

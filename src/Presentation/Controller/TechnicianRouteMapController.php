@@ -19,6 +19,7 @@ use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveOrderRepositoryInterface;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
@@ -191,6 +192,14 @@ final class TechnicianRouteMapController
      */
     private function formatIncidentTask(Incident $incident, Machine $machine, Location $location): array
     {
+        $slaDueAt = $this->incidentSlaDeadline($incident);
+        $isColdChainCritical = SlaTargetCalculator::isColdChainRisk(
+            $machine->getMachineType(),
+            $incident->getCategory(),
+            $incident->getUrgency()
+        );
+        $isContractualCritical = $this->isContractualCritical($slaDueAt, $incident->getPausedAt());
+
         return [
             'type' => 'CORRECTIVE',
             'id' => $incident->getId(),
@@ -200,27 +209,130 @@ final class TechnicianRouteMapController
             'floor_location' => $machine->getFloorWing(),
             'status' => $incident->getStatus()->value,
             'urgency' => $incident->getUrgency()->value,
-            'sla_due_at' => $this->incidentSlaDeadline($incident),
-            'is_critical' => $incident->getUrgency()->isCritical()
-                && $machine->getMachineType()->isPerishable(),
+            'sla_tier' => $incident->getSlaTierSnapshot()->value,
+            'sla_tier_snapshot' => $incident->getSlaTierSnapshot()->value,
+            'sla_tier_label' => $incident->getSlaTierLabel(),
+            'sla_target_minutes' => $incident->getSlaTargetMinutes(),
+            'sla_target_at' => $incident->getSlaTargetAt(),
+            'sla_due_at' => $slaDueAt,
+            'critical_reason' => $isColdChainCritical
+                ? 'COLD_CHAIN'
+                : ($isContractualCritical ? 'CONTRACTUAL_SLA' : null),
+            'is_cold_chain_critical' => $isColdChainCritical,
+            'is_contractual_critical' => $isContractualCritical,
+            'is_critical' => $isColdChainCritical || $isContractualCritical,
             'location' => $location,
         ];
     }
 
     private function incidentSlaDeadline(Incident $incident): ?string
     {
+        $sealedTargetAt = $incident->getSlaTargetAt();
+        if ($sealedTargetAt !== null && trim($sealedTargetAt) !== '') {
+            try {
+                return (new DateTimeImmutable($sealedTargetAt))->format(DATE_ATOM);
+            } catch (\Throwable) {
+                // Una huella corrupta no debe tumbar la ruta: se recalcula desde el objetivo sellado.
+            }
+        }
+
         $createdAt = $incident->getCreatedAt();
         if ($createdAt === null || trim($createdAt) === '') {
             return null;
         }
 
         try {
-            return (new DateTimeImmutable($createdAt))->modify(
-                '+' . $incident->getUrgency()->slaResponseMinutes() . ' minutes'
-            )->format(DATE_ATOM);
+            $targetSeconds = ($incident->getSlaTargetMinutes() * 60)
+                + max(0, $incident->getTotalPendingInfoSeconds());
+
+            return (new DateTimeImmutable($createdAt))
+                ->modify('+' . $targetSeconds . ' seconds')
+                ->format(DATE_ATOM);
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Frontera inclusiva de 240 min: un aviso vencido también es urgente (D3, QA 1).
+     * Si hay una pausa viva, la referencia se congela en `paused_at` (C2).
+     */
+    private function isContractualCritical(?string $slaDueAt, ?string $pausedAt = null): bool
+    {
+        if ($slaDueAt === null || trim($slaDueAt) === '') {
+            return false;
+        }
+
+        try {
+            $due = new DateTimeImmutable($slaDueAt);
+            $reference = $pausedAt !== null && trim($pausedAt) !== ''
+                ? (new DateTimeImmutable($pausedAt))->getTimestamp()
+                : time();
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return ($due->getTimestamp() - $reference) <= (240 * 60);
+    }
+
+    /**
+     * Vencimiento correctivo más próximo de la parada (C3).
+     *
+     * @param array<array<string, mixed>> $tasks
+     */
+    private function earliestSlaDueAt(array $tasks): ?string
+    {
+        $earliest = null;
+        $earliestTimestamp = null;
+
+        foreach ($tasks as $task) {
+            $raw = $task['sla_due_at'] ?? null;
+            if (!is_string($raw) || trim($raw) === '') {
+                continue;
+            }
+
+            try {
+                $due = new DateTimeImmutable($raw);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            $timestamp = $due->getTimestamp();
+            if ($earliestTimestamp === null || $timestamp < $earliestTimestamp) {
+                $earliestTimestamp = $timestamp;
+                $earliest = $raw;
+            }
+        }
+
+        return $earliest;
+    }
+
+    /**
+     * Objetivo de la correctiva más restrictiva que gobierna la parada (C3).
+     *
+     * @param array<array<string, mixed>> $tasks
+     */
+    private function governingSlaTargetMinutes(array $tasks): ?int
+    {
+        $targetMinutes = null;
+
+        foreach ($tasks as $task) {
+            if (strtoupper(trim((string)($task['type'] ?? 'CORRECTIVE'))) === 'PREVENTIVE') {
+                continue;
+            }
+
+            $value = $task['sla_target_minutes'] ?? null;
+            if (!is_numeric($value)) {
+                continue;
+            }
+
+            $minutes = max(0, (int)$value);
+            if ($targetMinutes === null || $minutes < $targetMinutes) {
+                $targetMinutes = $minutes;
+            }
+        }
+
+        return $targetMinutes;
     }
 
     /**
@@ -237,8 +349,16 @@ final class TechnicianRouteMapController
             'floor_location' => $machine->getFloorWing(),
             'status' => $order->getStatus() === 'IN_INSPECTION' ? 'IN_PROGRESS' : $order->getStatus(),
             'urgency' => 'MEDIUM',
-            'is_critical' => false,
+            'sla_tier' => null,
+            'sla_tier_snapshot' => null,
+            'sla_tier_label' => null,
+            'sla_target_minutes' => null,
+            'sla_target_at' => null,
             'sla_due_at' => null,
+            'critical_reason' => null,
+            'is_cold_chain_critical' => false,
+            'is_contractual_critical' => false,
+            'is_critical' => false,
             'location' => $location,
         ];
     }
@@ -254,7 +374,9 @@ final class TechnicianRouteMapController
         $locationFields = ['id', 'site_code', 'name', 'address', 'latitude', 'longitude'];
         $taskFields = [
             'type', 'id', 'machine_id', 'machine_code', 'machine_type', 'floor_location',
-            'status', 'urgency', 'is_critical', 'sla_due_at',
+            'status', 'urgency', 'is_critical', 'sla_tier', 'sla_tier_snapshot', 'sla_tier_label',
+            'sla_target_minutes', 'sla_target_at', 'sla_due_at', 'critical_reason',
+            'is_cold_chain_critical', 'is_contractual_critical',
         ];
 
         foreach ($route['stops'] as &$stop) {
@@ -263,6 +385,8 @@ final class TechnicianRouteMapController
                 static fn(array $task): array => array_intersect_key($task, array_flip($taskFields)),
                 $stop['tasks']
             );
+            $stop['sla_due_at'] = $this->earliestSlaDueAt($stop['tasks']);
+            $stop['sla_target_minutes'] = $this->governingSlaTargetMinutes($stop['tasks']);
         }
         unset($stop);
 

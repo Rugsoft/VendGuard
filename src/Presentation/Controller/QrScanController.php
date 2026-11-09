@@ -182,7 +182,7 @@ class QrScanController
 
         try {
             $data = $this->qrScanService->resolve($machineCode, $cleanSiteCode);
-            return Response::json($data, 200);
+            return Response::json($this->sanitizePublicQrPayload($data), 200);
         } catch (MachineNotFoundException $e) {
             return Response::error(
                 $e->getErrorCode(),
@@ -397,12 +397,44 @@ class QrScanController
 
         $statusCode = ($result['merged'] ?? false) ? 200 : 201;
 
-        return Response::json($result, $statusCode);
+        return Response::json($this->sanitizePublicQrPayload($result), $statusCode);
     }
 
     // ─────────────────────────────────────────────────────────────────────
     // Internals: captura de reintegro
     // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Opacidad pública del Módulo 30 (EARS 07.4, Art. V.4): el canal QR no
+     * publica el contrato ni el objetivo SLA, aunque un servicio añada el campo
+     * en el futuro. El filtro es recursivo para cubrir bloques anidados.
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function sanitizePublicQrPayload(array $payload): array
+    {
+        foreach ($payload as $key => $value) {
+            if (is_string($key) && (
+                preg_match('/^sla_/i', $key) === 1
+                || in_array($key, [
+                    'critical_reason',
+                    'is_cold_chain_critical',
+                    'is_contractual_critical',
+                    'is_cold_chain_risk',
+                ], true)
+            )) {
+                unset($payload[$key]);
+                continue;
+            }
+
+            if (is_array($value)) {
+                $payload[$key] = $this->sanitizePublicQrPayload($value);
+            }
+        }
+
+        return $payload;
+    }
 
     /**
      * Whether the citizen asked for their money back in this submission.

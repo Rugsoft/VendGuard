@@ -26,6 +26,7 @@ use VendGuard\Core\Domain\Exception\InvalidResolutionException;
 use VendGuard\Core\Domain\Exception\ServiceSheetPersistenceException;
 use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\SparePartRequestStatus;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentAssignmentAuditRepositoryInterface;
@@ -41,6 +42,7 @@ use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\ColdChainOverridePolicy;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\ResolutionTaxonomyValidator;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
@@ -473,6 +475,7 @@ class CoordinatorController
                 'sla_minutes_elapsed' => $minutesWaiting,
                 'waiting_minutes' => $minutesWaiting,
                 'sla_breached' => $slaBreached,
+                'is_cold_chain_risk' => $this->isColdChainRisk($incident),
                 // Reloj contractual congelado de la bandeja (RF-03.2, RF-04.2): la fila
                 // sabe si el SLA está pausado, cuántos minutos lleva descontados y si la
                 // espera de sede ya supera las 72 horas hábiles que encienden la alerta
@@ -499,6 +502,22 @@ class CoordinatorController
         }
 
         return Response::json($formattedIncidents, 200);
+    }
+
+    /**
+     * Riesgo sanitario del aviso según la matriz RF-01, derivado de la máquina
+     * histórica y no del perfil actual de la sede (Módulo 30, Art. II).
+     */
+    private function isColdChainRisk(Incident $incident): bool
+    {
+        $machineType = MachineType::tryFrom(strtoupper(trim((string)$incident->getMachineType())));
+
+        return $machineType !== null
+            && SlaTargetCalculator::isColdChainRisk(
+                $machineType,
+                $incident->getCategory(),
+                $incident->getUrgency()
+            );
     }
 
     /**

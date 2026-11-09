@@ -258,7 +258,7 @@ $incident = new Incident(
     urgency: UrgencyLevel::HIGH,
     status: IncidentStatus::ASSIGNED,
     assignedTechnicianId: 7,
-    createdAt: '2026-09-29 10:00:00',
+    createdAt: (new DateTimeImmutable('now'))->modify('-30 minutes')->format('Y-m-d H:i:s'),
     machineCode: 'VEND-MAP-01',
     machineType: 'HOT_DRINKS',
     locationName: 'Sede Ruta'
