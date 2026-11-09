@@ -301,13 +301,17 @@ $liveBase = null;
 $liveProcess = null;
 $liveBasePorts = [8000, 8099];
 
-$liveGet = static function (string $path, string $base): array {
+$liveGet = static function (string $path, string $base, array $headers = []): array {
     $ch = curl_init($base . $path);
-    curl_setopt_array($ch, [
+    $opts = [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 6,
         CURLOPT_HEADER => true,
-    ]);
+    ];
+    if ($headers !== []) {
+        $opts[CURLOPT_HTTPHEADER] = $headers;
+    }
+    curl_setopt_array($ch, $opts);
     $raw = (string)curl_exec($ch);
     $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $type = (string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
@@ -344,7 +348,7 @@ if ($liveBase === null) {
 $assert('A.1 El servidor de desarrollo responde en HTTP (no se asume: se comprueba el socket)', $liveBase !== null, 'ningún puerto de sonda quedó a la escucha');
 
 if ($liveBase !== null) {
-    $root = $liveGet('/', $liveBase);
+    $root = $liveGet('/', $liveBase, ['Accept: application/json']);
     $assert(
         'A.2 El servidor vivo se identifica como la API de VendGuard (200 y envoltura JSON propia)',
         $root['status'] === 200 && str_contains($root['body'], 'VendGuard API') && str_contains(strtolower($root['type']), 'json'),
@@ -421,6 +425,8 @@ $assert(
 // BLOQUE B — Funcionales: ramas sin cobertura previa
 // ─────────────────────────────────────────────────────────────────────────────────
 echo "\n{$cyan}--- Bloque B: funcionales (ramas no cubiertas por la batería) ---{$reset}\n";
+
+$api('POST', '/api/technician/shift/start', [], $techToken);
 
 // B.1 RF-02.1 enmendado (E-1) — El técnico ya inició otra parada: la respuesta de la sede
 //             NO transiciona nada; devuelve la avería a ASIGNADA la reanudación MANUAL
