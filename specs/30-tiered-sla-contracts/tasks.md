@@ -27,8 +27,10 @@ flowchart LR
 | **Fase 3** | `T-SLA-06` .. `T-SLA-07` | Repositorios PDO (`PdoLocationRepository`, `PdoIncidentRepository` con recálculo en triaje `C4` y descuento de intervalo cerrado en reapertura `< 48h` `QA 3`, `PdoMetricsRepository` y `PdoOfflineSyncMutationRepository`) | ~55 min |
 | **Fase 4** | `T-SLA-08` .. `T-SLA-09` | Servicios de Aplicación (`AdminLocationService` con auditoría idempotente `QA 4`, `QrReportService` con absorción `QA 1`, `IncidentPauseService`, `RouteOptimizationService` `<= 4,0h` con prelación sanitaria `Art. II.2`, `TechnicianAssignmentSuggester` `D4`/`QA 2`, `MetricsCalculationService` y `MetricsExportService`) + Suite Unitaria/Integración | ~60 min |
 | **Fase 5** | `T-SLA-10` .. `T-SLA-11` | Controladores REST (`CoordinatorAdminController`, `CoordinatorController`, `TechnicianRouteMapController`, `LocationPortalController`, blindaje `QrScanController`) y Suite de Integración HTTP + RBAC + Opacidad `Art. V.4` | ~50 min |
-| **Fase 6** | `T-SLA-12` .. `T-SLA-13` | Frontend Vue 3 (`AdminLocationsTab.js`, `AssignSuggestionPanel.js`, `MetricBreakdownTable.js`, `CoordinatorDashboardView.js`, `CoordinatorIncidentDetailModal.js`, `TechnicianRouteView.js`, `LocationPortalView.js`, `OfflineStorageService.js`, `styles.css`) + Test Frontend `.mjs` | ~55 min |
+| **Fase 6** | `T-SLA-12` .. `T-SLA-13` | Frontend Vue 3 (`AdminLocationsTab.js`, `AssignSuggestionPanel.js`, `MetricBreakdownTable.js`, `CoordinatorDashboardView.js`, `CoordinatorIncidentDetailModal.js`, `TechnicianRouteView.js`, `LocationPortalView.js`, `OfflineStorage.js`, `styles.css`) + Test Frontend `.mjs` | ~55 min |
 | **Fase 7** | `T-SLA-14` | Verificación Integral (`php tests/run_all.php`), sincronización `DocMetricsGuard`, matriz de trazabilidad (`traceability-matrix.md`) y cierre en `docs/features_pendientes.md` | ~25 min |
+
+> **Nota de trazabilidad de requisitos:** Las etiquetas `RF-06` (analítica de cumplimiento por sede) y `RF-07` (visibilidad por actor y soporte offline) corresponden a las subdivisiones canónicas de `RF-05` en `spec.md` (`RF-05.2` y `RF-05.1`); asimismo, `RNF-04` corresponde a la etiqueta de plan para la coherencia responsive y sistema de diseño (`RNF-03` en `spec.md`), tal como normaliza la matriz de trazabilidad §5.
 
 ---
 
@@ -51,7 +53,7 @@ flowchart LR
        - Para expedientes abiertos/activos: sellar `sla_tier_snapshot = COALESCE(l.sla_tier, 'STANDARD')`, calcular `sla_target_minutes` aplicando la matriz `RF-01` y poblar `sla_target_at = i.created_at + make_interval(mins => sla_target_minutes) + make_interval(secs => COALESCE(i.total_pending_info_seconds, 0))`.
     5. Crear la función `trg_fn_incidents_protect_sla_tier_snapshot()` y el disparador `trg_incidents_protect_sla_tier_snapshot` (`BEFORE UPDATE ON incidents`) que rechaza con `ERRCODE = '23514'` (`IMMUTABLE_SLA_TIER_SNAPSHOT`) cualquier intento de modificar `sla_tier_snapshot` tras la creación del expediente (`Art. III.3`, `D2`).
     6. Reflejar exactamente las mismas definiciones en `database/supabase_init.sql`.
-  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php` y `php tests/integration/PostgresTieredSlaBackfillTest.php`
+  - **Hecho cuando:** `php tests/integration/SchemaConvergenceParityTest.php && php tests/integration/PostgresTieredSlaBackfillTest.php`
 
 - [x] **T-SLA-02 · Enriquecer semillas del parque en `database/supabase_seeds.sql` y `SeedRunner.php`**
   - **Tiempo estimado:** 15 min
@@ -59,11 +61,11 @@ flowchart LR
   - **Archivos exactos a crear o modificar:**
     - Modificar `database/supabase_seeds.sql`
     - Modificar `src/Infrastructure/Database/SeedRunner.php`
-  - **Requisitos cubiertos:** `RF-01` a `RF-06`, `D1`, `D2`, `constitution.md` Art. I.3.
+  - **Requisitos cubiertos:** `RF-01` a `RF-05` (incluido `RF-05.2`), `D1`, `D2`, `constitution.md` Art. I.3.
   - **Detalle de implementación:**
     1. Asignar en `database/supabase_seeds.sql` y `SeedRunner.php` perfiles diferenciados realistas a las sedes semilla: `'CRITICAL_INFRASTRUCTURE_24_7'` para la sede hospitalaria/24x7, `'PRIORITY_CORPORATE'` para la sede corporativa de oficinas y `'STANDARD'` para el resto de ubicaciones.
     2. Sellar `sla_tier_snapshot`, `sla_target_minutes` y `sla_target_at` coherentes en las incidencias semilla manteniendo idempotencia en ejecuciones repetidas.
-  - **Hecho cuando:** `php database/run_seeds.php && vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php`
+  - **Hecho cuando:** `php database/run_seeds.php && php tests/integration/SchemaConvergenceParityTest.php`
 
 - [x] **T-SLA-03 · Actualizar contratos de esquema (`25 ENUMs`), utilidades de test y crear `PostgresTieredSlaSchemaTest.php`**
   - **Tiempo estimado:** 20 min
@@ -83,7 +85,7 @@ flowchart LR
        - Existencia del tipo `sla_tier` con sus 3 valores, columnas con sus defaults (`'STANDARD'` y `1440`) e índices.
        - Rechazo por `chk_incidents_sla_target_minutes` de valores fuera de `(240, 360, 480, 720, 1440)`.
        - Bloqueo por `trg_incidents_protect_sla_tier_snapshot` al intentar ejecutar `UPDATE incidents SET sla_tier_snapshot = 'CRITICAL_INFRASTRUCTURE_24_7'`, permitiendo en cambio actualizar `sla_target_minutes` y `sla_target_at` dentro de los valores válidos (`C4`).
-  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php tests/integration/PostgresSchemaTest.php tests/integration/SchemaCorrespondenceTest.php tests/integration/PostgresTieredSlaSchemaTest.php`
+  - **Hecho cuando:** `php tests/integration/SchemaConvergenceParityTest.php && php tests/integration/PostgresSchemaTest.php && php tests/integration/OpportunisticSchemaCorrespondenceTest.php && php tests/integration/PostgresTieredSlaSchemaTest.php`
 
 ---
 
@@ -119,7 +121,7 @@ flowchart LR
     1. Probar las 12 combinaciones de `SlaTier × UrgencyLevel` en máquinas sin riesgo alimentario (`480`/`720`/`1440`/`1440` en `STANDARD`; `360`/`480`/`720`/`720` en `PRIORITY_CORPORATE`; `240`/`240`/`480`/`480` en `CRITICAL_INFRASTRUCTURE_24_7`).
     2. Probar el techo sanitario innegociable de `240` min (`Art. II`, `QA 1`): cualquier categoría o prioridad (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) en máquina `PERISHABLE_FOOD` recibe `240` min; una máquina `COMBO` con `TEMPERATURE_COLD` o con prioridad `CRITICAL` recibe `240` min (`isColdChainRisk = true`), mientras que una `COMBO` con `PRODUCT_JAM` y prioridad `MEDIUM` en sede `STANDARD` recibe `1440` min (`isColdChainRisk = false`).
     3. Probar `computeEffectiveTargetAt()` con y sin segundos descontables acumulados, y probar `TechnicianWorkloadScorer` con `contractual_24_7_on_call_bonus = 60` frente a `on_call_cold_bonus = 100`.
-  - **Hecho cuando:** `vendor/bin/phpunit tests/unit/TieredSlaDomainTest.php`
+  - **Hecho cuando:** `php tests/unit/TieredSlaDomainTest.php`
 
 ---
 
@@ -135,7 +137,7 @@ flowchart LR
   - **Detalle de implementación:**
     1. En `PdoLocationRepository`: incluir `sla_tier` en `SELECT`, `INSERT` y `UPDATE` de `locations`.
     2. En `PdoIncidentRepository`:
-       - En `create()`: persistir `sla_tier_snapshot`, `sla_target_minutes` y `sla_target_at` (calculando `sla_target_at` a partir del `created_at` efectivo si aún no venía fijado).
+       - En `create()`: persistir `sla_tier_snapshot`, `sla_target_minutes` y `sla_target_at` provistos por los servicios de aplicación / agregados de apertura (sin inventar vencimientos si vienen nulos, respetando la arquitectura del reloj).
        - En `update()`: persistir `sla_target_minutes` y `sla_target_at` sin alterar jamás `sla_tier_snapshot`.
        - En `findRouteBoard()` y `findEnrichedDetailById()`: incluir `l.sla_tier AS board_location_sla_tier` / `l.sla_tier` en las lecturas de sede.
        - En `assign()`: cuando `urgencyOverride` cambie efectivamente la prioridad (`$urgencyChanged === true`), recalcular `sla_target_minutes` con `SlaTargetCalculator::calculateTargetMinutes($incident->getSlaTierSnapshot(), $machineType, $incident->getCategory(), $newUrgency)` y actualizar `sla_target_at = created_at + (sla_target_minutes * 60) + total_pending_info_seconds`, dejando constancia en la nota de `incident_history` (`C4`, `EARS 03.4`).
@@ -148,36 +150,36 @@ flowchart LR
   - **Archivos exactos a crear o modificar:**
     - Modificar `src/Infrastructure/Repository/PdoMetricsRepository.php`
     - Modificar `src/Infrastructure/Repository/PdoOfflineSyncMutationRepository.php`
-  - **Requisitos cubiertos:** `RF-06.1`–`RF-06.3`, `RF-07.2`, `D5`, `D6`, `C5`, `C6`, `QA 3`.
+  - **Requisitos cubiertos:** `RF-05.2` (plan `RF-06.1`–`RF-06.3`), `RF-05.1` (plan `RF-07.2`), `D5`, `D6`, `C5`, `C6`, `QA 3`.
   - **Detalle de implementación:**
-    1. En `PdoMetricsRepository::countCriticalSlaBreaches()`: evaluar cada ticket resuelto (`i.status IN ('RESOLVED', 'CLOSED')` con `i.resolved_at IS NOT NULL`) descontando `i.total_pending_info_seconds` y comparando contra el techo sanitario de `240 * 60` segundos si es `PERISHABLE_FOOD` o `COMBO` con fallo térmico/crítico, y contra `i.sla_target_minutes * 60` segundos en el resto de expedientes (`RF-06`, `EARS 06.1`, `QA 3`).
+    1. En `PdoMetricsRepository::countCriticalSlaBreaches()`: evaluar cada ticket resuelto (`i.status IN ('RESOLVED', 'CLOSED')` con `i.resolved_at IS NOT NULL`) descontando `i.total_pending_info_seconds` y comparando contra el techo sanitario de `240 * 60` segundos si es `PERISHABLE_FOOD` o `COMBO` con fallo térmico/crítico, y contra `i.sla_target_minutes * 60` segundos en el resto de expedientes (`RF-05.2`, `EARS 06.1`, `QA 3`).
     2. En `PdoMetricsRepository::getBreakdownByLocation()`: seleccionar `l.sla_tier` y calcular `sla_breaches` como la suma de tickets resueltos en el período cuyo tiempo neto superó su umbral individual sellado (`240 * 60` s en riesgo de frío o `i.sla_target_minutes * 60` s en el resto).
-    3. En `PdoOfflineSyncMutationRepository::fetchBootstrapSnapshotForTechnician()`: incluir en cada parada y aviso del paquete offline `sla_tier_snapshot`, `sla_tier_label`, `sla_target_minutes`, `sla_target_at`, `critical_reason`, `is_cold_chain_critical` e `is_contractual_critical` (`RF-07`, `C6`).
+    3. En `PdoOfflineSyncMutationRepository::fetchBootstrapSnapshotForTechnician()`: incluir en cada parada y aviso del paquete offline `sla_tier_snapshot`, `sla_tier_label`, `sla_target_minutes`, `sla_target_at`, `critical_reason`, `is_cold_chain_critical` e `is_contractual_critical` (`RF-05.1`, `C6`).
   - **Hecho cuando:** `php -l src/Infrastructure/Repository/PdoMetricsRepository.php && php -l src/Infrastructure/Repository/PdoOfflineSyncMutationRepository.php`
 
 ---
 
 ## Fase 4: Capa de Aplicación (Sedes, Absorción QR, Pausa, Ruta, Recomendador y Métricas)
 
-- [x] **T-SLA-08 · Actualizar `AdminLocationService`, `QrReportService`, `OpportunisticInterventionService`, `IncidentPauseService` y `CoordinatorIncidentDetailService`**
+- [x] **T-SLA-08 · Actualizar `AdminLocationService`, `QrReportService`, `OpportunisticIncidentService`, `IncidentPauseService` y `CoordinatorIncidentDetailService`**
   - **Tiempo estimado:** 30 min
   - **Dependencias previas:** `T-SLA-07`
   - **Archivos exactos a crear o modificar:**
     - Modificar `src/Application/Service/AdminLocationService.php`
     - Modificar `src/Application/Service/QrReportService.php`
-    - Modificar `src/Application/Service/OpportunisticInterventionService.php`
+    - Modificar `src/Application/Service/OpportunisticIncidentService.php`
     - Modificar `src/Application/Service/IncidentPauseService.php`
     - Modificar `src/Application/Service/CoordinatorIncidentDetailService.php`
-  - **Requisitos cubiertos:** `RF-02.1`–`RF-02.5`, `RF-03.1`, `RF-03.5`, `RF-07.1`, `D2`, `C1`, `C2`, `C4`, `QA 1`, `QA 4`, `constitution.md` Art. II y Art. III.3.
+  - **Requisitos cubiertos:** `RF-02.1`–`RF-02.4`, `RF-03.1`, `RF-05.1` (plan `RF-07.1`), `D2`, `C1`, `C2`, `C4`, `QA 1`, `QA 4`, `constitution.md` Art. II y Art. III.3.
   - **Detalle de implementación:**
     1. En `AdminLocationService`: validar `sla_tier` (por defecto `SlaTier::STANDARD` al crear; lanzar excepción con código `'INVALID_SLA_TIER'` para `422` si recibe un string inválido) y asegurar que `LOCATION_UPDATED` solo marque cambio de SLA cuando `oldLocation->getSlaTier() !== newLocation->getSlaTier()` (`QA 4`).
     2. En `QrReportService`:
        - Al abrir nuevo ticket: sellar `sla_tier_snapshot = $location->getSlaTier()`, `sla_target_minutes = SlaTargetCalculator::calculateTargetMinutes(...)` y `sla_target_at`.
        - En `mergeIntoExistingIncident()`: calcular la urgencia y minutos objetivo que corresponderían a la categoría entrante (`incomingCategory`) sobre la máquina y el `sla_tier_snapshot` original del ticket activo. Si el nuevo reporte implica mayor urgencia o menor `sla_target_minutes` (p. ej. fallo `TEMPERATURE_COLD` sobre un ticket previo de `PAYMENT_FAILURE` en máquina `COMBO`), actualizar `urgency`, `sla_target_minutes` y `sla_target_at` medido desde `created_at` y registrar evento en `incident_history`, manteniendo 100 % libres de datos de SLA las respuestas JSON del canal QR (`QA 1`, `QA 4`, `Art. V.4`).
-    3. En `OpportunisticInterventionService`: sellar `sla_tier_snapshot`, `sla_target_minutes` y `sla_target_at` al registrar averías oportunistas.
-    4. En `IncidentPauseService`: al reanudar de `PENDING_INFO`, recalcular `sla_target_at` desplazando en segundos continuos `total_pending_info_seconds` desde `created_at + sla_target_minutes * 60` (`C2`).
+    3. En `OpportunisticIncidentService`: sellar `sla_tier_snapshot`, `sla_target_minutes` y `sla_target_at` al registrar averías oportunistas.
+    4. En `IncidentPauseService`: al reanudar de `PENDING_INFO`, recalcular `sla_target_at` desplazando en segundos continuos `total_pending_info_seconds` desde `created_at + sla_target_minutes * 60` (`C2`, `C6`).
     5. En `CoordinatorIncidentDetailService`: exponer `sla_tier_snapshot`, `sla_tier_label`, `sla_target_minutes`, `sla_target_hours`, `sla_target_at` e `is_cold_chain_risk` en el detalle de Coordinación.
-  - **Hecho cuando:** `php -l src/Application/Service/AdminLocationService.php && php -l src/Application/Service/QrReportService.php && php -l src/Application/Service/OpportunisticInterventionService.php && php -l src/Application/Service/IncidentPauseService.php && php -l src/Application/Service/CoordinatorIncidentDetailService.php`
+  - **Hecho cuando:** `php -l src/Application/Service/AdminLocationService.php && php -l src/Application/Service/QrReportService.php && php -l src/Application/Service/OpportunisticIncidentService.php && php -l src/Application/Service/IncidentPauseService.php && php -l src/Application/Service/CoordinatorIncidentDetailService.php`
 
 - [x] **T-SLA-09 · Actualizar `RouteOptimizationService`, `TechnicianAssignmentSuggester`, `SuggestedTechniciansService`, `MetricsCalculationService` y `MetricsExportService` y ampliar `TieredSlaDomainTest.php`**
   - **Tiempo estimado:** 30 min
@@ -189,7 +191,7 @@ flowchart LR
     - Modificar `src/Application/Service/MetricsCalculationService.php`
     - Modificar `src/Application/Service/MetricsExportService.php`
     - Modificar `tests/unit/TieredSlaDomainTest.php`
-  - **Requisitos cubiertos:** `RF-04.1`–`RF-04.4`, `RF-05.1`–`RF-05.4`, `RF-06.1`–`RF-06.4`, `D3`, `D4`, `D6`, `C2`, `C3`, `QA 1`–`QA 3`, `constitution.md` Art. II.2.
+  - **Requisitos cubiertos:** `RF-03.1`–`RF-03.3` (plan `RF-04`), `RF-04.1`–`RF-04.2` (plan `RF-05`), `RF-05.2` (plan `RF-06`), `D3`, `D4`, `D6`, `C2`, `C3`, `QA 1`–`QA 3`, `constitution.md` Art. II.2.
   - **Detalle de implementación:**
     1. En `RouteOptimizationService`:
        - Determinar para cada parada si posee alguna tarea correctiva con riesgo alimentario (`is_cold_chain_critical = true`) y si posee alguna tarea correctiva cuyo tiempo restante efectivo hacia `sla_due_at` sea `<= 14400` segundos (`<= 240` min, inclusivo; congelado en `paused_at` si está en `PENDING_INFO`, `C2`).
@@ -200,10 +202,10 @@ flowchart LR
        - Implementar la activación del Escalado Contractual 24/7 en sedes `CRITICAL_INFRASTRUCTURE_24_7` sin riesgo de frío cuando no hay titulares/suplentes de zona en turno (`ON_SHIFT`) o cuando `sla_target_minutes <= 240` y ningún titular/suplente en turno tiene `0` paradas vivas (`D4`, `QA 2`).
        - Otorgar `+60` puntos (`contractual_24_7_on_call_bonus`) y motivo `"Escalado contractual 24/7"` al técnico `is_on_call` activo, aplicar el respaldo por menor carga viva y distancia Haversine cuando `on_call_available = false` (`QA 2`), y priorizar la menor carga viva cuando todos los efectivos de zona en turno tengan `>= 3` paradas vivas en avisos con `sla_target_minutes <= 480` (`EARS 05.4`).
     3. En `MetricsCalculationService` y `MetricsExportService`:
-       - Enriquecer cada fila de `by_location` con `sla_tier`, `sla_tier_label`, `sla_target_hours` (`24.0`, `12.0` o `8.0`), `sla_breaches` y `sla_status` (`'NO_DATA'`, `'BREACHED'` o `'COMPLIANT'`) (`RF-06`, `D6`, `QA 3`).
+       - Enriquecer cada fila de `by_location` con `sla_tier`, `sla_tier_label`, `sla_target_hours` (`24.0`, `12.0` o `8.0`), `sla_breaches` y `sla_status` (`'NO_DATA'`, `'BREACHED'` o `'COMPLIANT'`) (`RF-05.2`, `D6`, `QA 3`).
        - Añadir las columnas `Nivel SLA`, `Objetivo SLA (Horas)`, `Brechas SLA` y `Estado SLA` en el CSV de `by_location`.
     4. Ampliar `tests/unit/TieredSlaDomainTest.php` con pruebas unitarias exhaustivas de `RouteOptimizationService` y `TechnicianAssignmentSuggester` cubriendo todos los casos límite (`D3`, `D4`, `C2`, `C3`, `QA 1`, `QA 2`).
-  - **Hecho cuando:** `vendor/bin/phpunit tests/unit/TieredSlaDomainTest.php`
+  - **Hecho cuando:** `php tests/unit/TieredSlaDomainTest.php`
 
 ---
 
@@ -233,14 +235,14 @@ flowchart LR
   - **Archivos exactos a crear o modificar:**
     - Crear `tests/integration/TieredSlaContractsApiTest.php`
     - Crear `tests/integration/PostgresTieredSlaMetricsPerformanceTest.php`
-  - **Requisitos cubiertos:** `RF-01` a `RF-07`, `RNF-01` a `RNF-04`, `D1`–`D6`, `C1`–`C6`, `QA 1`–`QA 4`, `constitution.md` Art. II, Art. III.3, Art. V.4 y Art. V.6.
+  - **Requisitos cubiertos:** `RF-01` a `RF-05` (plan `RF-06`/`RF-07`), `RNF-01` a `RNF-03` (plan `RNF-04`), `D1`–`D6`, `C1`–`C6`, `QA 1`–`QA 4`, `constitution.md` Art. II, Art. III.3, Art. V.4 y Art. V.6.
   - **Detalle de implementación:**
     1. Probar CRUD de sedes (`POST`/`PUT`/`PATCH /api/coordinator/locations`): alta sin `sla_tier` toma `'STANDARD'`; valor inválido responde `422 INVALID_SLA_TIER`; cambio de contrato en sede existente no modifica `sla_tier_snapshot` ni `sla_target_minutes` de tickets previos (`C1`); edición de sede sin cambiar `sla_tier` no registra cambio de contrato espurio (`QA 4`).
     2. Probar apertura de tickets, cambio de prioridad en triaje (`PATCH /api/coordinator/incidents/{id}/assign` con `urgency_override`, `C4`) y absorción QR (`POST /api/qr/report` sobre máquina `COMBO` con ticket activo que revela `TEMPERATURE_COLD`, `QA 1`), verificando el recálculo de `sla_target_minutes` y `sla_target_at` desde `created_at`.
     3. Probar reapertura en garantía (`< 48 h`, `QA 3`, `Art. V.6`): verificar que el intervalo cerrado `reopened_at - resolved_at` se acumula en `total_pending_info_seconds` y desplaza `sla_target_at` sin reiniciar `created_at`.
     4. Probar sugerencias de asignación (`GET /api/coordinator/incidents/{id}/suggested-technicians`), ruta del técnico (`GET /api/technician/route/map`), paquete offline (`GET /api/technician/offline/bootstrap`), métricas (`GET /api/coordinator/metrics/summary`, `/breakdown` y `/export`) y segregación de visibilidad en Portal de Sede vs opacidad total en QR público (`Art. V.4`, `D5`, `QA 4`).
     5. Certificar RNF-01 en `PostgresTieredSlaMetricsPerformanceTest.php`: 20 muestras por endpoint tras calentamiento, mediana y p95 inferiores a 1,5 s, doble ejecución idéntica de `summary`, `breakdown` y `export`, y comparación del servicio con el mismo `DateTimeImmutable` de referencia.
-  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/TieredSlaContractsApiTest.php` y `source deploy/local/postgres/.env.local && php tests/integration/PostgresTieredSlaMetricsPerformanceTest.php`
+  - **Hecho cuando:** `php tests/integration/TieredSlaContractsApiTest.php` y `source deploy/local/postgres/.env.local && php tests/integration/PostgresTieredSlaMetricsPerformanceTest.php`
 
 ---
 
@@ -256,7 +258,7 @@ flowchart LR
     - Modificar `public/assets/js/components/AssignSuggestionPanel.js`
     - Modificar `public/assets/js/components/MetricBreakdownTable.js`
     - Modificar `public/assets/js/views/CoordinatorMetricsView.js`
-  - **Requisitos cubiertos:** `RF-02.1`–`RF-02.5`, `RF-05.1`, `RF-06.3`, `RF-07.1`, `RNF-04`, `D4`–`D6`, `QA 4`, `docs/design.md`.
+  - **Requisitos cubiertos:** `RF-02.1`–`RF-02.4`, `RF-05.1` (plan `RF-07.1`), `RF-05.2` (plan `RF-06.3`), `RNF-03` (plan `RNF-04`), `D4`–`D6`, `QA 4`, `docs/design.md`.
   - **Detalle de implementación:**
     1. En `AdminLocationsTab.js`: añadir selector de **Nivel de SLA** (`STANDARD` / `PRIORITY_CORPORATE` / `CRITICAL_INFRASTRUCTURE_24_7`) en el modal de alta/edición de sede y mostrar `vg-chip` con `sla_tier_label` en la tabla de sedes.
     2. En `CoordinatorDashboardView.js` y `CoordinatorIncidentDetailModal.js`: mostrar insignia `vg-chip` del contrato sellado (`sla_tier_label`) y objetivo (`sla_target_minutes` / horas), sin exponer jamás datos de SLA en `ServiceSheetModal.js` ni en `SanitarySpoilageOfficialActModal.js` (`QA 4`).
@@ -264,21 +266,21 @@ flowchart LR
     4. En `MetricBreakdownTable.js` y `CoordinatorMetricsView.js`: mostrar en el desglose por sede el **Nivel SLA**, el **Objetivo Nominal (`24h` / `12h` / `8h`)**, las **Brechas SLA (`sla_breaches`)** y el **Estado SLA (`Cumple` / `Incumple` / `Sin datos`)**.
   - **Hecho cuando:** `node --check public/assets/js/components/AdminLocationsTab.js && node --check public/assets/js/views/CoordinatorDashboardView.js && node --check public/assets/js/components/CoordinatorIncidentDetailModal.js && node --check public/assets/js/components/AssignSuggestionPanel.js && node --check public/assets/js/components/MetricBreakdownTable.js && node --check public/assets/js/views/CoordinatorMetricsView.js`
 
-- [x] **T-SLA-13 · Actualizar Ruta Móvil del Técnico (`TechnicianRouteView.js`, `TechnicianRouteMapModal.js`), `OfflineStorageService.js`, `LocationPortalView.js`, `styles.css` y crear `TieredSlaFrontendTest.mjs`**
+- [x] **T-SLA-13 · Actualizar Ruta Móvil del Técnico (`TechnicianRouteView.js`, `TechnicianRouteMapModal.js`), `OfflineStorage.js`, `LocationPortalView.js`, `styles.css` y crear `TieredSlaFrontendTest.mjs`**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SLA-12`
   - **Archivos exactos a crear o modificar:**
     - Modificar `public/assets/js/views/TechnicianRouteView.js`
     - Modificar `public/assets/js/components/TechnicianRouteMapModal.js`
-    - Modificar `public/assets/js/services/OfflineStorageService.js`
+    - Modificar `public/assets/js/utils/OfflineStorage.js`
     - Modificar `public/assets/js/views/LocationPortalView.js`
     - Modificar `public/assets/css/styles.css`
     - Modificar `public/sw.js` (bump `CACHE_NAME`)
     - Crear `tests/unit/TieredSlaFrontendTest.mjs`
-  - **Requisitos cubiertos:** `RF-04.1`–`RF-04.4`, `RF-07.2`–`RF-07.5`, `RNF-04`, `D3`, `D5`, `C6`, `QA 4`, `docs/design.md`.
+  - **Requisitos cubiertos:** `RF-03.1`–`RF-03.3` (plan `RF-04`), `RF-05.1` (plan `RF-07.2`–`RF-07.5`), `RNF-03` (plan `RNF-04`), `D3`, `D5`, `C6`, `QA 4`, `docs/design.md`.
   - **Detalle de implementación:**
-    1. En `TechnicianRouteView.js`, `TechnicianRouteMapModal.js` y `OfflineStorageService.js`: mostrar en cada parada y tarea el contrato de la sede (`sla_tier_label`), el vencimiento `sla_due_at` y la distinción explícita entre urgencia por **Riesgo Sanitario de Cadena de Frío** (`critical_reason === 'COLD_CHAIN'`) y urgencia por **Vencimiento Contractual $\le 4\text{ h}$** (`critical_reason === 'CONTRACTUAL_SLA'`), tanto online como en modo offline (`C6`).
-    2. En `LocationPortalView.js`: mostrar en la cabecera de la sede del Responsable de Ubicación su nivel contractual (`sla_tier_label`) y en cada aviso de su sede el plazo objetivo comprometido (`RF-07`, `EARS 07.3`).
+    1. En `TechnicianRouteView.js`, `TechnicianRouteMapModal.js` y `OfflineStorage.js`: mostrar en cada parada y tarea el contrato de la sede (`sla_tier_label`), el vencimiento `sla_due_at` y la distinción explícita entre urgencia por **Riesgo Sanitario de Cadena de Frío** (`critical_reason === 'COLD_CHAIN'`) y urgencia por **Vencimiento Contractual $\le 4\text{ h}$** (`critical_reason === 'CONTRACTUAL_SLA'`), tanto online como en modo offline (`C6`).
+    2. En `LocationPortalView.js`: mostrar en la cabecera de la sede del Responsable de Ubicación su nivel contractual (`sla_tier_label`) y en cada aviso de su sede el plazo objetivo comprometido (`RF-05.1`, `EARS 07.3`).
     3. Añadir estilos en `public/assets/css/styles.css` usando exclusivamente variables `var(--color-*)`, radios `4px`/`8px` y cero sombras en reposo (`docs/design.md`), e incrementar `CACHE_NAME` en `public/sw.js`.
     4. Crear `tests/unit/TieredSlaFrontendTest.mjs` verificando las superficies de Coordinación, Ruta Móvil, Offline y Portal de Sede, la opacidad en QR (`QrReportView.js`) y en los modales de impresión A4 (`ServiceSheetModal.js` y `SanitarySpoilageOfficialActModal.js`), y la superación de `CoordinatorButtonVariantsGuardTest`, `LegacyButtonPaletteRetirementTest` y `DesignTokenDebtRatchetTest`.
   - **Hecho cuando:** `node tests/unit/TieredSlaFrontendTest.mjs && node tests/unit/CoordinatorButtonVariantsGuardTest.mjs && node tests/unit/LegacyButtonPaletteRetirementTest.mjs && node tests/unit/DesignTokenDebtRatchetTest.mjs && node tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs`
@@ -295,9 +297,10 @@ flowchart LR
     - Modificar `docs/features_pendientes.md`
     - Modificar `README.md` (si `DocMetricsGuard` requiere actualizar los contadores de suites y aserciones vigentes)
     - Modificar `specs/30-tiered-sla-contracts/tasks.md` (marcar tareas `[x]`)
-  - **Requisitos cubiertos:** `RF-01` a `RF-07`, `RNF-01` a `RNF-04`, `D1`–`D6`, `C1`–`C6`, `QA 1`–`QA 4`, `constitution.md` Art. I–VII.
+  - **Requisitos cubiertos:** `RF-01` a `RF-05` (con etiquetas de plan `RF-06`/`RF-07`), `RNF-01` a `RNF-03` (plan `RNF-04`), `D1`–`D6`, `C1`–`C6`, `QA 1`–`QA 4`, `constitution.md` Art. I–VII.
   - **Detalle de implementación:**
     1. Ejecutar la batería completa (`php tests/run_all.php`), sincronizar las cifras vigentes exigidas por `DocMetricsGuard` y verificar **100 % en verde (0 fallos y 0 desviaciones)**.
-    2. Crear `specs/30-tiered-sla-contracts/traceability-matrix.md` cruzando cada criterio EARS (`01.1` a `07.5`), `D1`–`D6`, `C1`–`C6` y `QA 1`–`QA 4` con su archivo de implementación y su test automatizado.
-    3. Actualizar `docs/features_pendientes.md` marcando la **Feature 17 (`⚖️ Perfiles de SLA Diferenciados por Tipo de Sede` · Módulo 30)** como **100 % Implementada**.
+    2. Mantener `specs/30-tiered-sla-contracts/traceability-matrix.md` cruzando cada criterio EARS (`01.1` a `07.5`), `D1`–`D6`, `C1`–`C6` y `QA 1`–`QA 4` con su archivo de implementación y su test automatizado, sustentado por la resolución de los hallazgos H-01 a H-05 (`docs/auditoria_modulo_30_hallazgos.md`).
+    3. Actualizar `docs/features_pendientes.md` marcando la **Feature 17 (`⚖️ Perfiles de SLA Diferenciados por Tipo de Sede` · Módulo 30)** como **100 % Implementada y Certificada**.
+  - **Hecho cuando:** `php tests/run_all.php`
   - **Hecho cuando:** `php tests/run_all.php`

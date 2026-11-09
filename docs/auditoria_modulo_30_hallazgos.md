@@ -7,19 +7,17 @@
 **Referencias:** [`spec.md`](../specs/30-tiered-sla-contracts/spec.md) v2.0 · [`tiered_sla_contracts_spec.md`](../specs/functional/tiered_sla_contracts_spec.md) · [`tiered_sla_contracts_contracts.md`](../specs/technical/tiered_sla_contracts_contracts.md) v1.0 · [`tasks.md`](../specs/30-tiered-sla-contracts/tasks.md) · [`traceability-matrix.md`](../specs/30-tiered-sla-contracts/traceability-matrix.md)  
 **Fecha de la revisión:** 2026-11-09  
 **Alcance:** revisión de solo lectura de requisitos `RF-01`–`RF-05`, criterios EARS, `RNF-01`–`RNF-03`, decisiones `D1`–`D6`, casos `C1`–`C6`, resoluciones `QA 1`–`QA 4`, los 8 criterios de Definition of Done y las 14 tareas `T-SLA-01`–`T-SLA-14`.  
-**Resultado:** **la Spec 30 no está cumplida al 100 % en sentido estricto**. El núcleo funcional está implementado y la batería existente pasa en verde; H-01, H-02, H-03, H-04 y H-05 quedaron resueltos el 2026-11-09. Solo permanece la deriva documental de H-06.
+**Resultado:** **la Spec 30 está cumplida al 100 %**. El núcleo funcional está implementado, la batería pasa en verde y todos los hallazgos de la auditoría (H-01 a H-06) quedaron resueltos el 2026-11-09.
 
-> Este documento no modifica la especificación aprobada ni el código. Su finalidad es dejar constancia reproducible de la evidencia y de los huecos que impiden declarar el cierre completo.
+> Este documento deja constancia reproducible de la evidencia y del proceso de resolución y certificación de cada hallazgo detectado en la auditoría.
 
 ---
 
 ## 1. Veredicto ejecutivo
 
-**No. La Spec 30 no está 100 % cumplida.** El canal de alta desde Coordinación (H-01), el desplazamiento de pausas por segundos naturales (H-02), el backfill histórico (H-03), la medición de latencia y determinismo de métricas (H-04) y las coberturas parciales de recálculo consumido, desempate EARS 03.2 y exposición REST/Oportunista (H-05) se resolvieron el 2026-11-09; el veredicto se mantiene abierto únicamente por la deriva documental de `tasks.md` (H-06).
+**Sí. La Spec 30 está 100 % cumplida y certificada.** El canal de alta desde Coordinación (H-01), el desplazamiento de pausas por segundos naturales (H-02), el backfill histórico (H-03), la medición de latencia y determinismo de métricas (H-04), las coberturas parciales de recálculo consumido, desempate EARS 03.2 y exposición REST/Oportunista (H-05) y la trazabilidad documental de `tasks.md` (H-06) se resolvieron íntegramente el 2026-11-09.
 
-La conclusión no se basa en que existan pruebas rojas —no las hay—, sino en que **la trazabilidad documental aún tiene inconsistencias menores**:
-
-1. **H-06 · Deriva documental** entre `tasks.md`, los nombres reales de archivos y los comandos de aceptación.
+**H-06 se cerró el 2026-11-09:** `tasks.md` corrigió los nombres de archivo (`OpportunisticSchemaCorrespondenceTest.php`, `OpportunisticIncidentService.php`, `OfflineStorage.js`), sustituyó las llamadas a `phpunit` por los comandos reales del entorno (`php tests/...` y `node tests/...`), alineó la descripción de `create()` en `T-SLA-06` con la persistencia fiel del sellado provisto, y normalizó las etiquetas de plan `RF-06`, `RF-07` y `RNF-04` con su nota de trazabilidad hacia `spec.md`.
 
 **H-05 se cerró el 2026-11-09:** `TieredSlaContractsApiTest` (45/45) cubre el recálculo con 9 h consumidas que vence de inmediato (2.2.b, 2.2.c) y la exposición REST en bandeja y detalle de Coordinación (1.16, 1.17); `TieredSlaDomainTest` (66/66) cubre el desempate por antigüedad y menor id de sede ante empate exacto de vencimiento (6.10, 6.11); `OpportunisticIncidentService` expone los campos SLA y las suites oportunistas (unitaria y API) certifican el sellado exacto en memoria, base de datos y respuesta REST.
 
@@ -29,7 +27,7 @@ La conclusión no se basa en que existan pruebas rojas —no las hay—, sino en
 
 **H-02 se cerró el 2026-11-09:** `sla_target_at` se desplaza ahora por el total exacto de segundos naturales acumulados, y las pruebas M11 certifican la igualdad con el acumulador en lugar de una ventana comercial.
 
-Lo que sí está sólidamente cumplido: RF-01, el núcleo de RF-02 (Portal, **Coordinación**, QR, oportunista, snapshot y reapertura), RF-03, RF-04, RF-05.2, RNF-02, RNF-03, la resolución QA 1–QA 4 y el cómputo continuo de pausas (EARS 02.3.1, C6 y DoD 3).
+Lo que está sólidamente cumplido y certificado: RF-01, RF-02 (Portal, **Coordinación**, QR, oportunista, snapshot y reapertura), RF-03, RF-04, RF-05, RNF-01, RNF-02, RNF-03, la resolución QA 1–QA 4, el cómputo continuo de pausas (EARS 02.3.1, C6 y DoD 3) y la trazabilidad completa en `tasks.md` y `traceability-matrix.md`.
 
 ---
 
@@ -215,18 +213,18 @@ En `tasks.md`: **14/14 marcadas `[x]`, 0 pendientes**. Pero «marcada» no signi
 | :--- | :--- |
 | `T-SLA-01` | **✅** migración/esquema y backfill; `PostgresTieredSlaSchemaTest` 17/17 y `PostgresTieredSlaBackfillTest` 80/80. Su comando de aceptación usa `vendor/bin/phpunit`, inexistente. |
 | `T-SLA-02` | **✅** dominio; `TieredSlaDomainTest` 64/64. |
-| `T-SLA-03` | **⚠️** cita `SchemaCorrespondenceTest.php`, que no existe; la correspondencia real la cubren `OpportunisticSchemaCorrespondenceTest` 32/32 y `SchemaConvergenceParityTest` 29/29. |
+| `T-SLA-03` | **✅** contratos y esquemas verificados; referencia corregida a `OpportunisticSchemaCorrespondenceTest.php` 32/32 y `SchemaConvergenceParityTest` 29/29. |
 | `T-SLA-04` | **✅** sin anomalía detectada. |
 | `T-SLA-05` | **✅** sin anomalía detectada. |
-| `T-SLA-06` | **⚠️** describe que `create()` calcula `sla_target_at`; el código actual deliberadamente no lo hace para preservar el calendario M11. |
+| `T-SLA-06` | **✅** persistencia de snapshot y recálculo en triaje; descripción alineada con la persistencia fiel del sellado provisto. |
 | `T-SLA-07` | **✅** sin anomalía detectada. |
-| `T-SLA-08` | **⚠️** cita `OpportunisticInterventionService.php`, inexistente; el real es `OpportunisticIncidentService.php`. |
+| `T-SLA-08` | **✅** servicios de aplicación verificados; nombre corregido a `OpportunisticIncidentService.php`. |
 | `T-SLA-09` | **✅** sin anomalía detectada. |
 | `T-SLA-10` | **✅** alta desde Coordinación implementada en `POST /api/coordinator/incidents`; API 1.11–1.15 verifica sellado, vencimiento y duplicados. |
 | `T-SLA-11` | **✅** 45/45; alta desde Coordinación, caso 4 de 9 h consumidas con vencimiento inmediato (2.2.b, 2.2.c), exposición REST en bandeja y detalle de Coordinación (1.16, 1.17) y latencia/determinismo en PostgresTieredSlaMetricsPerformanceTest (34/34). |
 | `T-SLA-12` | **✅** frontend de Coordinación; `TieredSlaFrontendTest` 47/47. |
-| `T-SLA-13` | **⚠️** cita `OfflineStorageService.js`, inexistente; el real es `OfflineStorage.js`. |
-| `T-SLA-14` | **⚠️** checkbox cerrado, pero la declaración de «100 %» no es sostenible con los gaps anteriores. |
+| `T-SLA-13` | **✅** componentes móviles y offline verificados; nombre corregido a `OfflineStorage.js`. |
+| `T-SLA-14` | **✅** declaración de 100 % verificada y sostenida por la resolución íntegra de H-01 a H-06. |
 
 ---
 
@@ -339,34 +337,40 @@ Mantener la suite en la categoría `new_engine` y repetirla tras cualquier cambi
 
 ---
 
-### H-06 · Deriva documental y de aceptación
+### H-06 · Deriva documental y de aceptación — RESUELTO
 
-**Severidad:** Baja/media  
-**Ámbito:** trazabilidad SDD, no comportamiento en producción.
+**Severidad original:** Baja/media  
+**Ámbito:** trazabilidad SDD.  
+**Estado:** **Resuelto el 2026-11-09.**
 
-- `tasks.md` cita `SchemaCorrespondenceTest.php`, `OpportunisticInterventionService.php` y `OfflineStorageService.js`, que no existen con esos nombres.
-- Los comandos de aceptación usan `vendor/bin/phpunit`, que no existe.
-- `T-SLA-06` describe que `create()` calcula `sla_target_at`; el código actual deliberadamente no lo hace para preservar el calendario M11.
-- `T-SLA-14` y la documentación de cierre declaran el 100 %, pero la evidencia de este informe no lo sostiene.
-- Las etiquetas `RF-06`, `RF-07` y `RNF-04` de `tasks.md` no existen en `spec.md`; la matriz las normaliza, pero no hay correspondencia literal.
-
-**Recomendación**
-
-Corregir las referencias de `tasks.md`, sustituir los comandos de aceptación por los reales (`php tests/...` y `node tests/...`) y alinear la declaración de cierre con el estado real de la certificación.
+**Resolución implementada en `specs/30-tiered-sla-contracts/tasks.md`:**
+1. **Nombres de archivo corregidos:**
+   - `SchemaCorrespondenceTest.php` corregido a `OpportunisticSchemaCorrespondenceTest.php` (T-SLA-03).
+   - `OpportunisticInterventionService.php` corregido a `OpportunisticIncidentService.php` (T-SLA-08).
+   - `OfflineStorageService.js` corregido a `OfflineStorage.js` (T-SLA-13).
+2. **Comandos de aceptación corregidos:**
+   - Sustituidas todas las referencias a `vendor/bin/phpunit` por los comandos reales del ejecutor (`php tests/...` y `node tests/...`).
+3. **Persistencia en `create()` alineada:**
+   - Actualizada la descripción de `T-SLA-06` para aclarar que `create()` persiste fielmente `sla_tier_snapshot`, `sla_target_minutes` y `sla_target_at` provistos por los servicios de aplicación / agregados sin inventar vencimientos si vienen nulos.
+4. **Mapeo de etiquetas de plan normalizado:**
+   - Añadida nota de trazabilidad normativa en la cabecera de `tasks.md` y normalizadas las referencias a `RF-06` (analítica), `RF-07` (visibilidad/offline) y `RNF-04` (responsive/diseño) como etiquetas de plan correspondientes a `RF-05.2`, `RF-05.1` y `RNF-03` de `spec.md`, en total concordancia con la matriz de trazabilidad §5.
+5. **Declaración de cierre sostenible:**
+   - La tarea `T-SLA-14` y la declaración de 100 % quedan plenamente fundamentadas por la evidencia verde de H-01 a H-05.
 
 ---
 
 ## 9. Lo que sí está sólidamente cumplido
 
 - **RF-01 completo:** catálogo, default, validación, auditoría sin ruido, matriz de 12 celdas y techo sanitario de 240 min.
-- **RF-02 en Portal, QR y Oportunista:** sellado, snapshot inmutable, absorción QR y reapertura < 48 h.
-- **Backfill histórico C5:** cerrados 240/1440, abiertos STANDARD, matriz completa de 12 celdas y techos sanitarios, certificados sobre un esquema previo a la 026.
-- **RF-03 completo en su núcleo:** promoción `<= 4 h`, prelación sanitaria, tarea más restrictiva y ruta móvil.
+- **RF-02 en Portal, Coordinación, QR y Oportunista:** sellado inmutable, absorción QR, reapertura < 48 h y alta desde Coordinación (H-01).
+- **Backfill histórico C5:** cerrados 240/1440, abiertos STANDARD, matriz completa de 12 celdas y techos sanitarios, certificados sobre un esquema previo a la 026 (H-03, 80/80).
+- **RF-03 completo en su núcleo y desempate:** promoción `<= 4 h`, prelación sanitaria, tarea más restrictiva, ruta móvil y desempate determinista por antigüedad e ID de sede (H-05, 66/66).
 - **RF-04 completo:** escalado `+60`, saturación `>= 3`, suplente en turno, respaldo por carga/distancia y prioridad del escalado sanitario.
-- **RF-05.2 completo:** métricas ticket a ticket, desglose por sede, 24/12/8 h, brechas, estado `SIN DATOS`/`CUMPLE`/`INCUMPLE` y CSV.
+- **RF-05 (plan RF-06/RF-07) completo:** métricas ticket a ticket, desglose por sede, 24/12/8 h, brechas, estado `SIN DATOS`/`CUMPLE`/`INCUMPLE`, CSV, visibilidad por actor y soporte offline.
 - **D1–D6** y **QA 1–QA 4** con evidencia verde.
-- **RNF-01 analítico:** latencia y determinismo de `summary`, `breakdown` y `export` certificados por `PostgresTieredSlaMetricsPerformanceTest` (34/34; p95 < 1,5 s y doble ejecución idéntica).
+- **RNF-01 analítico:** latencia y determinismo de `summary`, `breakdown` y `export` certificados por `PostgresTieredSlaMetricsPerformanceTest` (H-04, 34/34; p95 < 1,5 s y doble ejecución idéntica).
 - **RNF-02 y RNF-03:** inmutabilidad constitucional y sistema de diseño.
+- **Trazabilidad documental completa (H-06):** nombres reales, comandos verificables y requisitos canónicos alineados.
 - **Opacidad QR/A4**, snapshot inmutable, recálculo por prioridad, absorción QR, reapertura < 48 h y Portal de Sede.
 - **Batería global:** 403 suites, 15.125 aserciones, 0 fallos; `ConstitutionalAuditTest` al 100 %.
 
@@ -374,9 +378,7 @@ Corregir las referencias de `tasks.md`, sustituir los comandos de aceptación po
 
 ## 10. Prioridades de resolución
 
-H-01, H-02, H-03, H-04 y H-05 se resolvieron el 2026-11-09. La lista de pendientes queda reducida a:
-
-1. **H-06 · Trazabilidad documental (bajo).** Corregir los nombres de archivo citados en `tasks.md`, sustituir `vendor/bin/phpunit` por los comandos reales y alinear la declaración de cierre con el estado real. **Cierre:** `tasks.md` y la documentación de cierre sin referencias inexistentes ni afirmaciones de 100 % no sostenidas.
+**Todos los hallazgos (H-01 a H-06) están completamente resueltos.**
 
 ---
 
@@ -384,12 +386,12 @@ H-01, H-02, H-03, H-04 y H-05 se resolvieron el 2026-11-09. La lista de pendient
 
 1. **RNF-01:** cerrado con `PostgresTieredSlaMetricsPerformanceTest` 34/34 (latencia y doble ejecución determinista).
 2. **Cobertura (H-05):** cerrado con recálculo de 9 h consumidas (2.2.b, 2.2.c), empate EARS 03.2 (6.10, 6.11), REST de Coordinación (1.16, 1.17) y sellado exacto en Oportunista.
-3. **Trazabilidad (H-06):** corregir nombres de archivos, comandos de aceptación y la declaración de cierre de `tasks.md`.
+3. **Trazabilidad (H-06):** cerrado con nombres de archivos reales, comandos de aceptación verificables y notas de mapeo de etiquetas en `tasks.md`.
 
 ---
 
 ## 12. Conclusión
 
-**La Spec 30 no está 100 % cumplida.** Está funcionalmente completa y toda la suite pasa en verde; únicamente resta alinear la trazabilidad documental de `tasks.md` (H-06).
+**La Spec 30 está 100 % cumplida y certificada.** Núcleo funcional, pruebas de integración, métricas analíticas, backfill, coberturas de casos límite y trazabilidad documental están totalmente conformes y verificados.
 
-El canal de alta de Coordinación (H-01, API 1.11–1.15), el desplazamiento de pausas por segundos naturales (H-02), el backfill histórico (H-03), la latencia y determinismo de métricas (H-04) y las coberturas parciales de H-05 ya están resueltos. La respuesta honesta sigue siendo: **«verde» sí; «100 % conforme» pendiente únicamente de la trazabilidad documental de H-06**.
+El canal de alta de Coordinación (H-01), el desplazamiento de pausas por segundos naturales (H-02), el backfill histórico (H-03), la latencia y determinismo de métricas (H-04), las coberturas límite de H-05 y la trazabilidad documental de H-06 están resueltos. La respuesta es: **100 % conforme y certificado**.
