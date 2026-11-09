@@ -226,7 +226,7 @@ flowchart LR
     5. Verificar que `QrScanController` (`GET /api/qr/scan/{code}` y `POST /api/qr/report`) nunca exponga campos de SLA (`EARS 07.4`, `Art. V.4`).
   - **Hecho cuando:** `php -l src/Presentation/Controller/CoordinatorAdminController.php && php -l src/Presentation/Controller/CoordinatorController.php && php -l src/Presentation/Controller/TechnicianRouteMapController.php && php -l src/Presentation/Controller/LocationPortalController.php && php -l src/Presentation/Controller/QrScanController.php`
 
-- [ ] **T-SLA-11 · Crear suite de integración de contratos HTTP, ciclo de vida, métricas y opacidad (`TieredSlaContractsApiTest.php`)**
+- [x] **T-SLA-11 · Crear suite de integración de contratos HTTP, ciclo de vida, métricas y opacidad (`TieredSlaContractsApiTest.php`)**
   - **Tiempo estimado:** 25 min
   - **Dependencias previas:** `T-SLA-10`
   - **Archivos exactos a crear o modificar:**

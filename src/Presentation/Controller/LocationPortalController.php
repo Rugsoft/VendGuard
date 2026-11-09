@@ -579,7 +579,7 @@ class LocationPortalController
                     // reintenta la unidad de trabajo completa con un código nuevo. El
                     // aviso se confirma una sola vez y la notificación se encola sólo
                     // tras el alta, así que el reintento no la duplica.
-                    return $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath, $urgency): Incident {
+                    return $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath, $urgency, $slaTier, $slaTargetMinutes): Incident {
                         $incident = new Incident(
                             id: null,
                             ticketCode: $ticketCode,
