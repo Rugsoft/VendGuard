@@ -1861,15 +1861,17 @@ export const CoordinatorDashboardView = {
       <!-- =================================================================== -->
       <!-- STATE B: AUTHENTICATED COORDINATOR TRIAGE DASHBOARD                 -->
       <!-- =================================================================== -->
+      <!-- Sin sesión de coordinador este bloque no se monta: el login es la   -->
+      <!-- única superficie visible y no se apilan pestañas, filtros ni tabla. -->
       <!-- Vista de Impresión en Lote A4 de Sede (EARS 2.2 / T-QR-14) -->
       <QrBatchPrintView
-        v-if="showQrBatchView"
+        v-if="isAuthenticated && showQrBatchView"
         :location-id="selectedBatchLocationId"
         :location-name="selectedBatchLocationName"
         @close="closeQrBatchPrint"
       />
 
-      <div v-else>
+      <div v-else-if="isAuthenticated">
         <!-- 0. Barra de Pestañas de Navegación del Coordinador (RF-FLEET-01). Las
              pestañas envuelven en pantallas medianas en lugar de comprimirse. -->
         <div class="vg-action-group" style="margin-bottom: 20px; border-bottom: 1px solid var(--color-hairline, #c8cfda); padding-bottom: 8px;">

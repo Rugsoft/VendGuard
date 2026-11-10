@@ -9,7 +9,7 @@
 | **URL** | `http://127.0.0.1:8000` |
 | **Alcance** | Portal de Sede, panel de Coordinación y vista móvil del Técnico |
 | **Método** | Navegación real con datos de demostración, capturas, consola, red y CSSOM |
-| **Resultado** | **6 hallazgos**: 3 de severidad alta, 1 media y 2 bajas · **H-01 y H-02 corregidos** |
+| **Resultado** | **6 hallazgos**: 3 de severidad alta, 1 media y 2 bajas · **H-01 a H-05 corregidos** |
 
 > Inspección de solo lectura. No se modificó código funcional durante la revisión.
 
@@ -23,7 +23,7 @@
 | **H-02** | **Alta** | `GET /api/technician/my-route` no publica los campos SLA; el técnico ve «Contrato sin asignar». | **Corregido** |
 | **H-03** | **Alta** | Desbordamiento horizontal de 205 px en la vista móvil del técnico a 390 px. | **Corregido** |
 | **H-04** | **Media** | La tabla de triaje desborda a 1280 × 720 y el chat tapa acciones. | **Corregido** |
-| **H-05** | **Baja** | El panel de Coordinación renderiza pestañas, filtros y tabla antes del login. | Abierto |
+| **H-05** | **Baja** | El panel de Coordinación renderiza pestañas, filtros y tabla antes del login. | **Corregido** |
 | **H-06** | **Baja** | El modal de satisfacción se abre automáticamente al entrar en el Portal de Sede. | Abierto |
 
 ### Flujos comprobados
@@ -301,10 +301,22 @@ Es una inconsistencia de experiencia, no un fallo de seguridad: la interfaz sugi
 
 Renderizar el shell de Coordinación solo cuando la sesión esté resuelta y el rol sea el adecuado. Mientras tanto, mostrar únicamente el formulario de login.
 
+**Resolución (2026-11-10)**
+
+H-05 corregido en la rama `tiered-sla-contracts`:
+
+- **Causa:** el bloque autenticado era el `v-else` de `QrBatchPrintView`, no del formulario de login. Con `showQrBatchView` en falso, el panel se montaba igualmente y quedaba apilado debajo del acceso.
+- El visor de impresión por lotes exige ahora `isAuthenticated && showQrBatchView`; el shell de Coordinación usa `v-else-if="isAuthenticated"` y solo se monta con una sesión de coordinador válida.
+- `public/sw.js` sube la caché del shell a `vendguard-app-shell-v15` para que los clientes instalados reciban la plantilla corregida.
+- Se añadió `tests/unit/CoordinatorLoginShellGuardTest.mjs` (6/6) para congelar la rama de login, la guarda del visor QR, la del panel y la versión de caché.
+- Verificación en navegador tras limpiar el service worker: sin sesión, el formulario está presente y `tab-incidents`, la tabla y el texto «Triaje y Avisos» no existen en el DOM. Tras autenticar con el coordinador, el formulario desaparece y vuelven las pestañas y la tabla, con la sesión persistida.
+- `CoordinatorDashboardViewTest.mjs` 143/143, `QrCoordinatorComponentsTest.mjs` 23/23, `FrontendTemplateCompileTest.mjs` 15/15, `OfflinePwaAssetsAndUiGuardTest.mjs` 45/45 y `CoordinatorDashboardViewTest.php` 9/9 pasan sin fallos.
+
 **Archivos relacionados**
 
-- `public/assets/js/app.js`
 - `public/assets/js/views/CoordinatorDashboardView.js`
+- `public/sw.js`
+- `tests/unit/CoordinatorLoginShellGuardTest.mjs`
 
 **Evidencia visual**
 
