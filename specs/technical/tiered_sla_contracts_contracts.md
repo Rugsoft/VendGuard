@@ -1,11 +1,11 @@
 # ESPECIFICACIÓN TÉCNICA Y CONTRATOS DE INTERFAZ: PERFILES DE SLA DIFERENCIADOS POR TIPO DE SEDE (MÓDULO 30)
 
-**Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
-**Módulo:** 30 · Perfiles de SLA Diferenciados por Tipo de Sede (*Tiered SLA Contracts*)  
-**Fase SDD:** Fase 2 · Diseño Técnico, Esquema Relacional, Fórmulas de Dominio y Contratos de API  
-**Versión:** 1.0  
-**Fecha:** Noviembre 2026  
-**Basado en:** [`specs/30-tiered-sla-contracts/spec.md`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/30-tiered-sla-contracts/spec.md) (v2.0 Aprobada) · [`specs/functional/tiered_sla_contracts_spec.md`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/functional/tiered_sla_contracts_spec.md) · [`constitution.md`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/constitution.md)  
+**Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)\
+**Módulo:** 30 · Perfiles de SLA Diferenciados por Tipo de Sede (*Tiered SLA Contracts*)\
+**Fase SDD:** Fase 2 · Diseño Técnico, Esquema Relacional, Fórmulas de Dominio y Contratos de API\
+**Versión:** 1.0\
+**Fecha:** Noviembre 2026\
+**Basado en:** [`specs/30-tiered-sla-contracts/spec.md`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/30-tiered-sla-contracts/spec.md) (v2.0 Aprobada) · [`specs/functional/tiered_sla_contracts_spec.md`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/functional/tiered_sla_contracts_spec.md) · [`constitution.md`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/constitution.md)\
 
 ---
 

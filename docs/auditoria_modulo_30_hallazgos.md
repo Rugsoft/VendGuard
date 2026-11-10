@@ -2,11 +2,11 @@
 
 ## Perfiles de SLA Diferenciados por Tipo de Sede (*Tiered SLA Contracts*)
 
-**Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
-**Módulo:** 30 · `specs/30-tiered-sla-contracts`  
-**Referencias:** [`spec.md`](../specs/30-tiered-sla-contracts/spec.md) v2.0 · [`tiered_sla_contracts_spec.md`](../specs/functional/tiered_sla_contracts_spec.md) · [`tiered_sla_contracts_contracts.md`](../specs/technical/tiered_sla_contracts_contracts.md) v1.0 · [`tasks.md`](../specs/30-tiered-sla-contracts/tasks.md) · [`traceability-matrix.md`](../specs/30-tiered-sla-contracts/traceability-matrix.md)  
-**Fecha de la revisión:** 2026-11-09  
-**Alcance:** revisión de solo lectura de requisitos `RF-01`–`RF-05`, criterios EARS, `RNF-01`–`RNF-03`, decisiones `D1`–`D6`, casos `C1`–`C6`, resoluciones `QA 1`–`QA 4`, los 8 criterios de Definition of Done y las 14 tareas `T-SLA-01`–`T-SLA-14`.  
+**Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)\
+**Módulo:** 30 · `specs/30-tiered-sla-contracts`\
+**Referencias:** [`spec.md`](../specs/30-tiered-sla-contracts/spec.md) v2.0 · [`tiered_sla_contracts_spec.md`](../specs/functional/tiered_sla_contracts_spec.md) · [`tiered_sla_contracts_contracts.md`](../specs/technical/tiered_sla_contracts_contracts.md) v1.0 · [`tasks.md`](../specs/30-tiered-sla-contracts/tasks.md) · [`traceability-matrix.md`](../specs/30-tiered-sla-contracts/traceability-matrix.md)\
+**Fecha de la revisión:** 2026-11-09\
+**Alcance:** revisión de solo lectura de requisitos `RF-01`–`RF-05`, criterios EARS, `RNF-01`–`RNF-03`, decisiones `D1`–`D6`, casos `C1`–`C6`, resoluciones `QA 1`–`QA 4`, los 8 criterios de Definition of Done y las 14 tareas `T-SLA-01`–`T-SLA-14`.\
 **Resultado:** **la Spec 30 está cumplida al 100 %**. El núcleo funcional está implementado, la batería pasa en verde y todos los hallazgos de la auditoría (H-01 a H-06) quedaron resueltos el 2026-11-09.
 
 > Este documento deja constancia reproducible de la evidencia y del proceso de resolución y certificación de cada hallazgo detectado en la auditoría.
@@ -226,8 +226,8 @@ En `tasks.md`: **14/14 marcadas `[x]`, 0 pendientes**. Pero «marcada» no signi
 
 ### H-01 · Alta de incidencias desde Coordinación — RESUELTO
 
-**Severidad original:** Alta  
-**Reglas:** EARS 02.1.1, DoD 2, `T-SLA-10`, Art. III.3.  
+**Severidad original:** Alta\
+**Reglas:** EARS 02.1.1, DoD 2, `T-SLA-10`, Art. III.3.\
 **Estado:** **Resuelto el 2026-11-09.**
 
 **Implementación**
@@ -245,8 +245,8 @@ En `tasks.md`: **14/14 marcadas `[x]`, 0 pendientes**. Pero «marcada» no signi
 
 ### H-02 · Las pausas se desplazaban en horario comercial, no en segundos continuos — RESUELTO
 
-**Severidad original:** Alta  
-**Reglas:** EARS 02.3.1, C6, DoD 3, Art. V.6.  
+**Severidad original:** Alta\
+**Reglas:** EARS 02.3.1, C6, DoD 3, Art. V.6.\
 **Estado:** **Resuelto el 2026-11-09.**
 
 **Implementación**
@@ -271,8 +271,8 @@ EARS 02.3.1, C6 y DoD 3 quedan satisfechos: el vencimiento contractual devuelve 
 
 ### H-03 · Backfill histórico C5 — RESUELTO
 
-**Severidad original:** Media  
-**Reglas:** EARS 02.4, C5, DoD 8, Art. III.3.  
+**Severidad original:** Media\
+**Reglas:** EARS 02.4, C5, DoD 8, Art. III.3.\
 **Estado:** **Resuelto el 2026-11-09.**
 
 **Implementación de la certificación**
@@ -297,7 +297,7 @@ EARS 02.4, C5 y el primer componente de DoD 8 quedan certificados: el backfill n
 
 ### H-04 · RNF-01 · latencia y determinismo de métricas — RESUELTO
 
-**Severidad:** Media · **Estado:** ✅ resuelto el 2026-11-09  
+**Severidad:** Media · **Estado:** ✅ resuelto el 2026-11-09\
 **Reglas:** RNF-01.
 
 **Evidencia**
@@ -318,7 +318,7 @@ Mantener la suite en la categoría `new_engine` y repetirla tras cualquier cambi
 
 ### H-05 · Coberturas parciales — RESUELTO
 
-**Severidad original:** Media/baja.  
+**Severidad original:** Media/baja.\
 **Estado:** **Resuelto el 2026-11-09.**
 
 | Cobertura | Situación y Resolución |
@@ -333,8 +333,8 @@ Mantener la suite en la categoría `new_engine` y repetirla tras cualquier cambi
 
 ### H-06 · Deriva documental y de aceptación — RESUELTO
 
-**Severidad original:** Baja/media  
-**Ámbito:** trazabilidad SDD.  
+**Severidad original:** Baja/media\
+**Ámbito:** trazabilidad SDD.\
 **Estado:** **Resuelto el 2026-11-09.**
 
 **Resolución implementada en `specs/30-tiered-sla-contracts/tasks.md`:**

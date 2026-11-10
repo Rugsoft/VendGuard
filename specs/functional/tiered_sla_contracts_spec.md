@@ -1,11 +1,11 @@
 # ESPECIFICACIÓN FUNCIONAL: PERFILES DE SLA DIFERENCIADOS POR TIPO DE SEDE (CONTRATOS DE NIVEL DE SERVICIO ESCALONADOS)
 
-**Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
-**Módulo:** 30 · Perfiles de SLA Diferenciados por Tipo de Sede  
-**Versión:** 2.0 · Incorpora las 6 Decisiones de Diseño (`D1`–`D6`), las 6 Decisiones de Casos Límite y Alcance (`C1`–`C6`) y las 4 Resoluciones de Auditoría QA (`QA 1`–`QA 4`) consensuadas con el Product Owner  
-**Estado:** Especificación Funcional Aprobada por el Product Owner el 2026-11-09 · Puerta de Aprobación SDD superada (Fase 2)  
-**Fecha:** Noviembre 2026  
-**Origen:** Funcionalidad 17 del catálogo de evolución del producto (*⚖️ Perfiles de SLA Diferenciados por Tipo de Sede · Tiered SLA Contracts*)  
+**Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)\
+**Módulo:** 30 · Perfiles de SLA Diferenciados por Tipo de Sede\
+**Versión:** 2.0 · Incorpora las 6 Decisiones de Diseño (`D1`–`D6`), las 6 Decisiones de Casos Límite y Alcance (`C1`–`C6`) y las 4 Resoluciones de Auditoría QA (`QA 1`–`QA 4`) consensuadas con el Product Owner\
+**Estado:** Especificación Funcional Aprobada por el Product Owner el 2026-11-09 · Puerta de Aprobación SDD superada (Fase 2)\
+**Fecha:** Noviembre 2026\
+**Origen:** Funcionalidad 17 del catálogo de evolución del producto (*⚖️ Perfiles de SLA Diferenciados por Tipo de Sede · Tiered SLA Contracts*)\
 **Alineación Constitucional:** Art. I (supremacía de la especificación aprobada y ausencia de comportamientos simulados), Art. II (prioridad sanitaria innegociable: techo absoluto de **4,0 horas naturales** para máquinas de alimentos perecederos y para máquinas mixtas con fallo de refrigeración o riesgo de cadena de frío, con prelación de la seguridad alimentaria sobre cualquier urgencia comercial desde el minuto cero), Art. III (prohibición de borrado físico, sellado histórico inmutable del nivel de contrato en cada expediente y auditoría sin ruido de cambios efectivos de contrato o prioridad), Art. IV (minimalismo y cómputo continuo sin motores externos de calendarios laborales), Art. V.4 (segregación estricta de visibilidad por rol: contrato visible en Coordinación, Técnico y Portal de Sede para su propia ubicación, y oculto en el canal público anónimo QR y en documentos imprimibles A4), Art. V.6 (cómputo riguroso ante reaperturas en garantía dentro de las 48 horas descontando el intervalo de cierre intermedio sin reiniciar el reloj de resolución), Art. VI (delimitación estricta del alcance acordado).
 
 ---
@@ -76,23 +76,23 @@ Implantar un sistema de **Perfiles de SLA Diferenciados por Tipo de Sede** que a
 ## 3. Historias de Usuario
 
 ### HU-01: Configuración del perfil de SLA por sede y sellado inmutable en cada aviso
-> **Como** Coordinador de Operaciones,  
-> **quiero** asignar a cada sede su perfil de contrato (**Estándar**, **Prioritario Corporativo** o **Infraestructura Crítica 24x7**) y que cada aviso selle automáticamente al abrirse su nivel contractual y su tiempo objetivo según su prioridad y riesgo sanitario,  
+> **Como** Coordinador de Operaciones,\
+> **quiero** asignar a cada sede su perfil de contrato (**Estándar**, **Prioritario Corporativo** o **Infraestructura Crítica 24x7**) y que cada aviso selle automáticamente al abrirse su nivel contractual y su tiempo objetivo según su prioridad y riesgo sanitario,\
 > **para** diferenciar los compromisos de servicio contratados por cada cliente sin que un cambio comercial futuro altere retroactivamente los avisos en curso ni las métricas históricas cerradas.
 
 ### HU-02: Priorización de paradas en ruta por vencimiento contractual (`<= 4,0 h`) con supremacía sanitaria
-> **Como** Técnico de Campo en ruta,  
-> **quiero** que mi hoja de ruta sitúe en el bloque urgente las paradas cuyo vencimiento efectivo de SLA sea de 4,0 horas o menos —colocando siempre las emergencias de cadena de frío por delante de los vencimientos comerciales— y me muestre la insignia del contrato incluso sin cobertura móvil,  
+> **Como** Técnico de Campo en ruta,\
+> **quiero** que mi hoja de ruta sitúe en el bloque urgente las paradas cuyo vencimiento efectivo de SLA sea de 4,0 horas o menos —colocando siempre las emergencias de cadena de frío por delante de los vencimientos comerciales— y me muestre la insignia del contrato incluso sin cobertura móvil,\
 > **para** atender a tiempo los compromisos críticos desde el minuto cero sin comprometer jamás la seguridad alimentaria.
 
 ### HU-03: Recomendación de técnicos con escalado contractual 24/7 (`+60 puntos`) y auditoría real por sede
-> **Como** Coordinador de Operaciones,  
-> **quiero** que el recomendador de asignación habilite al técnico de guardia 24/7 cuando una sede de **Infraestructura Crítica 24x7** no tenga efectivos de zona disponibles en turno (o estén todos ocupados ante un aviso de 4 horas), y que el cuadro de mandos mida los incumplimientos reales ticket a ticket en cada sede,  
+> **Como** Coordinador de Operaciones,\
+> **quiero** que el recomendador de asignación habilite al técnico de guardia 24/7 cuando una sede de **Infraestructura Crítica 24x7** no tenga efectivos de zona disponibles en turno (o estén todos ocupados ante un aviso de 4 horas), y que el cuadro de mandos mida los incumplimientos reales ticket a ticket en cada sede,\
 > **para** garantizar cobertura continua en infraestructuras críticas y auditar con exactitud el cumplimiento de cada contrato.
 
 ### HU-04: Transparencia del nivel de servicio contratado en el Portal de Sede
-> **Como** Responsable de Sede,  
-> **quiero** ver en mi portal el perfil de SLA contratado en mi centro y el objetivo de resolución de mis avisos registrados,  
+> **Como** Responsable de Sede,\
+> **quiero** ver en mi portal el perfil de SLA contratado en mi centro y el objetivo de resolución de mis avisos registrados,\
 > **para** conocer el compromiso de atención aplicable a cada incidencia de mi ubicación.
 
 ---

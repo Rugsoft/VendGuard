@@ -14,9 +14,9 @@
 
 ## Veredicto
 
-La PR remota contiene la revisión y su cierre documental, sin conflictos. Los hallazgos 1, 2, 3 y 4 están corregidos; las cifras y el recuento de commits se han unificado. Solo queda la limpieza de espacios finales (hallazgo 5).
+La PR remota contiene la revisión, su cierre documental y la limpieza de espacios, sin conflictos. Los hallazgos 1 a 5 están corregidos.
 
-> **Actualización (2026-11-10):** los hallazgos 1, 2, 3 y 4 quedan corregidos en esta rama. El alta y la elevación del puente sellan el perfil, los minutos y el vencimiento; H-04 fija `DATABASE_URL` desde `PG_TEST_DSN` antes del bootstrap y pasa 34/34 con solo ese contrato. La batería global se ejecutó sobre el banco TLS sano `vendguard_pr16`: **403/403 suites · 15.142 aserciones · 0 fallos · exit 0**. El cuerpo de la PR refleja el recuento vigente de commits. Las cifras de H-04 quedan unificadas en 97,0 / 160,9 / 162,3 ms. Las regresiones del puente están en `tests/unit/PreventiveCoexistenceBridgeServiceTest.php` (60 aserciones).
+> **Actualización (2026-11-10):** los hallazgos 1, 2, 3 y 4 quedan corregidos en esta rama. El alta y la elevación del puente sellan el perfil, los minutos y el vencimiento; H-04 fija `DATABASE_URL` desde `PG_TEST_DSN` antes del bootstrap y pasa 34/34 con solo ese contrato. La batería global se ejecutó sobre el banco TLS sano `vendguard_pr16`: **403/403 suites · 15.142 aserciones · 0 fallos · exit 0**. El cuerpo de la PR refleja el recuento vigente de commits y la limpieza de espacios finales se aplicó sobre 58 líneas de 6 documentos. Las cifras de H-04 quedan unificadas en 97,0 / 160,9 / 162,3 ms. Las regresiones del puente están en `tests/unit/PreventiveCoexistenceBridgeServiceTest.php` (60 aserciones).
 
 ---
 
@@ -28,7 +28,7 @@ La PR remota contiene la revisión y su cierre documental, sin conflictos. Los h
 | 2 | **Alta/media** | La suite H-04 no es reproducible con el comando que documenta. | Corregido en código; verificado |
 | 3 | **Media** | La batería global no pudo completarse por el estado del banco TLS local. | Corregido: 403/403 suites · 15.142 aserciones · exit 0 |
 | 4 | **Baja** | La auditoría se contradice sobre el estado de H-05/H-06. | Corregido en documentación |
-| 5 | **Baja** | Cifras, recuento de commits y `git diff --check` desactualizados. | Cifras y recuento corregidos; espacios finales pendientes |
+| 5 | **Baja** | Cifras, recuento de commits y `git diff --check` desactualizados. | Corregido |
 
 ---
 
@@ -144,7 +144,7 @@ php tests/run_all.php
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
- Tiempo de ejecución total : 403.12 segundos
+ Tiempo de ejecución total : 427.66 segundos
  Suites de pruebas PHP Unit : 174 / 174 pasadas
  Suites de pruebas JS Unit  : 97 / 97 pasadas
  Suites de Integración PHP  : 130 / 130 pasadas
@@ -161,7 +161,7 @@ php tests/run_all.php
 ======================================================================
 ```
 
-La primera pasada también terminó con **403/403 suites y 0 fallos**, pero `DocMetricsGuard` detectó 4 desviaciones porque el README y `docs/features_pendientes.md` declaraban **15.125** aserciones. Se corrigieron esas cifras en el README, la auditoría, la matriz de trazabilidad y `features_pendientes.md`; la segunda pasada cerró con **exit 0** y **cifras documentadas coherentes**. El banco quedó restablecido con 10 sedes, 13 máquinas, 6 usuarios y 0 averías.
+La primera pasada también terminó con **403/403 suites y 0 fallos**, pero `DocMetricsGuard` detectó 4 desviaciones porque el README y `docs/features_pendientes.md` declaraban **15.125** aserciones. Se corrigieron esas cifras en el README, la auditoría, la matriz de trazabilidad y `features_pendientes.md`; la segunda pasada cerró con **exit 0** y **cifras documentadas coherentes**. El banco quedó restablecido con 10 sedes, 13 máquinas, 6 usuarios y 0 averías. Tras la limpieza de los espacios finales se repitió la batería: **427,66 s, 403/403 suites, 15.142 aserciones, 0 fallos y cifras coherentes**.
 
 **Limitación restante:** `.env.battery` sigue apuntando al contenedor caído de 55434; la corrida se dirige con `DATABASE_URL` de proceso. Para dejar el contrato por defecto sano hay que reprovisionar ese contenedor o apuntar el contrato a una base del 55433.
 
@@ -192,16 +192,16 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 
 ## 5. Baja · Cifras, recuento de commits y `git diff --check` desactualizados
 
-**Estado:** cifras y recuento corregidos; espacios finales pendientes.
+**Estado:** cifras, recuento y espacios finales corregidos.
 
 - El cuerpo de la PR declaraba **22 commits**; los commits de la revisión y el cierre documental ya están publicados y el cuerpo refleja el recuento vigente.
 - Cifra canónica H-04: **97,0 / 160,9 / 162,3 ms** (summary, breakdown, export; corrida del 2026-11-10 con `PG_TEST_DSN`), con p95 **100,4 / 166,1 / 168,9 ms**. Está unificada en el cuerpo de la PR, la auditoría y la matriz de trazabilidad.
-- `git diff --check origin/main...origin/tiered-sla-contracts` sigue detectando espacios finales en Markdown, casi todos saltos de línea intencionales con dos espacios. Si el proyecto usa ese check como puerta, hay que limpiarlos o documentar la convención.
+- `git diff --check origin/main...origin/tiered-sla-contracts` detectaba 58 líneas con espacios finales en 6 documentos Markdown, todas saltos duros de dos espacios. Se sustituyeron por `\` (salto duro CommonMark) para conservar el renderizado; `git diff --check origin/main` y `git diff --check origin/main...origin/tiered-sla-contracts` salen **0**.
 
 ### Corrección esperada
 
 - ~~Unificar el recuento de commits y las medianas en el cuerpo de la PR y en la auditoría.~~ Corregido.
-- Limpiar los espacios finales o documentar la convención Markdown si son intencionales.
+- ~~Limpiar los espacios finales o documentar la convención Markdown si son intencionales.~~ Corregido.
 
 ---
 
@@ -210,7 +210,8 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 | Comprobación | Resultado |
 | :--- | :--- |
 | `gh pr view 16` | `OPEN`, `MERGEABLE`, `CLEAN`, base `main`, head `tiered-sla-contracts`. |
-| Rama local vs `origin/tiered-sla-contracts` | Sincronizadas tras publicar el cierre; sin cambios pendientes. |
+| Rama local vs `origin/tiered-sla-contracts` | Sincronizadas; sin cambios pendientes. |
+| `git diff --check origin/main` | **exit 0** tras convertir 58 saltos duros de 6 documentos Markdown a `\`. |
 | PHP lint de los 92 archivos PHP modificados | Sin errores. |
 | `PostgresTieredSlaMetricsPerformanceTest` | **34/34**, exit 0 (solo `PG_TEST_DSN`; la suite alinea `DATABASE_URL`). |
 | `TieredSlaDomainTest` | **66/66**, exit 0. |
@@ -232,4 +233,4 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 2. ~~Alinear la suite H-04 con `PG_TEST_DSN` y su comando de ejecución.~~ Corregido en esta rama.
 3. ~~Repetir la batería global completa sobre un banco TLS sano.~~ Corregido: 403/403 suites · 15.142 aserciones · exit 0 sobre `vendguard_pr16`.
 4. ~~Corregir la contradicción H-05/H-06 y unificar las cifras documentales.~~ Corregido en esta rama.
-5. Limpiar los espacios finales señalados por `git diff --check`.
+5. ~~Limpiar los espacios finales señalados por `git diff --check`.~~ Corregido.

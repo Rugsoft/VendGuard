@@ -1,9 +1,9 @@
 # Plan de Implementación Técnica: Perfiles de SLA Diferenciados por Tipo de Sede (Contratos de Nivel de Servicio Escalonados)
-**Módulo:** `30-tiered-sla-contracts` (Feature 17 de `docs/features_pendientes.md`)  
-**Versión:** 2.0 (Alineado con `spec.md` v2.0 y `tiered_sla_contracts_contracts.md` v1.0 · Aprobados por el Product Owner el 2026-11-09)  
-**Estado:** Plan Técnico Aprobado por el Product Owner el 2026-11-09 · Puerta SDD cerrada · Definitivo para Ejecución SDD  
-**Marco Normativo:** [`constitution.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/constitution.md) · [`AGENTS.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/AGENTS.md) · [`docs/design.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/docs/design.md)  
-**Especificación Funcional:** [`specs/30-tiered-sla-contracts/spec.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/30-tiered-sla-contracts/spec.md) (v2.0) · [`specs/functional/tiered_sla_contracts_spec.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/functional/tiered_sla_contracts_spec.md)  
+**Módulo:** `30-tiered-sla-contracts` (Feature 17 de `docs/features_pendientes.md`)\
+**Versión:** 2.0 (Alineado con `spec.md` v2.0 y `tiered_sla_contracts_contracts.md` v1.0 · Aprobados por el Product Owner el 2026-11-09)\
+**Estado:** Plan Técnico Aprobado por el Product Owner el 2026-11-09 · Puerta SDD cerrada · Definitivo para Ejecución SDD\
+**Marco Normativo:** [`constitution.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/constitution.md) · [`AGENTS.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/AGENTS.md) · [`docs/design.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/docs/design.md)\
+**Especificación Funcional:** [`specs/30-tiered-sla-contracts/spec.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/30-tiered-sla-contracts/spec.md) (v2.0) · [`specs/functional/tiered_sla_contracts_spec.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/functional/tiered_sla_contracts_spec.md)\
 **Contratos Técnicos:** [`specs/technical/tiered_sla_contracts_contracts.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/technical/tiered_sla_contracts_contracts.md) · [`specs/technical/database_schema.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/technical/database_schema.md) · [`specs/technical/schema_correspondence_contract.md`](file:///c:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/specs/technical/schema_correspondence_contract.md)
 
 ---

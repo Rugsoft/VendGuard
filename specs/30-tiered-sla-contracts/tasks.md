@@ -1,9 +1,9 @@
 # Plan de Tareas de Implementación (`tasks.md`): Perfiles de SLA Diferenciados por Tipo de Sede (`30-tiered-sla-contracts`)
 
-**Módulo:** `30-tiered-sla-contracts`  
-**Versión:** 1.0 (Alineado con `spec.md` v2.0, `tiered_sla_contracts_contracts.md` v1.0, `plan.md` v2.0 y `docs/design.md`)  
-**Estado:** Aprobado por el Product Owner el 2026-11-09 · Puerta SDD cerrada · Listo para Ejecución de las Tareas `T-SLA-01` a `T-SLA-14` (Fase 3: tests y código)  
-**Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño  
+**Módulo:** `30-tiered-sla-contracts`\
+**Versión:** 1.0 (Alineado con `spec.md` v2.0, `tiered_sla_contracts_contracts.md` v1.0, `plan.md` v2.0 y `docs/design.md`)\
+**Estado:** Aprobado por el Product Owner el 2026-11-09 · Puerta SDD cerrada · Listo para Ejecución de las Tareas `T-SLA-01` a `T-SLA-14` (Fase 3: tests y código)\
+**Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño\
 **Ley Suprema:** [`constitution.md`](../../constitution.md), [`AGENTS.md`](../../AGENTS.md) y [`docs/design.md`](../../docs/design.md)
 
 ---
