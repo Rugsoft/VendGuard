@@ -6,7 +6,7 @@
 | **PR** | [#16 · feat(sla): perfiles de SLA diferenciados por tipo de sede y sellado contractual (Módulo 30)](https://github.com/Rugsoft/VendGuard/pull/16) |
 | **Rama origen** | `tiered-sla-contracts` |
 | **Rama destino** | `main` |
-| **Commit revisado** | `ae8c64af732f4285fd0a79c7678b7b0908a51dac` (remoto) · 4 commits locales pendientes |
+| **Commit revisado** | `ecbf58367b8140feda26f293a5ecf06958d058fd` (remoto, 25 commits) |
 | **Fecha de revisión** | 2026-11-10 |
 | **Estado de la PR** | abierta, `MERGEABLE` / `CLEAN`, sin checks de CI asociados. |
 
@@ -14,9 +14,9 @@
 
 ## Veredicto
 
-La PR remota está sincronizada con su rama y no tiene conflictos; la rama local suma 4 commits pendientes de publicación. Los hallazgos funcionales 1 y 2 y la contradicción documental 4 están corregidos; las cifras y el recuento de commits se han unificado. Quedan la batería global (hallazgo 3) y la limpieza de espacios finales (hallazgo 5).
+La PR remota tiene 25 commits publicados y no presenta conflictos. Los hallazgos 1, 2, 3 y 4 están corregidos; las cifras y el recuento de commits se han unificado. El cierre de la batería y la actualización de cifras quedan en un commit documental local pendiente de publicación. Solo queda la limpieza de espacios finales (hallazgo 5).
 
-> **Actualización (2026-11-10):** los hallazgos 1, 2 y 4 quedan corregidos en esta rama. El alta y la elevación del puente sellan el perfil, los minutos y el vencimiento; H-04 fija `DATABASE_URL` desde `PG_TEST_DSN` antes del bootstrap y pasa 34/34 con solo ese contrato. El recuento de commits se alinea en 21 para la PR remota (4 commits locales pendientes de publicación) y las cifras de H-04 se unifican en la corrida del 2026-11-10: 97,0 / 160,9 / 162,3 ms. Las regresiones del puente están en `tests/unit/PreventiveCoexistenceBridgeServiceTest.php` (60 aserciones).
+> **Actualización (2026-11-10):** los hallazgos 1, 2, 3 y 4 quedan corregidos en esta rama. El alta y la elevación del puente sellan el perfil, los minutos y el vencimiento; H-04 fija `DATABASE_URL` desde `PG_TEST_DSN` antes del bootstrap y pasa 34/34 con solo ese contrato. La batería global se ejecutó sobre el banco TLS sano `vendguard_pr16`: **403/403 suites · 15.142 aserciones · 0 fallos · exit 0**. El recuento de commits es **25** en la PR remota; el commit documental con este cierre queda pendiente de publicación. Las cifras de H-04 quedan unificadas en 97,0 / 160,9 / 162,3 ms. Las regresiones del puente están en `tests/unit/PreventiveCoexistenceBridgeServiceTest.php` (60 aserciones).
 
 ---
 
@@ -26,7 +26,7 @@ La PR remota está sincronizada con su rama y no tiene conflictos; la rama local
 | :--- | :--- | :--- | :--- |
 | 1 | **Alta** | El puente preventivo no sella el SLA y degrada objetivos existentes. | Corregido en código; pendiente de revisión |
 | 2 | **Alta/media** | La suite H-04 no es reproducible con el comando que documenta. | Corregido en código; verificado |
-| 3 | **Media** | La batería global no pudo completarse por el estado del banco TLS local. | Limitación de entorno |
+| 3 | **Media** | La batería global no pudo completarse por el estado del banco TLS local. | Corregido: 403/403 suites · 15.142 aserciones · exit 0 |
 | 4 | **Baja** | La auditoría se contradice sobre el estado de H-05/H-06. | Corregido en documentación |
 | 5 | **Baja** | Cifras, recuento de commits y `git diff --check` desactualizados. | Cifras y recuento corregidos; espacios finales pendientes |
 
@@ -126,26 +126,50 @@ La suite pasó **34/34** cuando fijé `DATABASE_URL` y `PG_TEST_DSN` a la **mism
 
 ## 3. Media · La batería global no pudo completarse por el estado del banco TLS local
 
-**No es un defecto de código de la PR**, pero impide declarar la verificación completa.
+**Estado:** corregido. La batería completa se ejecutó el 2026-11-10 sobre el banco TLS sano `vendguard_pr16`, en el contenedor `vendguard-pg-tls` (puerto 55433).
 
-- El contenedor `vendguard-pg-tls-opp16` (puerto 55434, el que usaba `.env.battery`) estaba caído.
-- El contenedor `vendguard-pg-tls` (puerto 55433) tiene un volumen antiguo y `provision-tls-engine.sh` falla al inicializar porque la migración **025** ya aplicada tiene una huella distinta a la actual:
+**Contexto original.** El contenedor `vendguard-pg-tls-opp16` (puerto 55434, al que apuntaba `.env.battery`) estaba caído, y el volumen del contenedor de 55433 conservaba una migración **025** con una huella distinta a la vigente, de modo que `provision-tls-engine.sh` no podía reinicializarlo. El intento anterior sobre `vendguard_pr16` se cortó a los ~295 s sin resumen ni código de salida.
 
-```text
-La migración «025_sanitary_spoilage_records.sql» ya estaba aplicada y su contenido ha cambiado
-(huella 8b96b29884447c1527ebd023782311a8fc822e688efa74dea79b6d21e479c328
-≠ 1335de1d87d896cf22c8892a3610ad00b867760bdda762a6c675640418e7ec5f)
+**Banco de la corrida.** `vendguard_pr16` se inicializó con las **26 migraciones** y el catálogo maestro: 10 sedes, 13 máquinas, 6 usuarios y **0 averías**. La huella de la 025 es la vigente (`1335de1d…`). No se tocó `.env.battery`; la corrida se dirigió con `DATABASE_URL` de proceso, derivado de `PG_TEST_DSN`:
+
+```bash
+source deploy/local/postgres/.env.docker-tls
+export DATABASE_URL="${PG_TEST_DSN/vendguard_pg_test/vendguard_pr16}"
+php tests/run_all.php
 ```
 
-Para aislar el problema creé una base limpia `vendguard_pr16` en el contenedor TLS de 55433. La inicialización aplicó correctamente las **26 migraciones** y el catálogo maestro (10 sedes, 13 máquinas, 6 usuarios).
+**Resumen completo**
 
-La corrida global de `run_all.php` sobre esa base pasó muchas suites, pero se cortó a los ~295 s sin marcador de cierre. **No se cuenta como verde**: no hay resumen final ni código de salida. No se identificó una suite fallida; la ejecución no terminó.
+```text
+======================================================================
+ RESUMEN DE EJECUCIÓN GLOBAL (T-39)
+======================================================================
+ Tiempo de ejecución total : 403.12 segundos
+ Suites de pruebas PHP Unit : 174 / 174 pasadas
+ Suites de pruebas JS Unit  : 97 / 97 pasadas
+ Suites de Integración PHP  : 130 / 130 pasadas
+ Suites E2E Manuales (T-40): 2 / 2 pasadas
+ ──────────────────────────────────────────────────────────────────
+ Total Suites Ejecutadas    : 403
+ Total Aserciones Evaluadas : 15142
+ Fallos Detectados          : 0
+ Cifras documentadas        : COHERENTES
+ Base de datos restablecida : SÍ (Semillas intactas)
+======================================================================
+ RESULTADO: 100% EN VERDE. (0 errors, 0 failures)
+ CONDICIÓN T-39 CUMPLIDA SATISFACTORIAMENTE.
+======================================================================
+```
+
+La primera pasada también terminó con **403/403 suites y 0 fallos**, pero `DocMetricsGuard` detectó 4 desviaciones porque el README y `docs/features_pendientes.md` declaraban **15.125** aserciones. Se corrigieron esas cifras en el README, la auditoría, la matriz de trazabilidad y `features_pendientes.md`; la segunda pasada cerró con **exit 0** y **cifras documentadas coherentes**. El banco quedó restablecido con 10 sedes, 13 máquinas, 6 usuarios y 0 averías.
+
+**Limitación restante:** `.env.battery` sigue apuntando al contenedor caído de 55434; la corrida se dirige con `DATABASE_URL` de proceso. Para dejar el contrato por defecto sano hay que reprovisionar ese contenedor o apuntar el contrato a una base del 55433.
 
 ### Corrección esperada
 
-- Reconciliar o recrear el volumen TLS local para que la migración 025 tenga la huella vigente.
-- Repetir `php tests/run_all.php` con `DATABASE_URL` apuntando al banco de la batería y dejar el resumen completo.
-- Mantener `vendguard_pr16` como banco aislado si se quiere evitar tocar el volumen antiguo.
+- ~~Reconciliar o recrear el volumen TLS local para que la migración 025 tenga la huella vigente.~~ Se usó `vendguard_pr16`, con la huella vigente, en lugar de tocar el volumen antiguo.
+- ~~Repetir `php tests/run_all.php` con `DATABASE_URL` apuntando al banco de la batería y dejar el resumen completo.~~ Corregido: exit 0, 403/403 suites, 15.142 aserciones.
+- ~~Mantener `vendguard_pr16` como banco aislado si se quiere evitar tocar el volumen antiguo.~~ Es el banco de la corrida de cierre.
 
 ---
 
@@ -170,7 +194,7 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 
 **Estado:** cifras y recuento corregidos; espacios finales pendientes.
 
-- El cuerpo de la PR declaraba **22 commits**; la PR remota tiene **21** y la rama local suma **4** pendientes de publicación. El cuerpo ya publica 21.
+- El cuerpo de la PR declaraba **22 commits**; tras publicar los 4 commits de la revisión, la PR remota tiene **25** y el cuerpo ya publica esa cifra. El cierre de la batería y la actualización de cifras van en un commit documental local pendiente de publicación.
 - Cifra canónica H-04: **97,0 / 160,9 / 162,3 ms** (summary, breakdown, export; corrida del 2026-11-10 con `PG_TEST_DSN`), con p95 **100,4 / 166,1 / 168,9 ms**. Está unificada en el cuerpo de la PR, la auditoría y la matriz de trazabilidad.
 - `git diff --check origin/main...origin/tiered-sla-contracts` sigue detectando espacios finales en Markdown, casi todos saltos de línea intencionales con dos espacios. Si el proyecto usa ese check como puerta, hay que limpiarlos o documentar la convención.
 
@@ -186,7 +210,7 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 | Comprobación | Resultado |
 | :--- | :--- |
 | `gh pr view 16` | `OPEN`, `MERGEABLE`, `CLEAN`, base `main`, head `tiered-sla-contracts`. |
-| Rama local vs `origin/tiered-sla-contracts` | 4 commits locales por delante; árbol limpio. |
+| Rama local vs `origin/tiered-sla-contracts` | `origin` en `ecbf583` (25 commits); 1 commit documental local pendiente de publicación; sin cambios sin commitear. |
 | PHP lint de los 92 archivos PHP modificados | Sin errores. |
 | `PostgresTieredSlaMetricsPerformanceTest` | **34/34**, exit 0 (solo `PG_TEST_DSN`; la suite alinea `DATABASE_URL`). |
 | `TieredSlaDomainTest` | **66/66**, exit 0. |
@@ -195,8 +219,8 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 | `PostgresTieredSlaSchemaTest` | **17/17**, exit 0. |
 | `PostgresTieredSlaBackfillTest` | **80/80**, exit 0. |
 | `TieredSlaContractsApiTest` | **45/45**, exit 0. |
-| Inicialización de `vendguard_pr16` | 26 migraciones + semillas; 10 sedes, 13 máquinas, 6 usuarios. |
-| Batería global `run_all.php` | Incompleta: cortada a los ~295 s sin resumen final. |
+| Inicialización de `vendguard_pr16` | 26 migraciones + semillas; 10 sedes, 13 máquinas, 6 usuarios, 0 averías. |
+| Batería global `run_all.php` | **403/403 suites · 15.142 aserciones · 0 fallos · exit 0** (403,12 s; `vendguard_pr16`). |
 | Secretos, `.env`, claves o volcados en el diff | Ninguno. |
 | `var_dump` / `print_r` / depuración añadida | Ninguno. |
 
@@ -206,6 +230,6 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 
 1. ~~Corregir el sellado del puente preventivo y añadir sus regresiones.~~ Corregido en esta rama.
 2. ~~Alinear la suite H-04 con `PG_TEST_DSN` y su comando de ejecución.~~ Corregido en esta rama.
-3. Repetir la batería global completa sobre un banco TLS sano.
+3. ~~Repetir la batería global completa sobre un banco TLS sano.~~ Corregido: 403/403 suites · 15.142 aserciones · exit 0 sobre `vendguard_pr16`.
 4. ~~Corregir la contradicción H-05/H-06 y unificar las cifras documentales.~~ Corregido en esta rama.
 5. Limpiar los espacios finales señalados por `git diff --check`.

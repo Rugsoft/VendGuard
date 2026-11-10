@@ -59,7 +59,7 @@ Lo que está sólidamente cumplido y certificado: RF-01, RF-02 (Portal, **Coordi
 | `tests/integration/OpportunisticSchemaCorrespondenceTest.php` | **32/32**, exit 0 |
 | `tests/integration/PostgresConstitutionalTest.php` | **77/77**, exit 0 |
 | `tests/integration/ConstitutionalAuditTest.php` | **44 líneas PASS, 100 %** |
-| Batería global `php tests/run_all.php` | **exit 0; 403 suites; 15.125 aserciones; 0 fallos**; `DocMetricsGuard` coherente; fases 174/97/130/2 |
+| Batería global `php tests/run_all.php` | **exit 0; 403 suites; 15.142 aserciones; 0 fallos**; `DocMetricsGuard` coherente; fases 174/97/130/2 |
 
 ### 2.1. Nombres de archivo solicitados que no existen
 
@@ -195,7 +195,7 @@ No es un fallo funcional, pero impide una trazabilidad literal 1:1 entre `spec.m
 | **5** | Recomendador con `+60`, saturación y respaldo | Dominio 7.x; API 4.1–4.2 | **✅** |
 | **6** | Visible en Coordinación, Técnico/offline y Portal; ausente en QR y A4 | API 3.3–3.5; frontend 47/47; `OfflinePwaAssetsAndUiGuardTest` 44/44 | **✅** |
 | **7** | Métricas y CSV con objetivo sellado, 24/12/8 h, brechas y veredicto | API 5.1–5.3; dominio 8.x | **✅** |
-| **8** | Históricos cerrados conservan 240/1440 y toda la suite al 100 % | Suite global **✅ 403/15.125/0**; backfill histórico **✅ 80/80** | **✅** |
+| **8** | Históricos cerrados conservan 240/1440 y toda la suite al 100 % | Suite global **✅ 403/15.142/0**; backfill histórico **✅ 80/80** | **✅** |
 
 ---
 
@@ -366,7 +366,7 @@ Mantener la suite en la categoría `new_engine` y repetirla tras cualquier cambi
 - **RNF-02 y RNF-03:** inmutabilidad constitucional y sistema de diseño.
 - **Trazabilidad documental completa (H-06):** nombres reales, comandos verificables y requisitos canónicos alineados.
 - **Opacidad QR/A4**, snapshot inmutable, recálculo por prioridad, absorción QR, reapertura < 48 h y Portal de Sede.
-- **Batería global:** 403 suites, 15.125 aserciones, 0 fallos; `ConstitutionalAuditTest` al 100 %.
+- **Batería global:** 403 suites, 15.142 aserciones, 0 fallos; `ConstitutionalAuditTest` al 100 %.
 
 ---
 

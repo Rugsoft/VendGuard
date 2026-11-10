@@ -113,7 +113,7 @@ Para que la trazabilidad sea verificable y no invente criterios que la especific
 
 ```text
 Comando: php tests/run_all.php
-Resultado: 403 suites · 15.125 aserciones · 0 fallos · 0 desviaciones documentales · exit 0
+Resultado: 403 suites · 15.142 aserciones · 0 fallos · 0 desviaciones documentales · exit 0
 Fases: PHP Unit 174/174 · JS Unit 97/97 · Integración 130/130 · E2E 2/2
 ```
 
