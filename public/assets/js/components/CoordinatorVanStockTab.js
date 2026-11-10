@@ -845,9 +845,7 @@ export const CoordinatorVanStockTab = {
 
   template: `
     <div class="coordinator-van-stock-tab" data-testid="coord-van-stock-tab" style="padding-top: 8px;">
-      <!-- Hoja del Picking A4: se enlaza al montar la pestaña para que el papel
-           tenga sus reglas incluso cuando la aplicación no la cargue globalmente. -->
-      <link rel="stylesheet" href="/assets/css/styles.css" />
+      <!-- Hoja del Picking A4: styles.css se enlaza globalmente en index.html. -->
 
       <!-- Avisos -->
       <div

@@ -584,8 +584,7 @@ export const CoordinatorSanitarySpoilageTab = {
   },
   template: `
     <section class="vg-spoilage-tab" data-testid="coordinator-spoilage-tab">
-      <!-- La tabla y los KPIs viven en styles.css; esta pestaña la carga bajo demanda. -->
-      <link rel="stylesheet" href="/assets/css/styles.css" />
+      <!-- La tabla y los KPIs viven en styles.css, enlazada globalmente por index.html. -->
 
       <header class="vg-spoilage-tab__header">
         <div>

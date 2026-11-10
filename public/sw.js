@@ -22,7 +22,7 @@
 'use strict';
 
 /** Nombre de caché versionado (contratos §2.2). Subirlo es lo que invalida el shell. */
-const CACHE_NAME = 'vendguard-app-shell-v11';
+const CACHE_NAME = 'vendguard-app-shell-v12';
 
 /** Prefijo de la superficie HTTP que jamás entra en caché (Art. V.4). */
 const API_PATH_PREFIX = '/api/';
@@ -32,8 +32,8 @@ const API_PATH_PREFIX = '/api/';
  *
  * La lista es explícita a propósito —el Service Worker no puede enumerar el sistema de
  * ficheros— y debe crecer con cada módulo nuevo, o la interfaz se quedaría a medias sin
- * conexión. `styles.css` entra aunque no lo enlace `index.html` porque lo carga bajo
- * demanda la pestaña de stock de furgoneta del coordinador.
+ * conexión. `styles.css` es la hoja global enlazada por `index.html` y forma parte del
+ * shell para que el layout completo esté disponible también sin red.
  */
 /*
  * La raíz no se precachea: su respuesta depende de la cabecera Accept —HTML

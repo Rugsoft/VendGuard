@@ -631,10 +631,8 @@ export const CoordinatorTroubleshootingGuidesTab = {
   },
   template: `
     <div class="vg-guides-tab" data-testid="coordinator-guides-tab">
-      <!-- La hoja no viaja en index.html: se enlaza bajo demanda, como en las
-           pestañas de Pareto y Stock de furgoneta, para que las tarjetas KPI,
-           la toolbar y la tabla tengan su layout incluso en una carga directa. -->
-      <link rel="stylesheet" href="/assets/css/styles.css" />
+      <!-- La hoja compartida styles.css se enlaza globalmente en index.html;
+           las tarjetas KPI, la toolbar y la tabla conservan su layout. -->
 
       <div v-if="errorMessage" class="vg-guides-tab__alert vg-guides-tab__alert--error" role="alert">
         <span>⚠️ {{ errorMessage }}</span>

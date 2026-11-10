@@ -176,6 +176,11 @@ assert(
   missingAssets.length === 0,
   missingAssets.join(', ')
 );
+assert(
+  '2.4b El documento enlaza la hoja global styles.css',
+  indexHtmlSource.includes('href="/assets/css/styles.css"')
+    && shellSet.has('/assets/css/styles.css')
+);
 
 const unresolvedImports = [];
 for (const asset of shellAssets.filter((entry) => entry.split('?')[0].endsWith('.js'))) {
