@@ -21,7 +21,7 @@
 | :--- | :--- | :--- | :--- |
 | **H-01** | **Alta** | El Portal de Sede no carga `styles.css`; la fila del contrato SLA pierde su layout. | **Corregido** |
 | **H-02** | **Alta** | `GET /api/technician/my-route` no publica los campos SLA; el técnico ve «Contrato sin asignar». | **Corregido** |
-| **H-03** | **Alta** | Desbordamiento horizontal de 205 px en la vista móvil del técnico a 390 px. | Abierto |
+| **H-03** | **Alta** | Desbordamiento horizontal de 205 px en la vista móvil del técnico a 390 px. | **Corregido** |
 | **H-04** | **Media** | La tabla de triaje desborda a 1280 × 720 y el chat tapa acciones. | Abierto |
 | **H-05** | **Baja** | El panel de Coordinación renderiza pestañas, filtros y tabla antes del login. | Abierto |
 | **H-06** | **Baja** | El modal de satisfacción se abre automáticamente al entrar en el Portal de Sede. | Abierto |
@@ -206,11 +206,26 @@ La cabecera y la barra de perfiles usan disposición en línea sin `flex-wrap`, 
 3. En móvil, ocultar el selector de perfiles de demostración o convertirlo en un control compacto.
 4. Verificar a 360, 390 y 430 px que `scrollWidth <= clientWidth`.
 
+**Resolución (2026-11-10)**
+
+H-03 corregido en la rama `tiered-sla-contracts`:
+
+- La cabecera global usa `.vg-navbar__inner` y `.vg-navbar__actions` con `flex-wrap`, `min-width: 0` y altura mínima en lugar de una fila fija de 56 px. En móvil, las acciones ocupan una línea completa y la etiqueta de sesión puede truncarse con elipsis.
+- La barra de perfiles usa `.vg-profile-tabs` con envoltura y ancho máximo; el bloque de credenciales puede romper direcciones largas sin ensanchar el documento.
+- La cabecera de la ruta del técnico usa `.vg-tech-route-header` y `.vg-tech-route-actions` con envoltura y límites flexibles; la identidad conserva una base de 120 px para que las acciones pasen a una segunda línea solo cuando no caben.
+- `public/sw.js` sube la caché del shell a `vendguard-app-shell-v13` para que los clientes instalados reciban los estilos y módulos corregidos.
+- Se añadió `tests/unit/MobileShellLayoutGuardTest.mjs` (7/7) para congelar la envoltura, los límites de ancho y la versión de caché.
+- Verificación en navegador con el desplegable de credenciales abierto: a 360 px, `clientWidth=343` y `scrollWidth=343`; a 390 px, `373/373`; a 430 px, `413/413`. En los tres casos el desbordamiento es 0 px. A 1280 px no hay desbordamiento y la cabecera global conserva 56 px de alto.
+- `TechnicianRouteViewTest.mjs`, `OfflinePwaAssetsAndUiGuardTest.mjs` y `TroubleshootingGuideCoverageUiTest.mjs` pasan sin fallos.
+
 **Archivos relacionados**
 
 - `public/assets/css/styles.css` (reglas de cabecera y barra de perfiles)
+- `public/assets/js/components/AppNavbar.js` (cabecera y bloque de sesión)
+- `public/assets/js/app.js` (selector de perfiles y guía de credenciales)
 - `public/assets/js/views/TechnicianRouteView.js` (cabecera de la ruta)
-- `public/index.html` (contenedor del selector de perfiles)
+- `public/sw.js` (versión de caché del shell)
+- `tests/unit/MobileShellLayoutGuardTest.mjs` (guarda de regresión)
 
 **Evidencia visual**
 

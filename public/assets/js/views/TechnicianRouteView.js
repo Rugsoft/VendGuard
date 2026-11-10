@@ -3693,9 +3693,10 @@ export const TechnicianRouteView = {
       <div v-else>
         <!-- Mobile Top Header -->
         <div
+          class="vg-tech-route-header"
           style="display: flex; align-items: center; justify-content: space-between; background-color: #ffffff; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); padding: 12px 14px; margin-bottom: 14px; box-shadow: var(--shadow-card, 0 1px 3px rgba(0,0,0,0.04));"
         >
-          <div style="display: flex; align-items: center; gap: 10px;">
+          <div class="vg-tech-route-identity" style="display: flex; align-items: center; gap: 10px;">
             <div
               style="width: 38px; height: 38px; border-radius: 50%; background-color: #e5f2fc; color: var(--color-primary, #2560ff); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px;"
             >
@@ -3711,7 +3712,7 @@ export const TechnicianRouteView = {
             </div>
           </div>
 
-          <div style="display: flex; gap: 6px;">
+          <div class="vg-tech-route-actions" style="display: flex; gap: 6px;">
             <a
               href="/docs/guia_rapida_por_rol_a4.html#guia-tecnico"
               target="_blank"

@@ -1962,3 +1962,132 @@ details.vg-guide-accordion__disclosure:not([open]) .vg-guide-accordion__body {
     grid-template-columns: 1fr;
   }
 }
+
+/*
+ * App shell responsive layout (H-03).
+ *
+ * The navbar, the demo profile bar and the technician route header had inline
+ * flex rows without wrapping. At 390px their fixed children pushed the document
+ * to 578px. These rules keep every row inside the viewport: wrapping is enabled,
+ * text blocks can shrink, and the document no longer needs horizontal scrolling.
+ */
+.vg-navbar__inner {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  width: 100%;
+  max-width: 1200px;
+  min-height: 56px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.vg-navbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.vg-navbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.vg-navbar__session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.vg-navbar__session-role {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.vg-navbar__session-label {
+  min-width: 0;
+}
+
+.vg-profile-bar__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.vg-profile-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.vg-profile-tabs__label {
+  margin-right: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink-muted);
+}
+
+.vg-profile-tabs .vg-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.vg-profile-bar__credentials {
+  min-width: 0;
+}
+
+.vg-profile-guide {
+  overflow-wrap: anywhere;
+}
+
+.vg-tech-route-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.vg-tech-route-identity {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.vg-tech-route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 700px) {
+  .vg-navbar__inner {
+    align-items: flex-start;
+    padding: 8px 16px;
+  }
+
+  .vg-navbar__actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
