@@ -6,7 +6,7 @@
 | **PR** | [#16 · feat(sla): perfiles de SLA diferenciados por tipo de sede y sellado contractual (Módulo 30)](https://github.com/Rugsoft/VendGuard/pull/16) |
 | **Rama origen** | `tiered-sla-contracts` |
 | **Rama destino** | `main` |
-| **Commit revisado** | `ecbf58367b8140feda26f293a5ecf06958d058fd` (remoto, 25 commits) |
+| **Commit revisado** | `ecbf58367b8140feda26f293a5ecf06958d058fd` (25 commits al cierre de la revisión; el cierre de la batería se publicó después) |
 | **Fecha de revisión** | 2026-11-10 |
 | **Estado de la PR** | abierta, `MERGEABLE` / `CLEAN`, sin checks de CI asociados. |
 
@@ -14,9 +14,9 @@
 
 ## Veredicto
 
-La PR remota tiene 25 commits publicados y no presenta conflictos. Los hallazgos 1, 2, 3 y 4 están corregidos; las cifras y el recuento de commits se han unificado. El cierre de la batería y la actualización de cifras quedan en un commit documental local pendiente de publicación. Solo queda la limpieza de espacios finales (hallazgo 5).
+La PR remota contiene la revisión y su cierre documental, sin conflictos. Los hallazgos 1, 2, 3 y 4 están corregidos; las cifras y el recuento de commits se han unificado. Solo queda la limpieza de espacios finales (hallazgo 5).
 
-> **Actualización (2026-11-10):** los hallazgos 1, 2, 3 y 4 quedan corregidos en esta rama. El alta y la elevación del puente sellan el perfil, los minutos y el vencimiento; H-04 fija `DATABASE_URL` desde `PG_TEST_DSN` antes del bootstrap y pasa 34/34 con solo ese contrato. La batería global se ejecutó sobre el banco TLS sano `vendguard_pr16`: **403/403 suites · 15.142 aserciones · 0 fallos · exit 0**. El recuento de commits es **25** en la PR remota; el commit documental con este cierre queda pendiente de publicación. Las cifras de H-04 quedan unificadas en 97,0 / 160,9 / 162,3 ms. Las regresiones del puente están en `tests/unit/PreventiveCoexistenceBridgeServiceTest.php` (60 aserciones).
+> **Actualización (2026-11-10):** los hallazgos 1, 2, 3 y 4 quedan corregidos en esta rama. El alta y la elevación del puente sellan el perfil, los minutos y el vencimiento; H-04 fija `DATABASE_URL` desde `PG_TEST_DSN` antes del bootstrap y pasa 34/34 con solo ese contrato. La batería global se ejecutó sobre el banco TLS sano `vendguard_pr16`: **403/403 suites · 15.142 aserciones · 0 fallos · exit 0**. El cuerpo de la PR refleja el recuento vigente de commits. Las cifras de H-04 quedan unificadas en 97,0 / 160,9 / 162,3 ms. Las regresiones del puente están en `tests/unit/PreventiveCoexistenceBridgeServiceTest.php` (60 aserciones).
 
 ---
 
@@ -194,7 +194,7 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 
 **Estado:** cifras y recuento corregidos; espacios finales pendientes.
 
-- El cuerpo de la PR declaraba **22 commits**; tras publicar los 4 commits de la revisión, la PR remota tiene **25** y el cuerpo ya publica esa cifra. El cierre de la batería y la actualización de cifras van en un commit documental local pendiente de publicación.
+- El cuerpo de la PR declaraba **22 commits**; los commits de la revisión y el cierre documental ya están publicados y el cuerpo refleja el recuento vigente.
 - Cifra canónica H-04: **97,0 / 160,9 / 162,3 ms** (summary, breakdown, export; corrida del 2026-11-10 con `PG_TEST_DSN`), con p95 **100,4 / 166,1 / 168,9 ms**. Está unificada en el cuerpo de la PR, la auditoría y la matriz de trazabilidad.
 - `git diff --check origin/main...origin/tiered-sla-contracts` sigue detectando espacios finales en Markdown, casi todos saltos de línea intencionales con dos espacios. Si el proyecto usa ese check como puerta, hay que limpiarlos o documentar la convención.
 
@@ -210,7 +210,7 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 | Comprobación | Resultado |
 | :--- | :--- |
 | `gh pr view 16` | `OPEN`, `MERGEABLE`, `CLEAN`, base `main`, head `tiered-sla-contracts`. |
-| Rama local vs `origin/tiered-sla-contracts` | `origin` en `ecbf583` (25 commits); 1 commit documental local pendiente de publicación; sin cambios sin commitear. |
+| Rama local vs `origin/tiered-sla-contracts` | Sincronizadas tras publicar el cierre; sin cambios pendientes. |
 | PHP lint de los 92 archivos PHP modificados | Sin errores. |
 | `PostgresTieredSlaMetricsPerformanceTest` | **34/34**, exit 0 (solo `PG_TEST_DSN`; la suite alinea `DATABASE_URL`). |
 | `TieredSlaDomainTest` | **66/66**, exit 0. |
