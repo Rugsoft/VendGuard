@@ -6,7 +6,7 @@
 | **PR** | [#16 · feat(sla): perfiles de SLA diferenciados por tipo de sede y sellado contractual (Módulo 30)](https://github.com/Rugsoft/VendGuard/pull/16) |
 | **Rama origen** | `tiered-sla-contracts` |
 | **Rama destino** | `main` |
-| **Commit revisado** | `ae8c64af732f4285fd0a79c7678b7b0908a51dac` |
+| **Commit revisado** | `ae8c64af732f4285fd0a79c7678b7b0908a51dac` (remoto) · 4 commits locales pendientes |
 | **Fecha de revisión** | 2026-11-10 |
 | **Estado de la PR** | abierta, `MERGEABLE` / `CLEAN`, sin checks de CI asociados. |
 
@@ -14,9 +14,9 @@
 
 ## Veredicto
 
-La PR está sincronizada con su rama remota y no tiene conflictos, pero **no debería fusionarse todavía**. Hay un fallo funcional de negocio en el sellado de SLA del puente preventivo y un problema de reproducibilidad de la certificación H-04. Los otros tres hallazgos son de entorno y de coherencia documental.
+La PR remota está sincronizada con su rama y no tiene conflictos; la rama local suma 4 commits pendientes de publicación. Los hallazgos funcionales 1 y 2 y la contradicción documental 4 están corregidos; las cifras y el recuento de commits se han unificado. Quedan la batería global (hallazgo 3) y la limpieza de espacios finales (hallazgo 5).
 
-> **Actualización (2026-11-10):** los hallazgos 1 y 2 quedan corregidos en esta rama. El alta y la elevación del puente sellan el perfil, los minutos y el vencimiento; H-04 fija `DATABASE_URL` desde `PG_TEST_DSN` antes del bootstrap y pasa 34/34 con solo ese contrato. Las regresiones del puente están en `tests/unit/PreventiveCoexistenceBridgeServiceTest.php` (60 aserciones).
+> **Actualización (2026-11-10):** los hallazgos 1, 2 y 4 quedan corregidos en esta rama. El alta y la elevación del puente sellan el perfil, los minutos y el vencimiento; H-04 fija `DATABASE_URL` desde `PG_TEST_DSN` antes del bootstrap y pasa 34/34 con solo ese contrato. El recuento de commits se alinea en 21 para la PR remota (4 commits locales pendientes de publicación) y las cifras de H-04 se unifican en la corrida del 2026-11-10: 97,0 / 160,9 / 162,3 ms. Las regresiones del puente están en `tests/unit/PreventiveCoexistenceBridgeServiceTest.php` (60 aserciones).
 
 ---
 
@@ -27,8 +27,8 @@ La PR está sincronizada con su rama remota y no tiene conflictos, pero **no deb
 | 1 | **Alta** | El puente preventivo no sella el SLA y degrada objetivos existentes. | Corregido en código; pendiente de revisión |
 | 2 | **Alta/media** | La suite H-04 no es reproducible con el comando que documenta. | Corregido en código; verificado |
 | 3 | **Media** | La batería global no pudo completarse por el estado del banco TLS local. | Limitación de entorno |
-| 4 | **Baja** | La auditoría se contradice sobre el estado de H-05/H-06. | Corrección documental |
-| 5 | **Baja** | Cifras, recuento de commits y `git diff --check` desactualizados. | Limpieza |
+| 4 | **Baja** | La auditoría se contradice sobre el estado de H-05/H-06. | Corregido en documentación |
+| 5 | **Baja** | Cifras, recuento de commits y `git diff --check` desactualizados. | Cifras y recuento corregidos; espacios finales pendientes |
 
 ---
 
@@ -153,6 +153,8 @@ La corrida global de `run_all.php` sobre esa base pasó muchas suites, pero se c
 
 **Archivo:** `docs/auditoria_modulo_30_hallazgos.md`
 
+**Estado:** corregido: la línea 300 ya remite al cierre de H-05 y H-06.
+
 - Línea 10: la Spec 30 está **100 % cumplida** y H-01 a H-06 quedaron resueltos.
 - Línea 300: «La Spec 30 sigue pendiente de H-05 y H-06.»
 
@@ -166,16 +168,15 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 
 ## 5. Baja · Cifras, recuento de commits y `git diff --check` desactualizados
 
-- El cuerpo de la PR dice **22 commits**; `gh pr view 16 --json commits` devuelve **21**.
-- El cuerpo declara medianas H-04 de **96,7 / 157,9 / 164,6 ms**.
-- La auditoría declara **102,0 / 164,2 / 166,1 ms**.
-- La corrida de esta revisión midió **98,6 / 164,4 / 162,5 ms** (summary, breakdown, export).
-- Las tres están muy por debajo de 1,5 s, pero conviene publicar una sola corrida identificada y usarla en todos los documentos.
-- `git diff --check origin/main...origin/tiered-sla-contracts` sale con código **2** y **116 líneas** de espacios finales, casi todas en Markdown (saltos de línea intencionales con dos espacios). Si el proyecto usa ese check como puerta, está en rojo.
+**Estado:** cifras y recuento corregidos; espacios finales pendientes.
+
+- El cuerpo de la PR declaraba **22 commits**; la PR remota tiene **21** y la rama local suma **4** pendientes de publicación. El cuerpo ya publica 21.
+- Cifra canónica H-04: **97,0 / 160,9 / 162,3 ms** (summary, breakdown, export; corrida del 2026-11-10 con `PG_TEST_DSN`), con p95 **100,4 / 166,1 / 168,9 ms**. Está unificada en el cuerpo de la PR, la auditoría y la matriz de trazabilidad.
+- `git diff --check origin/main...origin/tiered-sla-contracts` sigue detectando espacios finales en Markdown, casi todos saltos de línea intencionales con dos espacios. Si el proyecto usa ese check como puerta, hay que limpiarlos o documentar la convención.
 
 ### Corrección esperada
 
-- Unificar el recuento de commits y las medianas en el cuerpo de la PR y en la auditoría.
+- ~~Unificar el recuento de commits y las medianas en el cuerpo de la PR y en la auditoría.~~ Corregido.
 - Limpiar los espacios finales o documentar la convención Markdown si son intencionales.
 
 ---
@@ -185,7 +186,7 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 | Comprobación | Resultado |
 | :--- | :--- |
 | `gh pr view 16` | `OPEN`, `MERGEABLE`, `CLEAN`, base `main`, head `tiered-sla-contracts`. |
-| Rama local vs `origin/tiered-sla-contracts` | `0/0`; árbol limpio. |
+| Rama local vs `origin/tiered-sla-contracts` | 4 commits locales por delante; árbol limpio. |
 | PHP lint de los 92 archivos PHP modificados | Sin errores. |
 | `PostgresTieredSlaMetricsPerformanceTest` | **34/34**, exit 0 (solo `PG_TEST_DSN`; la suite alinea `DATABASE_URL`). |
 | `TieredSlaDomainTest` | **66/66**, exit 0. |
@@ -206,4 +207,5 @@ Sustituir la línea 300 por una referencia al cierre de H-05 y H-06, o eliminarl
 1. ~~Corregir el sellado del puente preventivo y añadir sus regresiones.~~ Corregido en esta rama.
 2. ~~Alinear la suite H-04 con `PG_TEST_DSN` y su comando de ejecución.~~ Corregido en esta rama.
 3. Repetir la batería global completa sobre un banco TLS sano.
-4. Corregir la contradicción H-05/H-06 y unificar las cifras documentales.
+4. ~~Corregir la contradicción H-05/H-06 y unificar las cifras documentales.~~ Corregido en esta rama.
+5. Limpiar los espacios finales señalados por `git diff --check`.

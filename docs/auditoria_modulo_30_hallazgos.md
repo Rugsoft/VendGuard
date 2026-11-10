@@ -23,7 +23,7 @@
 
 **H-03 se cerró el 2026-11-09:** `PostgresTieredSlaBackfillTest` reconstruye el esquema previo a la 026, siembra avisos históricos, aplica la migración y certifica 240/1440 en cerrados, la matriz RF-01 en abiertos y la inmovilidad de `created_at` y del resto de indicadores históricos (80/80).
 
-**H-04 se cerró el 2026-11-09:** `PostgresTieredSlaMetricsPerformanceTest` mide el camino real de `summary`, `breakdown` y `export` con 3.000 resoluciones, 240 avisos abiertos y 600 resoluciones previas; las medianas son 102,0 ms, 164,2 ms y 166,1 ms, y las dos ejecuciones devuelven el mismo cuerpo (34/34).
+**H-04 se cerró el 2026-11-09 y se recertificó el 2026-11-10 con `PG_TEST_DSN`:** `PostgresTieredSlaMetricsPerformanceTest` mide el camino real de `summary`, `breakdown` y `export` con 3.000 resoluciones, 240 avisos abiertos y 600 resoluciones previas; las medianas son 97,0 ms, 160,9 ms y 162,3 ms, y las dos ejecuciones devuelven el mismo cuerpo (34/34).
 
 **H-02 se cerró el 2026-11-09:** `sla_target_at` se desplaza ahora por el total exacto de segundos naturales acumulados, y las pruebas M11 certifican la igualdad con el acumulador en lugar de una ventana comercial.
 
@@ -42,23 +42,17 @@ Lo que está sólidamente cumplido y certificado: RF-01, RF-02 (Portal, **Coordi
 | `tests/unit/DesignTokenDebtRatchetTest.mjs` | **3/3**, exit 0 |
 | `tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs` | **44/44**, exit 0 |
 | `tests/integration/TieredSlaContractsApiTest.php` | **45/45**, exit 0 (incluye alta coord, 9 h consumidas y REST coord) |
-| `tests/integration/PostgresTieredSlaSchemaTest.php` | **27/27**, exit 0 |
+| `tests/integration/PostgresTieredSlaSchemaTest.php` | **17/17**, exit 0 |
 | `tests/integration/PostgresTieredSlaBackfillTest.php` | **80/80**, exit 0 (esquema previo a 026) |
 | `tests/integration/PostgresTieredSlaMetricsPerformanceTest.php` | **34/34**, exit 0 (latencia < 1,5 s y determinismo) |
-| `tests/integration/TechnicianRouteMapApiTest.php` | **25/25**, exit 0 |
+| `tests/integration/TechnicianRouteMapApiTest.php` | **27/27**, exit 0 |
 | `tests/integration/OpportunisticIncidentServiceTest.php` | **100 % en verde**, exit 0 (sellado exacto SLA en memoria y BD) |
 | `tests/integration/OpportunisticIncidentApiIntegrationTest.php` | **56/56**, exit 0 (sellado exacto SLA en REST) |
-| `tests/integration/PostgresTieredSlaSchemaTest.php` | **17/17**, exit 0 |
-| `tests/integration/PostgresTieredSlaBackfillTest.php` | **80/80**, exit 0 |
-| `tests/integration/PostgresTieredSlaMetricsPerformanceTest.php` | **34/34**, exit 0 |
-| `tests/integration/TieredSlaContractsApiTest.php` | **41/41**, exit 0 |
-| `tests/integration/TechnicianRouteMapApiTest.php` | **27/27**, exit 0 |
 | `tests/integration/PendingInfoApiTest.php` | **44/44**, exit 0 |
 | `tests/integration/PendingInfoConcurrencyTest.php` | **23/23**, exit 0 |
 | `tests/integration/PendingInfoTechnicianEndpointsTest.php` | **60/60**, exit 0 |
 | `tests/unit/IncidentPauseServiceSlaShiftTest.php` | **28/28**, exit 0 |
 | `tests/integration/OpportunisticSurfaceContractsTest.php` | **23/23**, exit 0 |
-| `tests/integration/OpportunisticIncidentServiceTest.php` | **exit 0; 0 aserciones fallidas; 100 %** |
 | `tests/integration/CloudDeploySchemaParityTest.php` | **55/55**, exit 0 |
 | `tests/integration/SchemaConvergenceParityTest.php` | **29/29**, exit 0 |
 | `tests/integration/PostgresSchemaTest.php` | **126/126**, exit 0 |
@@ -88,7 +82,7 @@ Lo que está sólidamente cumplido y certificado: RF-01, RF-02 (Portal, **Coordi
 
 | Criterio | Implementación | Evidencia | Estado |
 | :--- | :--- | :--- | :---: |
-| **EARS 01.1** · Tres perfiles, `STANDARD` por defecto, validación `422`, auditoría solo si cambia | `SlaTier.php`; `AdminLocationService.php`; `PdoLocationRepository.php`; `CoordinatorAdminController.php`; `AdminLocationsTab.js`; migración `026` | `TieredSlaDomainTest` 2.1–2.13 (64/64); `TieredSlaContractsApiTest` 1.2–1.8 (41/41); `TieredSlaFrontendTest` 5.1–5.2 (47/47) | **✅** |
+| **EARS 01.1** · Tres perfiles, `STANDARD` por defecto, validación `422`, auditoría solo si cambia | `SlaTier.php`; `AdminLocationService.php`; `PdoLocationRepository.php`; `CoordinatorAdminController.php`; `AdminLocationsTab.js`; migración `026` | `TieredSlaDomainTest` 2.1–2.13 (66/66); `TieredSlaContractsApiTest` 1.2–1.8 (45/45); `TieredSlaFrontendTest` 5.1–5.2 (47/47) | **✅** |
 | **EARS 01.2** · Techo sanitario invariable de 240 min para perecederos y COMBO térmico/crítico | `SlaTargetCalculator::isColdChainRisk()` y `calculateTargetMinutes()`; restricción SQL de 240/1440 | `TieredSlaDomainTest` 3.1–3.8; `TieredSlaContractsApiTest` 1.6, 3.1, 3.2; `PostgresTieredSlaSchemaTest` 17/17 | **✅** |
 | **EARS 01.3** · Matriz exacta 480/720/1440, 360/480/720, 240/240/480 | `SlaTier::contractualTargetMinutes()`; `SlaTargetCalculator` | `TieredSlaDomainTest` 2.1–2.13 | **✅** |
 
@@ -97,7 +91,7 @@ Lo que está sólidamente cumplido y certificado: RF-01, RF-02 (Portal, **Coordi
 | Criterio | Implementación | Evidencia | Estado |
 | :--- | :--- | :--- | :---: |
 | **EARS 02.1.1** · Sellado al crear por **todos** los canales: Portal, **Coordinación**, QR y Oportunista | Portal: `LocationPortalController::createIncident()`; Coordinación: `CoordinatorController::createIncident()`; QR: `QrReportService`; Oportunista: `OpportunisticIncidentService`; trigger de inmutabilidad en `026` | `TieredSlaContractsApiTest` 1.6, **1.11–1.15**, 3.1; `OpportunisticIncidentServiceTest` 3.3–3.4 | **✅** |
-| **EARS 02.1.2** · El cambio posterior de perfil de sede no altera avisos existentes | `PdoIncidentRepository`; trigger `enforce_incident_sla_snapshot_immutability` | `TieredSlaContractsApiTest` 1.9–1.10 (41/41) | **✅** |
+| **EARS 02.1.2** · El cambio posterior de perfil de sede no altera avisos existentes | `PdoIncidentRepository`; trigger `enforce_incident_sla_snapshot_immutability` | `TieredSlaContractsApiTest` 1.9–1.10 (45/45) | **✅** |
 | **EARS 02.2.1** · Recálculo desde `created_at` al cambiar prioridad y marca inmediata de vencido | `PdoIncidentRepository::assign()`; `SlaTargetCalculator` | `TieredSlaContractsApiTest` 2.1–2.2 | **✅ implementado; ⚠️ el caso exacto de 9 h consumidas no se prueba** |
 | **EARS 02.2.2** · Absorción QR con conservación del snapshot salvo fallo térmico o urgencia más restrictiva | `QrReportService`; `PdoIncidentRepository` | `TieredSlaContractsApiTest` 3.2; `OpportunisticSurfaceContractsTest` 23/23 | **✅** |
 | **EARS 02.3.1** · Pausa por causa de la sede y desplazamiento por **el total exacto de segundos acumulados** | `IncidentPauseService::pauseSecondsSince()` + `shiftSlaTargetBySeconds()`; `total_pending_info_seconds` | `IncidentPauseServiceSlaShiftTest` 28/28; `PendingInfoApiTest` 44/44; `PendingInfoConcurrencyTest` 23/23; `PendingInfoTechnicianEndpointsTest` 60/60; `PendingInfoCoordinatorEndpointsTest` 55/55 | **✅** |
@@ -146,7 +140,7 @@ No es un fallo funcional, pero impide una trazabilidad literal 1:1 entre `spec.m
 
 | RNF | Implementación / guarda | Evidencia | Estado |
 | :--- | :--- | :--- | :---: |
-| **RNF-01** · Determinismo y métricas < 1,5 s | `SlaTargetCalculator`; `RouteOptimizationService`; `TechnicianAssignmentSuggester`; `PdoMetricsRepository` | `PostgresTieredSlaMetricsPerformanceTest` 34/34: medianas summary 102,0 ms, breakdown 164,2 ms y export 166,1 ms; p95 108,3/175,4/180,3 ms; doble ejecución idéntica de los tres endpoints y del servicio con reloj fijo. `TieredSlaDomainTest` 64/64, `TechnicianRouteMapApiTest` 27/27 y `TieredSlaContractsApiTest` 41/41 cubren el determinismo funcional de cálculo, ruta y ranking | **✅** |
+| **RNF-01** · Determinismo y métricas < 1,5 s | `SlaTargetCalculator`; `RouteOptimizationService`; `TechnicianAssignmentSuggester`; `PdoMetricsRepository` | `PostgresTieredSlaMetricsPerformanceTest` 34/34: medianas summary 97,0 ms, breakdown 160,9 ms y export 162,3 ms; p95 100,4/166,1/168,9 ms; doble ejecución idéntica de los tres endpoints y del servicio con reloj fijo. `TieredSlaDomainTest` 66/66, `TechnicianRouteMapApiTest` 27/27 y `TieredSlaContractsApiTest` 45/45 cubren el determinismo funcional de cálculo, ruta y ranking | **✅** |
 | **RNF-02** · Inmutabilidad y prohibición de borrado físico | `PostgresConstitutionalTest`; `PostgresTieredSlaSchemaTest`; trigger de snapshot; `SchemaConvergenceParityTest` A-4 | `PostgresConstitutionalTest` 77/77; `PostgresTieredSlaSchemaTest` 17/17; `SchemaConvergenceParityTest` 29/29 | **✅** |
 | **RNF-03** · Coherencia con `docs/design.md`: radios 4/8 px, tokens, sin sombras en reposo, distinción sanitaria/contractual y responsive | `styles.css`; `AdminLocationsTab.js`; `CoordinatorDashboardView.js`; `AssignSuggestionPanel.js`; `MetricBreakdownTable.js`; `TechnicianRouteView.js`; `LocationPortalView.js` | `CoordinatorButtonVariantsGuardTest` 22/22; `LegacyButtonPaletteRetirementTest.mjs` 18/18; `DesignTokenDebtRatchetTest.mjs` 3/3; `OfflinePwaAssetsAndUiGuardTest` 44/44; `TieredSlaFrontendTest` 47/47 | **✅** |
 
@@ -212,7 +206,7 @@ En `tasks.md`: **14/14 marcadas `[x]`, 0 pendientes**. Pero «marcada» no signi
 | Tarea | Verificación |
 | :--- | :--- |
 | `T-SLA-01` | **✅** migración/esquema y backfill; `PostgresTieredSlaSchemaTest` 17/17 y `PostgresTieredSlaBackfillTest` 80/80. Su comando de aceptación usa `vendor/bin/phpunit`, inexistente. |
-| `T-SLA-02` | **✅** dominio; `TieredSlaDomainTest` 64/64. |
+| `T-SLA-02` | **✅** dominio; `TieredSlaDomainTest` 66/66. |
 | `T-SLA-03` | **✅** contratos y esquemas verificados; referencia corregida a `OpportunisticSchemaCorrespondenceTest.php` 32/32 y `SchemaConvergenceParityTest` 29/29. |
 | `T-SLA-04` | **✅** sin anomalía detectada. |
 | `T-SLA-05` | **✅** sin anomalía detectada. |
@@ -297,7 +291,7 @@ EARS 02.3.1, C6 y DoD 3 quedan satisfechos: el vencimiento contractual devuelve 
 
 **Impacto del cierre**
 
-EARS 02.4, C5 y el primer componente de DoD 8 quedan certificados: el backfill no altera los indicadores históricos y aplica la matriz vigente a los avisos abiertos. La Spec 30 sigue pendiente de H-05 y H-06.
+EARS 02.4, C5 y el primer componente de DoD 8 quedan certificados: el backfill no altera los indicadores históricos y aplica la matriz vigente a los avisos abiertos. H-05 y H-06 quedaron resueltos el 2026-11-09 y se detallan en las secciones siguientes.
 
 ---
 
@@ -310,7 +304,7 @@ EARS 02.4, C5 y el primer componente de DoD 8 quedan certificados: el backfill n
 
 - `PostgresTieredSlaMetricsPerformanceTest` mide 20 muestras por endpoint tras tres pasadas de calentamiento, sobre 3.000 resoluciones, 240 avisos abiertos y 600 resoluciones del periodo anterior.
 - Dos ejecuciones de `summary`, `breakdown` y `export` con el mismo rango devuelven el mismo cuerpo; el servicio se compara dos veces con el mismo `DateTimeImmutable` de referencia.
-- Resultado: 34/34. Medianas 102,0 ms (`summary`), 164,2 ms (`breakdown`) y 166,1 ms (`export`); p95 108,3/175,4/180,3 ms; máximos 109,0/188,4/190,9 ms.
+- Resultado: 34/34. Medianas 97,0 ms (`summary`), 160,9 ms (`breakdown`) y 162,3 ms (`export`); p95 100,4/166,1/168,9 ms; máximos 100,4/166,4/198,5 ms.
 
 **Impacto**
 
