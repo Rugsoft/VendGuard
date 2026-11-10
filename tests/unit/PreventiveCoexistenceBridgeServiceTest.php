@@ -12,17 +12,20 @@ use VendGuard\Application\Service\PreventiveCoexistenceBridgeService;
 use VendGuard\Core\Domain\Exception\InvalidResolutionException;
 use VendGuard\Core\Domain\Exception\ReinspectionTemperatureExceededException;
 use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\PreventiveOrder;
 use VendGuard\Core\Domain\Model\PreventiveSetting;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveOrderRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 
 // =============================================================================
@@ -450,6 +453,67 @@ class InMemoryMachineRepoForBridge implements MachineRepositoryInterface
     public function softDelete(int $id): bool { return true; }
 }
 
+class InMemoryLocationRepoForBridge implements LocationRepositoryInterface
+{
+    /** @var array<int, Location> */
+    public array $locations = [];
+
+    public function findBySiteCode(string $siteCode): ?Location
+    {
+        foreach ($this->locations as $location) {
+            if ($location->getSiteCode() === strtoupper(trim($siteCode))) {
+                return $location;
+            }
+        }
+        return null;
+    }
+
+    public function findById(int $id): ?Location
+    {
+        return $this->locations[$id] ?? null;
+    }
+
+    public function findAllActive(): array
+    {
+        return array_values($this->locations);
+    }
+
+    public function findAll(string $status = 'all', ?string $search = null): array
+    {
+        return [];
+    }
+
+    public function create(array $data): Location
+    {
+        throw new DomainException('Not implemented');
+    }
+
+    public function update(int $id, array $data): bool
+    {
+        return true;
+    }
+
+    public function softDelete(int $id): bool
+    {
+        return true;
+    }
+
+    public function restore(int $id): bool
+    {
+        return true;
+    }
+
+    public function updateContactPhone(int $id, string $contactPhone): bool
+    {
+        return true;
+    }
+
+    public function countActiveMachines(int $locationId): int
+    {
+        return 0;
+    }
+}
+
 class InMemorySettingsRepoForBridge implements PreventiveSettingsRepositoryInterface
 {
     /** @var array<int, array<string, mixed>> */
@@ -564,13 +628,23 @@ $incidentRepo = new InMemoryIncidentRepoForBridge();
 $orderRepo = new InMemoryOrderRepoForBridge();
 $settingsRepo = new InMemorySettingsRepoForBridge();
 $machineRepo = new InMemoryMachineRepoForBridge();
+$locationRepo = new InMemoryLocationRepoForBridge();
 $auditLogger = new SpyAuditLoggerForBridge();
+
+$locationRepo->locations[1] = new Location(
+    id: 1,
+    siteCode: 'SEDE-TEST-01',
+    name: 'Sede Test',
+    address: 'Calle Test 1',
+    slaTier: SlaTier::PRIORITY_CORPORATE
+);
 
 $bridgeService = new PreventiveCoexistenceBridgeService(
     incidentRepo: $incidentRepo,
     orderRepo: $orderRepo,
     settingsRepo: $settingsRepo,
     machineRepo: $machineRepo,
+    locationRepo: $locationRepo,
     certificateRepo: null,
     auditLogger: $auditLogger
 );
@@ -629,6 +703,9 @@ assertTrue(str_contains($createdIncident->getDescription(), 'Sonda Térmica'), '
 // Verificar evento de auditoría
 $lastAuditEvent = end($auditLogger->incidentEvents);
 assertEquals('PREVENTIVE_TRIGGERED_INCIDENT', $lastAuditEvent['action'], '1.11 Evento de auditoría PREVENTIVE_TRIGGERED_INCIDENT registrado');
+assertEquals(SlaTier::PRIORITY_CORPORATE, $createdIncident->getSlaTierSnapshot(), '1.12 El alta sella el perfil de la sede y no el STANDARD por defecto');
+assertEquals(240, $createdIncident->getSlaTargetMinutes(), '1.13 El correctivo perecedero nace con el techo sanitario de 240 minutos');
+assertTrue($createdIncident->getSlaTargetAt() !== null, '1.14 El alta sella un vencimiento efectivo de SLA');
 
 // -----------------------------------------------------------------------------
 echo "\n--- 2. Caso B: Coexistencia con Ticket Activo Preexistente (Constitución Art. V.2) ---\n";
@@ -654,7 +731,8 @@ $preexistingIncident = new Incident(
     description: 'Monedero atascado con moneda de 50 céntimos.',
     urgency: UrgencyLevel::MEDIUM,
     status: IncidentStatus::ASSIGNED,
-    assignedTechnicianId: 3
+    assignedTechnicianId: 3,
+    createdAt: '2026-09-27 10:00:00'
 );
 $persistedPreexisting = $incidentRepo->create($preexistingIncident);
 $createCountBefore = $incidentRepo->createCallCount;
@@ -705,6 +783,69 @@ assertEquals(UrgencyLevel::CRITICAL, $updatedTicket->getUrgency(), '2.11 Urgenci
 // Auditoría de escalado
 $auditEscalation = end($auditLogger->incidentEvents);
 assertEquals('URGENCY_ESCALATED_CRITICAL_BY_PREVENTIVE', $auditEscalation['action'], '2.12 Auditoría inmutable de escalado registrada');
+assertEquals(SlaTier::STANDARD, $updatedTicket->getSlaTierSnapshot(), '2.13 El perfil sellado del ticket preexistente se conserva');
+assertEquals(240, $updatedTicket->getSlaTargetMinutes(), '2.14 El ticket perecedero existente conserva el techo sanitario de 240 minutos, no 1440');
+assertEquals('2026-09-27 14:00:00', $updatedTicket->getSlaTargetAt(), '2.15 El vencimiento se recalcula desde el alta, sin reiniciar el reloj');
+
+// -----------------------------------------------------------------------------
+// Caso B2 · Ticket prioritario existente: el escalado no degrada su SLA
+// -----------------------------------------------------------------------------
+$settingsRepo->machines[40] = [
+    'id' => 40,
+    'code' => 'VEND-SNACK-40',
+    'location_id' => 1,
+    'machine_type' => 'SNACKS',
+    'sanitary_status' => 'OK',
+    'sanitary_frequency_days' => 30,
+    'default_frequency_days' => 30,
+    'is_seasonal_pause' => 0,
+];
+
+$priorityIncident = new Incident(
+    id: null,
+    ticketCode: 'INC-2026-9040',
+    machineId: 40,
+    locationId: 1,
+    category: IncidentCategory::OTHER,
+    description: 'Puerta de acceso con bisagra deteriorada.',
+    urgency: UrgencyLevel::MEDIUM,
+    status: IncidentStatus::ASSIGNED,
+    assignedTechnicianId: 3,
+    createdAt: '2026-09-27 10:00:00',
+    slaTierSnapshot: SlaTier::PRIORITY_CORPORATE,
+    slaTargetMinutes: 480,
+    slaTargetAt: '2026-09-27 18:00:00'
+);
+$persistedPriority = $incidentRepo->create($priorityIncident);
+
+$orderPriority = $orderRepo->create([
+    'machine_id' => 40,
+    'location_id' => 1,
+    'assigned_technician_id' => 3,
+    'status' => 'IN_INSPECTION',
+    'order_type' => 'ROUTINE',
+    'scheduled_date' => '2026-09-27',
+    'due_date' => '2026-09-27',
+]);
+
+$resPriority = $bridgeService->handleNonConformity(
+    orderId: $orderPriority->getId(),
+    technicianId: 3,
+    temperature: null,
+    nonConformItems: [
+        ['item_code' => 'DOOR_HINGE', 'title' => 'Bisagra de puerta', 'is_critical' => true, 'status' => 'FAIL'],
+    ],
+    notes: 'La puerta no cierra correctamente.',
+    actor: ['id' => 3, 'name' => 'Carlos Técnico', 'role' => 'TECHNICIAN']
+);
+
+assertEquals('APPENDED_TO_EXISTING_INCIDENT', $resPriority['mode'], '2bis.1 Se reutiliza el ticket prioritario existente');
+assertTrue($resPriority['escalated'], '2bis.2 La urgencia se eleva a CRITICAL por ítem crítico');
+$updatedPriority = $incidentRepo->findById($persistedPriority->getId());
+assertEquals(UrgencyLevel::CRITICAL, $updatedPriority->getUrgency(), '2bis.3 Urgencia persistida CRITICAL');
+assertEquals(SlaTier::PRIORITY_CORPORATE, $updatedPriority->getSlaTierSnapshot(), '2bis.4 El perfil prioritario se conserva');
+assertEquals(360, $updatedPriority->getSlaTargetMinutes(), '2bis.5 El objetivo prioritario es 360 minutos, no 1440');
+assertEquals('2026-09-27 16:00:00', $updatedPriority->getSlaTargetAt(), '2bis.6 El vencimiento prioritario se recalcula desde el alta');
 
 // -----------------------------------------------------------------------------
 echo "\n--- 3. Validación de Cierre Justificado Obligatorio (Constitución Art. V.1) ---\n";

@@ -814,6 +814,7 @@ $coexistenceBridge = new PreventiveCoexistenceBridgeService(
     orderRepo: $orderRepo,
     settingsRepo: $settingsRepo,
     machineRepo: $machineRepo,
+    locationRepo: $locationRepo,
     certificateRepo: $certificateRepo,
     auditLogger: $auditLogger
 );
