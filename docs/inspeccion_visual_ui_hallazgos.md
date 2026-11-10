@@ -9,7 +9,7 @@
 | **URL** | `http://127.0.0.1:8000` |
 | **Alcance** | Portal de Sede, panel de Coordinación y vista móvil del Técnico |
 | **Método** | Navegación real con datos de demostración, capturas, consola, red y CSSOM |
-| **Resultado** | **6 hallazgos**: 3 de severidad alta, 1 media y 2 bajas · **H-01 a H-05 corregidos** |
+| **Resultado** | **6 hallazgos**: 3 de severidad alta, 1 media y 2 bajas · **H-01 a H-06 corregidos** |
 
 > Inspección de solo lectura. No se modificó código funcional durante la revisión.
 
@@ -24,7 +24,7 @@
 | **H-03** | **Alta** | Desbordamiento horizontal de 205 px en la vista móvil del técnico a 390 px. | **Corregido** |
 | **H-04** | **Media** | La tabla de triaje desborda a 1280 × 720 y el chat tapa acciones. | **Corregido** |
 | **H-05** | **Baja** | El panel de Coordinación renderiza pestañas, filtros y tabla antes del login. | **Corregido** |
-| **H-06** | **Baja** | El modal de satisfacción se abre automáticamente al entrar en el Portal de Sede. | Abierto |
+| **H-06** | **Baja** | El modal de satisfacción se abre automáticamente al entrar en el Portal de Sede. | **Corregido** |
 
 ### Flujos comprobados
 
@@ -343,10 +343,26 @@ Puede tapar el estado de las máquinas y retrasar la tarea principal del respons
 
 Sustituir la apertura automática por un aviso no modal en el panel, o abrir la encuesta solo cuando el usuario pulse explícitamente el aviso. Si se mantiene el modal, recordar la decisión de «Ahora no» durante la sesión.
 
+**Resolución (2026-11-10)**
+
+H-06 corregido en la rama `tiered-sla-contracts`:
+
+- Se retiró la apertura automática: `loadPendingSurveys()` solo alimenta el aviso y la lista de episodios; `showSurveyModal` pasa a `true` exclusivamente desde `openSurveyModal()`, que dispara el botón **Valorar servicio**.
+- `mounted()` y `handleSiteLogin()` consultan los pendientes sin opciones de autoapertura; se eliminó el estado `surveyModalOffered` y el refresco posterior a una valoración conserva el modal solo si ya estaba abierto.
+- `public/sw.js` sube la caché del shell a `vendguard-app-shell-v16`.
+- La Spec 20 se enmienda a la versión 3: RF-05.1 y RF-05.2 ya no exigen abrir el modal al cargar el portal, sino mostrar el aviso y abrirlo con **Valorar servicio**. Se actualizaron `docs/guia_uso_por_rol.md` y la trazabilidad de `T-CSAT-07`.
+- `LocationPortalViewTest.mjs` pasa a 78/78 con aserciones 8.8, 8.11, 8.24, 8.26 y 8.27 sobre el modal cerrado tras carga, login y refrescos, y la apertura solo desde el aviso. `SatisfactionSurveyModalTest.mjs` 64/64, `FrontendTemplateCompileTest.mjs` 15/15, `OfflinePwaAssetsAndUiGuardTest.mjs` 45/45, `FunctionalSpecMirrorParityTest.php` 24/24 y `CsatPrivacyConstitutionalTest.php` 22/22 pasan sin fallos.
+- Verificación en navegador con una respuesta de pendientes simulada, porque la base local no tenía episodios sin valorar: tras el login aparecen el aviso y el botón, el modal permanece cerrado y solo se abre al pulsar **Valorar servicio**.
+
 **Archivos relacionados**
 
 - `public/assets/js/views/LocationPortalView.js`
-- Componente de encuesta de satisfacción
+- `public/assets/js/components/SatisfactionSurveyModal.js`
+- `specs/20-csat-satisfaction-survey/spec.md` (RF-05.1 y RF-05.2)
+- `specs/20-csat-satisfaction-survey/tasks.md` (T-CSAT-07)
+- `docs/guia_uso_por_rol.md`
+- `public/sw.js`
+- `tests/unit/LocationPortalViewTest.mjs`
 
 **Evidencia visual**
 

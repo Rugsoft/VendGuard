@@ -79,13 +79,7 @@ export const LocationPortalView = {
       /** Total real de pendientes: no se recorta al tope de 20 de la lista. */
       pendingSurveyTotal: 0,
       isLoadingSurveys: false,
-      showSurveyModal: false,
-      /**
-       * R3: el modal se ofrece una sola vez por carga de página. Cerrarlo sin
-       * valorar no bloquea el portal ni lo reabre en cada refresco del listado;
-       * una recarga o un nuevo inicio de sesión vuelve a ofrecerlo.
-       */
-      surveyModalOffered: false
+      showSurveyModal: false
     };
   },
   computed: {
@@ -199,7 +193,7 @@ export const LocationPortalView = {
   mounted() {
     if (this.isAuthenticated && this.location?.site_code) {
       this.loadMachines();
-      this.loadPendingSurveys({ autoOpen: true });
+      this.loadPendingSurveys();
     }
   },
   methods: {
@@ -230,10 +224,8 @@ export const LocationPortalView = {
         store.setSiteSession(response.location, response.token);
         this.siteCodeInput = '';
         this.accessCodeInput = '';
-        // Un inicio de sesión nuevo vuelve a ofrecer la encuesta (R3).
-        this.surveyModalOffered = false;
         await this.loadMachines();
-        await this.loadPendingSurveys({ autoOpen: true });
+        await this.loadPendingSurveys();
       } catch (err) {
         this.loginError = err.message || 'Código o clave no reconocidos. Contacte con el servicio técnico.';
       } finally {
@@ -292,11 +284,11 @@ export const LocationPortalView = {
     /**
      * Consulta los episodios resueltos sin valorar de la sede (RF-05.1, R3).
      *
-     * `autoOpen` abre el modal solo la primera vez de esta carga de página: un
-     * refresco del listado no vuelve a asaltar a quien ya lo cerró sin valorar.
+     * Solo alimenta el aviso persistente y el modal: no abre la encuesta por sí
+     * mismo. La persona decide cuándo valorar con «Valorar servicio», de modo que
+     * un pendiente no interrumpe la primera visión del panel.
      */
-    async loadPendingSurveys(options = {}) {
-      const autoOpen = options?.autoOpen === true;
+    async loadPendingSurveys() {
       if (!this.isAuthenticated) return;
 
       this.isLoadingSurveys = true;
@@ -304,11 +296,6 @@ export const LocationPortalView = {
         const data = await api.satisfaction.getPending();
         this.pendingSurveys = Array.isArray(data?.items) ? data.items : [];
         this.pendingSurveyTotal = Number(data?.pending_total ?? this.pendingSurveys.length) || 0;
-
-        if (autoOpen && this.pendingSurveys.length > 0 && !this.surveyModalOffered) {
-          this.surveyModalOffered = true;
-          this.showSurveyModal = true;
-        }
       } catch (err) {
         // La encuesta no puede tumbar el portal: sin listado no hay aviso.
         this.pendingSurveys = [];
@@ -319,7 +306,6 @@ export const LocationPortalView = {
     },
 
     openSurveyModal() {
-      this.surveyModalOffered = true;
       this.showSurveyModal = true;
     },
 
@@ -338,7 +324,7 @@ export const LocationPortalView = {
           (episode) => Number(episode?.incident_id) !== Number(incidentId)
         );
       }
-      await this.loadPendingSurveys({ autoOpen: true });
+      await this.loadPendingSurveys();
     },
 
     /**

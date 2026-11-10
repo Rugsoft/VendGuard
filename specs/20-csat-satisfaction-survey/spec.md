@@ -3,8 +3,8 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** 20 · Encuesta de Satisfacción Post-Resolución (CSAT de Sede)  
 **Documento Canónico:** `specs/20-csat-satisfaction-survey/spec.md`  
-**Versión:** 2 · incorpora las 11 resoluciones de la revisión QA (2026-10-23)  
-**Estado:** Resoluciones R1–R11 **aprobadas por el Product Owner el 2026-10-23** · puerta SDD superada el mismo día · **Fase 3 implementada y cerrada** (WU-1 a WU-7) · **R6 revisada por el incremento 20.1** (superficie CSAT de solo lectura para el técnico) · batería global 325 suites / 12.732 aserciones en verde  
+**Versión:** 3 · incorpora la enmienda H-06 (2026-11-10): la encuesta no se abre automáticamente\
+**Estado:** Resoluciones R1–R11 **aprobadas por el Product Owner el 2026-10-23** · puerta SDD superada el mismo día · **Fase 3 implementada y cerrada** (WU-1 a WU-7) · **R6 revisada por el incremento 20.1** (superficie CSAT de solo lectura para el técnico) · **Enmienda H-06 aprobada por el Product Owner el 2026-11-10** · batería global 325 suites / 12.732 aserciones en verde\
 **Fecha:** Octubre 2026  
 **Origen:** Feature 6 del catálogo [`docs/features_pendientes.md`](../../docs/features_pendientes.md) (Bloque 2)  
 **Alineación Constitucional:** Art. I (supremacía de la especificación), Art. III.1 y III.3 (inmutabilidad y auditoría), Art. IV.1–IV.3 (PHP puro, Vue 3 estándar, cero dependencias), Art. V.4 (privacidad y segregación de la sede), Art. VI.2 (canalización del backlog). **Art. II: no aplica** (el módulo no altera cadena de frío, SLA ni cuarentenas).
@@ -158,8 +158,8 @@ Consecuencias normativas:
 
 ### RF-05 · Interfaz del Portal de Sede
 
-* **RF-05.1** Al cargar el portal autenticado se consulta el listado de pendientes. Si hay al menos uno, se abre el modal del episodio más reciente.
-* **RF-05.2** Un aviso persistente en la pestaña «Máquinas e Incidencias» muestra «Tiene N servicios por valorar» y reabre el modal. Cerrar el modal sin valorar no bloquea el portal y no lo reabre en cada refresco de la lista **dentro de la misma carga de página**; una recarga o un nuevo inicio de sesión sí vuelve a ofrecerlo (R3).
+* **RF-05.1** Al cargar el portal autenticado se consulta el listado de pendientes y, si hay al menos uno, se muestra el aviso persistente de RF-05.2. El modal **no se abre automáticamente** (enmienda H-06).
+* **RF-05.2** Un aviso persistente en la pestaña «Máquinas e Incidencias» muestra «Tiene N servicios por valorar» y abre el modal cuando la persona pulsa «Valorar servicio». Cerrar el modal sin valorar no bloquea el portal; el aviso sigue visible mientras existan pendientes y no hay reapertura automática en refrescos ni en un nuevo inicio de sesión (R3, enmienda H-06).
 * **RF-05.3** El modal contiene: ticket, máquina y fecha de resolución; selector de 1 a 5 estrellas; textarea con contador `0/500`; botón «Enviar valoración» deshabilitado mientras el envío está en curso.
 * **RF-05.4** Un error de red o de servidor muestra el mensaje y **conserva** nota y comentario. Un `409` informa de que ese servicio ya fue valorado y lo retira de la lista.
 * **RF-05.5** Tras un envío correcto se **vuelve a consultar el listado de pendientes** (R3): si queda otro, el modal pasa al siguiente; si no, se cierra con confirmación. El bucle continúa hasta que `pending_total` sea `0` o el usuario cierre el modal; nunca queda un pendiente inalcanzable por el tope de 20.
