@@ -68,6 +68,7 @@ use VendGuard\Core\Domain\ValueObject\OfflineSyncMetadata;
 use VendGuard\Core\Service\ResolutionTaxonomyHistoryParser;
 use VendGuard\Core\Service\ResolutionTaxonomyValidator;
 use VendGuard\Core\Service\ResolutionValidator;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
@@ -825,7 +826,94 @@ class TechnicianController
             // que la resolución aplicará de verdad (máquina en cuarentena o reloj
             // biológico vencido en tipología bajo vigilancia sanitaria).
             'sanitary_resolution_required' => $sanitaryResolutionRequired,
+            ...$this->stopSlaPayload($incident, $machine),
         ];
+    }
+
+    /**
+     * Contrato SLA de una parada de «Mi Ruta» (Módulo 30, RF-07.4).
+     *
+     * La tarjeta móvil ya sabe describir el contrato cuando recibe estos campos;
+     * publicarlos aquí mantiene la parada online y offline con la misma forma y
+     * evita que el técnico vea «Contrato sin asignar» en un aviso sellado.
+     *
+     * @return array<string, mixed>
+     */
+    private function stopSlaPayload(Incident $incident, ?Machine $machine): array
+    {
+        $dueAt = $this->stopSlaDeadline($incident);
+        $isColdChainCritical = $machine !== null && SlaTargetCalculator::isColdChainRisk(
+            $machine->getMachineType(),
+            $incident->getCategory(),
+            $incident->getUrgency()
+        );
+        $isContractualCritical = $this->isStopContractualCritical($dueAt, $incident->getPausedAt());
+
+        return [
+            'sla_tier_snapshot' => $incident->getSlaTierSnapshot()->value,
+            'sla_tier_label' => $incident->getSlaTierLabel(),
+            'sla_target_minutes' => $incident->getSlaTargetMinutes(),
+            'sla_target_at' => $incident->getSlaTargetAt(),
+            'sla_due_at' => $dueAt,
+            'critical_reason' => $isColdChainCritical
+                ? 'COLD_CHAIN'
+                : ($isContractualCritical ? 'CONTRACTUAL_SLA' : null),
+            'is_cold_chain_critical' => $isColdChainCritical,
+            'is_contractual_critical' => $isContractualCritical,
+        ];
+    }
+
+    /**
+     * Vencimiento efectivo de la parada, con el sello persistido como fuente
+     * principal y el cálculo determinista como respaldo para avisos antiguos.
+     */
+    private function stopSlaDeadline(Incident $incident): ?string
+    {
+        $sealedTargetAt = $incident->getSlaTargetAt();
+        if ($sealedTargetAt !== null && trim($sealedTargetAt) !== '') {
+            try {
+                return (new DateTimeImmutable($sealedTargetAt))->format(DATE_ATOM);
+            } catch (\Throwable) {
+                // Una huella corrupta no debe tumbar la ruta: se recalcula desde el objetivo sellado.
+            }
+        }
+
+        $createdAt = $incident->getCreatedAt();
+        if ($createdAt === null || trim($createdAt) === '') {
+            return null;
+        }
+
+        try {
+            $targetSeconds = ($incident->getSlaTargetMinutes() * 60)
+                + max(0, $incident->getTotalPendingInfoSeconds());
+
+            return (new DateTimeImmutable($createdAt))
+                ->modify('+' . $targetSeconds . ' seconds')
+                ->format(DATE_ATOM);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Frontera inclusiva de 240 min, congelada en `paused_at` si hay una pausa viva.
+     */
+    private function isStopContractualCritical(?string $slaDueAt, ?string $pausedAt = null): bool
+    {
+        if ($slaDueAt === null || trim($slaDueAt) === '') {
+            return false;
+        }
+
+        try {
+            $due = new DateTimeImmutable($slaDueAt);
+            $reference = $pausedAt !== null && trim($pausedAt) !== ''
+                ? (new DateTimeImmutable($pausedAt))->getTimestamp()
+                : time();
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return ($due->getTimestamp() - $reference) <= (240 * 60);
     }
 
     /**

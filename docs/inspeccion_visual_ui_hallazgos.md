@@ -9,7 +9,7 @@
 | **URL** | `http://127.0.0.1:8000` |
 | **Alcance** | Portal de Sede, panel de Coordinación y vista móvil del Técnico |
 | **Método** | Navegación real con datos de demostración, capturas, consola, red y CSSOM |
-| **Resultado** | **6 hallazgos**: 3 de severidad alta, 1 media y 2 bajas · **H-01 corregido** |
+| **Resultado** | **6 hallazgos**: 3 de severidad alta, 1 media y 2 bajas · **H-01 y H-02 corregidos** |
 
 > Inspección de solo lectura. No se modificó código funcional durante la revisión.
 
@@ -20,7 +20,7 @@
 | ID | Severidad | Hallazgo | Estado |
 | :--- | :--- | :--- | :--- |
 | **H-01** | **Alta** | El Portal de Sede no carga `styles.css`; la fila del contrato SLA pierde su layout. | **Corregido** |
-| **H-02** | **Alta** | `GET /api/technician/my-route` no publica los campos SLA; el técnico ve «Contrato sin asignar». | Abierto |
+| **H-02** | **Alta** | `GET /api/technician/my-route` no publica los campos SLA; el técnico ve «Contrato sin asignar». | **Corregido** |
 | **H-03** | **Alta** | Desbordamiento horizontal de 205 px en la vista móvil del técnico a 390 px. | Abierto |
 | **H-04** | **Media** | La tabla de triaje desborda a 1280 × 720 y el chat tapa acciones. | Abierto |
 | **H-05** | **Baja** | El panel de Coordinación renderiza pestañas, filtros y tabla antes del login. | Abierto |
@@ -130,7 +130,10 @@ No aparece ninguna de las claves que consume el frontend:
 - `sla_tier_label`
 - `sla_target_minutes`
 - `sla_target_at`
-- `sla_critical_reason`
+- `sla_due_at`
+- `critical_reason`
+- `is_cold_chain_critical`
+- `is_contractual_critical`
 
 `TechnicianController::stopPayload()` construye la tarjeta de la parada y no incluye campos SLA. El frontend, en cambio, ya está preparado: `TechnicianRouteView.js` mapea `sla_tier_label`, `sla_tier_snapshot` y `sla_tier`, y la plantilla recurre a `'Contrato sin asignar'` cuando no hay datos.
 
@@ -144,9 +147,19 @@ Omisión en la serialización de `stopPayload()`, no en el frontend. Conviene re
 
 **Corrección propuesta**
 
-1. Añadir a `stopPayload()` los campos `sla_tier_snapshot`, `sla_target_minutes` y `sla_target_at`, y el motivo crítico si aplica.
+1. Añadir a `stopPayload()` los campos `sla_tier_snapshot`, `sla_tier_label`, `sla_target_minutes`, `sla_target_at`, `sla_due_at`, `critical_reason`, `is_cold_chain_critical` e `is_contractual_critical`.
 2. Verificar que ambos caminos de lectura (`routeFromBoard()` y `routeFromReads()`) publican exactamente el mismo contrato.
-3. Añadir una aserción en `TechnicianRouteMapApiTest` que compruebe los campos SLA en la respuesta de `my-route`.
+3. Añadir una aserción en `TechnicianRouteEndpointTest` que compruebe los campos SLA en la respuesta real de `my-route`.
+
+**Resolución (2026-11-10)**
+
+H-02 corregido en la rama `tiered-sla-contracts`:
+
+- `TechnicianController::stopPayload()` incorpora el contrato SLA mediante `stopSlaPayload()`, con la misma precedencia que la ruta y el mapa: `COLD_CHAIN` prevalece sobre `CONTRACTUAL_SLA`.
+- `sla_target_at` conserva el valor persistido; `sla_due_at` publica el vencimiento efectivo en ISO 8601, con cálculo determinista de respaldo para avisos antiguos.
+- La respuesta real de `my-route` devuelve la etiqueta `Estándar`, 1440 minutos, vencimiento y `COLD_CHAIN` para la parada perecedera; la segunda parada queda sin motivo crítico.
+- `TechnicianRouteBatchReadsTest` pasa 30/30 y `TechnicianRouteEndpointTest` completa su batería sin fallos, incluidas las aserciones 2.7 y 2.8.
+- Verificación en navegador: las dos tarjetas muestran «Estándar» y «Vence: 11/11, 11:37»; la perecedera añade «🌡️ Riesgo sanitario de cadena de frío», sin errores de consola.
 
 **Archivos relacionados**
 
