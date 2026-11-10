@@ -22,7 +22,7 @@
 | **H-01** | **Alta** | El Portal de Sede no carga `styles.css`; la fila del contrato SLA pierde su layout. | **Corregido** |
 | **H-02** | **Alta** | `GET /api/technician/my-route` no publica los campos SLA; el técnico ve «Contrato sin asignar». | **Corregido** |
 | **H-03** | **Alta** | Desbordamiento horizontal de 205 px en la vista móvil del técnico a 390 px. | **Corregido** |
-| **H-04** | **Media** | La tabla de triaje desborda a 1280 × 720 y el chat tapa acciones. | Abierto |
+| **H-04** | **Media** | La tabla de triaje desborda a 1280 × 720 y el chat tapa acciones. | **Corregido** |
 | **H-05** | **Baja** | El panel de Coordinación renderiza pestañas, filtros y tabla antes del login. | Abierto |
 | **H-06** | **Baja** | El modal de satisfacción se abre automáticamente al entrar en el Portal de Sede. | Abierto |
 
@@ -256,10 +256,24 @@ El coordinador puede no ver el botón de acción de una fila sin desplazarse hor
 3. Desplazar la burbuja de chat cuando la tabla esté visible, o permitir ocultarla.
 4. Probar a 1280 × 720 y 1366 × 768.
 
+**Resolución (2026-11-10)**
+
+H-04 corregido en la rama `tiered-sla-contracts`:
+
+- La tabla de triaje queda encapsulada en `.vg-triage-table-card`, `.vg-triage-table-scroll` y `.vg-triage-table`; el contenedor acota el ancho al 100 % y asume el `overflow-x`.
+- La columna de acciones usa `.vg-triage-actions` con `position: sticky`, ancho de 240 px y fondo heredado de la fila, de modo que permanece visible y conserva el resaltado SLA.
+- En anchos de 900 px o más, la tarjeta reserva 88 px a la derecha para que la burbuja fija del chat no invada los botones. A 1024 px la tabla usa desplazamiento interno y la columna fija sigue a la vista.
+- `public/sw.js` sube la caché del shell a `vendguard-app-shell-v14`.
+- Se añadió `tests/unit/CoordinatorTriageLayoutGuardTest.mjs` (6/6).
+- Verificación en navegador: a 1280 × 720, contenedor 1141/1141, borde derecho de acciones 1158 y chat desde 1183 (25 px de separación); a 1366 × 768, acciones hasta 1220 y chat desde 1269 (≈49 px); a 1024 × 768, la tabla desborda solo dentro de su contenedor y la columna fija termina en 902 frente al chat en 927 (25 px). Sin desbordamiento horizontal del documento en ninguno de los tres casos.
+- `CoordinatorDashboardViewTest.mjs` 143/143, `CoordinatorActionsWrapGuardTest.mjs` 7/7 y `OfflinePwaAssetsAndUiGuardTest.mjs` 45/45 pasan sin fallos.
+
 **Archivos relacionados**
 
 - `public/assets/js/views/CoordinatorDashboardView.js`
 - `public/assets/css/styles.css`
+- `public/sw.js`
+- `tests/unit/CoordinatorTriageLayoutGuardTest.mjs`
 - Widget de chat de n8n (`@n8n/chat`)
 
 **Evidencia visual**

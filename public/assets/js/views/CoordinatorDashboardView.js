@@ -2243,9 +2243,9 @@ export const CoordinatorDashboardView = {
         </div>
 
         <!-- 4. Incident Table (8px card) -->
-        <div class="vg-card" style="border-radius: var(--radius-card, 8px); padding: 0; overflow: hidden;">
-          <div style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; text-align: left; font-family: var(--font-body, Inter, sans-serif); font-size: 13px;">
+        <div class="vg-card vg-triage-table-card">
+          <div class="vg-triage-table-scroll">
+            <table class="vg-triage-table" style="width: 100%; border-collapse: collapse; text-align: left; font-family: var(--font-body, Inter, sans-serif); font-size: 13px;">
               <thead>
                 <tr style="background-color: #fafbfc; border-bottom: 1px solid var(--color-hairline, #c8cfda); color: var(--color-ink-muted, #6c7e9d); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;">
                   <th style="padding: 12px 16px;">Ticket / SLA</th>
@@ -2254,7 +2254,7 @@ export const CoordinatorDashboardView = {
                   <th style="padding: 12px 16px;">Urgencia</th>
                   <th style="padding: 12px 16px;">Estado</th>
                   <th style="padding: 12px 16px;">Técnico Asignado</th>
-                  <th style="padding: 12px 16px; text-align: right;">Acciones</th>
+                  <th class="vg-triage-actions" style="padding: 12px 16px; text-align: right;">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -2391,7 +2391,7 @@ export const CoordinatorDashboardView = {
                        una línea (clase vg-row-actions). Con la pausa de sede viva la fila
                        suma «Reanudar» y la etiqueta de «Imprimir QR» se partía dentro del
                        botón, saliéndose por debajo del borde. -->
-                  <td style="padding: 14px 16px; vertical-align: top; text-align: right;">
+                  <td class="vg-triage-actions" style="padding: 14px 16px; vertical-align: top; text-align: right;">
                     <div class="vg-row-actions">
 
                       <!-- Conversation Thread Badge with the total message count (RF-01.1) -->

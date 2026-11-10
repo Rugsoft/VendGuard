@@ -2091,3 +2091,47 @@ details.vg-guide-accordion__disclosure:not([open]) .vg-guide-accordion__body {
     width: 100%;
   }
 }
+
+/*
+ * Coordinator triage table (H-04).
+ *
+ * The table used to widen the document at 1280x720 and its action column could
+ * sit outside the visible area. The scroll container now owns the overflow, the
+ * action column stays pinned to its right edge, and the wide-screen right gutter
+ * keeps the floating chat bubble outside the action buttons.
+ */
+.vg-triage-table-card {
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+}
+
+.vg-triage-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.vg-triage-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.vg-triage-actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  width: 240px;
+  min-width: 240px;
+  background-color: inherit;
+  box-shadow: -1px 0 0 var(--color-hairline);
+}
+
+@media (min-width: 900px) {
+  .vg-triage-table-card {
+    padding-right: 88px;
+  }
+}
