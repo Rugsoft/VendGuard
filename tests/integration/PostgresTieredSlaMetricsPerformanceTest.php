@@ -36,11 +36,31 @@ declare(strict_types=1);
  * en el `finally`, incluso si una aserción falla.
  *
  * Uso:
- *   source deploy/local/postgres/.env.local && php tests/integration/PostgresTieredSlaMetricsPerformanceTest.php
+ *   source deploy/local/postgres/.env.local   # o .env.docker-tls
+ *   php tests/integration/PostgresTieredSlaMetricsPerformanceTest.php
+ *
+ * La suite fija `DATABASE_URL` desde `PG_TEST_DSN` antes de cargar el bootstrap,
+ * de modo que `ConnectionFactory`, el fixture y `AppRouter` miden el mismo motor
+ * y no dependen del contrato de `.env.battery`.
  *
  * Dogma Vanilla: PHP 8.2+ puro, PDO nativo, cero dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
  */
+
+$pgTestDsn = trim((string)getenv('PG_TEST_DSN'));
+if ($pgTestDsn === '') {
+    fwrite(STDERR, PHP_EOL . '[CATEGORÍA NO EJECUTABLE] Falta PG_TEST_DSN: el motor nuevo no está declarado.' . PHP_EOL);
+    fwrite(STDERR, 'Aprovisione deploy/local/postgres/ y exporte su contrato de entorno; la suite no se omite en silencio.' . PHP_EOL);
+    exit(2);
+}
+
+// H-04 mide el camino real de la aplicación: el fixture, ConnectionFactory y
+// AppRouter deben compartir el motor que declara la categoría. Se fija
+// DATABASE_URL antes del bootstrap para que el arnés no resuelva .env.battery
+// por su cuenta y la conexión cacheada no quede apuntando a otro banco.
+putenv('DATABASE_URL=' . $pgTestDsn);
+$_ENV['DATABASE_URL'] = $pgTestDsn;
+$_SERVER['DATABASE_URL'] = $pgTestDsn;
 
 require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../Support/PostgresFixtureBuilder.php';
@@ -92,13 +112,10 @@ echo " VENDGUARD · T-SLA-11 / H-04 · Latencia y determinismo de métricas\n";
 echo " Categoría: new_engine (canal propio, fuera de la batería hermética)\n";
 echo "======================================================================\n";
 
-if (trim((string)getenv('PG_TEST_DSN')) === '') {
-    fwrite(STDERR, "\n[CATEGORÍA NO EJECUTABLE] Falta PG_TEST_DSN: el motor nuevo no está declarado.\n");
-    fwrite(STDERR, "Aprovisione deploy/local/postgres/ y exporte su contrato de entorno; la suite no se omite en silencio.\n");
-    exit(2);
-}
-
 try {
+    // El bootstrap ya recibió DATABASE_URL desde PG_TEST_DSN; se descarta una
+    // instancia previa para que la conexión compartida nazca con ese contrato.
+    ConnectionFactory::reset();
     $pdo = ConnectionFactory::getConnection();
     $pdo->query('SELECT 1');
 } catch (Throwable $exception) {

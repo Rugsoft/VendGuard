@@ -318,7 +318,7 @@ RNF-01 queda certificado en su mitad analítica: el determinismo se demuestra co
 
 **Recomendación**
 
-Mantener la suite en la categoría `new_engine` y repetirla tras cualquier cambio en `PdoMetricsRepository`, `MetricsCalculationService`, `MetricsExportService` o `MetricFilter`. El comando es `source deploy/local/postgres/.env.local && php tests/integration/PostgresTieredSlaMetricsPerformanceTest.php`.
+Mantener la suite en la categoría `new_engine` y repetirla tras cualquier cambio en `PdoMetricsRepository`, `MetricsCalculationService`, `MetricsExportService` o `MetricFilter`. El comando es `source deploy/local/postgres/.env.local && php tests/integration/PostgresTieredSlaMetricsPerformanceTest.php`; la suite alinea `DATABASE_URL` con `PG_TEST_DSN` antes del bootstrap, de modo que no depende de `.env.battery` ni de exportar las dos variables.
 
 ---
 

@@ -162,8 +162,8 @@ if ($driver !== 'pgsql') {
 // Los dos contratos conviven a propósito y no se pisan: las suites de esquema abren su
 // fixture con `PG_TEST_DSN`, y las de flujo HTTP usan `ConnectionFactory`, que resuelve
 // `DATABASE_URL` (el banco del arnés) porque miden el camino real de la aplicación. El
-// canal solo exige el primero; el segundo lo resuelve `tests/bootstrap.php` desde su
-// contrato y, si falta, la suite lo declara en lugar de medir a ciegas.
+// canal solo exige el primero; H-04 alinea expresamente `DATABASE_URL` con `PG_TEST_DSN`
+// antes del bootstrap para que el fixture y el router compartan el motor declarado.
 
 $filter = trim((string)($argv[1] ?? ''));
 $suites = NewEngineChannel::discover($integrationDir);
