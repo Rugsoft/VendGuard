@@ -696,7 +696,7 @@ Las suites que declaran `VENDGUARD_TEST_CATEGORY = 'new_engine'` exigen un Postg
 
 ```bash
 source deploy/local/postgres/.env.local     # motor local; .env.docker-tls para el TLS
-php tests/run_new_engine.php                # las 48 suites del canal
+php tests/run_new_engine.php                # las 49 suites del canal
 php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 ```
 
