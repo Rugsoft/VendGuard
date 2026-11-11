@@ -722,9 +722,22 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             $sql .= " AND (u.is_active = {$this->dialect->booleanLiteral(false)} OR u.deleted_at IS NOT NULL)";
         }
 
-        if (!empty($filters['role']) && $filters['role'] !== 'all') {
+        $roleFilter = $filters['role'] ?? null;
+        if ($roleFilter !== null && trim((string)$roleFilter) !== '' && strtoupper(trim((string)$roleFilter)) !== 'ALL') {
+            // Módulo 31, `D2`: el filtro `ALL` no restringe y cualquier otro valor
+            // debe ser un rol real. Un rol inventado devolvería una lista vacía y
+            // el coordinador creería que no hay personal. Se acepta en cualquier
+            // caja porque la consola envía `TECHNICIAN`/`RESTOCKER` y los enlaces
+            // heredados en minúsculas.
+            $normalizedRole = strtoupper(trim((string)$roleFilter));
+            if (!in_array($normalizedRole, UserRole::values(), true)) {
+                throw new \InvalidArgumentException(
+                    "Filtro de rol no válido: '{$roleFilter}'. Valores admitidos: ALL, " . implode(', ', UserRole::values()) . '.'
+                );
+            }
+
             $sql .= " AND u.role = :role";
-            $params[':role'] = strtoupper(trim((string)$filters['role']));
+            $params[':role'] = $normalizedRole;
         }
 
         if (!empty($filters['search'])) {

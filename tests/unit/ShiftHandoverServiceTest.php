@@ -99,10 +99,10 @@ $shiftRepo = new class($activeShift) implements TechnicianShiftRepositoryInterfa
     public function findById(int $shiftId): ?TechnicianShift { return $this->shift; }
     public function saveAdjustment(TechnicianShift $adjustedShift): TechnicianShift { return $adjustedShift; }
     public function findOverlappingShiftId(int $technicianId, DateTimeImmutable $startedAt, DateTimeImmutable $closedAt, ?int $excludeShiftId = null): ?int { return null; }
-    public function findShiftsByDateRange(string $fromDate, string $toDate, ?int $technicianId = null): array { return []; }
-    public function findOrphanOpenShiftsBefore(string $beforeDate, ?int $technicianId = null): array { return []; }
-    public function getClosedInterventionMetricsByTechnician(DateTimeImmutable $from, DateTimeImmutable $to, ?int $technicianId = null): array { return []; }
-    public function getActiveShiftsMap(): array { return []; }
+    public function findShiftsByDateRange(string $fromDate, string $toDate, ?int $technicianId = null, ?string $role = null): array { return []; }
+    public function findOrphanOpenShiftsBefore(string $beforeDate, ?int $technicianId = null, ?string $role = null): array { return []; }
+    public function getClosedInterventionMetricsByTechnician(DateTimeImmutable $from, DateTimeImmutable $to, ?int $technicianId = null, ?string $role = null): array { return []; }
+    public function getActiveShiftsMap(?string $role = null): array { return []; }
 };
 
 $userRepo = new class implements UserRepositoryInterface {
@@ -213,7 +213,7 @@ $machineRepo = new class implements MachineRepositoryInterface {
 $absenceRepo = new class implements TechnicianAbsenceRepositoryInterface {
     public function create(int $technicianId, VendGuard\Core\Domain\ValueObject\AbsenceReason $reason, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, ?string $notes, int $createdBy): VendGuard\Core\Domain\Model\TechnicianAbsence { throw new LogicException(); }
     public function findById(int $id): ?VendGuard\Core\Domain\Model\TechnicianAbsence { return null; }
-    public function findAll(?int $technicianId = null, ?string $status = null): array { return []; }
+    public function findAll(?int $technicianId = null, ?string $status = null, ?string $role = null): array { return []; }
     public function findActiveAbsenceForTechnician(int $technicianId, ?DateTimeImmutable $referenceTime = null): ?VendGuard\Core\Domain\Model\TechnicianAbsence { return null; }
     public function findActiveAbsencesMap(DateTimeImmutable $at): array { return []; }
     public function hasOverlappingAbsence(int $technicianId, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, ?int $excludeAbsenceId = null): bool { return false; }

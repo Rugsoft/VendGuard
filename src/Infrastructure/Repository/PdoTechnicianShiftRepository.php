@@ -109,7 +109,7 @@ final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInt
                AND i.assigned_technician_id IS NOT NULL
                AND i.status::text IN ('RESOLVED', 'CLOSED')
                AND i.started_at IS NOT NULL
-               AND i.resolved_at BETWEEN :from_incident AND :to_incident%s
+               AND i.resolved_at BETWEEN :from_incident AND :to_incident%s%s
         ),
         completed_preventives AS (
             SELECT po.assigned_technician_id AS technician_id,
@@ -126,7 +126,7 @@ final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInt
              WHERE po.deleted_at IS NULL
                AND po.assigned_technician_id IS NOT NULL
                AND po.status::text = 'COMPLETED'
-               AND po.completed_at BETWEEN :from_preventive AND :to_preventive%s
+               AND po.completed_at BETWEEN :from_preventive AND :to_preventive%s%s
         )
         SELECT technician_id,
                SUM(intervention_seconds)::BIGINT AS intervention_seconds,
@@ -350,7 +350,8 @@ final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInt
     public function findShiftsByDateRange(
         string $fromDate,
         string $toDate,
-        ?int $technicianId = null
+        ?int $technicianId = null,
+        ?string $role = null
     ): array {
         $sql = 'SELECT * FROM technician_shifts
                  WHERE shift_date BETWEEN :from_date AND :to_date';
@@ -362,6 +363,12 @@ final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInt
         if ($technicianId !== null) {
             $sql .= ' AND technician_id = :technician_id';
             $params[':technician_id'] = $technicianId;
+        }
+
+        $roleFilter = self::normalizeRoleFilter($role);
+        if ($roleFilter !== null) {
+            $sql .= ' AND technician_id IN (SELECT id FROM users WHERE role = :role_filter)';
+            $params[':role_filter'] = $roleFilter;
         }
 
         $sql .= ' ORDER BY shift_date ASC, started_at ASC, id ASC';
@@ -377,7 +384,8 @@ final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInt
      */
     public function findOrphanOpenShiftsBefore(
         string $beforeDate,
-        ?int $technicianId = null
+        ?int $technicianId = null,
+        ?string $role = null
     ): array {
         $sql = 'SELECT * FROM technician_shifts
                  WHERE closed_at IS NULL
@@ -387,6 +395,12 @@ final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInt
         if ($technicianId !== null) {
             $sql .= ' AND technician_id = :technician_id';
             $params[':technician_id'] = $technicianId;
+        }
+
+        $roleFilter = self::normalizeRoleFilter($role);
+        if ($roleFilter !== null) {
+            $sql .= ' AND technician_id IN (SELECT id FROM users WHERE role = :role_filter)';
+            $params[':role_filter'] = $roleFilter;
         }
 
         $sql .= ' ORDER BY shift_date ASC, started_at ASC, id ASC';
@@ -403,8 +417,10 @@ final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInt
     public function getClosedInterventionMetricsByTechnician(
         DateTimeImmutable $from,
         DateTimeImmutable $to,
-        ?int $technicianId = null
+        ?int $technicianId = null,
+        ?string $role = null
     ): array {
+        $roleFilter = self::normalizeRoleFilter($role);
         $params = [
             ':from_incident' => $this->timestamp($from),
             ':to_incident' => $this->timestamp($to),
@@ -417,10 +433,17 @@ final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInt
             $params[':preventive_technician'] = $technicianId;
         }
 
+        if ($roleFilter !== null) {
+            $params[':incident_role'] = $roleFilter;
+            $params[':preventive_role'] = $roleFilter;
+        }
+
         $sql = sprintf(
             self::INTERVENTION_METRICS_SQL,
             $technicianId !== null ? "\n               AND i.assigned_technician_id = :incident_technician" : '',
-            $technicianId !== null ? "\n               AND po.assigned_technician_id = :preventive_technician" : ''
+            $roleFilter !== null ? "\n               AND i.assigned_technician_id IN (SELECT id FROM users WHERE role = :incident_role)" : '',
+            $technicianId !== null ? "\n               AND po.assigned_technician_id = :preventive_technician" : '',
+            $roleFilter !== null ? "\n               AND po.assigned_technician_id IN (SELECT id FROM users WHERE role = :preventive_role)" : ''
         );
 
         $stmt = $this->pdo->prepare($sql);
@@ -440,12 +463,23 @@ final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInt
     /**
      * @return array<int, string> technicianId => shift_status ('ON_SHIFT'|'MEAL_BREAK'|'OFF_SHIFT')
      */
-    public function getActiveShiftsMap(): array
+    public function getActiveShiftsMap(?string $role = null): array
     {
-        $stmt = $this->pdo->query(
-            'SELECT technician_id, status FROM technician_shifts
-              WHERE closed_at IS NULL'
-        );
+        $roleFilter = self::normalizeRoleFilter($role);
+
+        if ($roleFilter === null) {
+            $stmt = $this->pdo->query(
+                'SELECT technician_id, status FROM technician_shifts
+                  WHERE closed_at IS NULL'
+            );
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT technician_id, status FROM technician_shifts
+                  WHERE closed_at IS NULL
+                    AND technician_id IN (SELECT id FROM users WHERE role = :role_filter)'
+            );
+            $stmt->execute([':role_filter' => $roleFilter]);
+        }
 
         $map = [];
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -453,6 +487,35 @@ final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInt
         }
 
         return $map;
+    }
+
+    /**
+     * Normaliza el filtro de rol de la consola (`ALL` | `TECHNICIAN` | `RESTOCKER`).
+     *
+     * Devuelve `null` cuando no hay restricción y rechaza en voz alta un valor
+     * fuera del catálogo: un filtro imposible devolvería un informe de horas
+     * vacío y el coordinador creería que nadie ha fichado (Módulo 31, `D2`).
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function normalizeRoleFilter(?string $role): ?string
+    {
+        if ($role === null) {
+            return null;
+        }
+
+        $normalized = strtoupper(trim($role));
+        if ($normalized === '' || $normalized === 'ALL') {
+            return null;
+        }
+
+        if (!in_array($normalized, ['TECHNICIAN', 'RESTOCKER'], true)) {
+            throw new \InvalidArgumentException(
+                "Filtro de rol no válido: '{$role}'. Se admite ALL, TECHNICIAN o RESTOCKER."
+            );
+        }
+
+        return $normalized;
     }
 
     /**

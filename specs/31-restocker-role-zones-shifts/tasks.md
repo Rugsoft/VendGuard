@@ -54,7 +54,7 @@ flowchart LR
   - **Requisitos:** `RF-02.1`–`RF-02.4`, `QA 1`, `QA 2`, `QA 4`.
   - **Verificación:** `php tests/integration/PdoRestockerZoneRepositoryTest.php`
 
-- [ ] **T-RES-06 · Extender repositorios de Personal, Ausencias, Turnos y Horas para filtrado por Rol (`ALL` | `TECHNICIAN` | `RESTOCKER`)**
+- [x] **T-RES-06 · Extender repositorios de Personal, Ausencias, Turnos y Horas para filtrado por Rol (`ALL` | `TECHNICIAN` | `RESTOCKER`)**
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `RF-05.1`, `RF-05.2`, `C1`, `C3`, `QA 4`.
   - **Verificación:** `php tests/integration/PdoWorkHoursRoleFilterTest.php`
 

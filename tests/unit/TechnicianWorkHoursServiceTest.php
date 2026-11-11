@@ -210,8 +210,12 @@ $shiftRepo = new class($reportShifts, $metrics) implements TechnicianShiftReposi
         return $this->conflictId;
     }
 
-    public function findShiftsByDateRange(string $fromDate, string $toDate, ?int $technicianId = null): array
-    {
+    public function findShiftsByDateRange(
+        string $fromDate,
+        string $toDate,
+        ?int $technicianId = null,
+        ?string $role = null
+    ): array {
         if ($technicianId === null) {
             return $this->rangeShifts;
         }
@@ -222,15 +226,19 @@ $shiftRepo = new class($reportShifts, $metrics) implements TechnicianShiftReposi
         ));
     }
 
-    public function findOrphanOpenShiftsBefore(string $beforeDate, ?int $technicianId = null): array
-    {
+    public function findOrphanOpenShiftsBefore(
+        string $beforeDate,
+        ?int $technicianId = null,
+        ?string $role = null
+    ): array {
         return $technicianId === null || $technicianId === 2 ? [$this->byId[14]] : [];
     }
 
     public function getClosedInterventionMetricsByTechnician(
         DateTimeImmutable $from,
         DateTimeImmutable $to,
-        ?int $technicianId = null
+        ?int $technicianId = null,
+        ?string $role = null
     ): array {
         if ($technicianId === null) {
             return $this->metrics;
@@ -239,7 +247,7 @@ $shiftRepo = new class($reportShifts, $metrics) implements TechnicianShiftReposi
         return isset($this->metrics[$technicianId]) ? [$technicianId => $this->metrics[$technicianId]] : [];
     }
 
-    public function getActiveShiftsMap(): array
+    public function getActiveShiftsMap(?string $role = null): array
     {
         return [];
     }
