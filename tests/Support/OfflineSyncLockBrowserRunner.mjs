@@ -18,17 +18,18 @@
  *    arriendo compartido en `localStorage` debe sostener la misma exclusión.
  *
  * El arnés usa solo lo que trae Node (servidor `http`, `WebSocket` global para el
- * protocolo DevTools) y el Chromium instalado en la máquina (Chrome o Edge). Si
- * no hay navegador, sale con código 2 para que el canal lo declare no ejecutable
- * en lugar de fingir un verde; nunca se sustituye por un doble.
+ * protocolo DevTools) y un Chromium instalado en la máquina (Chrome, Chromium,
+ * Edge o la caché de Playwright). Si no hay navegador, sale con código 2 para que
+ * el canal lo declare no ejecutable en lugar de fingir un verde; nunca se
+ * sustituye por un doble.
  *
  * Dogma Vanilla: ESM nativo, cero dependencias npm, cero red externa.
  */
 
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -67,6 +68,53 @@ function notExecutable(reason) {
 // 1. Navegador instalado
 // ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * Chromium descargado por Playwright en la caché local.
+ *
+ * No añade una dependencia npm: reutiliza un binario que ya está en la máquina.
+ * Se prefiere antes que Edge porque el canal no certifica un navegador concreto,
+ * sino el comportamiento de Web Locks y localStorage entre pestañas.
+ */
+function playwrightChromiumCandidates() {
+  const roots = [];
+  if (process.platform === 'win32') {
+    if (typeof process.env.LOCALAPPDATA === 'string' && process.env.LOCALAPPDATA !== '') {
+      roots.push(join(process.env.LOCALAPPDATA, 'ms-playwright'));
+    }
+  } else if (process.platform === 'darwin') {
+    roots.push(join(homedir(), 'Library', 'Caches', 'ms-playwright'));
+  } else {
+    const cacheRoot = process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache');
+    roots.push(join(cacheRoot, 'ms-playwright'));
+  }
+
+  const candidates = [];
+  for (const root of roots) {
+    let entries;
+    try {
+      entries = readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    const revisions = entries
+      .filter((entry) => entry.isDirectory() && /^chromium-\d+$/.test(entry.name))
+      .map((entry) => entry.name)
+      .sort((left, right) => right.localeCompare(left, 'en', { numeric: true }));
+
+    for (const revision of revisions) {
+      candidates.push(
+        join(root, revision, 'chrome-win64', 'chrome.exe'),
+        join(root, revision, 'chrome-win', 'chrome.exe'),
+        join(root, revision, 'chrome-linux', 'chrome'),
+        join(root, revision, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium')
+      );
+    }
+  }
+
+  return candidates.filter((candidate) => existsSync(candidate));
+}
+
 function candidateBrowsers() {
   const candidates = [];
   const explicit = process.env.VENDGUARD_CHROME_PATH;
@@ -74,22 +122,28 @@ function candidateBrowsers() {
     candidates.push(explicit.trim());
   }
 
+  const edgeCandidates = [];
+
   if (process.platform === 'win32') {
     for (const base of [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA]) {
       if (typeof base !== 'string' || base === '') {
         continue;
       }
       candidates.push(join(base, 'Google', 'Chrome', 'Application', 'chrome.exe'));
-      candidates.push(join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
       candidates.push(join(base, 'Chromium', 'Application', 'chrome.exe'));
+      edgeCandidates.push(join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
     }
   } else if (process.platform === 'darwin') {
     candidates.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
-    candidates.push('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
     candidates.push('/Applications/Chromium.app/Contents/MacOS/Chromium');
+    edgeCandidates.push('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
   } else {
-    candidates.push('/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/microsoft-edge');
+    candidates.push('/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser');
+    edgeCandidates.push('/usr/bin/microsoft-edge');
   }
+
+  candidates.push(...playwrightChromiumCandidates());
+  candidates.push(...edgeCandidates);
 
   return candidates;
 }

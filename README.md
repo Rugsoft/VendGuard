@@ -702,25 +702,23 @@ php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 
 El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla. La medición del pooler remoto sigue siendo la evidencia de RNF-01: si el enlace del proveedor incumple el presupuesto de 250 ms en alguna operación, el canal publica el fallo con su mediana y su p95, sin convertirlo en omisión.
 
-Corrida del 11 de noviembre de 2026 (el canal no cierra en verde y los fallos se publican sin omitirse):
+Corrida del 11 de noviembre de 2026 (canal cerrado en verde):
 
 ```text
 ======================================================================
  RESUMEN DEL CANAL new_engine
  Suites evaluadas    : 44
- Suites en verde     : 43
+ Suites en verde     : 44
  No ejecutables      : 0
- Aserciones          : 1.471
- Fallos              : 1
- RESULTADO: FALLO. Revisa: OfflineSyncLockBrowserTest.php
+ Aserciones          : 1.487
+ Fallos              : 0
+ RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 ======================================================================
 ```
 
 El pooler remoto ya está en verde: `PoolerLatencyMeasurementTest` completa sus 20 rondas y pasa 30/30 aserciones. La optimización de `asignar` integró el cierre y la apertura de custodia en el CTE atómico de la asignación y eliminó dos viajes por operación; la mediana de «asignar» quedó por debajo del presupuesto de 250 ms.
 
-El único fallo que queda, con su causa medida:
-
-* **`OfflineSyncLockBrowserTest`** no llega a abrir DevTools: Edge 157 termina con código 0 antes de publicar la URL. Las sondas con `--headless=new`, `--headless` y `--no-sandbox` reproducen la salida vacía; es un fallo de arranque del navegador en este runner, no una regresión del cerrojo de sincronización. La suite exige un Chromium real y no se sustituye por un doble.
+El cerrojo entre pestañas también queda certificado: `OfflineSyncLockBrowserTest` completa sus **16/16 aserciones**. El runner prefiere Chrome/Chromium del sistema, después el Chromium que Playwright tenga en su caché local y, por último, Edge; así evita el arranque de Edge 157, que en este puesto termina con código 0 antes de publicar DevTools, sin instalar dependencias ni rebajar la exigencia de navegador real.
 
 
 El canal incluye además `OfflineSyncLockBrowserTest`, única suite que exige **navegador real**: abre dos pestañas de Chromium sobre el mismo perfil, comparte `IndexedDB` entre ambas y comprueba con un servidor de pruebas que el cerrojo `vendguard-offline-sync` impide dos envíos en vuelo y que el control negativo sin cerrojo sí los detecta. La quinta sección oculta `navigator.locks` en las dos pestañas —lo que ve una PWA servida por HTTP plano— y verifica que el arriendo en `localStorage` sostiene la misma exclusión (16 aserciones en total).
