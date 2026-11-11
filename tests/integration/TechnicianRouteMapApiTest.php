@@ -183,7 +183,8 @@ $makeRouteIncident = function (
     int $locationId,
     IncidentStatus $status,
     UrgencyLevel $urgency,
-    string $createdMinutesAgo
+    string $createdMinutesAgo,
+    int $slaTargetMinutes
 ) use ($incidentRepo, $pdo, $machinesByCode, $tech1Id): Incident {
     $machineId = $machinesByCode[$machineCode]->getId();
 
@@ -210,11 +211,16 @@ $makeRouteIncident = function (
 
     $pdo->prepare("UPDATE incidents
                    SET status = :status, assigned_technician_id = :tech_id,
-                       created_at = NOW() - INTERVAL '{$createdMinutesAgo} minutes'
+                       created_at = NOW() - INTERVAL '{$createdMinutesAgo} minutes',
+                       sla_target_minutes = :sla_target_minutes,
+                       sla_target_at = (NOW() - INTERVAL '{$createdMinutesAgo} minutes')
+                           + (:sla_target_offset * INTERVAL '1 minute')
                    WHERE id = :id")
         ->execute([
             ':status'  => $status->value,
             ':tech_id' => $tech1Id,
+            ':sla_target_minutes' => $slaTargetMinutes,
+            ':sla_target_offset' => $slaTargetMinutes,
             ':id'      => $created->getId(),
         ]);
 
@@ -247,15 +253,16 @@ $assert('1.3 Coordinador en endpoint de técnico => 403 Forbidden', $res->getSta
 echo "\n--- BLOQUE 2: Parada #1, crítica por SLA y Nearest Neighbor ---\n";
 
 // Parada en curso (fija el puesto #1) con segunda máquina consolidada en la misma sede
-$incInProgress = $makeRouteIncident('MAP18-A1', $sitesByCode['SEDE-MAP18-A']->getId(), IncidentStatus::IN_PROGRESS, UrgencyLevel::HIGH, '90 MINUTE');
-$incConsolidated = $makeRouteIncident('MAP18-A2', $sitesByCode['SEDE-MAP18-A']->getId(), IncidentStatus::ASSIGNED, UrgencyLevel::HIGH, '80 MINUTE');
+$incInProgress = $makeRouteIncident('MAP18-A1', $sitesByCode['SEDE-MAP18-A']->getId(), IncidentStatus::IN_PROGRESS, UrgencyLevel::HIGH, '90 MINUTE', 240);
+$incConsolidated = $makeRouteIncident('MAP18-A2', $sitesByCode['SEDE-MAP18-A']->getId(), IncidentStatus::ASSIGNED, UrgencyLevel::HIGH, '80 MINUTE', 720);
 
-// Crítica perecedera: CRITICAL + perecedera + SLA de 60 min creado hace 30 min (quedan ~30 min < 4h)
-$incCritical = $makeRouteIncident('MAP18-B1', $sitesByCode['SEDE-MAP18-B']->getId(), IncidentStatus::ASSIGNED, UrgencyLevel::CRITICAL, '30 MINUTE');
+// Crítica perecedera: CRITICAL + perecedera con techo Art. II de 240 min, creada hace 30 min
+// (quedan ~210 min < 4 h y la parada entra en el bloque crítico).
+$incCritical = $makeRouteIncident('MAP18-B1', $sitesByCode['SEDE-MAP18-B']->getId(), IncidentStatus::ASSIGNED, UrgencyLevel::CRITICAL, '30 MINUTE', 240);
 
 // Ordinarias para el encadenamiento del Vecino Más Cercano
-$incOrdinaryC = $makeRouteIncident('MAP18-C1', $sitesByCode['SEDE-MAP18-C']->getId(), IncidentStatus::ASSIGNED, UrgencyLevel::HIGH, '70 MINUTE');
-$incOrdinaryD = $makeRouteIncident('MAP18-D1', $sitesByCode['SEDE-MAP18-D']->getId(), IncidentStatus::ASSIGNED, UrgencyLevel::MEDIUM, '70 MINUTE');
+$incOrdinaryC = $makeRouteIncident('MAP18-C1', $sitesByCode['SEDE-MAP18-C']->getId(), IncidentStatus::ASSIGNED, UrgencyLevel::HIGH, '70 MINUTE', 720);
+$incOrdinaryD = $makeRouteIncident('MAP18-D1', $sitesByCode['SEDE-MAP18-D']->getId(), IncidentStatus::ASSIGNED, UrgencyLevel::MEDIUM, '70 MINUTE', 1440);
 
 [$status, $body] = $fetchMap(['origin_lat' => '41.3935', 'origin_lng' => '2.1890']);
 $data = $body['data'] ?? [];
@@ -274,8 +281,8 @@ $assert('2.7 Las máquinas consolidadas aparecen en el desglose de tareas', str_
 
 $criticalSla = $stops[1]['tasks'][0]['sla_due_at'] ?? null;
 $slaTimestamp = $criticalSla !== null ? (new DateTimeImmutable($criticalSla))->getTimestamp() : 0;
-$assert('2.8 La crítica se ordena según SLA real derivado de created_at (vence en ~30 min)',
-    $slaTimestamp > time() + 15 * 60 && $slaTimestamp < time() + 45 * 60);
+$assert('2.8 La crítica deriva su vencimiento de created_at y del techo de 240 min (vence en ~210 min)',
+    $slaTimestamp > time() + 180 * 60 && $slaTimestamp < time() + 240 * 60);
 
 $distances = array_column($stops, 'distance_from_previous_km');
 $assert('2.9 Distancias Haversine reales entre hitos consecutivos (A->B ~1,4 km)', is_numeric($distances[1]) && $distances[1] > 1.2 && $distances[1] < 1.6);
@@ -345,8 +352,8 @@ $assert('5.3 Ningún enlace contiene coordenadas de la parada excluida', !str_co
 $assert('5.4 La ruta no está truncada con menos de 9 waypoints', ($body['data']['waypoints_truncated'] ?? true) === false);
 
 $summary = $body['data']['summary'] ?? [];
-$assert('5.5 El resumen concentra paradas, tareas y críticas',
-    ($summary['total_stops'] ?? 0) === 3 && ($summary['total_tasks'] ?? 0) === 4 && ($summary['total_critical'] ?? 0) === 1);
+$assert('5.5 El resumen concentra paradas, tareas y críticas (incluida la parada en curso de perecederos)',
+    ($summary['total_stops'] ?? 0) === 3 && ($summary['total_tasks'] ?? 0) === 4 && ($summary['total_critical'] ?? 0) === 2);
 
 // =========================================================================
 // RESUMEN FINAL

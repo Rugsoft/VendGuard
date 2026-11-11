@@ -197,12 +197,13 @@ export const App = {
       <!-- Profile Selector Bar (Oculto en las vistas públicas QR y seguimiento) -->
       <div
         v-if="currentView !== 'qr' && currentView !== 'tracking'"
+        class="vg-profile-bar"
         style="background-color: #ffffff; border-bottom: 1px solid var(--color-hairline, #c8cfda); padding: 8px 16px;"
       >
-        <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">
+        <div class="vg-profile-bar__inner">
           <!-- Profile Tabs -->
-          <div style="display: flex; gap: 6px; align-items: center;">
-            <span style="font-size: 12px; font-weight: 600; color: var(--color-ink-muted, #6c7e9d); margin-right: 6px;">
+          <div class="vg-profile-tabs">
+            <span class="vg-profile-tabs__label">
               Perfil activo:
             </span>
             <button
@@ -235,7 +236,7 @@ export const App = {
           </div>
 
           <!-- Quick Test Credentials Helper Toggle -->
-          <div>
+          <div class="vg-profile-bar__credentials">
             <button
               type="button"
               class="vg-btn vg-btn-secondary"
@@ -250,6 +251,7 @@ export const App = {
         <!-- Collapsible Credentials Guide -->
         <div
           v-if="showCredentialsGuide"
+          class="vg-profile-guide"
           style="max-width: 1200px; margin: 8px auto 0 auto; background-color: #f1f5f9; border-radius: var(--radius-interactive, 4px); padding: 8px 12px; font-size: 12px; color: var(--color-slate, #2c333f); display: flex; flex-wrap: wrap; gap: 16px; align-items: center;"
         >
           <div>

@@ -26,6 +26,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '../..');
 const componentPath = path.join(projectRoot, 'public/assets/js/components/CoordinatorTroubleshootingGuidesTab.js');
 const componentSource = fs.readFileSync(componentPath, 'utf8');
+const indexHtmlSource = fs.readFileSync(path.join(projectRoot, 'public/index.html'), 'utf8');
 
 let assertions = 0;
 let failures = 0;
@@ -157,9 +158,10 @@ assert(
 );
 
 assert(
-  '2.4 La cobertura se carga desde coverage_summary y la pestaña enlaza styles.css',
+  '2.4 La cobertura se carga desde coverage_summary y styles.css se enlaza globalmente',
   componentSource.includes('catalog?.coverage_summary')
-    && componentSource.includes('href="/assets/css/styles.css"')
+    && indexHtmlSource.includes('href="/assets/css/styles.css"')
+    && !componentSource.includes('href="/assets/css/styles.css"')
 );
 
 assert(

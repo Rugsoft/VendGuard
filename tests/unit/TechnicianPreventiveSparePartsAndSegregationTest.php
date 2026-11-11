@@ -741,6 +741,7 @@ function createPrevTestEnvironment(): array
         orderRepo: $orderRepo,
         settingsRepo: $settingsRepo,
         machineRepo: $machineRepo,
+        locationRepo: $locationRepo,
         certificateRepo: $certRepo,
         auditLogger: $auditLogger
     );

@@ -826,6 +826,19 @@ export const CoordinatorIncidentDetailModal = {
       return Boolean(this.sla?.has_sla_limit);
     },
 
+    /**
+     * Objetivo nominal del contrato sellado en el aviso (Módulo 30, RF-02.1).
+     * Se lee del snapshot, nunca de la sede vigente: el ticket conserva su contrato.
+     */
+    slaContractTargetLabel() {
+      const minutes = Number(this.incident?.sla_target_minutes);
+      if (Number.isFinite(minutes) && minutes > 0) {
+        return minutes % 60 === 0 ? `${minutes / 60} h` : this.formatMinutes(minutes);
+      }
+      const hours = Number(this.incident?.sla_target_hours);
+      return Number.isFinite(hours) && hours > 0 ? `${hours} h` : '—';
+    },
+
     /** Presentación del monitor de SLA: ámbar/rojo si está incumplido, verde si cumplido. */
     slaMonitorStyle() {
       const breached = Boolean(this.sla?.is_breached);
@@ -1738,6 +1751,13 @@ export const CoordinatorIncidentDetailModal = {
                   :custom-label="incident.urgency_label"
                   data-testid="incident-detail-urgency-badge"
                 />
+                <span
+                  v-if="incident.sla_tier_label"
+                  class="vg-chip"
+                  data-testid="incident-detail-sla-tier"
+                >
+                  Contrato: {{ incident.sla_tier_label }} · {{ slaContractTargetLabel }}
+                </span>
                 <!-- Trazabilidad oportunista (Módulo 16, RF-06.4): la ficha de
                      Coordinación distingue el alta in situ de la asunción. -->
                 <IncidentBadge
@@ -2046,6 +2066,18 @@ export const CoordinatorIncidentDetailModal = {
                   <span v-for="metric in timelineMetrics" :key="metric.key">
                     {{ metric.label }}: <strong style="color: var(--color-ink-slate, #2c333f);">{{ metric.value }}</strong>
                   </span>
+                </div>
+
+                <div
+                  v-if="incident && incident.sla_tier_label"
+                  class="sla-contract-card"
+                  data-testid="detail-sla-contract"
+                  style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; margin-bottom: 12px; background-color: var(--color-canvas); border: 1px solid var(--color-hairline); border-left: 3px solid var(--color-primary); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-secondary);"
+                >
+                  <span class="vg-chip">Contrato: {{ incident.sla_tier_label }}</span>
+                  <span>Objetivo: <strong>{{ slaContractTargetLabel }}</strong></span>
+                  <span v-if="incident.sla_target_at">Vencimiento: <strong>{{ formatDateTime(incident.sla_target_at) }}</strong></span>
+                  <span v-if="incident.is_cold_chain_risk" style="font-weight: 700; color: var(--color-error-text);">🥪 Techo sanitario Art. II</span>
                 </div>
 
                 <div

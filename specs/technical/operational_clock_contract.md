@@ -61,7 +61,7 @@ lectura publicada.
 | :--- | :--- | :--- |
 | **Ancla del intervalo de pausa** | `paused_at` se graba con el desfase de la zona que declaró la pausa | [`Incident::pausePendingInfo()`](../../src/Core/Domain/Model/Incident.php) |
 | **Ancla del vencimiento** | `sla_target_at` se graba con el desfase de la zona en que el calendario lo resolvió | [`Incident::shiftSlaTarget()`](../../src/Core/Domain/Model/Incident.php) |
-| **Lectura del vencimiento** | la marca del motor se compara como instante y se convierte a la zona operativa antes de aplicar la ventana comercial | [`IncidentPauseService::shiftSlaTargetInBusinessHours()`](../../src/Application/Service/IncidentPauseService.php) y `pauseBusinessSecondsSince()` |
+| **Lectura del vencimiento** | la marca del motor se compara como instante y se convierte a la zona operativa antes de sumar los segundos naturales de la pausa | [`IncidentPauseService::shiftSlaTargetBySeconds()`](../../src/Application/Service/IncidentPauseService.php) y `pauseSecondsSince()` |
 | **Anuncio del vencimiento** | la respuesta de la pausa y la nota inmutable documentan la **pared de sede** del instante | `IncidentPauseService::siteWall()` y `closePauseInterval()` |
 | **Anuncio de la marca de intervalo** | `paused_at` viaja **con su desfase**, que es como lo devuelve el motor y como lo lee el consumidor que mide minutos de espera | [`IncidentPauseService`](../../src/Application/Service/IncidentPauseService.php) y los bloques de detalle |
 | **Siembra y expectativa del arnés** | la batería siembra con el reloj del motor (`EngineClock`) y mide instantes; el censo de paredes locales queda congelado en el ratchet de la guarda | [`EngineClock`](../../tests/Support/EngineClock.php) y `HarnessClockContractTest` |

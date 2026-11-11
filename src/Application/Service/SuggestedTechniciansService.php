@@ -6,6 +6,7 @@ namespace VendGuard\Application\Service;
 
 use VendGuard\Application\DTO\SuggestedTechnicianDto;
 use VendGuard\Core\Domain\Repository\TechnicianSuggestionRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Infrastructure\Repository\PdoTechnicianSuggestionRepository;
 
 /**
@@ -72,8 +73,17 @@ final class SuggestedTechniciansService
             static fn (array $technician): bool => !in_array((int)$technician['technician_id'], $excluded, true)
         ));
 
+        // El sellado viaja desde el expediente; la etiqueta se deriva aquí para que
+        // el recomendador no tenga que conocer el catálogo de presentación.
+        $incident = $photo['incident'];
+        $tierValue = strtoupper(trim((string)($incident['sla_tier_snapshot'] ?? '')));
+        $tier = $tierValue === '' ? null : SlaTier::tryFrom($tierValue);
+        if ($tier !== null) {
+            $incident['sla_tier_label'] = $tier->label();
+        }
+
         return $this->suggester->getSuggestionsForIncident(
-            $photo['incident'],
+            $incident,
             $technicians,
             $photo['options'] ?? []
         );

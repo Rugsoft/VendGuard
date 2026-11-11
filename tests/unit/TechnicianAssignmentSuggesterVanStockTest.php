@@ -408,7 +408,7 @@ $coldTechnicians = [
 
 $coldTechniciansBefore = $coldTechnicians;
 
-$coldIncident = $incident(['priority' => 'CRITICAL']);
+$coldIncident = $incident(['priority' => 'CRITICAL', 'machine_type' => 'PERISHABLE_FOOD']);
 $coldEnrichedIncident = $withVanStockContext($coldIncident, [14 => 1], false, [14]);
 
 $coldLegacy = $suggester->getSuggestionsForIncident($coldIncident, $coldTechnicians, $base);

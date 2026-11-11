@@ -15,6 +15,7 @@ use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\OpportunisticMode;
 use VendGuard\Core\Domain\ValueObject\OpportunisticOriginReason;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 
@@ -32,6 +33,9 @@ class Incident implements ArrayAccess, JsonSerializable
      * al cuerpo HTTP crudo y la entidad la vuelve a exigir al cambiar de estado.
      */
     public const MIN_PAUSE_REASON_LENGTH = 20;
+
+    /** Los cinco objetivos de la matriz RF-01 que el motor admite. */
+    private const VALID_SLA_TARGET_MINUTES = [240, 360, 480, 720, 1440];
 
     private ?int $id;
     private string $ticketCode;
@@ -75,6 +79,12 @@ class Incident implements ArrayAccess, JsonSerializable
     private ?string $pausedAt;
     private int $totalPendingInfoSeconds;
     private ?string $slaTargetAt;
+
+    /** Perfil contractual congelado al abrir el aviso (Módulo 30, D2, C1). */
+    private SlaTier $slaTierSnapshot;
+
+    /** Objetivo en minutos naturales de la matriz RF-01. */
+    private int $slaTargetMinutes;
 
     // Campos de la avería oportunista in situ (módulo 16)
     private ?OpportunisticMode $opportunisticMode;
@@ -167,7 +177,9 @@ class Incident implements ArrayAccess, JsonSerializable
         ?IncidentCategory $rootCauseCategorySnapshot = null,
         ?string $rootCauseNameSnapshot = null,
         ?string $standardSolutionCodeSnapshot = null,
-        ?string $standardSolutionNameSnapshot = null
+        ?string $standardSolutionNameSnapshot = null,
+        ?SlaTier $slaTierSnapshot = null,
+        ?int $slaTargetMinutes = null
     ) {
         $this->id = $id;
         $this->ticketCode = strtoupper(trim($ticketCode));
@@ -229,6 +241,15 @@ class Incident implements ArrayAccess, JsonSerializable
 
         $this->totalPendingInfoSeconds = $totalPendingInfoSeconds;
         $this->slaTargetAt = $slaTargetAt;
+
+        $resolvedSlaTargetMinutes = $slaTargetMinutes ?? 1440;
+        if (!in_array($resolvedSlaTargetMinutes, self::VALID_SLA_TARGET_MINUTES, true)) {
+            throw new InvalidArgumentException(
+                'El objetivo de SLA debe ser uno de los cinco valores de la matriz RF-01: 240, 360, 480, 720 o 1440 minutos.'
+            );
+        }
+        $this->slaTierSnapshot = $slaTierSnapshot ?? SlaTier::STANDARD;
+        $this->slaTargetMinutes = $resolvedSlaTargetMinutes;
 
         // Coherencia oportunista (RF-04.1): la modalidad y su submotivo se
         // acompañan siempre, y cada modalidad admite sólo sus motivos. La base
@@ -396,7 +417,11 @@ class Incident implements ArrayAccess, JsonSerializable
                 : null,
             isset($row['standard_solution_name_snapshot']) && $row['standard_solution_name_snapshot'] !== null
                 ? (string)$row['standard_solution_name_snapshot']
-                : null
+                : null,
+            isset($row['sla_tier_snapshot']) && $row['sla_tier_snapshot'] !== null && $row['sla_tier_snapshot'] !== ''
+                ? SlaTier::fromString((string)$row['sla_tier_snapshot'])
+                : null,
+            isset($row['sla_target_minutes']) ? (int)$row['sla_target_minutes'] : null
         );
     }
 
@@ -407,6 +432,20 @@ class Incident implements ArrayAccess, JsonSerializable
     {
         $clone = clone $this;
         $clone->id = $id;
+        return $clone;
+    }
+
+    /**
+     * Recalcula la urgencia conservando el resto del agregado (C4).
+     *
+     * La operación es inmutable: la absorción QR necesita elevar la prioridad
+     * sin perder las marcas, la pausa ni el contexto enriquecido del expediente.
+     */
+    public function withUrgency(UrgencyLevel $urgency): self
+    {
+        $clone = clone $this;
+        $clone->urgency = $urgency;
+
         return $clone;
     }
 
@@ -718,12 +757,33 @@ class Incident implements ArrayAccess, JsonSerializable
     }
 
     /**
-     * Fecha límite contractual persistida, ya desplazada en horario comercial de la
-     * sede (RF-03.3). `null` mientras el ticket nunca haya sufrido una pausa.
+     * Fecha límite contractual persistida, ya desplazada por los segundos naturales
+     * de las pausas acumuladas (RF-03.3, EARS 02.3.1, C6). `null` mientras el ticket
+     * nunca haya sufrido una pausa.
      */
     public function getSlaTargetAt(): ?string
     {
         return $this->slaTargetAt;
+    }
+
+    public function getSlaTierSnapshot(): SlaTier
+    {
+        return $this->slaTierSnapshot;
+    }
+
+    public function getSlaTierLabel(): string
+    {
+        return $this->slaTierSnapshot->label();
+    }
+
+    public function getSlaTargetMinutes(): int
+    {
+        return $this->slaTargetMinutes;
+    }
+
+    public function getSlaTargetHours(): float
+    {
+        return $this->slaTargetMinutes / 60;
     }
 
     /**
@@ -945,9 +1005,9 @@ class Incident implements ArrayAccess, JsonSerializable
      * puede disfrazarse de `REGISTERED`: la reanudación debe devolverlo a la operación
      * (`IN_PROGRESS`/`ASSIGNED`).
      *
-     * No desplaza `sla_target_at`: el cálculo del horario comercial depende del
-     * calendario de la sede y vive en `IncidentPauseService` (T-PAUSE-06), que
-     * encadena este método con `shiftSlaTarget()`. La causa y el texto de la pausa
+     * No desplaza `sla_target_at`: el desplazamiento por segundos naturales vive en
+     * `IncidentPauseService` (T-PAUSE-06), que encadena este método con
+     * `shiftSlaTarget()`. La causa y el texto de la pausa
      * se conservan como último bloqueo conocido; la auditoría inmutable de cada
      * intervalo la graba el repositorio en `incident_history` (Art. III).
      *
@@ -1049,6 +1109,30 @@ class Incident implements ArrayAccess, JsonSerializable
         return $clone;
     }
 
+    /**
+     * Recalcula el objetivo y su vencimiento sin tocar el perfil sellado (C4).
+     *
+     * La operación es inmutable: devuelve una nueva instancia con el objetivo
+     * de la matriz y la marca anclada que el repositorio persistirá. El perfil
+     * de la sede permanece intacto por mandato del Art. III.3.
+     *
+     * @throws InvalidArgumentException si el objetivo no pertenece a la matriz RF-01.
+     */
+    public function withRecalculatedSlaTarget(int $slaTargetMinutes, DateTimeImmutable $slaTargetAt): self
+    {
+        if (!in_array($slaTargetMinutes, self::VALID_SLA_TARGET_MINUTES, true)) {
+            throw new InvalidArgumentException(
+                'El objetivo de SLA debe ser uno de los cinco valores de la matriz RF-01: 240, 360, 480, 720 o 1440 minutos.'
+            );
+        }
+
+        $clone = clone $this;
+        $clone->slaTargetMinutes = $slaTargetMinutes;
+        $clone->slaTargetAt = $slaTargetAt->format('Y-m-d\TH:i:sP');
+
+        return $clone;
+    }
+
     public function isCancelled(): bool
     {
         return $this->status === IncidentStatus::CANCELLED;
@@ -1122,6 +1206,10 @@ class Incident implements ArrayAccess, JsonSerializable
             'is_paused' => $this->isPaused(),
             'total_pending_info_seconds' => $this->totalPendingInfoSeconds,
             'sla_target_at' => $this->slaTargetAt,
+            'sla_tier_snapshot' => $this->slaTierSnapshot->value,
+            'sla_tier_label' => $this->slaTierSnapshot->label(),
+            'sla_target_minutes' => $this->slaTargetMinutes,
+            'sla_target_hours' => $this->getSlaTargetHours(),
             'cycle_started_at' => $this->cycleStartedAt,
             'cold_alert_sent_at' => $this->coldAlertSentAt,
             'sla_2h_alert_sent_at' => $this->sla2hAlertSentAt,

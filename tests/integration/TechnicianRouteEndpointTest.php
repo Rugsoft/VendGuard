@@ -32,6 +32,7 @@ use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
 
@@ -223,6 +224,27 @@ $assert("2.6 Subobjeto 'location' presente con name, address, contact_phone",
     isset($firstItem['location']['name']) && 
     isset($firstItem['location']['address']) && 
     isset($firstItem['location']['contact_phone'])
+);
+
+$dbSla = $pdo->query("SELECT sla_tier_snapshot, sla_target_minutes, sla_target_at FROM incidents WHERE id = " . (int)$incTech1->getId())->fetch(PDO::FETCH_ASSOC);
+$assert("2.7 La parada publica el contrato SLA sellado de la incidencia",
+    array_key_exists('sla_tier_snapshot', $firstItem)
+        && ($firstItem['sla_tier_snapshot'] ?? '') === (string)($dbSla['sla_tier_snapshot'] ?? '')
+        && ($firstItem['sla_tier_label'] ?? '') !== ''
+        && (int)($firstItem['sla_target_minutes'] ?? 0) === (int)($dbSla['sla_target_minutes'] ?? 0)
+        && (string)($firstItem['sla_target_at'] ?? '') === (string)($dbSla['sla_target_at'] ?? '')
+        && ($firstItem['sla_due_at'] ?? '') !== ''
+);
+
+$expectedColdChainCritical = SlaTargetCalculator::isColdChainRisk(
+    $mach1->getMachineType(),
+    IncidentCategory::PAYMENT_SYSTEM,
+    UrgencyLevel::HIGH
+);
+$assert("2.8 La parada distingue el riesgo sanitario de cadena de frío",
+    ($firstItem['is_cold_chain_critical'] ?? null) === $expectedColdChainCritical
+        && ($firstItem['critical_reason'] ?? null) === ($expectedColdChainCritical ? 'COLD_CHAIN' : null)
+        && is_bool($firstItem['is_contractual_critical'] ?? null)
 );
 
 // =========================================================================

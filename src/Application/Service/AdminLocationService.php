@@ -15,6 +15,7 @@ use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SiteAccessCodeRepositoryInterface;
 use VendGuard\Core\Domain\Service\SiteAccessCodeGenerator;
 use VendGuard\Core\Domain\ValueObject\PostalCode;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Infrastructure\Database\UniqueViolationDetector;
 use VendGuard\Infrastructure\Repository\PdoSiteAccessCodeRepository;
 
@@ -122,6 +123,12 @@ class AdminLocationService
         // recomendador no puede saber qué técnico la atiende.
         $postalCode = $this->requirePostalCode($data);
 
+        // Perfil contractual de la sede (Módulo 30, RF-02.1): el alta nace en
+        // STANDARD salvo que la coordinación declare explícitamente otro nivel.
+        $slaTier = array_key_exists('sla_tier', $data) && trim((string)$data['sla_tier']) !== ''
+            ? $this->parseSlaTier($data['sla_tier'])
+            : SlaTier::STANDARD;
+
         // Detección de colisiones de código único (RF-01, EARS 1.6)
         $existing = $this->locationRepo->findBySiteCode($siteCode, onlyActive: false, allowDeleted: true);
         if ($existing !== null) {
@@ -151,6 +158,7 @@ class AdminLocationService
             'contact_name'  => $contactName,
             'contact_phone' => $contactPhone,
             'postal_code'   => $postalCode,
+            'sla_tier'      => $slaTier->value,
         ];
         if ($contactEmail !== null) {
             $locationData['contact_email'] = $contactEmail;
@@ -206,6 +214,7 @@ class AdminLocationService
                 'contact_email' => $created->getContactEmail(),
                 'postal_code'   => $created->getPostalCode(),
                 'zone_id'       => $created->getZoneId(),
+                'sla_tier'      => $created->getSlaTier()->value,
             ],
             !empty($metadata) ? $metadata : null
         );
@@ -317,6 +326,14 @@ class AdminLocationService
         // `PATCH` parcial deje la sede con un CP que nadie validó.
         $postalCode = $this->requirePostalCode($data);
         $cleanData['postal_code'] = $postalCode;
+
+        if (array_key_exists('sla_tier', $data) && trim((string)$data['sla_tier']) !== '') {
+            $slaTier = $this->parseSlaTier($data['sla_tier']);
+            $cleanData['sla_tier'] = $slaTier->value;
+            if ($slaTier !== $location->getSlaTier()) {
+                $changedFields[] = 'sla_tier';
+            }
+        }
         if ($postalCode !== $location->getPostalCode()) {
             $changedFields[] = 'postal_code';
         }
@@ -399,6 +416,7 @@ class AdminLocationService
             'contact_email' => $location->getContactEmail(),
             'postal_code'   => $location->getPostalCode(),
             'zone_id'       => $location->getZoneId(),
+            'sla_tier'      => $location->getSlaTier()->value,
         ];
 
         $this->locationRepo->update($id, $cleanData);
@@ -417,6 +435,7 @@ class AdminLocationService
             'contact_email' => $updated->getContactEmail(),
             'postal_code'   => $updated->getPostalCode(),
             'zone_id'       => $updated->getZoneId(),
+            'sla_tier'      => $updated->getSlaTier()->value,
         ];
 
         // Auditoría inmutable sincrónica (RF-05, EARS 4.2)
@@ -577,6 +596,25 @@ class AdminLocationService
         }
 
         return (new PostalCode(is_int($raw) ? $raw : (string)$raw))->value();
+    }
+
+    /**
+     * Traduce el perfil contractual recibido al value object del dominio.
+     *
+     * El prefijo del mensaje es el código de error que la capa HTTP publicará
+     * como 422 (T-SLA-10); un valor fuera del ENUM nunca llega al repositorio.
+     */
+    private function parseSlaTier(mixed $raw): SlaTier
+    {
+        try {
+            return SlaTier::fromString((string)$raw);
+        } catch (InvalidArgumentException $exception) {
+            throw new InvalidArgumentException(
+                'INVALID_SLA_TIER: ' . $exception->getMessage(),
+                0,
+                $exception
+            );
+        }
     }
 
     /**

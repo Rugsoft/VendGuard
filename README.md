@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-401%20Suites%20%7C%2015.013%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-406%20Suites%20%7C%2015.166%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -108,7 +108,7 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Señalización visual y resiliencia:** los contadores de conversación activa aparecen en la tarjeta de máquina y en el triaje sin filtrar contenido, y un envío fallido avisa y conserva el borrador en pantalla (RF-07).
 
 ### 10. Pausa Contractual de Espera de Sede (Módulo 11)
-* **Estado operativo `PENDING_INFO` («Pendiente de información»):** el técnico o el coordinador aparcan la avería cuando falta acceso al inmueble o información de la sede, con causa tipificada y motivo de ≥ 20 caracteres. La pausa **congela el reloj contractual de SLA** y su vencimiento se desplaza en horario comercial de la sede.
+* **Estado operativo `PENDING_INFO` («Pendiente de información»):** el técnico o el coordinador aparcan la avería cuando falta acceso al inmueble o información de la sede, con causa tipificada y motivo de ≥ 20 caracteres. La pausa **congela el reloj contractual de SLA** y su vencimiento se desplaza exactamente los segundos naturales de la espera (24/7).
 * **Reanudación siempre humana y coherente:** la reactivación automática por comentario de sede quedó derogada; sin técnico asignado el expediente vuelve a `REGISTERED` (cola de asignación) y **nunca** a `ASSIGNED`/`IN_PROGRESS`, para no declarar un responsable inexistente.
 * **Cancelación supervisada por inactividad:** superadas **72 horas hábiles** de silencio, la coordinación puede cancelar el expediente de forma justificada sin que la máquina vuelva a figurar como «Operativa», desvinculando con seguridad los reintegros pendientes (Art. V.1 y V.2).
 * **Doble reloj sanitario (Art. II):** sobre máquinas perecederas y mixtas corre en paralelo el Reloj Sanitario Biológico — **4 horas naturales** sin frío confirmado activan la cuarentena y bloquean el cierre hasta declarar temperatura real, retirada y destrucción del stock y checklist de higienización.
@@ -475,7 +475,7 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | Método | Endpoint | Rol | Descripción del Recurso |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/technician/incidents/{id}/pause-pending-info` | `TECHNICIAN` | Pausa por falta de acceso o información del inmueble: causa tipificada, motivo ≥ 20 caracteres y **reloj de SLA congelado**. |
-| `POST` | `/api/technician/incidents/{id}/resume-pending-info` | `TECHNICIAN` | Reanudación manual in situ con el vencimiento desplazado en horario comercial. |
+| `POST` | `/api/technician/incidents/{id}/resume-pending-info` | `TECHNICIAN` | Reanudación manual in situ con el vencimiento desplazado por los segundos naturales de la pausa. |
 | `POST` | `/api/coordinator/incidents/{id}/pause-pending-info` | `COORDINATOR` | Pausa supervisada sobre cualquier ticket activo. |
 | `POST` | `/api/coordinator/incidents/{id}/resume-pending-info` | `COORDINATOR` | Reanudación manual: devuelve el expediente a `ASSIGNED` o a `REGISTERED` según haya responsable o no. |
 | `POST` | `/api/coordinator/incidents/{id}/cancel-inactivity` | `COORDINATOR` | Cancelación justificada tras **72 horas hábiles** de silencio, desvinculando los reintegros pendientes (Art. V.1 y V.2). |
@@ -643,20 +643,20 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 401 suites · 15.013 aserciones
+batería global: 406 suites · 15.166 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
- Tiempo de ejecución total : 299.00 segundos  (variable en cada corrida)
- Suites de pruebas PHP Unit : 173 / 173 pasadas
- Suites de pruebas JS Unit  : 96 / 96 pasadas
+ Tiempo de ejecución total : 435.06 segundos  (variable en cada corrida)
+ Suites de pruebas PHP Unit : 174 / 174 pasadas
+ Suites de pruebas JS Unit  : 100 / 100 pasadas
  Suites de Integración PHP  : 130 / 130 pasadas
  Suites E2E Manuales (T-40): 2 / 2 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 401
- Total Aserciones Evaluadas : 15.013
+ Total Suites Ejecutadas    : 406
+ Total Aserciones Evaluadas : 15.166
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -696,29 +696,29 @@ Las suites que declaran `VENDGUARD_TEST_CATEGORY = 'new_engine'` exigen un Postg
 
 ```bash
 source deploy/local/postgres/.env.local     # motor local; .env.docker-tls para el TLS
-php tests/run_new_engine.php                # las 40 suites del canal
+php tests/run_new_engine.php                # las 44 suites del canal
 php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 ```
 
 El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla. La medición del pooler remoto sigue siendo la evidencia de RNF-01: si el enlace del proveedor incumple el presupuesto de 250 ms en alguna operación, el canal publica el fallo con su mediana y su p95, sin convertirlo en omisión.
 
-Corrida del 7 de noviembre de 2026 (el canal no cierra en verde y los fallos se publican sin omitirse):
+Corrida del 11 de noviembre de 2026 (canal cerrado en verde):
 
 ```text
 ======================================================================
  RESUMEN DEL CANAL new_engine
- Suites evaluadas    : 40
- Suites en verde     : 39
+ Suites evaluadas    : 44
+ Suites en verde     : 44
  No ejecutables      : 0
- Aserciones          : 1.308
- Fallos              : 1
- RESULTADO: FALLO. Revisa: PoolerLatencyMeasurementTest.php
+ Aserciones          : 1.487
+ Fallos              : 0
+ RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 ======================================================================
 ```
 
-El único fallo que queda, con su causa medida:
+El pooler remoto queda en verde y estable: `PoolerLatencyMeasurementTest` completa sus 20 rondas y pasa 30/30 aserciones en tres corridas. La optimización de `asignar` integró el cierre y la apertura de custodia en el CTE atómico y trasladó la revalidación de estado, titular y urgencia al propio `UPDATE` condicionado, eliminando en PostgreSQL la lectura bloqueada previa. Las medianas de «asignar» fueron **166,8 ms**, **165,6 ms** y **174,3 ms** (p95 194,2 / 224,6 / 241,1 ms) frente al presupuesto de 250 ms; el enlace base se mantuvo en 43,8–44,1 ms.
 
-* **`PoolerLatencyMeasurementTest`** mide contra el motor remoto real (Supavisor, puerto 6543, TLS `verify-full`): la mediana de «crear» quedó en **261,0 ms** (p95 326,7 ms) y la de «asignar» en **322,4 ms** (p95 407,4 ms), por encima del presupuesto de 250 ms de RNF-01. Es una medición del enlace del proveedor, no del motor local, y por eso no se sustituye ni se omite.
+El cerrojo entre pestañas también queda certificado: `OfflineSyncLockBrowserTest` completa sus **16/16 aserciones**. El runner prefiere Chrome/Chromium del sistema, después el Chromium que Playwright tenga en su caché local y, por último, Edge; así evita el arranque de Edge 157, que en este puesto termina con código 0 antes de publicar DevTools, sin instalar dependencias ni rebajar la exigencia de navegador real.
 
 
 El canal incluye además `OfflineSyncLockBrowserTest`, única suite que exige **navegador real**: abre dos pestañas de Chromium sobre el mismo perfil, comparte `IndexedDB` entre ambas y comprueba con un servidor de pruebas que el cerrojo `vendguard-offline-sync` impide dos envíos en vuelo y que el control negativo sin cerrojo sí los detecta. La quinta sección oculta `navigator.locks` en las dos pestañas —lo que ve una PWA servida por HTTP plano— y verifica que el arriendo en `localStorage` sostiene la misma exclusión (16 aserciones en total).
@@ -820,7 +820,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 401 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 406 suites (100% verde)
     ├── run_new_engine.php        # Canal propio de la categoría new_engine (PG_TEST_DSN)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)

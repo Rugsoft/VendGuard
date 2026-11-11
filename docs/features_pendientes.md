@@ -1,7 +1,7 @@
 # VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro**Documento:** `docs/features_pendientes.md`  
 **Fecha de Actualización:** Noviembre 2026
   
-**Estado del Proyecto:** batería global: 401 suites · 15.013 aserciones, al 100 % en verde. Documento versionado (ya está en el índice pese a la regla de `.gitignore`), así que su cifra se audita junto con la del README por `DocMetricsGuard`. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
+**Estado del Proyecto:** batería global: 406 suites · 15.166 aserciones, al 100 % en verde. Documento versionado (ya está en el índice pese a la regla de `.gitignore`), así que su cifra se audita junto con la del README por `DocMetricsGuard`. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---
@@ -239,6 +239,7 @@ Refinamiento del análisis de averías, economía circular de taller, asistencia
 * **Complejidad:** Media (2 días).
 
 #### 17. ⚖️ Perfiles de SLA Diferenciados por Tipo de Sede (*Tiered SLA Contracts*)
+* **Estado:** ✅ **100% IMPLEMENTADO (Módulo 30: `30-tiered-sla-contracts`)** — 25.º tipo nativo `sla_tier`; matriz `SlaTier × UrgencyLevel` con techo sanitario de 240 min (Art. II); snapshot inmutable `sla_tier_snapshot`/`sla_target_minutes` y disparador de protección; sellado en QR, alta oportunista, Coordinación y Portal de Sede; recálculo C4 y reapertura QA 3; prelación `COLD_CHAIN`/`CONTRACTUAL_SLA` en ruta y bono `+60` del Escalado Contractual 24/7; visibilidad segregada con opacidad total en QR y A4; métricas/CSV ticket a ticket; matriz de trazabilidad en `specs/30-tiered-sla-contracts/traceability-matrix.md`.
 * **Propósito:** Adaptar los objetivos de respuesta y resolución de máquinas no perecederas según el nivel de servicio contratado por cada sede (ej. Hospitales 24/7 vs. Oficinas estándar), manteniendo siempre innegociable el techo constitucional de **4.0 horas naturales** para alimentos perecederos (Art. II).
 * **Componentes Técnicos:**
   * Enum `SlaTier` y columna `sla_tier` en `locations` (`STANDARD`, `PRIORITY_CORPORATE`, `CRITICAL_INFRASTRUCTURE_24_7`).

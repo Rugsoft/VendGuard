@@ -38,6 +38,9 @@ use VendGuard\Core\Domain\ValueObject\ZoneAffinityType;
  *      paradas previas (RF-05.1, QA 1 y QA 9). El escalado lo decide el caso de uso
  *      porque necesita el cuadrante completo; este scorer solo aplica el bono al
  *      técnico que efectivamente está de guardia.
+ *   7. **Salvaguarda contractual.** +60 al técnico de guardia cuando el escalado
+ *      contractual 24/7 está activo y no se ha otorgado el bono sanitario. Los dos
+ *      bonos nunca se suman: el Art. II conserva la prelación (D4, QA 2).
  *
  * El contexto es un array asociativo con estas claves (todas opcionales; el
  * escenario vacío puntúa 0):
@@ -51,6 +54,8 @@ use VendGuard\Core\Domain\ValueObject\ZoneAffinityType;
  *   - `preventive_orders_today` (int): preventivos de hoy asignados.
  *   - `is_cold_chain_risk` (bool): avería perecedera o `CRITICAL`.
  *   - `cold_chain_escalation_active` (bool): ningún titular activo libre en la zona.
+ *   - `contractual_24_7_escalation_active` (bool): sede crítica 24/7 sin cobertura
+ *     en turno o con todos los candidatos ocupados.
  *   - `is_on_call` (bool): técnico de guardia 24/7 (`users.is_on_call`).
  *
  * Los contadores negativos y las afinidades desconocidas se rechazan en voz alta:
@@ -85,6 +90,9 @@ final class TechnicianWorkloadScorer
     /** Guardia 24/7 durante un escalado de cadena de frío (Art. II). */
     public const COLD_CHAIN_ON_CALL_BONUS = 100;
 
+    /** Guardia 24/7 durante un escalado contractual de sede crítica (D4, QA 2). */
+    public const BONUS_ON_CALL_CONTRACTUAL_24_7 = 60;
+
     /** Claves del desglose que consume el contrato de la API (§3.6). */
     public const BREAKDOWN_KEYS = [
         'territorial_affinity',
@@ -93,6 +101,7 @@ final class TechnicianWorkloadScorer
         'active_workload_penalty',
         'inter_location_penalty',
         'cold_chain_on_call_bonus',
+        'contractual_24_7_on_call_bonus',
     ];
 
     /**
@@ -120,7 +129,8 @@ final class TechnicianWorkloadScorer
      *     same_zone_stops: int,
      *     active_workload_penalty: int,
      *     inter_location_penalty: int,
-     *     cold_chain_on_call_bonus: int
+     *     cold_chain_on_call_bonus: int,
+     *     contractual_24_7_on_call_bonus: int
      * }
      *
      * @throws InvalidArgumentException Si un contador es negativo o la afinidad no existe.
@@ -136,7 +146,12 @@ final class TechnicianWorkloadScorer
         $preventiveOrdersToday = self::readCounter($context, 'preventive_orders_today');
         $isColdChainRisk = self::readFlag($context, 'is_cold_chain_risk');
         $escalationActive = self::readFlag($context, 'cold_chain_escalation_active');
+        $contractualEscalationActive = self::readFlag($context, 'contractual_24_7_escalation_active');
         $isOnCall = self::readFlag($context, 'is_on_call');
+
+        $coldChainBonus = ($isColdChainRisk && $escalationActive && $isOnCall)
+            ? self::COLD_CHAIN_ON_CALL_BONUS
+            : 0;
 
         return [
             'territorial_affinity' => self::territorialPoints($affinity),
@@ -147,8 +162,11 @@ final class TechnicianWorkloadScorer
             'active_workload_penalty' => self::ACTIVE_WORKLOAD_PENALTY * ($activeIncidents + $preventiveOrdersToday)
                 + self::PENDING_INFO_PENALTY * $pendingInfoIncidents,
             'inter_location_penalty' => $hasInProgressElsewhere ? self::INTER_LOCATION_PENALTY : 0,
-            'cold_chain_on_call_bonus' => ($isColdChainRisk && $escalationActive && $isOnCall)
-                ? self::COLD_CHAIN_ON_CALL_BONUS
+            'cold_chain_on_call_bonus' => $coldChainBonus,
+            // El escalado contractual nunca se suma al sanitario: el Art. II
+            // conserva la prelación y el desglose distingue ambos motivos.
+            'contractual_24_7_on_call_bonus' => ($coldChainBonus === 0 && $contractualEscalationActive && $isOnCall)
+                ? self::BONUS_ON_CALL_CONTRACTUAL_24_7
                 : 0,
         ];
     }

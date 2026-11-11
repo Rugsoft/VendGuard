@@ -392,7 +392,6 @@ function createSurveyState(overrides = {}) {
     pendingSurveyTotal: 0,
     isLoadingSurveys: false,
     showSurveyModal: false,
-    surveyModalOffered: false,
     ...overrides
   };
 
@@ -420,7 +419,7 @@ const portalData = LocationPortalView.data();
 assert('8.2 Portal state starts with no pending surveys and the modal closed',
   Array.isArray(portalData.pendingSurveys) && portalData.pendingSurveys.length === 0
     && portalData.pendingSurveyTotal === 0 && portalData.showSurveyModal === false
-    && portalData.isLoadingSurveys === false && portalData.surveyModalOffered === false);
+    && portalData.isLoadingSurveys === false);
 
 assert('8.3 Notice reads "Tiene 3 servicios por valorar"',
   LocationPortalView.computed.surveyNotice.call({ pendingSurveyTotal: 3 }) === 'Tiene 3 servicios por valorar');
@@ -431,19 +430,19 @@ assert('8.5 No notice when nothing is pending',
 assert('8.6 The notice shows the real total above the 20 episode cap',
   LocationPortalView.computed.surveyNotice.call({ pendingSurveyTotal: 25 }) === 'Tiene 25 servicios por valorar');
 
-// 8.7: first load offers the modal
+// 8.7: the first load populates the notice but does not interrupt the portal
 let surveyState = createSurveyState();
 await withPendingSurveys(async () => ({
   items: [pendingEpisode, secondPendingEpisode],
   pending_total: 25
 }), async () => {
-  await surveyState.loadPendingSurveys({ autoOpen: true });
+  await surveyState.loadPendingSurveys();
 });
 
 assert('8.7 The pending list and the real total are stored',
   surveyState.pendingSurveys.length === 2 && surveyState.pendingSurveyTotal === 25);
-assert('8.8 The first authenticated load opens the modal',
-  surveyState.surveyModalOffered === true && surveyState.showSurveyModal === true);
+assert('8.8 The first authenticated load leaves the modal closed',
+  surveyState.showSurveyModal === false);
 assert('8.9 The loading flag is released', surveyState.isLoadingSurveys === false);
 
 // 8.10: R3 — closing it does not reopen on a later list refresh
@@ -454,17 +453,17 @@ await withPendingSurveys(async () => ({
   items: [pendingEpisode, secondPendingEpisode],
   pending_total: 25
 }), async () => {
-  await surveyState.loadPendingSurveys({ autoOpen: true });
+  await surveyState.loadPendingSurveys();
 });
 
-assert('8.11 A later refresh does not reopen the modal in the same page load',
+assert('8.11 A later refresh does not reopen the modal',
   surveyState.showSurveyModal === false && surveyState.pendingSurveyTotal === 25);
 
 surveyState.openSurveyModal();
 assert('8.12 The persistent notice reopens it on demand', surveyState.showSurveyModal === true);
 
 // 8.13: submitting one valuation advances the list and the total
-surveyState = createSurveyState({ showSurveyModal: true, surveyModalOffered: true });
+surveyState = createSurveyState({ showSurveyModal: true });
 let pendingCalls = 0;
 await withPendingSurveys(async () => {
   pendingCalls++;
@@ -472,7 +471,7 @@ await withPendingSurveys(async () => {
     ? { items: [pendingEpisode, secondPendingEpisode], pending_total: 2 }
     : { items: [secondPendingEpisode], pending_total: 1 };
 }, async () => {
-  await surveyState.loadPendingSurveys({ autoOpen: true });
+  await surveyState.loadPendingSurveys();
   await surveyState.onSurveySubmitted({ incidentId: 42, alreadySubmitted: false });
 });
 
@@ -482,7 +481,7 @@ assert('8.14 The total is refreshed from the server', surveyState.pendingSurveyT
 assert('8.15 The modal stays open for the next episode', surveyState.showSurveyModal === true);
 
 // 8.16: the last valuation leaves the modal in its empty state
-surveyState = createSurveyState({ showSurveyModal: true, surveyModalOffered: true });
+surveyState = createSurveyState({ showSurveyModal: true });
 await withPendingSurveys(async () => ({ items: [], pending_total: 0 }), async () => {
   await surveyState.onSurveySubmitted({ incidentId: 42, alreadySubmitted: false });
 });
@@ -496,7 +495,7 @@ surveyState = createSurveyState({ pendingSurveyTotal: 4 });
 let surveyThrew = false;
 await withPendingSurveys(async () => { throw new Error('500'); }, async () => {
   try {
-    await surveyState.loadPendingSurveys({ autoOpen: true });
+    await surveyState.loadPendingSurveys();
   } catch (error) {
     surveyThrew = true;
   }
@@ -510,7 +509,7 @@ assert('8.18 A survey fetch failure clears the stale notice',
 surveyState = createSurveyState({ isAuthenticated: false });
 let unauthCalls = 0;
 await withPendingSurveys(async () => { unauthCalls++; return { items: [], pending_total: 0 }; }, async () => {
-  await surveyState.loadPendingSurveys({ autoOpen: true });
+  await surveyState.loadPendingSurveys();
 });
 assert('8.19 No pending fetch without an authenticated site', unauthCalls === 0);
 
@@ -528,11 +527,16 @@ assert('8.22 The modal receives the episodes, the loading flag and both listener
     && LocationPortalView.template.includes('@closed="closeSurveyModal"'));
 assert('8.23 mounted() looks up the pending surveys of an authenticated site',
   LocationPortalView.mounted.toString().includes('loadPendingSurveys'));
-assert('8.24 A new site login offers the survey again',
-  LocationPortalView.methods.handleSiteLogin.toString().includes('surveyModalOffered = false')
-    && LocationPortalView.methods.handleSiteLogin.toString().includes('loadPendingSurveys'));
+assert('8.24 A new site login loads the pending list without opening the modal',
+  LocationPortalView.methods.handleSiteLogin.toString().includes('loadPendingSurveys')
+    && !LocationPortalView.methods.handleSiteLogin.toString().includes('autoOpen'));
 assert('8.25 A valuation refreshes the pending list',
   LocationPortalView.methods.onSurveySubmitted.toString().includes('loadPendingSurveys'));
+assert('8.26 Pending loads never open the survey automatically',
+  !LocationPortalView.methods.loadPendingSurveys.toString().includes('autoOpen')
+    && !LocationPortalView.methods.loadPendingSurveys.toString().includes('showSurveyModal = true'));
+assert('8.27 Mounting the portal does not pass an auto-open option',
+  !LocationPortalView.mounted.toString().includes('autoOpen'));
 
 // Summary
 console.log('\n======================================================================');

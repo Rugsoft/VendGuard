@@ -233,6 +233,13 @@ try {
         $insertionFailure ?? implode(' → ', $order)
     );
 
+    $assert(
+        'La fixture mínima de incidents hereda el perfil estándar y el objetivo por defecto del Módulo 30',
+        isset($rows['incidents'])
+        && ($rows['incidents']['sla_tier_snapshot'] ?? null) === 'STANDARD'
+        && (int)($rows['incidents']['sla_target_minutes'] ?? 0) === 1440
+    );
+
     // ─────────────────────────────────────────────────────────────────────
     // Lectura: la fila vuelve por su clave primaria
     // ─────────────────────────────────────────────────────────────────────

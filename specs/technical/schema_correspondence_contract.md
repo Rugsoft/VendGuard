@@ -23,10 +23,10 @@ Queda completamente retirado el camino dual de persistencia (MariaDB/MySQL).
 
 Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_delete_*` vinculado a `prevent_hard_delete()` (Art. III.1). `incident_service_sheets` e `incident_satisfaction_surveys` son además **de solo inserción**: `trg_no_update_incident_service_sheets` (`prevent_service_sheet_rewrite()`) e `trg_no_update_incident_satisfaction_surveys` (`prevent_satisfaction_survey_rewrite()`) rechazan cualquier `UPDATE` con `45000`, porque la hoja firmada es prueba documental y la valoración de la sede no se rectifica (RD-01 y RD-06 del Módulo 20). La clave primaria es `id BIGINT GENERATED ALWAYS AS IDENTITY` salvo en `operational_zone_postal_codes`, donde la identidad de la fila es el propio código postal: es la forma de garantizar que un CP pertenezca a una sola zona en todo su ciclo de vida (RF-01.2, Resolución QA 7).
 
-1. `locations` (20 columnas)
+1. `locations` (23 columnas)
 2. `machines` (19 columnas)
 3. `users` (13 columnas)
-4. `incidents` (50 columnas)
+4. `incidents` (52 columnas)
 5. `incident_history` (7 columnas)
 6. `incident_comments` (9 columnas)
 7. `incident_replaced_parts` (17 columnas)
@@ -100,7 +100,8 @@ Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de l
   - `users.email_key` con índice único `uq_users_email_key` para unicidad estricta insensible a acentos y mayúsculas.
   - `locations.site_code_key` con índice único `uq_locations_site_code_key`.
 - **Restricciones CHECK de longitud mínima (Art. V.1):** 7 restricciones de longitud en sentencias que validan un mínimo de 20 caracteres significativos sin espacios en blanco superfluos.
-- **Tipado estricto:** 32 enumerados nativos `ENUM` que encapsulan los estados y categorías del dominio.
+- **Tipado estricto:** 35 enumerados nativos `ENUM` que encapsulan los estados y categorías del dominio.
+- **Perfiles de SLA diferenciados por sede (Módulo 30, RF-01 a RF-03):** `locations.sla_tier` declara el perfil contractual (`STANDARD`, `PRIORITY_CORPORATE` o `CRITICAL_INFRASTRUCTURE_24_7`) con defecto `STANDARD`; el índice parcial `idx_locations_sla_tier` sirve el catálogo de sedes activas. `incidents` incorpora `sla_tier_snapshot` (`NOT NULL DEFAULT 'STANDARD'`, perfil congelado en el alta), `sla_target_minutes` (`NOT NULL DEFAULT 1440`) y `sla_target_at` (vencimiento). `chk_incidents_sla_target_minutes` acota los cinco objetivos de la matriz RF-01 (240, 360, 480, 720 y 1440 min) e `idx_incidents_sla_target_lookup` sirve la consulta por estado y vencimiento. El disparador `trg_incidents_protect_sla_tier_snapshot` (`trg_fn_incidents_protect_sla_tier_snapshot()`) rechaza con `23514` (`IMMUTABLE_SLA_TIER_SNAPSHOT`) cualquier cambio del perfil sellado, mientras que el objetivo y su vencimiento siguen siendo recalculables (C4). El backfill de `026_tiered_sla_contracts.sql` conserva el umbral histórico de los expedientes cerrados (240 min en riesgo de cadena de frío y 1440 min en el resto) y aplica la matriz vigente a los abiertos bajo el perfil de su sede (C5, Art. III.3).
 - **Coherencia de la avería oportunista in situ (Módulo 16):** `chk_incidents_opportunistic_coherence` exige el acompañamiento mutuo (ni modalidad sin submotivo ni submotivo sin modalidad, RF-04.1) y limita los motivos admitidos por cada modalidad (`NEW`: aviso verbal en sede, detección propia o reapertura en garantía; `ASSUMED`: asunción de ticket abierto o reapertura en garantía).
 - **Cadena de reincidencias (Art. III.1):** `fk_incidents_chronic_predecessor` enlaza el expediente sucesor con el crónico que cierra, con `ON DELETE RESTRICT` para no romper la traza histórica y `ON UPDATE CASCADE`.
 - **Índice parcial oportunista:** `idx_incidents_opportunistic_mode` sobre `(opportunistic_mode, created_at)` y sólo las filas con modalidad no borradas lógicamente, que es el universo del indicador de desplazamientos evitados (RF-06.4).

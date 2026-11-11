@@ -7,6 +7,7 @@ namespace VendGuard\Core\Domain\Model;
 use ArrayAccess;
 use InvalidArgumentException;
 use JsonSerializable;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
 
 /**
  * Location
@@ -42,6 +43,9 @@ class Location implements ArrayAccess, JsonSerializable
     /** True cuando la zona fue fijada a mano y no debe recalcularse con el CP. */
     private bool $isManualOverride;
 
+    /** Perfil contractual vigente de la sede (Módulo 30, RF-01.1). */
+    private SlaTier $slaTier;
+
     public function __construct(
         int $id,
         string $siteCode,
@@ -59,7 +63,8 @@ class Location implements ArrayAccess, JsonSerializable
         string $contactEmail = 'recepcion@sede.vendguard.es',
         ?string $postalCode = null,
         ?int $zoneId = null,
-        bool $isManualOverride = false
+        bool $isManualOverride = false,
+        SlaTier $slaTier = SlaTier::STANDARD
     ) {
         $this->id = $id;
         $this->siteCode = strtoupper(trim($siteCode));
@@ -85,6 +90,7 @@ class Location implements ArrayAccess, JsonSerializable
         $this->postalCode = $normalizedPostalCode === '' ? null : $normalizedPostalCode;
         $this->zoneId = $zoneId !== null && $zoneId > 0 ? $zoneId : null;
         $this->isManualOverride = $isManualOverride;
+        $this->slaTier = $slaTier;
     }
 
     /**
@@ -112,7 +118,10 @@ class Location implements ArrayAccess, JsonSerializable
             isset($row['contact_email']) && trim((string)$row['contact_email']) !== '' ? (string)$row['contact_email'] : 'recepcion@sede.vendguard.es',
             isset($row['postal_code']) && $row['postal_code'] !== null ? (string)$row['postal_code'] : null,
             isset($row['zone_id']) && $row['zone_id'] !== null ? (int)$row['zone_id'] : null,
-            self::toBoolean($row['is_manual_override'] ?? false)
+            self::toBoolean($row['is_manual_override'] ?? false),
+            isset($row['sla_tier']) && $row['sla_tier'] !== null && $row['sla_tier'] !== ''
+                ? SlaTier::fromString((string)$row['sla_tier'])
+                : SlaTier::STANDARD
         );
     }
 
@@ -201,6 +210,16 @@ class Location implements ArrayAccess, JsonSerializable
         return $this->isManualOverride;
     }
 
+    public function getSlaTier(): SlaTier
+    {
+        return $this->slaTier;
+    }
+
+    public function getSlaTierLabel(): string
+    {
+        return $this->slaTier->label();
+    }
+
     public function isActive(): bool
     {
         return $this->isActive && $this->deletedAt === null;
@@ -247,6 +266,8 @@ class Location implements ArrayAccess, JsonSerializable
             'postal_code' => $this->postalCode,
             'zone_id' => $this->zoneId,
             'is_manual_override' => $this->isManualOverride,
+            'sla_tier' => $this->slaTier->value,
+            'sla_tier_label' => $this->slaTier->label(),
             'is_active' => $this->isActive,
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,

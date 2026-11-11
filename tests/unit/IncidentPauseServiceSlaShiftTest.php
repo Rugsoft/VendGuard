@@ -6,23 +6,20 @@ declare(strict_types=1);
  * IncidentPauseServiceSlaShiftTest
  *
  * Suite unitaria del Algoritmo 3 del módulo 11 (tarea T-PAUSE-06): el
- * desplazamiento del vencimiento contractual de SLA en horario hábil comercial
- * (RF-03.3, RNF-01). Certifica que el cálculo es exacto al segundo y que nunca
- * puede producir un vencimiento artificial:
+ * desplazamiento del vencimiento contractual de SLA en segundos naturales
+ * continuos (EARS 02.3.1, C6, RF-03.3, RNF-01). Certifica que:
  *
- * 1. Dentro de la misma jornada hábil el desplazamiento es aritmética directa
- *    (Jueves 12:15 + 90 min = Jueves 13:45).
- * 2. Salto nocturno: lo que no cabe antes del cierre (18:00) continúa a las
- *    08:00 del siguiente día hábil, y una fecha de madrugada o de noche arranca
- *    desde la apertura.
- * 3. Salto de fin de semana: viernes por la tarde continúa el lunes, y una
- *    pausa puede atravesar sábados y domingos sin consumir un solo segundo de
- *    ellos.
- * 4. La fecha devuelta vive siempre dentro de la ventana legal y en la zona
- *    operativa de la sede (Europe/Madrid), incluso si la entrada llega en UTC.
- * 5. La duración nula no altera el reloj (caso límite §6.1 de la especificación
- *    funcional) y la duración negativa o una sede inválida se rechazan de
- *    inmediato (Fail-Fast).
+ * 1. El desplazamiento es aritmética directa de segundos, dentro o fuera de la
+ *    jornada: no se recorta a las 08:00-18:00 ni salta noches o fines de semana.
+ * 2. La duración nula no altera el reloj y la negativa se rechaza.
+ * 3. La fecha devuelta se expresa en la zona operativa de la sede, incluso si
+ *    la entrada llega en UTC.
+ * 4. El cálculo usa el instante absoluto, de modo que un cambio de hora
+ *    estacional no altera la duración contratada.
+ * 5. El alias histórico `shiftSlaTargetInBusinessHours()` conserva la firma
+ *    publicada, pero delega en el cálculo continuo.
+ * 6. La espera natural (`pauseSecondsSince`) no se confunde con la espera hábil
+ *    de 72 horas que sigue usando el protocolo de inactividad de sede.
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin librerías externas ni red.
  */
@@ -64,25 +61,24 @@ $capture = static function (callable $action): array {
 
 $service = new IncidentPauseService();
 
-/** Sede semilla de trabajo; cualquier entero positivo es válido mientras el calendario sea contractual. */
+/** Sede semilla de trabajo; cualquier entero positivo es válido. */
 $locationId = 1;
 
 $madrid = static fn (string $moment): DateTimeImmutable => new DateTimeImmutable($moment, new DateTimeZone('Europe/Madrid'));
 
-/** Desplaza y devuelve la fecha resultante formateada en hora local de sede. */
+/** Desplaza y devuelve la fecha resultante. */
 $shift = static function (string $deadline, int $seconds) use ($service, $locationId, $madrid): DateTimeImmutable {
-    return $service->shiftSlaTargetInBusinessHours($madrid($deadline), $seconds, $locationId);
+    return $service->shiftSlaTargetBySeconds($madrid($deadline), $seconds, $locationId);
 };
 
-$shifted = static function (string $deadline, int $seconds) use ($service, $locationId, $madrid): string {
-    return $service->shiftSlaTargetInBusinessHours($madrid($deadline), $seconds, $locationId)
-        ->format('Y-m-d H:i:s');
+$shifted = static function (string $deadline, int $seconds) use ($shift): string {
+    return $shift($deadline, $seconds)->format('Y-m-d H:i:s');
 };
 
 // =====================================================================
-// GRUPO 1: Sin salto — la pausa cabe en la jornada en curso
+// GRUPO 1: Aritmética directa, sin recortes de jornada
 // =====================================================================
-echo "--- Grupo 1: Desplazamiento dentro de la misma jornada hábil ---\n";
+echo "--- Grupo 1: Desplazamiento continuo de segundos ---\n";
 
 $assert(
     '1.1 Jueves 12:15 + 90 minutos = Jueves 13:45 (caso base del módulo)',
@@ -97,100 +93,100 @@ $assert(
 );
 
 $assert(
-    '1.3 La jornada completa cabe hasta el borde de cierre: 08:00 + 36.000 s = 18:00',
+    '1.3 08:00 + 36.000 s = 18:00, sin normalización de borde',
     $shifted('2026-10-08 08:00:00', 36000) === '2026-10-08 18:00:00',
     $shifted('2026-10-08 08:00:00', 36000)
 );
 
 $assert(
-    '1.4 Un minuto exacto no consume el borde de cierre: 17:59 + 60 s = 18:00',
+    '1.4 17:59 + 60 s = 18:00, sin consumir un segundo de más',
     $shifted('2026-10-08 17:59:00', 60) === '2026-10-08 18:00:00',
     $shifted('2026-10-08 17:59:00', 60)
 );
 
 // =====================================================================
-// GRUPO 2: Salto nocturno (entre las 18:00 y las 08:00 no se computa nada)
+// GRUPO 2: La noche no detiene el reloj contractual
 // =====================================================================
-echo "\n--- Grupo 2: Salto nocturno ---\n";
+echo "\n--- Grupo 2: Noche y madrugada cuentan igual ---\n";
 
 $assert(
-    '2.1 Jueves 17:30 + 60 min reparte 30 min hoy y 30 min mañana: Viernes 08:30',
-    $shifted('2026-10-08 17:30:00', 3600) === '2026-10-09 08:30:00',
+    '2.1 Jueves 17:30 + 60 min = Jueves 18:30, sin saltar al día siguiente',
+    $shifted('2026-10-08 17:30:00', 3600) === '2026-10-08 18:30:00',
     $shifted('2026-10-08 17:30:00', 3600)
 );
 
 $assert(
-    '2.2 Un vencimiento ya de noche (Jueves 23:00) arranca a la apertura: Viernes 08:10',
-    $shifted('2026-10-08 23:00:00', 600) === '2026-10-09 08:10:00',
+    '2.2 Jueves 23:00 + 10 min = Jueves 23:10, sin esperar a la apertura',
+    $shifted('2026-10-08 23:00:00', 600) === '2026-10-08 23:10:00',
     $shifted('2026-10-08 23:00:00', 600)
 );
 
 $assert(
-    '2.3 Un vencimiento de madrugada (Jueves 06:00) se normaliza a las 08:00 y suma: 08:15',
-    $shifted('2026-10-08 06:00:00', 900) === '2026-10-08 08:15:00',
+    '2.3 Jueves 06:00 + 15 min = Jueves 06:15, sin normalizar a las 08:00',
+    $shifted('2026-10-08 06:00:00', 900) === '2026-10-08 06:15:00',
     $shifted('2026-10-08 06:00:00', 900)
 );
 
 $assert(
-    '2.4 Un vencimiento exactamente a las 18:00 salta al día siguiente: Viernes 08:01',
-    $shifted('2026-10-08 18:00:00', 60) === '2026-10-09 08:01:00',
+    '2.4 Jueves 18:00 + 60 s = Jueves 18:01, sin saltar al día siguiente',
+    $shifted('2026-10-08 18:00:00', 60) === '2026-10-08 18:01:00',
     $shifted('2026-10-08 18:00:00', 60)
 );
 
 $assert(
-    '2.5 Dos jornadas completas desde el lunes: Lunes 08:00 + 72.000 s = Martes 18:00',
-    $shifted('2026-10-05 08:00:00', 72000) === '2026-10-06 18:00:00',
+    '2.5 Lunes 08:00 + 72.000 s = Martes 04:00, atravesando la noche',
+    $shifted('2026-10-05 08:00:00', 72000) === '2026-10-06 04:00:00',
     $shifted('2026-10-05 08:00:00', 72000)
 );
 
 // =====================================================================
-// GRUPO 3: Salto de fin de semana (sábado y domingo no son horas hábiles)
+// GRUPO 3: El fin de semana tampoco detiene el reloj
 // =====================================================================
-echo "\n--- Grupo 3: Salto de fin de semana ---\n";
+echo "\n--- Grupo 3: Fin de semana continuo ---\n";
 
 $assert(
-    '3.1 Viernes 17:00 + 120 min cruza el fin de semana: Lunes 09:00',
-    $shifted('2026-10-09 17:00:00', 7200) === '2026-10-12 09:00:00',
+    '3.1 Viernes 17:00 + 120 min = Viernes 19:00, sin saltar al lunes',
+    $shifted('2026-10-09 17:00:00', 7200) === '2026-10-09 19:00:00',
     $shifted('2026-10-09 17:00:00', 7200)
 );
 
 $assert(
-    '3.2 Un vencimiento en sábado se traslada al lunes: Sábado 10:00 + 60 min = Lunes 09:00',
-    $shifted('2026-10-10 10:00:00', 3600) === '2026-10-12 09:00:00',
+    '3.2 Sábado 10:00 + 60 min = Sábado 11:00, sin normalizar al lunes',
+    $shifted('2026-10-10 10:00:00', 3600) === '2026-10-10 11:00:00',
     $shifted('2026-10-10 10:00:00', 3600)
 );
 
 $assert(
-    '3.3 Un vencimiento en domingo por la noche despierta el lunes: 08:30',
-    $shifted('2026-10-11 20:00:00', 1800) === '2026-10-12 08:30:00',
+    '3.3 Domingo 20:00 + 30 min = Domingo 20:30, sin normalizar al lunes',
+    $shifted('2026-10-11 20:00:00', 1800) === '2026-10-11 20:30:00',
     $shifted('2026-10-11 20:00:00', 1800)
 );
 
 $assert(
-    '3.4 Cinco jornadas hábiles desde el lunes terminan el viernes a las 18:00',
-    $shifted('2026-10-05 08:00:00', 180000) === '2026-10-09 18:00:00',
+    '3.4 Lunes 08:00 + 50 h = Miércoles 10:00, contando días naturales',
+    $shifted('2026-10-05 08:00:00', 180000) === '2026-10-07 10:00:00',
     $shifted('2026-10-05 08:00:00', 180000)
 );
 
 $assert(
-    '3.5 Una pausa de 25 horas hábiles atravesada por un fin de semana: Viernes 09:00 + 90.000 s = Martes 14:00',
-    $shifted('2026-10-09 09:00:00', 90000) === '2026-10-13 14:00:00',
+    '3.5 Viernes 09:00 + 25 h = Sábado 10:00, contando el sábado',
+    $shifted('2026-10-09 09:00:00', 90000) === '2026-10-10 10:00:00',
     $shifted('2026-10-09 09:00:00', 90000)
 );
 
 $assert(
-    '3.6 El fin de semana no consume ni un segundo: 36.000 s desde el viernes 09:00 acaban el lunes a las 09:00',
-    $shifted('2026-10-09 09:00:00', 36000) === '2026-10-12 09:00:00',
-    $shifted('2026-10-09 09:00:00', 36000)
+    '3.6 Viernes 09:00 + 72 h = Lunes 09:00, sin descontar el fin de semana',
+    $shifted('2026-10-09 09:00:00', 259200) === '2026-10-12 09:00:00',
+    $shifted('2026-10-09 09:00:00', 259200)
 );
 
 // =====================================================================
-// GRUPO 4: Pausa nula, inmutabilidad y ventana legal resultante
+// GRUPO 4: Pausa nula, inmutabilidad y alias de compatibilidad
 // =====================================================================
-echo "\n--- Grupo 4: Pausa nula, inmutabilidad y ventana legal ---\n";
+echo "\n--- Grupo 4: Pausa nula, inmutabilidad y alias ---\n";
 
 $assert(
-    '4.1 Duración nula devuelve el vencimiento intacto, incluso de noche (§6.1)',
+    '4.1 Duración nula devuelve el vencimiento intacto, incluso de noche',
     $shifted('2026-10-08 23:30:00', 0) === '2026-10-08 23:30:00',
     $shifted('2026-10-08 23:30:00', 0)
 );
@@ -203,39 +199,17 @@ $assert(
 
 $sourceDeadline = $madrid('2026-10-08 12:15:00');
 $sourceDeadlineSnapshot = $sourceDeadline->format('Y-m-d H:i:s');
-$service->shiftSlaTargetInBusinessHours($sourceDeadline, 5400, $locationId);
+$service->shiftSlaTargetBySeconds($sourceDeadline, 5400, $locationId);
 $assert(
     '4.3 El método no muta el vencimiento de entrada (inmutabilidad del cálculo)',
     $sourceDeadline->format('Y-m-d H:i:s') === $sourceDeadlineSnapshot,
     $sourceDeadline->format('Y-m-d H:i:s')
 );
 
-$legalWindowCases = [
-    ['2026-10-08 12:15:00', 5400],
-    ['2026-10-08 17:30:00', 3600],
-    ['2026-10-08 23:00:00', 600],
-    ['2026-10-08 06:00:00', 900],
-    ['2026-10-09 17:00:00', 7200],
-    ['2026-10-10 10:00:00', 3600],
-    ['2026-10-11 20:00:00', 1800],
-    ['2026-10-05 08:00:00', 180000],
-    ['2026-10-09 09:00:00', 90000],
-];
-
-$illegalResults = [];
-foreach ($legalWindowCases as [$caseDeadline, $caseSeconds]) {
-    $result = $shift($caseDeadline, $caseSeconds);
-    $weekday = (int)$result->format('N');
-    $secondOfDay = ((int)$result->format('G')) * 3600 + ((int)$result->format('i')) * 60 + (int)$result->format('s');
-
-    if ($weekday > 5 || $secondOfDay < 28800 || $secondOfDay > 64800) {
-        $illegalResults[] = $caseDeadline . ' + ' . $caseSeconds . 's -> ' . $result->format('Y-m-d H:i:s (l)');
-    }
-}
 $assert(
-    '4.4 Ninguna fecha resultante cae en fin de semana ni fuera de la ventana 08:00-18:00',
-    $illegalResults === [],
-    implode(' | ', $illegalResults)
+    '4.4 El alias histórico delega en el cálculo continuo y conserva la firma de T-PAUSE-06',
+    $service->shiftSlaTargetInBusinessHours($madrid('2026-10-09 17:00:00'), 7200, $locationId)
+        ->format('Y-m-d H:i:s') === '2026-10-09 19:00:00'
 );
 
 // =====================================================================
@@ -244,10 +218,10 @@ $assert(
 echo "\n--- Grupo 5: Zona horaria de la sede y validación Fail-Fast ---\n";
 
 $utcDeadline = new DateTimeImmutable('2026-10-08 15:15:00', new DateTimeZone('UTC'));
-$utcShifted = $service->shiftSlaTargetInBusinessHours($utcDeadline, 3600, $locationId);
+$utcShifted = $service->shiftSlaTargetBySeconds($utcDeadline, 3600, $locationId);
 $assert(
-    '5.1 Una entrada en UTC se interpreta como 17:15 de sede y vence el viernes a las 08:15',
-    $utcShifted->format('Y-m-d H:i:s') === '2026-10-09 08:15:00',
+    '5.1 Una entrada en UTC se interpreta como 17:15 de sede y suma una hora natural: 18:15',
+    $utcShifted->format('Y-m-d H:i:s') === '2026-10-08 18:15:00',
     $utcShifted->format('Y-m-d H:i:s')
 );
 
@@ -257,37 +231,59 @@ $assert(
     $utcShifted->getTimezone()->getName()
 );
 
-$negativeDuration = $capture(static fn () => $service->shiftSlaTargetInBusinessHours($madrid('2026-10-08 12:15:00'), -1, $locationId));
+$negativeDuration = $capture(static fn () => $service->shiftSlaTargetBySeconds($madrid('2026-10-08 12:15:00'), -1, $locationId));
 $assert(
     '5.3 Una duración de pausa negativa se rechaza de inmediato',
     $negativeDuration['threw'] === true,
     $negativeDuration['message']
 );
 
-$invalidLocation = $capture(static fn () => $service->shiftSlaTargetInBusinessHours($madrid('2026-10-08 12:15:00'), 600, 0));
+$invalidLocation = $capture(static fn () => $service->shiftSlaTargetBySeconds($madrid('2026-10-08 12:15:00'), 600, 0));
 $assert(
-    '5.4 Una sede sin identificador válido se rechaza en lugar de aplicar el calendario por defecto',
+    '5.4 Una sede sin identificador válido se rechaza',
     $invalidLocation['threw'] === true,
     $invalidLocation['message']
 );
 
-$negativeLocation = $capture(static fn () => $service->shiftSlaTargetInBusinessHours($madrid('2026-10-08 12:15:00'), 600, -7));
+$negativeLocation = $capture(static fn () => $service->shiftSlaTargetBySeconds($madrid('2026-10-08 12:15:00'), 600, -7));
 $assert(
     '5.5 Una sede con identificador negativo también se rechaza',
     $negativeLocation['threw'] === true,
     $negativeLocation['message']
 );
 
-$zeroPauseInvalidLocation = $capture(static fn () => $service->shiftSlaTargetInBusinessHours($madrid('2026-10-08 12:15:00'), 0, 0));
+$zeroPauseInvalidLocation = $capture(static fn () => $service->shiftSlaTargetBySeconds($madrid('2026-10-08 12:15:00'), 0, 0));
 $assert(
     '5.6 La validación de sede precede al atajo de duración nula',
     $zeroPauseInvalidLocation['threw'] === true,
     $zeroPauseInvalidLocation['message']
 );
 
+$dstStart = $madrid('2026-10-24 12:00:00');
+$dstShifted = $service->shiftSlaTargetBySeconds($dstStart, 86400, $locationId);
 $assert(
-    '5.7 El servicio es final (sin herencia accidental) y no expone estado mutable interno',
+    '5.7 Un cambio de hora estacional no altera la duración absoluta',
+    $dstShifted->getTimestamp() - $dstStart->getTimestamp() === 86400
+        && $dstShifted->format('Y-m-d H:i:s') === '2026-10-25 11:00:00',
+    $dstShifted->format('Y-m-d H:i:s')
+);
+
+$assert(
+    '5.8 El servicio es final (sin herencia accidental) y no expone estado mutable interno',
     (new ReflectionClass(IncidentPauseService::class))->isFinal() === true
+);
+
+// =====================================================================
+// GRUPO 6: La espera natural no se confunde con el umbral de 72 h hábiles
+// =====================================================================
+echo "\n--- Grupo 6: Espera natural frente a espera hábil ---\n";
+
+$weekendPauseNatural = $service->pauseSecondsSince('2026-10-09 17:00:00', $madrid('2026-10-12 09:00:00'));
+$weekendPauseBusiness = $service->pauseBusinessSecondsSince('2026-10-09 17:00:00', $madrid('2026-10-12 09:00:00'));
+$assert(
+    '6.1 La espera natural cuenta 64 h y la hábil 2 h para el mismo fin de semana',
+    $weekendPauseNatural === 64 * 3600 && $weekendPauseBusiness === 2 * 3600,
+    "natural={$weekendPauseNatural} s · hábil={$weekendPauseBusiness} s"
 );
 
 // =====================================================================

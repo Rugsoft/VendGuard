@@ -33,6 +33,7 @@ use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
@@ -566,12 +567,19 @@ class LocationPortalController
                 (string)$uploadedPhotoPath,
                 function () use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath): Incident {
                     $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $category);
+                    $slaTier = $location->getSlaTier();
+                    $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+                        $slaTier,
+                        $machine->getMachineType(),
+                        $category,
+                        $urgency
+                    );
 
                     // EARS 2.4: si el índice único del ticket rechaza el código, se
                     // reintenta la unidad de trabajo completa con un código nuevo. El
                     // aviso se confirma una sola vez y la notificación se encola sólo
                     // tras el alta, así que el reintento no la duplica.
-                    return $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath, $urgency): Incident {
+                    return $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath, $urgency, $slaTier, $slaTargetMinutes): Incident {
                         $incident = new Incident(
                             id: null,
                             ticketCode: $ticketCode,
@@ -586,7 +594,9 @@ class LocationPortalController
                             reporterPhone: $reporterPhone,
                             retainedMoneyAmount: $retainedMoney,
                             photoPath: $photoPath,
-                            reporterEmail: $reporterEmail
+                            reporterEmail: $reporterEmail,
+                            slaTierSnapshot: $slaTier,
+                            slaTargetMinutes: $slaTargetMinutes
                         );
 
                         $enqueuer = $this->notifications();
@@ -1522,6 +1532,13 @@ class LocationPortalController
             $data['technician_name'] = $technicianId !== null
                 ? 'Servicio Técnico Oficial · Operador #' . sprintf('%02d', $technicianId)
                 : 'Servicio Técnico Oficial';
+        }
+
+        // Módulo 30, EARS 07.3: la sede autenticada recibe el perfil de su propio
+        // aviso con el nombre público `sla_tier`; el snapshot se conserva para
+        // trazabilidad interna de la proyección, nunca para otra sede.
+        if (isset($data['sla_tier_snapshot']) && is_string($data['sla_tier_snapshot'])) {
+            $data['sla_tier'] = $data['sla_tier_snapshot'];
         }
 
         foreach ($data as $key => $value) {

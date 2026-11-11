@@ -629,8 +629,7 @@ export const CoordinatorRootCauseParetoTab = {
   },
   template: `
     <div class="vg-pareto-tab" data-testid="coordinator-root-cause-pareto-tab">
-      <!-- La hoja vive en styles.css y esta pestaña la carga bajo demanda. -->
-      <link rel="stylesheet" href="/assets/css/styles.css" />
+      <!-- La hoja compartida styles.css se enlaza globalmente en index.html. -->
 
       <header class="vg-taxonomy-panel__header">
         <div>

@@ -1853,6 +1853,83 @@ details.vg-guide-accordion__disclosure:not([open]) .vg-guide-accordion__body {
   font-size: var(--font-size-caption);
 }
 
+/* Módulo 30 · Contrato SLA en Ruta Móvil y Portal de Sede (RF-07.4, RF-07.5).
+   Solo tokens del sistema: insignia azul contractual, motivo crítico rojo para
+   cadena de frío y ámbar para vencimiento contractual, sin sombras en reposo. */
+.vg-sla-contract-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 6px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--color-ink-secondary);
+}
+
+.vg-sla-contract-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-interactive);
+  background-color: var(--color-primary-subtle);
+  color: var(--color-primary-dark);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.vg-sla-contract-deadline {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--color-ink-secondary);
+}
+
+.vg-sla-reason-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid;
+  border-radius: var(--radius-interactive);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.vg-sla-reason-badge--cold {
+  background-color: var(--color-error-bg);
+  border-color: var(--color-error-border);
+  color: var(--color-error-text);
+}
+
+.vg-sla-reason-badge--contractual {
+  background-color: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning-text);
+}
+
+.vg-machine-card-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vg-portal-incident-sla {
+  margin-top: 0;
+  padding: 8px 10px;
+  background-color: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-interactive);
+}
+
+.route-stop-sla {
+  margin-top: 2px;
+}
+
 @media (max-width: 1100px) {
   .vg-spoilage-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1883,5 +1960,178 @@ details.vg-guide-accordion__disclosure:not([open]) .vg-guide-accordion__body {
 
   .vg-guides-tab__editor-row {
     grid-template-columns: 1fr;
+  }
+}
+
+/*
+ * App shell responsive layout (H-03).
+ *
+ * The navbar, the demo profile bar and the technician route header had inline
+ * flex rows without wrapping. At 390px their fixed children pushed the document
+ * to 578px. These rules keep every row inside the viewport: wrapping is enabled,
+ * text blocks can shrink, and the document no longer needs horizontal scrolling.
+ */
+.vg-navbar__inner {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  width: 100%;
+  max-width: 1200px;
+  min-height: 56px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.vg-navbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.vg-navbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.vg-navbar__session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.vg-navbar__session-role {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.vg-navbar__session-label {
+  min-width: 0;
+}
+
+.vg-profile-bar__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.vg-profile-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.vg-profile-tabs__label {
+  margin-right: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink-muted);
+}
+
+.vg-profile-tabs .vg-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.vg-profile-bar__credentials {
+  min-width: 0;
+}
+
+.vg-profile-guide {
+  overflow-wrap: anywhere;
+}
+
+.vg-tech-route-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.vg-tech-route-identity {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.vg-tech-route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 700px) {
+  .vg-navbar__inner {
+    align-items: flex-start;
+    padding: 8px 16px;
+  }
+
+  .vg-navbar__actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+
+/*
+ * Coordinator triage table (H-04).
+ *
+ * The table used to widen the document at 1280x720 and its action column could
+ * sit outside the visible area. The scroll container now owns the overflow, the
+ * action column stays pinned to its right edge, and the wide-screen right gutter
+ * keeps the floating chat bubble outside the action buttons.
+ */
+.vg-triage-table-card {
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+}
+
+.vg-triage-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.vg-triage-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.vg-triage-actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  width: 240px;
+  min-width: 240px;
+  background-color: inherit;
+  box-shadow: -1px 0 0 var(--color-hairline);
+}
+
+@media (min-width: 900px) {
+  .vg-triage-table-card {
+    padding-right: 88px;
   }
 }

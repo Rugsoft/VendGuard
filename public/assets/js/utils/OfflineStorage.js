@@ -98,6 +98,52 @@ export const MUTATION_STATUS = Object.freeze({
   CONFLICT: 'CONFLICT'
 });
 
+/** Etiquetas canónicas del contrato SLA (Módulo 30, RF-07.4). */
+export const SLA_TIER_LABELS = Object.freeze({
+  STANDARD: 'Estándar',
+  PRIORITY_CORPORATE: 'Prioritario Corporativo',
+  CRITICAL_INFRASTRUCTURE_24_7: 'Infraestructura Crítica 24x7'
+});
+
+/**
+ * Describe el contrato SLA de una parada o tarea para la ruta móvil.
+ *
+ * La copia local puede venir de un paquete anterior a este módulo: si falta la
+ * etiqueta, se deriva del código sellado; si falta el motivo crítico, se
+ * reconstruye desde los booleanos que ya publicaba el servidor. La distinción
+ * entre cadena de frío y vencimiento contractual nunca se colapsa (`C6`).
+ *
+ * @param {Object|null} stop Parada, tarea o aviso con campos SLA.
+ * @returns {{tier_label: (string|null), due_at: (string|null), critical_reason: (string|null), critical_reason_label: (string|null)}}
+ */
+export function describeStopSlaContract(stop) {
+  const source = stop !== null && typeof stop === 'object' ? stop : {};
+  const rawTier = String(
+    source.sla_tier_label ?? source.sla_tier_snapshot ?? source.sla_tier ?? ''
+  ).trim();
+  const tierLabel = rawTier === '' ? null : (SLA_TIER_LABELS[rawTier] ?? rawTier);
+  const rawDueAt = source.sla_due_at ?? source.sla_target_at ?? null;
+  const dueAt = typeof rawDueAt === 'string' && rawDueAt.trim() !== '' ? rawDueAt : null;
+
+  let criticalReason = null;
+  if (source.critical_reason === 'COLD_CHAIN' || source.critical_reason === 'CONTRACTUAL_SLA') {
+    criticalReason = source.critical_reason;
+  } else if (source.is_cold_chain_critical === true) {
+    criticalReason = 'COLD_CHAIN';
+  } else if (source.is_contractual_critical === true) {
+    criticalReason = 'CONTRACTUAL_SLA';
+  }
+
+  return {
+    tier_label: tierLabel,
+    due_at: dueAt,
+    critical_reason: criticalReason,
+    critical_reason_label: criticalReason === 'COLD_CHAIN'
+      ? 'Riesgo sanitario de cadena de frío'
+      : (criticalReason === 'CONTRACTUAL_SLA' ? 'Vencimiento contractual ≤ 4 h' : null)
+  };
+}
+
 /**
  * Margen a partir del cual un envío en `SYNCING` se considera huérfano.
  *

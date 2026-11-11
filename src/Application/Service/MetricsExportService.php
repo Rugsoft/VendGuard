@@ -52,7 +52,9 @@ class MetricsExportService
             'MTTR Formateado',
             'MTTR Horas',
             'Reintervenciones 48h',
-            'SLA Objetivo Horas',
+            'Nivel SLA',
+            'Objetivo SLA (Horas)',
+            'Brechas SLA',
             'Estado SLA'
         ];
         fputcsv($handle, $headers, ',');
@@ -70,7 +72,11 @@ class MetricsExportService
                     $loc['mttr_formatted'] ?? 'N/A',
                     $loc['mttr_hours'] !== null ? (string)$loc['mttr_hours'] : 'N/A',
                     '0',
-                    isset($loc['sla_target_hours']) ? (string)$loc['sla_target_hours'] : '24.0',
+                    $loc['sla_tier_label'] ?? $loc['sla_tier'] ?? 'N/A',
+                    isset($loc['sla_target_hours'])
+                        ? number_format((float)$loc['sla_target_hours'], 1, '.', '')
+                        : 'N/A',
+                    (string)($loc['sla_breaches'] ?? 0),
                     $loc['sla_status'] ?? 'N/A',
                 ], ',');
             }
@@ -91,6 +97,8 @@ class MetricsExportService
                     (string)($tech['warranty_reopens'] ?? 0),
                     'N/A',
                     'N/A',
+                    'N/A',
+                    $tech['sla_status'] ?? 'N/A',
                 ], ',');
             }
         }
@@ -108,7 +116,11 @@ class MetricsExportService
                     $mType['mttr_formatted'] ?? 'N/A',
                     $mType['mttr_hours'] !== null ? (string)$mType['mttr_hours'] : 'N/A',
                     '0',
-                    isset($mType['sla_target_hours']) ? (string)$mType['sla_target_hours'] : 'N/A',
+                    'N/A',
+                    isset($mType['sla_target_hours'])
+                        ? number_format((float)$mType['sla_target_hours'], 1, '.', '')
+                        : 'N/A',
+                    'N/A',
                     $mType['sla_status'] ?? 'N/A',
                 ], ',');
             }
@@ -125,8 +137,10 @@ class MetricsExportService
                     (string)($cat['tickets_resolved'] ?? 0),
                     $cat['mttr_minutes'] !== null ? (string)$cat['mttr_minutes'] : 'N/A',
                     $cat['mttr_formatted'] ?? 'N/A',
-                    'N/A',
+                    isset($cat['mttr_hours']) ? (string)$cat['mttr_hours'] : 'N/A',
                     '0',
+                    'N/A',
+                    'N/A',
                     'N/A',
                     'N/A',
                 ], ',');

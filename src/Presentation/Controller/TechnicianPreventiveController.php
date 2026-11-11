@@ -125,6 +125,7 @@ class TechnicianPreventiveController
             orderRepo: $this->orderRepo,
             settingsRepo: $this->settingsRepo,
             machineRepo: $this->machineRepo,
+            locationRepo: $this->locationRepo,
             certificateRepo: $certificateRepo,
             auditLogger: $this->auditLogger
         );

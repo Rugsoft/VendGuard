@@ -7,7 +7,7 @@ declare(strict_types=1);
  *
  * Suite integral del ciclo de vida de la pausa por bloqueo imputable a la sede
  * (T-PAUSE-11). A diferencia de las suites de cada tarea —que protegen el detalle
- * de su algoritmo (T-PAUSE-06 calendario comercial, T-PAUSE-07 reloj sanitario,
+ * de su algoritmo (T-PAUSE-06 desplazamiento por segundos naturales, T-PAUSE-07 reloj sanitario,
  * T-PAUSE-09 cancelación por inactividad)—, ésta recorre el PIVOTE completo del
  * servicio sobre sus colaboradores reales:
  *

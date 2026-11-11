@@ -59,7 +59,7 @@ import {
 } from '../utils/OpportunisticContext.js';
 import { OfflineSyncTrayModal } from '../components/OfflineSyncTrayModal.js';
 import { TroubleshootingGuideAccordion } from '../components/TroubleshootingGuideAccordion.js';
-import { getOfflineTroubleshootingGuidesByModel } from '../utils/OfflineStorage.js';
+import { describeStopSlaContract, getOfflineTroubleshootingGuidesByModel } from '../utils/OfflineStorage.js';
 import {
   MUTATION_STATUS,
   OFFLINE_MESSAGES,
@@ -1355,10 +1355,74 @@ export const TechnicianRouteView = {
         id: Number(stop?.id ?? stop?.incident_id ?? 0),
         comments_count: Number(stop?.comments_count ?? 0),
         site_response_since_pause: stop?.site_response_since_pause === true,
+        sla_tier_label: stop?.sla_tier_label ?? stop?.sla_tier_snapshot ?? stop?.sla_tier ?? null,
+        sla_due_at: stop?.sla_due_at ?? stop?.sla_target_at ?? null,
+        critical_reason: stop?.critical_reason ?? null,
         pending_info_reason_category: stop?.pending_info_reason_category ?? pendingInfo.category ?? null,
         pending_info_reason_text: stop?.pending_info_reason_text ?? pendingInfo.reason ?? null,
         machine
       };
+    },
+
+    /**
+     * Contrato SLA visible de una parada (Módulo 30, RF-07.4).
+     *
+     * Si la parada no trae motivo crítico propio, hereda el de su tarea más
+     * restrictiva; la fecha límite se toma de la parada o, en su defecto, de la
+     * tarea con el vencimiento más próximo (EARS 03.3).
+     */
+    slaContractFor(incident) {
+      const contract = describeStopSlaContract(incident);
+      const tasks = Array.isArray(incident?.tasks) ? incident.tasks : [];
+      const candidates = [contract.due_at, ...tasks.map((task) => describeStopSlaContract(task).due_at)]
+        .filter((value) => typeof value === 'string' && value !== '');
+      const earliest = candidates.sort((a, b) => {
+        const timeA = Date.parse(a);
+        const timeB = Date.parse(b);
+        return (Number.isFinite(timeA) ? timeA : Number.MAX_SAFE_INTEGER)
+          - (Number.isFinite(timeB) ? timeB : Number.MAX_SAFE_INTEGER);
+      })[0] ?? null;
+
+      let reason = contract.critical_reason;
+      let reasonLabel = contract.critical_reason_label;
+      if (reason === null) {
+        for (const task of tasks) {
+          const taskContract = describeStopSlaContract(task);
+          if (taskContract.critical_reason !== null) {
+            reason = taskContract.critical_reason;
+            reasonLabel = taskContract.critical_reason_label;
+            break;
+          }
+        }
+      }
+
+      return {
+        tier_label: contract.tier_label,
+        due_at: earliest,
+        critical_reason: reason,
+        critical_reason_label: reasonLabel
+      };
+    },
+
+    /** Hora límite efectiva en formato corto de ruta móvil. */
+    formatSlaDeadline(value) {
+      const date = new Date(String(value ?? ''));
+      if (Number.isNaN(date.getTime())) {
+        return '';
+      }
+      return date.toLocaleString('es-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    },
+
+    /** Clase visual del motivo crítico: sanitario rojo, contractual ámbar. */
+    slaCriticalReasonClass(incident) {
+      return this.slaContractFor(incident).critical_reason === 'COLD_CHAIN'
+        ? 'vg-sla-reason-badge--cold'
+        : 'vg-sla-reason-badge--contractual';
     },
 
     /**
@@ -3629,9 +3693,10 @@ export const TechnicianRouteView = {
       <div v-else>
         <!-- Mobile Top Header -->
         <div
+          class="vg-tech-route-header"
           style="display: flex; align-items: center; justify-content: space-between; background-color: #ffffff; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); padding: 12px 14px; margin-bottom: 14px; box-shadow: var(--shadow-card, 0 1px 3px rgba(0,0,0,0.04));"
         >
-          <div style="display: flex; align-items: center; gap: 10px;">
+          <div class="vg-tech-route-identity" style="display: flex; align-items: center; gap: 10px;">
             <div
               style="width: 38px; height: 38px; border-radius: 50%; background-color: #e5f2fc; color: var(--color-primary, #2560ff); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px;"
             >
@@ -3647,7 +3712,7 @@ export const TechnicianRouteView = {
             </div>
           </div>
 
-          <div style="display: flex; gap: 6px;">
+          <div class="vg-tech-route-actions" style="display: flex; gap: 6px;">
             <a
               href="/docs/guia_rapida_por_rol_a4.html#guia-tecnico"
               target="_blank"
@@ -4213,6 +4278,26 @@ export const TechnicianRouteView = {
               </div>
               <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 2px;">
                 🏢 {{ incident.location?.name || 'Sede' }} ({{ incident.location?.address || '' }})
+              </div>
+
+              <!-- Contrato SLA de la parada (Módulo 30, RF-07.4): visible online y offline,
+                   con el motivo crítico sanitario y el contractual nunca confundidos. -->
+              <div class="vg-sla-contract-row" data-testid="tech-stop-sla-contract">
+                <span class="vg-sla-contract-badge">
+                  {{ slaContractFor(incident).tier_label || 'Contrato sin asignar' }}
+                </span>
+                <span v-if="slaContractFor(incident).due_at" class="vg-sla-contract-deadline" data-testid="tech-stop-sla-deadline">
+                  Vence: {{ formatSlaDeadline(slaContractFor(incident).due_at) }}
+                </span>
+                <span
+                  v-if="slaContractFor(incident).critical_reason"
+                  class="vg-sla-reason-badge"
+                  :class="slaCriticalReasonClass(incident)"
+                  data-testid="tech-stop-sla-critical-reason"
+                >
+                  {{ slaContractFor(incident).critical_reason === 'COLD_CHAIN' ? '🌡️' : '⏱️' }}
+                  {{ slaContractFor(incident).critical_reason_label }}
+                </span>
               </div>
 
               <!-- Disponibilidad del repuesto en la furgoneta (Módulo 23, RF-05.4 / QA 3).

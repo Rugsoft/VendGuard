@@ -117,11 +117,11 @@ class SeedRunner
 
         $columns = [
             'site_code', 'name', 'address', 'latitude', 'longitude',
-            'contact_name', 'contact_phone', 'postal_code', 'is_active',
+            'contact_name', 'contact_phone', 'postal_code', 'sla_tier', 'is_active',
         ];
         $placeholders = [
             ':site_code', ':name', ':address', ':latitude', ':longitude',
-            ':contact_name', ':contact_phone', ':postal_code', $this->dialect->booleanLiteral(true),
+            ':contact_name', ':contact_phone', ':postal_code', ':sla_tier', $this->dialect->booleanLiteral(true),
         ];
 
         if ($writesCanonicalKey) {
@@ -146,6 +146,9 @@ class SeedRunner
             // El CP es la llave de la herencia territorial (Resolución QA 7): el
             // sembrador lo escribe, no lo deja al azar de una migración.
             'postal_code' => SqlDialectAdapter::PROPOSED_VALUE,
+            // El perfil contractual se reafirma como el resto de la ficha: una sede
+            // que cambia de contrato no conserva el nivel anterior (C1, QA 4).
+            'sla_tier' => SqlDialectAdapter::PROPOSED_VALUE,
             'deleted_at' => 'NULL',
         ];
 
@@ -180,6 +183,7 @@ class SeedRunner
                 ':contact_name' => $loc['contact_name'],
                 ':contact_phone' => $loc['contact_phone'],
                 ':postal_code' => $loc['postal_code'],
+                ':sla_tier' => $loc['sla_tier'],
             ];
             if ($writesCanonicalKey) {
                 $params[':site_code_key'] = $this->dialect->identityKey($loc['site_code']);
@@ -3109,6 +3113,7 @@ class SeedRunner
                 'contact_name' => 'Laura Sanitaria',
                 'contact_phone' => '600111222',
                 'postal_code' => '08003',
+                'sla_tier' => 'CRITICAL_INFRASTRUCTURE_24_7',
             ],
             [
                 'site_code' => 'SEDE-BCN-02',
@@ -3119,6 +3124,7 @@ class SeedRunner
                 'contact_name' => 'Marc Recepción',
                 'contact_phone' => '600333444',
                 'postal_code' => '08018',
+                'sla_tier' => 'PRIORITY_CORPORATE',
             ],
             [
                 'site_code' => 'SEDE-BCN-03',
@@ -3129,6 +3135,7 @@ class SeedRunner
                 'contact_name' => 'Carles Coordinador',
                 'contact_phone' => '600555666',
                 'postal_code' => '08907',
+                'sla_tier' => 'CRITICAL_INFRASTRUCTURE_24_7',
             ],
             [
                 'site_code' => 'SEDE-BCN-04',
@@ -3139,6 +3146,7 @@ class SeedRunner
                 'contact_name' => 'Núria Port',
                 'contact_phone' => '600777888',
                 'postal_code' => '08039',
+                'sla_tier' => 'PRIORITY_CORPORATE',
             ],
             [
                 'site_code' => 'SEDE-BCN-05',
@@ -3149,6 +3157,7 @@ class SeedRunner
                 'contact_name' => 'Albert Campus',
                 'contact_phone' => '600999000',
                 'postal_code' => '08034',
+                'sla_tier' => 'STANDARD',
             ],
             [
                 'site_code' => 'SEDE-BCN-06',
@@ -3159,6 +3168,7 @@ class SeedRunner
                 'contact_name' => 'Clara Innovació',
                 'contact_phone' => '611222333',
                 'postal_code' => '08042',
+                'sla_tier' => 'STANDARD',
             ],
             [
                 'site_code' => 'SEDE-BCN-07',
@@ -3169,6 +3179,7 @@ class SeedRunner
                 'contact_name' => 'Sergi Logística',
                 'contact_phone' => '611444555',
                 'postal_code' => '08916',
+                'sla_tier' => 'CRITICAL_INFRASTRUCTURE_24_7',
             ],
             [
                 'site_code' => 'SEDE-BCN-08',
@@ -3179,6 +3190,7 @@ class SeedRunner
                 'contact_name' => 'Gemma Gestió',
                 'contact_phone' => '611666777',
                 'postal_code' => '08195',
+                'sla_tier' => 'PRIORITY_CORPORATE',
             ],
             [
                 'site_code' => 'SEDE-BCN-09',
@@ -3189,6 +3201,7 @@ class SeedRunner
                 'contact_name' => 'Pau Esdeveniments',
                 'contact_phone' => '611888999',
                 'postal_code' => '08908',
+                'sla_tier' => 'STANDARD',
             ],
             [
                 'site_code' => 'SEDE-BCN-10',
@@ -3199,6 +3212,7 @@ class SeedRunner
                 'contact_name' => 'Mireia Serveis',
                 'contact_phone' => '622111222',
                 'postal_code' => '08940',
+                'sla_tier' => 'PRIORITY_CORPORATE',
             ],
         ];
     }

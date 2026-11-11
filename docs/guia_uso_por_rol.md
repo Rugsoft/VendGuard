@@ -282,7 +282,7 @@ Cuando hay servicios resueltos sin valorar, el portal muestra un aviso:
 3. Añade un **comentario** si quieres (opcional).
 4. Envía la valoración.
 
-La encuesta se ofrece una vez por carga de página y no bloquea el portal. Las valoraciones alimentan el indicador de satisfacción de coordinación, sin datos personales del informante.
+La encuesta no se abre automáticamente: el aviso permanece en el panel y solo se abre al pulsar **Valorar servicio**. Las valoraciones alimentan el indicador de satisfacción de coordinación, sin datos personales del informante.
 
 ---
 

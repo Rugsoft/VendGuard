@@ -79,13 +79,7 @@ export const LocationPortalView = {
       /** Total real de pendientes: no se recorta al tope de 20 de la lista. */
       pendingSurveyTotal: 0,
       isLoadingSurveys: false,
-      showSurveyModal: false,
-      /**
-       * R3: el modal se ofrece una sola vez por carga de página. Cerrarlo sin
-       * valorar no bloquea el portal ni lo reabre en cada refresco del listado;
-       * una recarga o un nuevo inicio de sesión vuelve a ofrecerlo.
-       */
-      surveyModalOffered: false
+      showSurveyModal: false
     };
   },
   computed: {
@@ -94,6 +88,19 @@ export const LocationPortalView = {
     },
     location() {
       return store.state.location;
+    },
+    /** Nivel contractual de la sede autenticada (Módulo 30, RF-07.3). */
+    locationSlaLabel() {
+      const direct = this.location?.sla_tier_label;
+      if (typeof direct === 'string' && direct.trim() !== '') {
+        return direct;
+      }
+      const labels = {
+        STANDARD: 'Estándar',
+        PRIORITY_CORPORATE: 'Prioritario Corporativo',
+        CRITICAL_INFRASTRUCTURE_24_7: 'Infraestructura Crítica 24x7'
+      };
+      return labels[this.location?.sla_tier] || '';
     },
     filteredMachines() {
       if (this.activeFilter === 'incident') {
@@ -186,7 +193,7 @@ export const LocationPortalView = {
   mounted() {
     if (this.isAuthenticated && this.location?.site_code) {
       this.loadMachines();
-      this.loadPendingSurveys({ autoOpen: true });
+      this.loadPendingSurveys();
     }
   },
   methods: {
@@ -217,16 +224,39 @@ export const LocationPortalView = {
         store.setSiteSession(response.location, response.token);
         this.siteCodeInput = '';
         this.accessCodeInput = '';
-        // Un inicio de sesión nuevo vuelve a ofrecer la encuesta (R3).
-        this.surveyModalOffered = false;
         await this.loadMachines();
-        await this.loadPendingSurveys({ autoOpen: true });
+        await this.loadPendingSurveys();
       } catch (err) {
         this.loginError = err.message || 'Código o clave no reconocidos. Contacte con el servicio técnico.';
       } finally {
         this.isLoggingIn = false;
         store.setLoading(false);
       }
+    },
+
+    /** Plazo objetivo comprometido del aviso, en horas/minutos (RF-07.3). */
+    slaTargetLabel(minutes) {
+      const total = Number(minutes);
+      if (!Number.isFinite(total) || total <= 0) {
+        return '—';
+      }
+      const hours = Math.floor(total / 60);
+      const rest = total % 60;
+      return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+    },
+
+    /** Fecha de vencimiento legible para el Responsable de Sede. */
+    formatPortalDeadline(value) {
+      const date = new Date(String(value ?? ''));
+      if (Number.isNaN(date.getTime())) {
+        return '';
+      }
+      return date.toLocaleString('es-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
     },
 
     /**
@@ -254,11 +284,11 @@ export const LocationPortalView = {
     /**
      * Consulta los episodios resueltos sin valorar de la sede (RF-05.1, R3).
      *
-     * `autoOpen` abre el modal solo la primera vez de esta carga de página: un
-     * refresco del listado no vuelve a asaltar a quien ya lo cerró sin valorar.
+     * Solo alimenta el aviso persistente y el modal: no abre la encuesta por sí
+     * mismo. La persona decide cuándo valorar con «Valorar servicio», de modo que
+     * un pendiente no interrumpe la primera visión del panel.
      */
-    async loadPendingSurveys(options = {}) {
-      const autoOpen = options?.autoOpen === true;
+    async loadPendingSurveys() {
       if (!this.isAuthenticated) return;
 
       this.isLoadingSurveys = true;
@@ -266,11 +296,6 @@ export const LocationPortalView = {
         const data = await api.satisfaction.getPending();
         this.pendingSurveys = Array.isArray(data?.items) ? data.items : [];
         this.pendingSurveyTotal = Number(data?.pending_total ?? this.pendingSurveys.length) || 0;
-
-        if (autoOpen && this.pendingSurveys.length > 0 && !this.surveyModalOffered) {
-          this.surveyModalOffered = true;
-          this.showSurveyModal = true;
-        }
       } catch (err) {
         // La encuesta no puede tumbar el portal: sin listado no hay aviso.
         this.pendingSurveys = [];
@@ -281,7 +306,6 @@ export const LocationPortalView = {
     },
 
     openSurveyModal() {
-      this.surveyModalOffered = true;
       this.showSurveyModal = true;
     },
 
@@ -300,7 +324,7 @@ export const LocationPortalView = {
           (episode) => Number(episode?.incident_id) !== Number(incidentId)
         );
       }
-      await this.loadPendingSurveys({ autoOpen: true });
+      await this.loadPendingSurveys();
     },
 
     /**
@@ -525,6 +549,10 @@ export const LocationPortalView = {
             <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate, #2c333f); margin: 0;">
               📍 {{ location.address }} · Contacto: {{ location.contact_name || 'No especificado' }}
             </p>
+            <!-- Contrato de la propia sede (Módulo 30, RF-07.3): nunca datos de otras sedes. -->
+            <div v-if="locationSlaLabel" class="vg-sla-contract-row" data-testid="location-portal-sla-tier" style="margin-top: 6px;">
+              <span class="vg-sla-contract-badge">Contrato de sede: {{ locationSlaLabel }}</span>
+            </div>
           </div>
 
           <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
@@ -777,14 +805,26 @@ export const LocationPortalView = {
             class="vg-machine-grid"
             style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;"
           >
-            <MachineCard
-              v-for="m in filteredMachines"
-              :key="m.id"
-              :machine="m"
-              @report="onReport"
-              @open-comments="onOpenComments"
-              @reopen="onReopen"
-            />
+            <div v-for="m in filteredMachines" :key="m.id" class="vg-machine-card-wrap">
+              <!-- Plazo comprometido de cada aviso de la sede (Módulo 30, RF-07.3). -->
+              <div
+                v-if="m.active_incident"
+                class="vg-sla-contract-row vg-portal-incident-sla"
+                data-testid="location-portal-incident-sla"
+              >
+                <span class="vg-sla-contract-badge">{{ m.active_incident.sla_tier_label || locationSlaLabel || 'Contrato de sede' }}</span>
+                <span>Plazo objetivo: <strong>{{ slaTargetLabel(m.active_incident.sla_target_minutes) }}</strong></span>
+                <span v-if="m.active_incident.sla_target_at" class="vg-sla-contract-deadline">
+                  · Vence: {{ formatPortalDeadline(m.active_incident.sla_target_at) }}
+                </span>
+              </div>
+              <MachineCard
+                :machine="m"
+                @report="onReport"
+                @open-comments="onOpenComments"
+                @reopen="onReopen"
+              />
+            </div>
           </div>
         </div>
 

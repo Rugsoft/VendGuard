@@ -183,12 +183,11 @@ export const AppNavbar = {
         style="height: 3px; background: linear-gradient(90deg, #2560ff 0%, #38bd7d 50%, #2560ff 100%); background-size: 200% 100%; animation: vg-progress-animation 1.5s infinite linear; position: absolute; top: 0; left: 0; right: 0;"
       ></div>
 
-      <div
-        style="max-width: 1200px; margin: 0 auto; padding: 0 16px; height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px;"
-      >
+      <div class="vg-navbar__inner">
         <!-- Brand / Logo -->
         <div
-          style="display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;"
+          class="vg-navbar__brand"
+          style="cursor: pointer; user-select: none;"
           @click="handleBrandClick"
         >
           <div
@@ -213,19 +212,22 @@ export const AppNavbar = {
         <!-- Session Identity & Actions -->
         <div
           v-if="isAuthenticated"
-          style="display: flex; align-items: center; gap: 12px;"
+          class="vg-navbar__actions"
         >
           <!-- Site Session Context (Location Responsible) -->
           <div
             v-if="isSiteSession && location"
-            style="display: flex; align-items: center; gap: 8px; background-color: var(--color-surface-1, #efefef); padding: 4px 10px; border-radius: var(--radius-interactive, 4px); border: 1px solid var(--color-hairline, #c8cfda);"
+            class="vg-navbar__session"
+            style="background-color: var(--color-surface-1, #efefef); padding: 4px 10px; border-radius: var(--radius-interactive, 4px); border: 1px solid var(--color-hairline, #c8cfda);"
           >
             <span
+              class="vg-navbar__session-role"
               style="font-family: var(--font-body, Inter, sans-serif); font-size: 11px; font-weight: 700; background-color: var(--color-primary, #2560ff); color: #ffffff; padding: 2px 6px; border-radius: 3px;"
             >
               {{ location.site_code }}
             </span>
             <span
+              class="vg-navbar__session-label"
               style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; font-weight: 500; color: var(--color-slate, #2c333f); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
               :title="location.name"
             >
@@ -236,9 +238,11 @@ export const AppNavbar = {
           <!-- Internal User Context (Coordinator / Field Technician) -->
           <div
             v-else-if="user"
-            style="display: flex; align-items: center; gap: 8px; background-color: var(--color-surface-1, #efefef); padding: 4px 10px; border-radius: var(--radius-interactive, 4px); border: 1px solid var(--color-hairline, #c8cfda);"
+            class="vg-navbar__session"
+            style="background-color: var(--color-surface-1, #efefef); padding: 4px 10px; border-radius: var(--radius-interactive, 4px); border: 1px solid var(--color-hairline, #c8cfda);"
           >
             <span
+              class="vg-navbar__session-role"
               style="font-family: var(--font-body, Inter, sans-serif); font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 3px;"
               :style="{
                 backgroundColor: user.role === 'COORDINATOR' ? '#ede9fe' : '#eaf8f1',
@@ -249,6 +253,7 @@ export const AppNavbar = {
               {{ roleLabel }}
             </span>
             <span
+              class="vg-navbar__session-label vg-navbar__session-label--user"
               style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; font-weight: 500; color: var(--color-slate, #2c333f); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
               :title="user.email"
             >

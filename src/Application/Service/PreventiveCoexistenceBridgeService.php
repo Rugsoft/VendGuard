@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace VendGuard\Application\Service;
 
+use DateTimeImmutable;
 use DomainException;
 use VendGuard\Core\Domain\Exception\ReinspectionTemperatureExceededException;
 use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\PreventiveOrder;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveOrderRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
@@ -18,6 +21,8 @@ use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\ResolutionValidator;
+use VendGuard\Core\Service\SlaTargetCalculator;
+use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 
 /**
@@ -40,6 +45,7 @@ class PreventiveCoexistenceBridgeService
     private ?SanitaryCertificateRepositoryInterface $certificateRepo;
     private AuditLogger $auditLogger;
     private ?IncidentTicketAllocator $ticketAllocator;
+    private LocationRepositoryInterface $locationRepo;
 
     public function __construct(
         IncidentRepositoryInterface $incidentRepo,
@@ -48,7 +54,8 @@ class PreventiveCoexistenceBridgeService
         ?MachineRepositoryInterface $machineRepo = null,
         ?SanitaryCertificateRepositoryInterface $certificateRepo = null,
         ?AuditLogger $auditLogger = null,
-        ?IncidentTicketAllocator $ticketAllocator = null
+        ?IncidentTicketAllocator $ticketAllocator = null,
+        ?LocationRepositoryInterface $locationRepo = null
     ) {
         $this->incidentRepo = $incidentRepo;
         $this->orderRepo = $orderRepo;
@@ -57,6 +64,7 @@ class PreventiveCoexistenceBridgeService
         $this->certificateRepo = $certificateRepo;
         $this->auditLogger = $auditLogger ?? new AuditLogger();
         $this->ticketAllocator = $ticketAllocator;
+        $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
     }
 
     /**
@@ -100,6 +108,7 @@ class PreventiveCoexistenceBridgeService
         $machineConfig = $this->settingsRepo->getMachineSettings($machineId);
         $machineType = strtoupper((string)($machineConfig['machine_type'] ?? 'PERISHABLE_FOOD'));
         $isPerishable = in_array($machineType, ['PERISHABLE_FOOD', 'COMBO'], true);
+        $machineTypeEnum = MachineType::fromString($machineType);
 
         // Determinar criticidad (rotura de frío o ítems críticos)
         $isColdBreach = ($isPerishable && $temperature !== null && $temperature > 4.0);
@@ -146,11 +155,28 @@ class PreventiveCoexistenceBridgeService
                 $description .= " Observaciones técnicas: " . trim($notes) . ".";
             }
 
+            $location = $this->locationRepo->findById($locationId);
+            if ($location === null) {
+                throw new DomainException("Sede no encontrada con ID {$locationId} para la orden preventiva {$order->getOrderCode()}.");
+            }
+
+            $slaTier = $location->getSlaTier();
+            $createdAt = new DateTimeImmutable('now');
+            $createdAtSql = $createdAt->format('Y-m-d H:i:s');
+            $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+                $slaTier,
+                $machineTypeEnum,
+                $category,
+                $urgency
+            );
+            $slaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt($createdAt, $slaTargetMinutes)
+                ->format('Y-m-d H:i:s');
+
             // EARS 2.4: el alta se repite con un código nuevo si el índice único del
             // ticket lo rechaza, de modo que una colisión de azar no pierde el correctivo
             // que la inspección acaba de detectar ni responde un 500 al técnico.
             $createdIncident = $this->tickets()->persistWithUniqueTicket(
-                function (string $ticketCode) use ($machineId, $locationId, $category, $description, $urgency, $technicianId, $order): Incident {
+                function (string $ticketCode) use ($machineId, $locationId, $category, $description, $urgency, $technicianId, $order, $slaTier, $slaTargetMinutes, $slaTargetAt, $createdAtSql): Incident {
                     $newIncident = new Incident(
                         id: null,
                         ticketCode: $ticketCode,
@@ -163,8 +189,12 @@ class PreventiveCoexistenceBridgeService
                         assignedTechnicianId: $technicianId,
                         reporterName: 'Sistema Preventivo (VendGuard)',
                         reporterPhone: '000000000',
-                        assignedAt: date('Y-m-d H:i:s'),
-                        startedAt: date('Y-m-d H:i:s')
+                        assignedAt: $createdAtSql,
+                        startedAt: $createdAtSql,
+                        cycleStartedAt: $createdAtSql,
+                        slaTierSnapshot: $slaTier,
+                        slaTargetMinutes: $slaTargetMinutes,
+                        slaTargetAt: $slaTargetAt
                     );
 
                     return $this->incidentRepo->create(
@@ -260,6 +290,35 @@ class PreventiveCoexistenceBridgeService
 
         if ($isCriticalFailure && $previousUrgency !== UrgencyLevel::CRITICAL->value) {
             $newUrgency = UrgencyLevel::CRITICAL->value;
+
+            $cycleStartedAt = $activeIncident->getCreatedAt() ?? $activeIncident->getCycleStartedAt();
+            if ($cycleStartedAt === null || $cycleStartedAt === '') {
+                throw new DomainException(
+                    "La incidencia activa {$activeIncident->getTicketCode()} no tiene fecha de alta para recalcular su SLA."
+                );
+            }
+
+            $recalculatedTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+                $activeIncident->getSlaTierSnapshot(),
+                $machineTypeEnum,
+                $activeIncident->getCategory(),
+                UrgencyLevel::CRITICAL
+            );
+            $targetMinutes = min($activeIncident->getSlaTargetMinutes(), $recalculatedTargetMinutes);
+            $candidateTargetAt = SlaTargetCalculator::computeEffectiveTargetAt(
+                new DateTimeImmutable($cycleStartedAt),
+                $targetMinutes,
+                $activeIncident->getTotalPendingInfoSeconds()
+            );
+
+            $existingTargetAt = $activeIncident->getSlaTargetAt();
+            if ($existingTargetAt !== null && $existingTargetAt !== '') {
+                $existingTarget = new DateTimeImmutable($existingTargetAt);
+                if ($existingTarget < $candidateTargetAt) {
+                    $candidateTargetAt = $existingTarget;
+                }
+            }
+
             $updatedIncident = new Incident(
                 id: $activeIncident->getId(),
                 ticketCode: $activeIncident->getTicketCode(),
@@ -293,7 +352,10 @@ class PreventiveCoexistenceBridgeService
                 pendingInfoReasonText: $activeIncident->getPendingInfoReasonText(),
                 pausedAt: $activeIncident->getPausedAt(),
                 totalPendingInfoSeconds: $activeIncident->getTotalPendingInfoSeconds(),
-                slaTargetAt: $activeIncident->getSlaTargetAt()
+                cycleStartedAt: $activeIncident->getCycleStartedAt(),
+                slaTierSnapshot: $activeIncident->getSlaTierSnapshot(),
+                slaTargetMinutes: $targetMinutes,
+                slaTargetAt: $candidateTargetAt->format('Y-m-d H:i:s')
             );
 
             $this->incidentRepo->update($updatedIncident);

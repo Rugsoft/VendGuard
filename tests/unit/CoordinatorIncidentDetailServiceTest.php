@@ -423,13 +423,13 @@ $assert(
     json_encode($liveSla)
 );
 
-// El recalculado desplaza el vencimiento congelado por el tiempo HÁBIL perdido en el
-// intervalo vivo (09:00 -> 11:00 del jueves son 2 h comerciales), que es exactamente lo
-// que grabará la reanudación al cerrar la pausa (cierre de F-3): la ficha y la escritura
-// no pueden discrepar. El acumulador de pausas cerradas (1 h 30 min de pared) no entra en
-// este desplazamiento, porque ya está incorporado al vencimiento vigente.
+// El recalculado desplaza el vencimiento congelado por la duración natural del intervalo
+// vivo (09:00 -> 11:00 del jueves son 2 h continuas), que es exactamente lo que grabará la
+// reanudación al cerrar la pausa (EARS 02.3.1, C6): la ficha y la escritura no pueden
+// discrepar. El acumulador de pausas cerradas (1 h 30 min) no entra en este desplazamiento,
+// porque ya está incorporado al vencimiento vigente.
 $assert(
-    '7.3 El vencimiento congelado es el vigente al pausar y el recalculado suma la espera hábil del intervalo vivo',
+    '7.3 El vencimiento congelado es el vigente al pausar y el recalculado suma la duración natural del intervalo vivo',
     $sitePauseBlock['sla_target_frozen_at'] === '2026-10-01 12:15:00'
         && $sitePauseBlock['sla_target_recalculated_at'] === '2026-10-01 14:15:00',
     json_encode([$sitePauseBlock['sla_target_frozen_at'], $sitePauseBlock['sla_target_recalculated_at']])

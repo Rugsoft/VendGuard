@@ -29,7 +29,7 @@ El sistema opera sobre **40 tablas de dominio** y **1 tabla de infraestructura d
 | 1 | `locations` | Sedes y ubicaciones físicas de las máquinas |
 | 2 | `machines` | Parque de máquinas expendedoras |
 | 3 | `users` | Cuentas internas de personal (Coordinadores, Técnicos) |
-| 4 | `incidents` | Registro central de averías e incidencias (50 columnas) |
+| 4 | `incidents` | Registro central de averías e incidencias (52 columnas) |
 | 5 | `incident_history` | Trazabilidad inmutable de cambios de estado de incidencias |
 | 6 | `incident_comments` | Hilo de evidencias y comentarios de incidencias |
 | 7 | `incident_replaced_parts` | Repuestos consumidos y sustituidos en intervenciones |
@@ -72,7 +72,7 @@ El sistema opera sobre **40 tablas de dominio** y **1 tabla de infraestructura d
 
 ## 3. Tipos Enumerados Nativos (ENUM)
 
-El esquema implementa 34 tipos `ENUM` nativos en PostgreSQL:
+El esquema implementa 35 tipos `ENUM` nativos en PostgreSQL:
 - `user_role`: `'COORDINATOR'`, `'TECHNICIAN'`
 - `machine_type`: `'HOT_DRINKS'`, `'COLD_DRINKS'`, `'SNACKS'`, `'PERISHABLE_FOOD'`, `'COMBO'`
 - `preventive_machine_type`: `'PERISHABLE_FOOD'`, `'HOT_DRINKS'`, `'COLD_DRINKS'`, `'SNACKS'`, `'COMBO'`
@@ -84,6 +84,7 @@ El esquema implementa 34 tipos `ENUM` nativos en PostgreSQL:
 - `audit_entity_type`: catálogo completo en el contrato de correspondencia (§2), ampliado con `'ROOT_CAUSE_TAXONOMY'` por la migración `021_root_cause_taxonomy.sql` (Módulo 25)
 - `incident_assignment_source`: `'COORDINATOR_ASSIGN'`, `'COORDINATOR_REASSIGN'`, `'ABSENCE_COVERAGE_REASSIGN'`, `'OPPORTUNISTIC_NEW'`, `'OPPORTUNISTIC_ASSUMED'`, `'OPPORTUNISTIC_TAKEOVER'`, `'OPPORTUNISTIC_WARRANTY_REOPEN'`, `'SHIFT_HANDOVER'`, `'SANITARY_FAILSAFE_GUARD'` (Módulo 26)
 - `incident_unassignment_reason_type`: las 10 causas de cierre de tramo, de `'REASSIGNED_BY_COORDINATOR'` a `'CANCELLED'` (Módulo 26)
+- `sla_tier`: `'STANDARD'`, `'PRIORITY_CORPORATE'`, `'CRITICAL_INFRASTRUCTURE_24_7'` (Módulo 30)
 - *Otros enumerados de dominio:* `spare_part_category`, `inspection_result`, `approval_decision`, `compensation_method`, `technician_finding`, etc.
 
 ---
@@ -103,6 +104,8 @@ Los dos enumerados del Módulo 27 nacen con la migración `023_workshop_repair_i
 - **Acta de merma y destrucción de lotes (Módulo 29, RF-01 a RF-05):** `sanitary_spoilage_records` (Tabla 40, 22 columnas) certifica cada levantamiento de cuarentena sanitaria con el código oficial `ACTA-MERMA-AAAA-NNNN`, la máquina, la avería u orden preventiva vinculada, el técnico certificador in situ y el usuario registrador, el origen de la cuarentena (`BIOLOGICAL_CLOCK_4H`, `PREVENTIVE_NON_CONFORMITY`, `MANUAL_SANITARY_LOCK`), las unidades y lotes destruidos —o la confirmación de máquina vacía—, las temperaturas de retirada y reapertura, el método de destrucción, la fotografía de evidencia, las observaciones de higienización, el coste estimado con su ajuste auditado y el certificado higiénico emitido. Seis claves foráneas `ON DELETE RESTRICT ON UPDATE CASCADE` y nueve restricciones `CHECK` impiden un acta incoherente: `chk_spoilage_records_empty_coherence` separa la rama de máquina vacía (unidades `0`, confirmación expresa y método `NOT_APPLICABLE_EMPTY`) de la de producto destruido (unidades `> 0`, método real y sin confirmación de vacía), y `chk_spoilage_records_loss_non_negative` obliga a coste `0,00 €` sin ajuste en la primera y a coste positivo acotado en la segunda (C5, D3). `trg_no_delete_sanitary_spoilage_records` (`prevent_hard_delete()`), `trg_touch_sanitary_spoilage_records` (`touch_updated_at()`) y `trg_immutable_sanitary_spoilage_records` (`enforce_sanitary_spoilage_records_immutability()`) prohíben el borrado físico y cualquier cambio de los hechos sanitarios o físicos tras la emisión, admitiendo solo `estimated_merchandise_loss_eur`, `loss_adjusted_by` y `loss_adjustment_reason` (Art. III.1 y III.3, RNF-01). El valor `SANITARY_SPOILAGE_RECORD` amplía `audit_entity_type`; todo llega con la migración `025_sanitary_spoilage_records.sql`.
 - **`enforce_root_causes_immutability()` y `enforce_standard_solutions_immutability()` (Módulo 25):** Funciones disparadoras `BEFORE UPDATE` que rechazan con `SQLSTATE 45000` cualquier intento de cambiar `code`, `category` o `root_cause_id` tras el alta del catálogo (C4, QA 1).
 - **Taxonomía de causas raíz (Módulo 25):** `root_causes` (8 columnas) y `standard_solutions` (8 columnas) son maestras de baja lógica, con `trg_no_delete_*` y la unicidad parcial `uq_standard_solutions_default_per_cause (root_cause_id) WHERE is_default = TRUE AND is_active = TRUE`. `incidents` pasa a 50 columnas con las dos referencias y los cinco snapshots congelados, y `chk_incidents_taxonomy_coherence` impone la coherencia todo-o-nada. El índice `idx_incidents_pareto_resolved` sirve la analítica de Pareto por `resolved_at` vigente.
+
+- **Perfiles de SLA diferenciados por sede (Módulo 30, RF-01 a RF-03):** `locations.sla_tier` declara el perfil contractual (`STANDARD`, `PRIORITY_CORPORATE` o `CRITICAL_INFRASTRUCTURE_24_7`) con defecto `STANDARD` e índice parcial `idx_locations_sla_tier` para el catálogo de sedes activas. `incidents` incorpora `sla_tier_snapshot` (perfil congelado en el alta, `NOT NULL DEFAULT 'STANDARD'`), `sla_target_minutes` (`NOT NULL DEFAULT 1440`) y `sla_target_at` (vencimiento). `chk_incidents_sla_target_minutes` acota los cinco objetivos de la matriz RF-01 (240, 360, 480, 720 y 1440 min) y `idx_incidents_sla_target_lookup` sirve la consulta por estado y vencimiento. `trg_fn_incidents_protect_sla_tier_snapshot` y `trg_incidents_protect_sla_tier_snapshot` rechazan con `SQLSTATE 23514` (`IMMUTABLE_SLA_TIER_SNAPSHOT`) cualquier cambio del perfil sellado, mientras que el objetivo y su vencimiento siguen siendo recalculables (C4). El backfill de `026_tiered_sla_contracts.sql` conserva el umbral histórico de los expedientes cerrados (240 min en riesgo de cadena de frío y 1440 min en el resto) y aplica la matriz vigente a los abiertos bajo el perfil de su sede (C5, Art. III.3).
 
 ---
 

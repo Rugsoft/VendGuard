@@ -92,6 +92,28 @@ export const CoordinatorMetricsView = {
     },
     csatMonthlyTrend() {
       return Array.isArray(this.csat?.monthly_trend) ? this.csat.monthly_trend : [];
+    },
+    /**
+     * Pulso contractual agregado del periodo (Módulo 30, RF-06, D6).
+     * Solo cuenta el desglose por sede: el detalle fila a fila vive en la tabla.
+     */
+    slaBreakdownSummary() {
+      const rows = Array.isArray(this.breakdown?.by_location) ? this.breakdown.by_location : [];
+      const tiers = new Map();
+
+      rows.forEach((row) => {
+        const label = row?.sla_tier_label || row?.sla_tier || 'Sin contrato';
+        tiers.set(label, (tiers.get(label) || 0) + 1);
+      });
+
+      return {
+        total: rows.length,
+        breaches: rows.reduce((acc, row) => acc + Number(row?.sla_breaches || 0), 0),
+        compliant: rows.filter((row) => row?.sla_status === 'COMPLIANT').length,
+        breached: rows.filter((row) => row?.sla_status === 'BREACHED').length,
+        noData: rows.filter((row) => !row?.sla_status || row?.sla_status === 'NO_DATA').length,
+        tiers: Array.from(tiers, ([label, count]) => ({ label, count }))
+      };
     }
   },
   mounted() {
@@ -342,6 +364,25 @@ export const CoordinatorMetricsView = {
 
       <!-- SUBPESTAÑA 2: Desglose Multidimensional -->
       <div v-else-if="activeSubTab === 'breakdown'">
+        <!-- Franja-resumen contractual (Módulo 30, RF-06, D6): el detalle por sede
+             se lee en la tabla; aquí queda el pulso agregado del periodo. -->
+        <div
+          data-testid="sla-breakdown-summary"
+          style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 12px 16px; margin-bottom: 12px; background-color: var(--color-canvas); border: 1px solid var(--color-hairline); border-radius: var(--radius-card, 8px); font-size: 12px; color: var(--color-ink-secondary);"
+        >
+          <span>Contratos: <strong>{{ slaBreakdownSummary.total }}</strong></span>
+          <span style="color: var(--color-success-text);">Cumplen: <strong>{{ slaBreakdownSummary.compliant }}</strong></span>
+          <span style="color: var(--color-error-text);">Incumplen: <strong>{{ slaBreakdownSummary.breached }}</strong></span>
+          <span>Sin datos: <strong>{{ slaBreakdownSummary.noData }}</strong></span>
+          <span>Brechas SLA: <strong>{{ slaBreakdownSummary.breaches }}</strong></span>
+          <span
+            v-for="tier in slaBreakdownSummary.tiers"
+            :key="tier.label"
+            class="vg-chip"
+          >
+            {{ tier.label }} · {{ tier.count }}
+          </span>
+        </div>
         <MetricBreakdownTable :breakdown="breakdown" :is-loading="isLoading" />
       </div>
 

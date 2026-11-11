@@ -333,6 +333,7 @@ $bridge = new PreventiveCoexistenceBridgeService(
     $incidentRepo,
     $orderRepo,
     $settingsRepo,
+    locationRepo: $locationRepo,
     ticketAllocator: new IncidentTicketAllocator($sequence([$bridgeHeldCode, $bridgeFreshCode]))
 );
 $bridgeRace = $race(

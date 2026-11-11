@@ -18,11 +18,10 @@ declare(strict_types=1);
  *      en caliente (< 60 min) vuelve a `IN_PROGRESS`; desfasada (>= 60 min) a
  *      `ASSIGNED`. La rama desfasada se siembra con SQL dirigido sobre el
  *      expediente propio, porque esperar una hora real no cabe en una suite.
- *   4. **Desplazamiento exacto de SLA en horario hábil** (RF-03.3, RNF-01): el
- *      vencimiento sembrado en jornada comercial se desplaza al segundo los
- *      intervalos acumulados, incluida la suma de pausas sucesivas del mismo
- *      expediente (RF-04.1), y nunca aterriza fuera de 08:00-18:00 de lunes a
- *      viernes.
+ *   4. **Desplazamiento exacto de SLA en segundos naturales continuos** (EARS 02.3.1,
+ *      C6, RF-03.3, RNF-01): el vencimiento se desplaza al segundo por los intervalos
+ *      acumulados, incluida la suma de pausas sucesivas del mismo expediente (RF-04.1),
+ *      sin recortar noches ni fines de semana.
  *   5. **Cancelación formal por inactividad de 72 h hábiles** (RF-04.2 a RF-04.5):
  *      tras una espera real de más de 72 horas hábiles, el coordinador cancela el
  *      expediente con motivo, la máquina queda fuera de servicio por falta de
@@ -330,9 +329,9 @@ $pauseBody            = static fn (string $category, string $reason): array => [
     'reason_text'     => $reason,
 ];
 
-// El vencimiento comercial de la suite: martes a las 12:15, dentro de la ventana
-// 08:00-18:00 y con margen de sobra para que los desplazamientos de los escenarios
-// (segundos o 90 minutos) aterricen en el mismo día hábil.
+// Vencimiento semilla de la suite: martes a las 12:15. El desplazamiento usa segundos
+// naturales continuos, así que puede cruzar la noche o el fin de semana sin normalizarse
+// a una jornada comercial (EARS 02.3.1, C6).
 //
 // Dos formas del MISMO instante, y cada una para lo suyo (Contrato del Reloj Operativo): la
 // **pared de sede** es lo que publica la API y lo que el operador lee, y la marca **anclada** es
@@ -358,7 +357,7 @@ try {
     $seedDeadline($cycleId, $commercialDeadlineStored);
 
     $assert(
-        '1.0 Premisa del banco: el vencimiento sembrado cae en jornada comercial (martes 12:15)',
+        '1.0 Premisa del banco: el vencimiento sembrado queda en un martes a las 12:15',
         (int)$deadlineMoment->format('N') === 2 && (int)$deadlineMoment->format('G') === 12
     );
 
@@ -439,9 +438,8 @@ try {
     );
 
     // La pausa la cierra ahora el técnico in situ (RF-02.2): es su reanudación MANUAL la
-    // que desplaza el vencimiento contractual del primer intervalo (RF-03.3).
-    // Orillas del reloj real: el servicio lee su instante en algún punto entre ambas, de
-    // modo que la expectativa se expresa como rango de tiempo hábil (cierre de F-3).
+    // que desplaza el vencimiento contractual del primer intervalo (RF-03.3). El acumulador
+    // persistido es la duración natural exacta que debe haberse desplazado.
     $hotBefore = new DateTimeImmutable('now', $madrid);
     $res = $router->dispatch(new Request(
         method: 'POST',
@@ -464,37 +462,23 @@ try {
     $firstIntervalSeconds = (int)($hotRow['total_pending_info_seconds'] ?? 0);
     $shifted1            = (string)($hotData['sla_target_at_shifted'] ?? '');
     $shifted1Seconds     = $shifted1 === '' ? -1 : $deadlineSeconds($commercialDeadline, $shifted1);
-    // El vencimiento avanza el tiempo HÁBIL perdido en la ventana de pausa, calculado por el
-    // calendario independiente del arnés: con el reloj real dentro de la jornada coincide con
-    // el intervalo, y de madrugada o en fin de semana es cero sin que el acumulador mienta
-    // (cierre de F-3: la duración de pared ya no se reinterpreta como horas comerciales).
-    [$shift1Min, $shift1Max] = BusinessCalendar::shiftRange((string)($cycleRow['paused_at'] ?? ''), $hotBefore, $hotAfter);
+    // La reanudación devuelve al vencimiento exactamente la duración natural del intervalo:
+    // noches, fines de semana y festivos cuentan igual que la jornada (EARS 02.3.1, C6).
     $assert(
-        '1.6 El primer intervalo desplaza el vencimiento el tiempo HÁBIL perdido, nunca más (RF-03.3, RNF-01)',
+        '1.6 El primer intervalo desplaza el vencimiento exactamente sus segundos naturales (RF-03.3, RNF-01)',
         $firstIntervalSeconds >= 1
             && $shifted1 !== ''
-            && $shifted1Seconds >= $shift1Min
-            && $shifted1Seconds <= $shift1Max
-            && $shifted1Seconds <= $firstIntervalSeconds
+            && $shifted1Seconds === $firstIntervalSeconds
             && $hotRow['paused_at'] === null
             && $sameDeadline($hotRow['sla_target_at'] ?? null, $shifted1),
-        sprintf(
-            'intervalo=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
-            $firstIntervalSeconds,
-            $shifted1Seconds,
-            $shift1Min,
-            $shift1Max
-        )
+        sprintf('intervalo=%d s, desplazamiento=%d s', $firstIntervalSeconds, $shifted1Seconds)
     );
 
     $shifted1Moment = new DateTimeImmutable($shifted1, $madrid);
     $assert(
-        '1.7 El vencimiento desplazado sigue en jornada hábil 08:00-18:00 del mismo día',
+        '1.7 El vencimiento se calcula por aritmética de instantes, sin normalizar a 08:00-18:00',
         $shifted1 !== ''
-            && (int)$shifted1Moment->format('N') <= 5
-            && $shifted1Moment->format('Y-m-d') === $deadlineMoment->format('Y-m-d')
-            && (int)$shifted1Moment->format('G') >= 8
-            && (int)$shifted1Moment->format('G') < 18
+            && $shifted1Moment->getTimestamp() === $deadlineMoment->getTimestamp() + $firstIntervalSeconds
     );
     $assert(
         '1.8 El contrato conserva los segundos en base y redondea los minutos de la interfaz (RNF-01)',
@@ -544,37 +528,29 @@ try {
     $totalSeconds  = (int)($cycleFinalRow['total_pending_info_seconds'] ?? 0);
     $finalDeadline = (string)($cycleFinalRow['sla_target_at'] ?? '');
     $finalShiftSeconds = $finalDeadline === '' ? -1 : $deadlineSeconds($commercialDeadline, $finalDeadline);
-    // El acumulador suma la duración de PARED de los dos intervalos (RF-04.1, es lo que
-    // descuenta del MTTR) y el vencimiento avanza el tiempo HÁBIL de ambos (RF-03.3).
-    [$shift2Min, $shift2Max] = BusinessCalendar::shiftRange((string)($pause2Data['paused_at'] ?? ''), $secondBefore, $secondAfter);
+    // El acumulador y el vencimiento usan la misma duración natural de los dos intervalos
+    // (EARS 02.3.1, C6; RF-04.1).
     $assert(
-        '1.11 El desplazamiento acumulativo es la suma del tiempo hábil de los dos intervalos (RF-04.1, RNF-01)',
+        '1.11 El desplazamiento acumulativo es la suma natural de los dos intervalos (RF-04.1, RNF-01)',
         $totalSeconds >= 2
             && $totalSeconds > $firstIntervalSeconds
             && $finalDeadline !== ''
-            && $finalShiftSeconds >= $shift1Min + $shift2Min
-            && $finalShiftSeconds <= $shift1Max + $shift2Max
-            && $finalShiftSeconds <= $totalSeconds
+            && $finalShiftSeconds === $totalSeconds
             && $sameDeadline($resume2Data['sla_target_at_shifted'] ?? null, $finalDeadline)
             && ($cycleFinalRow['status'] ?? '') === 'IN_PROGRESS',
         sprintf(
-            'total=%d s, primer intervalo=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
+            'total=%d s, primer intervalo=%d s, desplazamiento=%d s',
             $totalSeconds,
             $firstIntervalSeconds,
-            $finalShiftSeconds,
-            $shift1Min + $shift2Min,
-            $shift1Max + $shift2Max
+            $finalShiftSeconds
         )
     );
 
     $finalMoment = new DateTimeImmutable($finalDeadline, $madrid);
     $assert(
-        '1.12 El vencimiento final sigue en la jornada comercial del mismo día hábil',
+        '1.12 El vencimiento final conserva el instante original más la espera natural total',
         $finalDeadline !== ''
-            && (int)$finalMoment->format('N') <= 5
-            && $finalMoment->format('Y-m-d') === $deadlineMoment->format('Y-m-d')
-            && (int)$finalMoment->format('G') >= 8
-            && (int)$finalMoment->format('G') < 18
+            && $finalMoment->getTimestamp() === $deadlineMoment->getTimestamp() + $totalSeconds
     );
 
     $manualRows = array_values(array_filter(
@@ -656,7 +632,7 @@ try {
     );
 
     // La pausa desfasada la cierra la coordinación con destino explícito (RF-02.3): el
-    // expediente vuelve a ASIGNADA y el vencimiento se desplaza el tiempo hábil perdido.
+    // expediente vuelve a ASIGNADA y el vencimiento se desplaza la duración natural exacta.
     $coldBefore = new DateTimeImmutable('now', $madrid);
     $res = $router->dispatch(new Request(
         method: 'POST',
@@ -682,34 +658,22 @@ try {
     $coldSeconds = (int)($coldRow['total_pending_info_seconds'] ?? 0);
     $coldShifted = (string)($coldData['sla_target_at_shifted'] ?? '');
     $coldShiftSeconds = $coldShifted === '' ? -1 : $deadlineSeconds($commercialDeadline, $coldShifted);
-    [$coldShiftMin, $coldShiftMax] = BusinessCalendar::shiftRange($coldPausedAt, $coldBefore, $coldAfter);
     $assert(
-        '2.4 El desplazamiento comercial equivale al tiempo HÁBIL de los 90 minutos pausados (RF-03.3, RNF-01)',
+        '2.4 El desplazamiento equivale a los segundos naturales de la pausa de 90 minutos (RF-03.3, RNF-01)',
         $coldSeconds >= 5400
             && $coldShifted !== ''
-            && $coldShiftSeconds >= $coldShiftMin
-            && $coldShiftSeconds <= $coldShiftMax
-            && $coldShiftSeconds <= $coldSeconds
+            && $coldShiftSeconds === $coldSeconds
             && $sameDeadline($coldRow['sla_target_at'] ?? null, $coldShifted)
             && $coldRow['paused_at'] === null
             && (int)($coldData['accumulated_pause_minutes'] ?? -1) === (int)round($coldSeconds / 60),
-        sprintf(
-            'acumulado=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
-            $coldSeconds,
-            $coldShiftSeconds,
-            $coldShiftMin,
-            $coldShiftMax
-        )
+        sprintf('acumulado=%d s, desplazamiento=%d s', $coldSeconds, $coldShiftSeconds)
     );
 
     $coldMoment = new DateTimeImmutable($coldShifted, $madrid);
     $assert(
-        '2.5 El nuevo vencimiento cae en día hábil dentro de la jornada 08:00-18:00',
+        '2.5 El vencimiento de coordinación se calcula como instante continuo, sin normalizar a jornada',
         $coldShifted !== ''
-            && (int)$coldMoment->format('N') <= 5
-            && $coldMoment->format('Y-m-d') === $deadlineMoment->format('Y-m-d')
-            && (int)$coldMoment->format('G') >= 8
-            && (int)$coldMoment->format('G') < 18
+            && $coldMoment->getTimestamp() === $deadlineMoment->getTimestamp() + $coldSeconds
     );
 
     $coldRows = array_values(array_filter(
@@ -773,33 +737,21 @@ try {
     $manualOriginal = (string)($manualData['sla_target_at_original'] ?? '');
     $manualShifted  = (string)($manualData['sla_target_at_shifted'] ?? '');
     $manualShiftSeconds = $manualShifted === '' ? -1 : $deadlineSeconds($commercialDeadline, $manualShifted);
-    [$manualShiftMin, $manualShiftMax] = BusinessCalendar::shiftRange($manualPausedAt, $manualBefore, $manualAfter);
     $assert(
-        '3.3 El desplazamiento del intervalo manual es el tiempo HÁBIL perdido y queda persistido (RF-03.3, RNF-01)',
+        '3.3 El desplazamiento del intervalo manual es la duración natural y queda persistido (RF-03.3, RNF-01)',
         $manualSeconds >= 1
             && $manualOriginal === $commercialDeadline
             && $manualShifted !== ''
-            && $manualShiftSeconds >= $manualShiftMin
-            && $manualShiftSeconds <= $manualShiftMax
-            && $manualShiftSeconds <= $manualSeconds
+            && $manualShiftSeconds === $manualSeconds
             && $sameDeadline($manualRow['sla_target_at'] ?? null, $manualShifted),
-        sprintf(
-            'intervalo=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
-            $manualSeconds,
-            $manualShiftSeconds,
-            $manualShiftMin,
-            $manualShiftMax
-        )
+        sprintf('intervalo=%d s, desplazamiento=%d s', $manualSeconds, $manualShiftSeconds)
     );
 
     $manualMoment = new DateTimeImmutable($manualShifted, $madrid);
     $assert(
-        '3.4 El vencimiento manual queda dentro de la ventana comercial del mismo día',
+        '3.4 El vencimiento manual se obtiene por aritmética de instantes, sin recorte de jornada',
         $manualShifted !== ''
-            && (int)$manualMoment->format('N') <= 5
-            && $manualMoment->format('Y-m-d') === $deadlineMoment->format('Y-m-d')
-            && (int)$manualMoment->format('G') >= 8
-            && (int)$manualMoment->format('G') < 18
+            && $manualMoment->getTimestamp() === $deadlineMoment->getTimestamp() + $manualSeconds
     );
 
     $coordinatorRows = array_values(array_filter(

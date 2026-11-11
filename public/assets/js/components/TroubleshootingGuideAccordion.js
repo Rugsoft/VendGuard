@@ -398,9 +398,7 @@ export const TroubleshootingGuideAccordion = {
   },
   template: `
     <section class="vg-guide-accordion" data-testid="troubleshooting-guide-accordion" :aria-label="'Guías de diagnóstico de ' + modelLabel()">
-      <!-- La hoja vive en styles.css y se enlaza bajo demanda para que la
-           superficie del técnico y la del coordinador compartan el layout. -->
-      <link rel="stylesheet" href="/assets/css/styles.css" />
+      <!-- La hoja compartida styles.css se enlaza globalmente en index.html. -->
       <!-- Fuera del <details>: la alerta sanitaria debe seguir visible con la guía plegada. -->
       <div
         v-if="showSanitaryBanner"

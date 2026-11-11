@@ -316,15 +316,21 @@ $assert(
         && (int)$created['assigned_technician_id'] === $jordi->getId()
 );
 $assert(
-    '3.3 El vencimiento contractual viaja con el expediente',
+    '3.3 El vencimiento contractual y el sellado de SLA viajan con el expediente (EARS 02.1.1)',
     is_string($created['sla_target_at']) && $created['sla_target_at'] !== ''
+        && ($created['sla_tier_snapshot'] ?? null) === 'CRITICAL_INFRASTRUCTURE_24_7'
+        && ($created['sla_tier_label'] ?? null) === 'Infraestructura Crítica 24x7'
+        && (int)($created['sla_target_minutes'] ?? 0) === 480
+        && (float)($created['sla_target_hours'] ?? 0) === 8.0
 );
 
 $rawCreated = $rawRow($createdId);
 $assert(
-    '3.4 La fila de incidents refleja modalidad y SLA',
+    '3.4 La fila de incidents refleja modalidad y el sellado exacto de SLA en base de datos',
     ($rawCreated['opportunistic_mode'] ?? null) === 'NEW'
         && ($rawCreated['sla_target_at'] ?? null) !== null
+        && ($rawCreated['sla_tier_snapshot'] ?? null) === 'CRITICAL_INFRASTRUCTURE_24_7'
+        && (int)($rawCreated['sla_target_minutes'] ?? 0) === 480
 );
 $assert(
     '3.5 El alta deja su primer evento inmutable de historial',
@@ -811,7 +817,7 @@ $assert(
     'acumulado=' . ($resumedPausedModel?->getTotalPendingInfoSeconds() ?? -1)
 );
 $assert(
-    '11.8 El vencimiento contractual se desplaza en horario comercial (RF-03.3)',
+    '11.8 El vencimiento contractual se desplaza por los segundos naturales de la pausa (RF-03.3, C6)',
     $resumedPausedModel !== null
         && $resumedPausedModel->getSlaTargetAt() !== null
         && strtotime((string)$resumedPausedModel->getSlaTargetAt()) > strtotime($stamp(28800))

@@ -11,11 +11,15 @@ use PDO;
 use PDOException;
 use Throwable;
 use VendGuard\Core\Domain\Exception\IncidentNotFoundException;
+use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\OfflineSyncMutation;
 use VendGuard\Core\Domain\Model\RootCause;
 use VendGuard\Core\Domain\Model\StandardSolution;
 use VendGuard\Core\Domain\Repository\OfflineSyncMutationRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
+use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
@@ -157,6 +161,10 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
         $this->attachRefundInspections($routeStops);
         $this->attachRecentHistory($routeStops);
 
+        $pendingCriticalStops = $this->attachSlaEnrichmentToPendingCriticalStops(
+            $this->incidentContext()->findPendingCriticalStopsInOtherLocations($technicianId, 0)
+        );
+
         $preventive = $this->fetchPreventiveOrders($technicianId);
         $checklists = $this->fetchPreventiveChecklists($preventive);
 
@@ -176,8 +184,7 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                     new DateTimeImmutable('now'),
                     false
                 ),
-                'pending_critical_stops_other_locations' => $this->incidentContext()
-                    ->findPendingCriticalStopsInOtherLocations($technicianId, 0),
+                'pending_critical_stops_other_locations' => $pendingCriticalStops,
             ],
             'preventive_orders' => array_values($preventive),
             'preventive_checklists_by_order' => $checklists,
@@ -832,7 +839,8 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
             'SELECT i.id, i.ticket_code, i.status, i.urgency, i.category, i.description,
                     i.assigned_at, i.started_at, i.paused_at,
                     i.pending_info_reason_category, i.pending_info_reason_text,
-                    i.sla_target_at, i.cycle_started_at,
+                    i.sla_target_at, i.sla_tier_snapshot, i.sla_target_minutes,
+                    i.cycle_started_at,
                     m.id AS machine_id, m.code AS machine_code, m.model AS machine_model,
                     m.machine_type, m.floor_wing, m.sanitary_status, m.is_blocked_no_access,
                     l.id AS location_id, l.name AS location_name, l.site_code,
@@ -857,8 +865,21 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
         );
 
         $stops = [];
+        $evaluationNow = new DateTimeImmutable('now');
         foreach ($rows as $row) {
             $incidentId = (int)$row['id'];
+            $slaEnrichment = $this->buildSlaEnrichment(
+                (string)$row['sla_tier_snapshot'],
+                (string)$row['machine_type'],
+                (string)$row['category'],
+                (string)$row['urgency'],
+                (string)$row['status'],
+                $this->nullableString($row['paused_at']),
+                $this->nullableString($row['sla_target_at']),
+                (int)$row['sla_target_minutes'],
+                $evaluationNow
+            );
+
             $stops[$incidentId] = [
                 'id' => $incidentId,
                 'incident_id' => $incidentId,
@@ -874,7 +895,13 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                     'category' => $this->nullableString($row['pending_info_reason_category']),
                     'reason' => $this->nullableString($row['pending_info_reason_text']),
                 ],
+                'sla_tier_snapshot' => $slaEnrichment['sla_tier_snapshot'],
+                'sla_tier_label' => $slaEnrichment['sla_tier_label'],
+                'sla_target_minutes' => $slaEnrichment['sla_target_minutes'],
                 'sla_target_at' => $this->nullableString($row['sla_target_at']),
+                'critical_reason' => $slaEnrichment['critical_reason'],
+                'is_cold_chain_critical' => $slaEnrichment['is_cold_chain_critical'],
+                'is_contractual_critical' => $slaEnrichment['is_contractual_critical'],
                 'cycle_started_at' => $this->nullableString($row['cycle_started_at']),
                 'machine' => [
                     'id' => (int)$row['machine_id'],
@@ -902,6 +929,135 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
         }
 
         return $stops;
+    }
+
+    /**
+     * Calcula los campos derivados del SLA sellado de un aviso.
+     *
+     * La urgencia contractual se congela en `paused_at` cuando el aviso está
+     * en `PENDING_INFO`; en cualquier otro estado se evalúa contra el instante
+     * de referencia del paquete. La cadena de frío prevalece sobre el SLA
+     * contractual en `critical_reason` (T-SLA-07, RF-07, C6).
+     *
+     * @return array{
+     *   sla_tier_snapshot: string,
+     *   sla_tier_label: string,
+     *   sla_target_minutes: int,
+     *   critical_reason: ?string,
+     *   is_cold_chain_critical: bool,
+     *   is_contractual_critical: bool
+     * }
+     */
+    private function buildSlaEnrichment(
+        string $slaTierSnapshot,
+        string $machineType,
+        string $category,
+        string $urgency,
+        string $status,
+        ?string $pausedAt,
+        ?string $slaTargetAt,
+        int $slaTargetMinutes,
+        DateTimeImmutable $now
+    ): array {
+        $slaTier = SlaTier::fromString($slaTierSnapshot);
+        $isColdChainCritical = SlaTargetCalculator::isColdChainRisk(
+            MachineType::fromString($machineType),
+            IncidentCategory::from($category),
+            UrgencyLevel::fromString($urgency)
+        );
+
+        $isContractualCritical = false;
+        if ($slaTargetAt !== null) {
+            $evaluationAt = $status === 'PENDING_INFO' && $pausedAt !== null
+                ? new DateTimeImmutable($pausedAt)
+                : $now;
+            $remainingSeconds = (new DateTimeImmutable($slaTargetAt))->getTimestamp()
+                - $evaluationAt->getTimestamp();
+            $isContractualCritical = $remainingSeconds <= 240 * 60;
+        }
+
+        return [
+            'sla_tier_snapshot' => $slaTier->value,
+            'sla_tier_label' => $slaTier->label(),
+            'sla_target_minutes' => $slaTargetMinutes,
+            'critical_reason' => $isColdChainCritical
+                ? 'COLD_CHAIN'
+                : ($isContractualCritical ? 'CONTRACTUAL_SLA' : null),
+            'is_cold_chain_critical' => $isColdChainCritical,
+            'is_contractual_critical' => $isContractualCritical,
+        ];
+    }
+
+    /**
+     * Completa las paradas críticas de otras sedes con el contrato SLA del Módulo 30.
+     *
+     * La consulta de origen no devuelve el snapshot contractual ni la pausa; se
+     * recuperan en un único lote por los identificadores ya filtrados, sin abrir
+     * una consulta N+1 por aviso.
+     *
+     * @param list<array<string, mixed>> $stops
+     * @return list<array<string, mixed>>
+     */
+    private function attachSlaEnrichmentToPendingCriticalStops(array $stops): array
+    {
+        if ($stops === []) {
+            return [];
+        }
+
+        $ids = [];
+        foreach ($stops as $stop) {
+            $id = (int)($stop['incident_id'] ?? $stop['id'] ?? 0);
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+        if ($ids === []) {
+            return $stops;
+        }
+
+        [$placeholders, $params] = $this->placeholders('pending_sla', array_values($ids));
+        $rows = $this->fetchAll(
+            'SELECT id, status, paused_at, sla_target_at, sla_tier_snapshot, sla_target_minutes
+               FROM incidents
+              WHERE id IN (' . $placeholders . ')',
+            $params
+        );
+
+        $snapshots = [];
+        foreach ($rows as $row) {
+            $snapshots[(int)$row['id']] = $row;
+        }
+
+        $now = new DateTimeImmutable('now');
+        foreach ($stops as &$stop) {
+            $id = (int)($stop['incident_id'] ?? $stop['id'] ?? 0);
+            if (!isset($snapshots[$id])) {
+                continue;
+            }
+
+            $row = $snapshots[$id];
+            $slaEnrichment = $this->buildSlaEnrichment(
+                (string)$row['sla_tier_snapshot'],
+                (string)($stop['machine_type'] ?? ''),
+                (string)($stop['category'] ?? ''),
+                (string)($stop['urgency'] ?? ''),
+                (string)$row['status'],
+                $this->nullableString($row['paused_at'] ?? null),
+                $this->nullableString($row['sla_target_at'] ?? null),
+                (int)$row['sla_target_minutes'],
+                $now
+            );
+
+            $stop['sla_tier_snapshot'] = $slaEnrichment['sla_tier_snapshot'];
+            $stop['sla_tier_label'] = $slaEnrichment['sla_tier_label'];
+            $stop['sla_target_minutes'] = $slaEnrichment['sla_target_minutes'];
+            $stop['critical_reason'] = $slaEnrichment['critical_reason'];
+            $stop['is_cold_chain_critical'] = $slaEnrichment['is_cold_chain_critical'];
+            $stop['is_contractual_critical'] = $slaEnrichment['is_contractual_critical'];
+        }
+        unset($stop);
+
+        return array_values($stops);
     }
 
     /**
