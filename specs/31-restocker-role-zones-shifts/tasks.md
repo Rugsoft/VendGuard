@@ -70,7 +70,7 @@ flowchart LR
   - **Requisitos:** `RF-04.2`, `RF-04.3`, `RF-05.1`, `RF-05.2`, `D1`, `D2`, `QA 4`.
   - **Verificación:** `php tests/unit/RestockerShiftAndWorkHoursTest.php`
 
-- [ ] **T-RES-10 · Exponer rutas REST de `RESTOCKER`, cuadrante/cobertura de carga y guardas RBAC en `public/index.php`**
+- [x] **T-RES-10 · Exponer rutas REST de `RESTOCKER`, cuadrante/cobertura de carga y guardas RBAC en `public/index.php`**
   - **Requisitos:** `RF-01.4`, `RF-02` a `RF-05`, `Art. V.4`.
   - **Verificación:** `php tests/integration/RestockerRoleZonesShiftsApiTest.php`
 
