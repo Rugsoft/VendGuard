@@ -871,6 +871,25 @@ export const OperationalZoneManagementTab = {
       }
     },
 
+    /** Etiqueta semántica en castellano para el estado de cobertura de carga. */
+    restockerCoverageLabel(status) {
+      const labels = {
+        'COVERED_BY_PRIMARY': 'Titular en turno activo',
+        'COVERED_BY_PROMOTED_BACKUP': 'Suplente en cobertura activa',
+        'UNCOVERED': 'Sin cobertura activa',
+        'SIN_COBERTURA': 'Sin cobertura activa',
+      };
+      return labels[status] || status || 'Sin cobertura activa';
+    },
+
+    /** Clase de chip semántico según el estado de cobertura de carga. */
+    restockerCoverageChipClass(status) {
+      if (status === 'COVERED_BY_PRIMARY' || status === 'COVERED_BY_PROMOTED_BACKUP') {
+        return 'vg-chip-success';
+      }
+      return 'vg-chip-warning';
+    },
+
     /**
      * Alta o cambio de rol en el cuadrante de carga. La titularidad única se
      * resuelve en el servidor: si el reponedor ya es PRIMARY de otra zona, la
@@ -1647,8 +1666,8 @@ export const OperationalZoneManagementTab = {
 
             <div v-if="isLoadingRestockerCoverage" style="font-size: 12px; color: var(--color-ink-muted);">Calculando cobertura…</div>
             <div v-else-if="restockerCoverage" class="mb-2" data-testid="zone-restockers-coverage">
-              <span class="vg-chip vg-chip-success">
-                {{ restockerCoverage.coverage_status || 'SIN_COBERTURA' }}
+              <span class="vg-chip" :class="restockerCoverageChipClass(restockerCoverage.coverage_status)">
+                {{ restockerCoverageLabel(restockerCoverage.coverage_status) }}
               </span>
               <span v-if="restockerCoverage.recommended_restocker_name" class="ms-2" style="font-size: 12px; color: var(--color-slate);">
                 #1 recomendado: <strong>{{ restockerCoverage.recommended_restocker_name }}</strong>

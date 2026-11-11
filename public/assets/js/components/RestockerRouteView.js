@@ -556,7 +556,10 @@ export const RestockerRouteView = {
           style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
         >
           <h2 style="font-family: var(--font-display); font-size: 16px; margin: 0 0 6px 0;">Ruta de abastecimiento</h2>
-          <p v-if="isLoading" style="font-size: 13px; color: var(--color-ink-muted); margin: 0;">Cargando tu ruta…</p>
+          <div v-if="isLoading" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-ink-muted); margin: 6px 0;">
+            <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; border-width: 2px;"></span>
+            <span>Sincronizando paradas y zonas de abastecimiento…</span>
+          </div>
           <p v-else-if="loadError" data-testid="restocker-route-error" style="font-size: 13px; color: var(--color-urgency-critical); margin: 0;">{{ loadError }}</p>
           <p v-else-if="routeStops.length === 0" style="font-size: 13px; color: var(--color-ink-muted); margin: 0;">
             Sin paradas asignadas por ahora. Las órdenes de carga y las visitas a máquinas
