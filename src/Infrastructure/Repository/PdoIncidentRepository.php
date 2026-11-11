@@ -3678,42 +3678,50 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             // ── Cadena de custodia (Módulo 26) ─────────────────────────────────────
             // El cierre del tramo saliente y la apertura del entrante viajan en esta
-            // misma transacción PDO, antes de mover el titular y sin ventana en la que
-            // la avería tenga dos custodios activos o ninguno (Art. III.3, Art. V.3).
-            // Los snapshots los congela la propia primitiva desde `users`: un renombrado
-            // posterior no puede reescribir quién tenía la avería (D2).
-            if ($isReassignment) {
-                // El canal lo decide quien ejecuta el cambio: Coordinación por
-                // defecto, cobertura de ausencia cuando el saliente está ausente o
-                // relevo/guardia cuando el cierre viene del fin de turno.
+            // misma transacción PDO. En PostgreSQL ambos forman parte del CTE atómico
+            // que actualiza el expediente, de modo que la asignación paga un solo viaje
+            // por la cadena de custodia (RNF-01). Sin ventana en la que la avería tenga
+            // dos custodios activos o ninguno (Art. III.3, Art. V.3). Los snapshots los
+            // congela la propia primitiva desde `users`: un renombrado posterior no
+            // puede reescribir quién tenía la avería (D2).
+            $custodyCloseReasonType = $isReassignment
+                ? ($unassignmentReason ?? IncidentUnassignmentReasonType::REASSIGNED_BY_COORDINATOR)
+                : IncidentUnassignmentReasonType::WARRANTY_REOPENED;
+            $custodyCloseReason = $isReassignment
+                ? $cleanReassignmentReason
+                : 'Sellado defensivo de un tramo heredado sin cerrar antes de la asignación inicial.';
+            $custodyCloseReason = trim($custodyCloseReason);
+            if ($custodyCloseReason === '') {
+                $custodyCloseReason = 'Cierre de custodia registrado por el sistema.';
+            }
+            $custodyCloseReason = mb_substr($custodyCloseReason, 0, 1000);
+
+            if (!$this->dialect->isPostgres()) {
                 $this->closeActiveCustodySegmentInTransaction(
                     $numericId,
-                    $unassignmentReason ?? IncidentUnassignmentReasonType::REASSIGNED_BY_COORDINATOR,
+                    $custodyCloseReasonType,
                     $coordinatorId,
-                    $cleanReassignmentReason,
+                    $custodyCloseReason,
                     $actorNameSnapshot
-                );
-            } else {
-                $this->closeActiveCustodySegmentInTransaction(
-                    $numericId,
-                    IncidentUnassignmentReasonType::WARRANTY_REOPENED,
-                    $coordinatorId,
-                    'Sellado defensivo de un tramo heredado sin cerrar antes de la asignación inicial.'
                 );
             }
 
-            $this->openCustodySegmentInTransaction(
-                $numericId,
-                $technicianId,
-                $assignmentSource ?? ($isReassignment
-                    ? IncidentAssignmentSource::COORDINATOR_REASSIGN
-                    : IncidentAssignmentSource::COORDINATOR_ASSIGN),
-                $coordinatorId,
-                null,
-                $actorNameSnapshot
-            );
-            // En PostgreSQL consolidamos el UPDATE de la incidencia y la inserción del
-            // evento en incident_history en un único round-trip atómico con CTE (T-HYBRID-27).
+            $resolvedAssignmentSource = $assignmentSource ?? ($isReassignment
+                ? IncidentAssignmentSource::COORDINATOR_REASSIGN
+                : IncidentAssignmentSource::COORDINATOR_ASSIGN);
+            if (!$this->dialect->isPostgres()) {
+                $this->openCustodySegmentInTransaction(
+                    $numericId,
+                    $technicianId,
+                    $resolvedAssignmentSource,
+                    $coordinatorId,
+                    null,
+                    $actorNameSnapshot
+                );
+            }
+            // En PostgreSQL consolidamos el UPDATE de la incidencia, el evento de
+            // incident_history y la cadena de custodia (cierre + apertura) en un único
+            // round-trip atómico con CTE (T-HYBRID-27, RNF-01).
             if ($this->dialect->isPostgres()) {
                 if ($isReassignment) {
                     $actionNote = 'Reasignación técnica: del técnico ID '
@@ -3783,8 +3791,52 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             CAST(:audit_created_at AS timestamptz)
                         WHERE CAST(:audit_action AS text) IS NOT NULL
                         RETURNING id
+                    ),
+                    closed_custody AS (
+                        UPDATE incident_assignments
+                        SET unassigned_at = GREATEST(assigned_at, CURRENT_TIMESTAMP),
+                            unassigned_by = :close_by,
+                            unassigned_by_name_snapshot = COALESCE(
+                                CAST(:close_by_name AS text),
+                                (SELECT NULLIF(btrim(name), '') FROM users WHERE id = :close_by_lookup),
+                                'Coordinación / Sistema'
+                            ),
+                            unassignment_reason_type = CAST(:close_reason_type AS incident_unassignment_reason_type),
+                            reassignment_reason = :close_reason
+                        WHERE incident_id = :close_incident_id
+                          AND unassigned_at IS NULL
+                        RETURNING id
+                    ),
+                    -- El agregado fuerza la dependencia cierre -> apertura y devuelve
+                    -- una fila incluso cuando no había un tramo previo que cerrar.
+                    opened_custody AS (
+                        INSERT INTO incident_assignments (
+                            incident_id,
+                            technician_id,
+                            technician_name_snapshot,
+                            technician_code_snapshot,
+                            assignment_source,
+                            assigned_by,
+                            assigned_by_name_snapshot,
+                            assigned_at
+                        )
+                        SELECT
+                            :custody_incident_id,
+                            u.id,
+                            u.name,
+                            COALESCE(NULLIF(btrim(u.operator_code), ''), 'SIN-CODIGO'),
+                            CAST(:custody_source AS incident_assignment_source),
+                            actor.id,
+                            COALESCE(CAST(:custody_assigned_by_name AS text), NULLIF(btrim(actor.name), ''), 'Coordinación / Sistema'),
+                            CURRENT_TIMESTAMP
+                        FROM users u
+                        LEFT JOIN users actor ON actor.id = CAST(:custody_assigned_by AS bigint)
+                        CROSS JOIN (SELECT COUNT(*) AS closed_rows FROM closed_custody) AS custody_close
+                        WHERE u.id = :custody_technician_id
+                        RETURNING id
                     )
-                    SELECT updated.*, (SELECT COUNT(*) FROM new_audit) AS audit_rows
+                    SELECT updated.*, (SELECT COUNT(*) FROM new_audit) AS audit_rows,
+                           (SELECT COUNT(*) FROM opened_custody) AS custody_rows
                     FROM updated;
                 ";
 
@@ -3826,8 +3878,37 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $stmt->bindValue(':audit_metadata', $auditMetadataJson, $auditMetadataJson !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':audit_created_at', $auditEvent?->getCreatedAt(), $auditEvent !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
 
+                $stmt->bindValue(':custody_incident_id', $numericId, PDO::PARAM_INT);
+                $stmt->bindValue(':custody_technician_id', $technicianId, PDO::PARAM_INT);
+                $stmt->bindValue(':custody_source', $resolvedAssignmentSource->value, PDO::PARAM_STR);
+                $stmt->bindValue(':custody_assigned_by', $coordinatorId, $coordinatorId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $stmt->bindValue(
+                    ':custody_assigned_by_name',
+                    $actorNameSnapshot,
+                    $actorNameSnapshot !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+                );
+                $stmt->bindValue(':close_incident_id', $numericId, PDO::PARAM_INT);
+                $stmt->bindValue(':close_by', $coordinatorId, $coordinatorId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $stmt->bindValue(':close_by_lookup', $coordinatorId, $coordinatorId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $stmt->bindValue(
+                    ':close_by_name',
+                    $actorNameSnapshot,
+                    $actorNameSnapshot !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+                );
+                $stmt->bindValue(':close_reason_type', $custodyCloseReasonType->value, PDO::PARAM_STR);
+                $stmt->bindValue(':close_reason', $custodyCloseReason, PDO::PARAM_STR);
+
                 $stmt->execute();
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($row === false) {
+                    throw new DomainException('Error al recuperar la incidencia asignada.');
+                }
+                if ((int)($row['custody_rows'] ?? 0) === 0) {
+                    throw new DomainException(
+                        "No se pudo abrir el tramo de custodia: el técnico {$technicianId} no existe en el directorio."
+                    );
+                }
 
                 if ($urgencyChanged && $urgencyReason !== null && trim($urgencyReason) !== '') {
                     $this->insertHistory(
@@ -4977,14 +5058,6 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         ?string $closedByNameSnapshot = null,
         ?DateTimeImmutable $closedAt = null
     ): bool {
-        $lock = $this->pdo->prepare(
-            'SELECT id FROM incident_assignments WHERE incident_id = :incident_id AND unassigned_at IS NULL FOR UPDATE'
-        );
-        $lock->execute([':incident_id' => $incidentId]);
-        if ($lock->fetchColumn() === false) {
-            return false;
-        }
-
         $cleanReason = trim($reason);
         if ($cleanReason === '') {
             $cleanReason = 'Cierre de custodia registrado por el sistema.';
@@ -4995,7 +5068,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             'UPDATE incident_assignments'
             . ' SET unassigned_at = GREATEST(assigned_at, COALESCE(CAST(:closed_at AS timestamptz), CURRENT_TIMESTAMP)),'
             . '     unassigned_by = :closed_by,'
-            . '     unassigned_by_name_snapshot = :closed_by_name,'
+            . '     unassigned_by_name_snapshot = COALESCE('
+            . '         CAST(:closed_by_name AS text),'
+            . '         (SELECT NULLIF(btrim(name), \'\') FROM users WHERE id = :closed_by_lookup),'
+            . '         \'Coordinación / Sistema\'),'
             . '     unassignment_reason_type = CAST(:reason_type AS incident_unassignment_reason_type),'
             . '     reassignment_reason = :reason'
             . ' WHERE incident_id = :incident_id'
@@ -5008,10 +5084,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $closedAt !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
         );
         $stmt->bindValue(':closed_by', $closedBy, $closedBy !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':closed_by_lookup', $closedBy, $closedBy !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
         $stmt->bindValue(
             ':closed_by_name',
-            $closedByNameSnapshot ?? $this->userDisplayName($closedBy),
-            PDO::PARAM_STR
+            $closedByNameSnapshot,
+            $closedByNameSnapshot !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
         );
         $stmt->bindValue(':reason_type', $reasonType->value, PDO::PARAM_STR);
         $stmt->bindValue(':reason', $cleanReason, PDO::PARAM_STR);
@@ -5143,19 +5220,6 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
     }
 
-    /** Nombre legible del actor, o el respaldo determinista cuando no hay usuario humano. */
-    private function userDisplayName(?int $userId): string
-    {
-        if ($userId === null) {
-            return 'Coordinación / Sistema';
-        }
-
-        $stmt = $this->pdo->prepare('SELECT name FROM users WHERE id = :id');
-        $stmt->execute([':id' => $userId]);
-        $name = $stmt->fetchColumn();
-
-        return is_string($name) && trim($name) !== '' ? $name : 'Coordinación / Sistema';
-    }
 }
 
 
