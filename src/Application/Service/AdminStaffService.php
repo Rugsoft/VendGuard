@@ -187,7 +187,7 @@ class AdminStaffService
             if ($closedShift !== null && $activeShift !== null) {
                 $this->auditLogger->logUserEvent(
                     $id,
-                    self::FORCE_CLOSE_SHIFT_ACTION,
+                    'FORCE_CLOSE_SHIFT',
                     $actor,
                     $activeShift->toArray(),
                     $closedShift->toArray(),

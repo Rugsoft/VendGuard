@@ -86,6 +86,6 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-01.2`, `RF-02.4`, `RF-03.2`, `RF-05.1`, `RF-05.2`, `RNF-03`.
   - **Verificación:** `node tests/frontend/coordinator_restocker_tabs.test.mjs`
 
-- [ ] **T-RES-14 · Ejecutar batería global, sincronizar `DocMetricsGuard`, generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
+- [x] **T-RES-14 · Ejecutar batería global, sincronizar `DocMetricsGuard`, generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
   - **Requisitos:** `DoD 1`–`DoD 7`.
   - **Verificación:** `php tests/run_all.php`

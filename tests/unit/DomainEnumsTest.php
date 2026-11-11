@@ -195,8 +195,8 @@ if ($refrigOk) {
 // -------------------------------------------------------------
 echo "[4/4] Verificando Componentes Adicionales (Category, Role, TicketCode):\n";
 
-if (count(IncidentCategory::cases()) === 5 && count(UserRole::cases()) === 2) {
-    echo "      - IncidentCategory (5 categorías) y UserRole (2 roles): [OK]\n";
+if (count(IncidentCategory::cases()) === 5 && count(UserRole::cases()) === 3) {
+    echo "      - IncidentCategory (5 categorías) y UserRole (3 roles): [OK]\n";
 } else {
     echo "      - Conteo de categorías o roles erróneo: [FALLO]\n";
     $failures++;

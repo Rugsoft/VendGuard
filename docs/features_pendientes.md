@@ -1,7 +1,7 @@
 # VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro**Documento:** `docs/features_pendientes.md`  
 **Fecha de Actualización:** Noviembre 2026
   
-**Estado del Proyecto:** batería global: 406 suites · 15.166 aserciones, al 100 % en verde. Documento versionado (ya está en el índice pese a la regla de `.gitignore`), así que su cifra se audita junto con la del README por `DocMetricsGuard`. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
+**Estado del Proyecto:** batería global: 412 suites · 15.398 aserciones, al 100 % en verde. Documento versionado (ya está en el índice pese a la regla de `.gitignore`), así que su cifra se audita junto con la del README por `DocMetricsGuard`. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---
@@ -266,6 +266,7 @@ Refinamiento del análisis de averías, economía circular de taller, asistencia
 Segunda pata operativa de **VendGuard** para cubrir el ciclo integral de explotación de máquinas de vending: gestión de la plantilla de **Cargadores / Reponedores de Ruta**, planogramas de producto y consumibles, órdenes de carga de furgoneta desde almacén y cámara frigorífica, control sanitario FEFO de caducidades in situ (Art. II), arqueo de efectivo y carga de tubos de cambio bajo confidencialidad estricta (Art. V.4), y sinergia directa con el equipo de Técnicos SAT para resolver incidencias de primer nivel o escalar averías electromecánicas.
 
 #### 21. 👤 Rol de Cargador/Reponedor de Ruta (`RESTOCKER`), Zonificación de Carga y Control de Jornada
+* **Estado:** ✅ **100% IMPLEMENTADO (Módulo 31: `31-restocker-role-zones-shifts`)** — Cuarto rol `RESTOCKER` con `operator_code`, rol inmutable y `is_on_call = FALSE`; Tabla 41 `restocker_zone_assignments` con titularidad única y baja lógica; cobertura determinista de 6 niveles con promoción automática del `BACKUP`; vista móvil `RestockerRouteView.js` con cierre directo de turno; e integración con filtro de rol en Zonas, Ausencias y Registro de Horas/CSV. Certificado por `specs/31-restocker-role-zones-shifts/traceability-matrix.md` y la batería global al 100 % en verde. Se conserva a continuación el diseño original de la propuesta para trazabilidad SDD.
 * **Propósito:** Incorporar en el dominio el cuarto actor operativo del sistema (**Cargador / Reponedor de Ruta**, `UserRole::RESTOCKER`) con permisos segregados del Técnico SAT (`TECHNICIAN`), asignado a demarcaciones territoriales (Módulo 17) y sujeto al control de turnos, pausas de comida, ausencias y relevo de ruta (Módulos 21 y 22).
 * **Componentes Técnicos:**
   * Ampliación del enum nativo `user_role` y `UserRole` (`RESTOCKER`) con guardas RBAC en router y controladores para separar la vista móvil de reposición de la vista de reparación técnica SAT.
@@ -401,7 +402,7 @@ FASE DE TRAZABILIDAD AVANZADA, TALLER Y EFICIENCIA OPERATIVA (CONCLUIDA AL 100%)
  20. Registro de Jornada y Cómputo de Horas Efectivas (Time Tracking derivado de turnos) [✅ IMPLEMENTADO - Módulo 22]
 ------------------------------------------------------------------------------------
 FASE DE OPERATIVA DE CARGA, REPOSICIÓN Y GESTIÓN DE REPONEDORES (PRIORIDAD ACTIVA):
- 21. Rol de Cargador/Reponedor de Ruta (RESTOCKER), Zonificación de Carga y Control de Jornada
+ 21. Rol de Cargador/Reponedor de Ruta (RESTOCKER), Zonificación de Carga y Control de Jornada [✅ IMPLEMENTADO - Módulo 31]
  22. Catálogo Maestro de Productos, Consumibles y Planograma por Máquina (Slot Matrix + Art. II)
  23. Órdenes de Carga de Furgoneta de Reposición y Picking con Trazabilidad de Frío
  24. Visita de Reposición In Situ, Control FEFO de Caducidades y Limpieza Diaria (Art. II + Offline)
