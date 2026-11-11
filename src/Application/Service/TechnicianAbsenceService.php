@@ -14,6 +14,7 @@ use VendGuard\Core\Domain\Model\TechnicianAbsence;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
@@ -43,12 +44,13 @@ final class TechnicianAbsenceService
         private readonly AuditLogRepositoryInterface $auditRepo,
         private readonly TransactionManagerInterface $transactions,
         private readonly TechnicianLockRepositoryInterface $lockRepo,
-        private readonly ?SuggestedTechniciansService $suggestions = null
+        private readonly ?SuggestedTechniciansService $suggestions = null,
+        private readonly ?OperationalZoneRepositoryInterface $zoneRepo = null
     ) {
     }
 
     /**
-     * @return array{absence: TechnicianAbsenceDto, affected_incidents: list<array<string, mixed>>}
+     * @return array{absence: TechnicianAbsenceDto, affected_incidents: list<array<string, mixed>>, promoted_zones: list<array<string, mixed>>}
      */
     public function createAbsence(
         int $technicianId,
@@ -59,7 +61,7 @@ final class TechnicianAbsenceService
         int $createdBy
     ): array {
         $tech = $this->userRepo->findById($technicianId);
-        if ($tech === null || $tech->getRole() !== UserRole::TECHNICIAN) {
+        if ($tech === null || !$tech->getRole()->isFieldOperator()) {
             throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
         }
 
@@ -149,6 +151,21 @@ final class TechnicianAbsenceService
             return $absence;
         });
 
+        // RF-05.1: el reponedor no atiende tickets SAT, así que su ausencia no
+        // abre el asistente de reasignación. En su lugar se informa de las zonas
+        // donde su suplente `BACKUP` queda promovido a titular efectivo (`D3`).
+        if ($tech->getRole()->isRestocker()) {
+            return [
+                'absence' => TechnicianAbsenceDto::fromEntity(
+                    absence: $absence,
+                    technicianName: $tech->getName(),
+                    creatorName: $creator?->getName()
+                ),
+                'affected_incidents' => [],
+                'promoted_zones' => $this->promotedZonesFor($technicianId),
+            ];
+        }
+
         // La ausencia ya está confirmada y auditada. La lectura de afectados es
         // posterior y no debe convertir un alta correcta en un 500 que invite a
         // repetirla: si falla, se devuelve la ausencia con lista vacía.
@@ -206,6 +223,7 @@ final class TechnicianAbsenceService
                 creatorName: $creator?->getName()
             ),
             'affected_incidents' => $affectedList,
+            'promoted_zones' => [],
         ];
     }
 
@@ -339,9 +357,9 @@ final class TechnicianAbsenceService
     /**
      * @return list<TechnicianAbsenceDto>
      */
-    public function listAbsences(?int $technicianId = null, ?string $status = null): array
+    public function listAbsences(?int $technicianId = null, ?string $status = null, ?string $role = null): array
     {
-        $absences = $this->absenceRepo->findAll($technicianId, $status);
+        $absences = $this->absenceRepo->findAll($technicianId, $status, $role);
         $dtos = [];
 
         foreach ($absences as $a) {
@@ -350,5 +368,61 @@ final class TechnicianAbsenceService
         }
 
         return $dtos;
+    }
+
+    /**
+     * Zonas donde el reponedor ausente es titular y su `BACKUP` queda al frente.
+     *
+     * La consulta inversa devuelve un cuadrante por reponedor con sus zonas; para
+     * cada zona titular se busca el primer suplente vivo de la misma zona. Si no
+     * hay suplente, la zona viaja igualmente con `backup_restocker_id = null`,
+     * porque la falta de cobertura es información que Coordinación necesita ver.
+     *
+     * @return list<array{zone_id: int, zone_code: string, zone_name: string, backup_restocker_id: int|null, backup_restocker_name: string|null}>
+     */
+    private function promotedZonesFor(int $restockerId): array
+    {
+        if ($this->zoneRepo === null) {
+            return [];
+        }
+
+        $quadrants = $this->zoneRepo->findRestockerQuadrantsByTechnician();
+
+        $backupsByZone = [];
+        foreach ($quadrants as $quadrant) {
+            foreach ($quadrant['zones'] ?? [] as $zone) {
+                if (strtoupper((string)($zone['role_in_zone'] ?? '')) !== 'BACKUP') {
+                    continue;
+                }
+                $backupsByZone[(int)$zone['zone_id']][] = [
+                    'id' => (int)$quadrant['restocker_id'],
+                    'name' => (string)$quadrant['name'],
+                ];
+            }
+        }
+
+        $promoted = [];
+        foreach ($quadrants as $quadrant) {
+            if ((int)$quadrant['restocker_id'] !== $restockerId) {
+                continue;
+            }
+
+            foreach ($quadrant['zones'] ?? [] as $zone) {
+                if (strtoupper((string)($zone['role_in_zone'] ?? '')) !== 'PRIMARY') {
+                    continue;
+                }
+
+                $backup = $backupsByZone[(int)$zone['zone_id']][0] ?? null;
+                $promoted[] = [
+                    'zone_id' => (int)$zone['zone_id'],
+                    'zone_code' => (string)$zone['code'],
+                    'zone_name' => (string)$zone['name'],
+                    'backup_restocker_id' => $backup['id'] ?? null,
+                    'backup_restocker_name' => $backup['name'] ?? null,
+                ];
+            }
+        }
+
+        return $promoted;
     }
 }

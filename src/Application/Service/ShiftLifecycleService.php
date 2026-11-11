@@ -56,7 +56,7 @@ final class ShiftLifecycleService
     public function startShift(int $technicianId): TechnicianShiftDto
     {
         $tech = $this->userRepo->findById($technicianId);
-        if ($tech === null || $tech->getRole() !== UserRole::TECHNICIAN) {
+        if ($tech === null || !$tech->getRole()->isFieldOperator()) {
             throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
         }
 
@@ -87,7 +87,7 @@ final class ShiftLifecycleService
                     entityId: $technicianId,
                     action: 'ABSENCE_OVERRIDE_BY_SHIFT_START',
                     userId: $technicianId,
-                    userRole: 'TECHNICIAN',
+                    userRole: $tech->getRole()->value,
                     userName: $tech->getName(),
                     previousState: ['active_absence_id' => $activeAbsence->id(), 'reason' => $activeAbsence->reason()->value],
                     newState: ['shift_status' => ShiftStatus::ON_SHIFT->value],
@@ -134,7 +134,7 @@ final class ShiftLifecycleService
     public function pauseMeal(int $technicianId): TechnicianShiftDto
     {
         $tech = $this->userRepo->findById($technicianId);
-        if ($tech === null) {
+        if ($tech === null || !$tech->getRole()->isFieldOperator()) {
             throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
         }
 
@@ -182,7 +182,7 @@ final class ShiftLifecycleService
     public function resumeShift(int $technicianId): TechnicianShiftDto
     {
         $tech = $this->userRepo->findById($technicianId);
-        if ($tech === null) {
+        if ($tech === null || !$tech->getRole()->isFieldOperator()) {
             throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
         }
 
@@ -220,6 +220,86 @@ final class ShiftLifecycleService
                 $updated,
                 $tech->getName(),
                 $this->buildTodaySummary($technicianId)
+            );
+        });
+    }
+
+    /**
+     * Cierre directo de la jornada de un reponedor (`D1`).
+     *
+     * El `RESTOCKER` no atiende averías SAT: al cerrar su turno no se abre el
+     * modal de relevo ni se ejecuta ningún protocolo de tickets. El cierre se
+     * registra en la bitácora y en auditoría dentro de la misma transacción que
+     * el `UPDATE`, igual que el resto de transiciones (Art. III.3).
+     *
+     * Los técnicos SAT conservan su cierre con relevo en `ShiftHandoverService`;
+     * permitirles este atajo saltaría las comprobaciones de tickets abiertos.
+     */
+    public function closeShift(int $technicianId, ?string $closeReason = null): TechnicianShiftDto
+    {
+        $tech = $this->userRepo->findById($technicianId);
+        if ($tech === null || !$tech->getRole()->isFieldOperator()) {
+            throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
+        }
+
+        if (!$tech->getRole()->isRestocker()) {
+            throw new InvalidShiftTransitionException(
+                'El cierre directo de jornada está reservado al rol de reponedor.',
+                'SHIFT_DIRECT_CLOSE_FORBIDDEN',
+                409
+            );
+        }
+
+        $cleanReason = trim((string)$closeReason);
+        if ($cleanReason === '') {
+            $cleanReason = 'Fin de jornada de reposición';
+        }
+
+        return $this->transactions->runInTransaction(function () use ($technicianId, $tech, $cleanReason): TechnicianShiftDto {
+            if (!$this->lockRepo->lockTechnicianForUpdate($technicianId)) {
+                throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
+            }
+
+            $activeShift = $this->shiftRepo->findActiveShiftByTechnician($technicianId);
+            if ($activeShift === null) {
+                throw InvalidShiftTransitionException::noOpenShift('cerrar la jornada');
+            }
+
+            $now = new DateTimeImmutable('now');
+            $closed = $this->shiftRepo->closeShift(
+                shiftId: (int)$activeShift->id(),
+                closedBy: $technicianId,
+                closeReason: $cleanReason,
+                closedAt: $now
+            );
+
+            $event = new AuditEvent(
+                id: null,
+                entityType: AuditEvent::ENTITY_USER,
+                entityId: $technicianId,
+                action: 'CLOSE_TECHNICIAN_SHIFT',
+                userId: $technicianId,
+                userRole: $tech->getRole()->value,
+                userName: $tech->getName(),
+                previousState: $activeShift->toArray(),
+                newState: $closed->toArray(),
+                metadata: ['close_reason' => $cleanReason]
+            );
+            $this->auditRepo->log($event);
+
+            $this->recordShiftLog(
+                shift: $closed,
+                eventType: ShiftEventType::CLOSE_SHIFT,
+                actorUserId: $technicianId,
+                effectiveAt: $closed->closedAt() ?? $now,
+                previousState: $activeShift->toArray(),
+                reason: $cleanReason
+            );
+
+            return TechnicianShiftDto::fromEntity(
+                $closed,
+                $tech->getName(),
+                $this->buildTodaySummary($technicianId, $now)
             );
         });
     }

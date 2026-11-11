@@ -597,7 +597,7 @@ $summaryHeader = $csvRows[0] ?? [];
 $assert(
     'El CSV declara la cabecera de resumen por técnico',
     $summaryHeader === [
-        'Técnico', 'Estado en Plantilla', 'Sesiones', 'Horas Brutas', 'Tiempo Comida',
+        'Técnico', 'Rol', 'Estado en Plantilla', 'Sesiones', 'Horas Brutas', 'Tiempo Comida',
         'Horas Efectivas Netas', 'Tiempo en Intervención', 'Tiempo en Ruta',
         'Intervenciones Resueltas', 'Turnos Anómalos (>12h)', 'Intervención Fuera de Turno',
     ],
@@ -614,7 +614,7 @@ foreach ($csvRows as $index => $csvRow) {
 
 $assert('El CSV declara la cabecera de detalle de sesiones', $detailIndex !== null && ($csvRows[$detailIndex][1] ?? null) === 'Fecha Imputación');
 $assert('El CSV separa las dos secciones con una fila en blanco', $detailIndex !== null && ($csvRows[$detailIndex - 1] ?? null) === [null]);
-$assert('El CSV marca el estado en plantilla en castellano', in_array('Activo', array_column($csvRows, 1), true) && in_array('Inactivo', array_column($csvRows, 1), true));
+$assert('El CSV marca el estado en plantilla en castellano', in_array('Activo', array_column($csvRows, 2), true) && in_array('Inactivo', array_column($csvRows, 2), true));
 $assert(
     'El CSV marca los cierres forzados y ajustes',
     $detailIndex !== null
