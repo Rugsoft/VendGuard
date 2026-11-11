@@ -16,6 +16,7 @@ import { ConnectionStateBanner } from './components/ConnectionStateBanner.js';
 import { LocationPortalView } from './views/LocationPortalView.js';
 import { CoordinatorDashboardView } from './views/CoordinatorDashboardView.js?v=26';
 import { TechnicianRouteView } from './views/TechnicianRouteView.js';
+import { RestockerRouteView } from './components/RestockerRouteView.js';
 import { QrReportView } from './views/QrReportView.js';
 import { PublicRefundTrackingView } from './views/PublicRefundTrackingView.js';
 import { mountChatWidget, unmountChatWidget } from './utils/n8nChat.js';
@@ -28,12 +29,13 @@ export const App = {
     LocationPortalView,
     CoordinatorDashboardView,
     TechnicianRouteView,
+    RestockerRouteView,
     QrReportView,
     PublicRefundTrackingView
   },
   data() {
     return {
-      currentView: 'portal', // 'portal' | 'coordinator' | 'technician' | 'qr' | 'tracking'
+      currentView: 'portal', // 'portal' | 'coordinator' | 'technician' | 'restocker' | 'qr' | 'tracking'
       trackingToken: '',
       siteCode: 'SEDE-BCN-01',
       showCredentialsGuide: true,
@@ -135,6 +137,8 @@ export const App = {
         this.currentView = 'coordinator';
       } else if (store.state.user?.role === 'TECHNICIAN') {
         this.currentView = 'technician';
+      } else if (store.state.user?.role === 'RESTOCKER') {
+        this.currentView = 'restocker';
       }
     }
   },
@@ -166,6 +170,10 @@ export const App = {
 
       if (store.state.user?.role === 'TECHNICIAN') {
         return 'technician';
+      }
+
+      if (store.state.user?.role === 'RESTOCKER') {
+        return 'restocker';
       }
 
       return null;
@@ -308,6 +316,9 @@ export const App = {
         <TechnicianRouteView
           v-else-if="currentView === 'technician'"
           :initial-ticket-code="deepLinkTicket"
+        />
+        <RestockerRouteView
+          v-else-if="currentView === 'restocker'"
         />
       </main>
 

@@ -331,6 +331,9 @@ export const store = {
   get isTechnician() {
     return Boolean(state.user && state.user.role === 'TECHNICIAN');
   },
+  get isRestocker() {
+    return Boolean(state.user && state.user.role === 'RESTOCKER');
+  },
   get isSiteSession() {
     return Boolean(state.authType === 'site' && state.location !== null);
   },

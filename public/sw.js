@@ -105,6 +105,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/components/TroubleshootingGuideAccordion.js',
   '/assets/js/components/CoordinatorVanStockTab.js',
   '/assets/js/components/CoordinatorWorkHoursTab.js',
+  '/assets/js/components/RestockerRouteView.js',
   '/assets/js/components/CoordinatorWorkshopTrayTab.js',
   '/assets/js/components/ExecutiveReportModal.js',
   '/assets/js/components/ImagePreview.js',
