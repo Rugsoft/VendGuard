@@ -413,6 +413,8 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
                   WHERE zone_id = :zone_id AND released_at IS NULL) AS postal_codes,
                 (SELECT COUNT(*) FROM technician_zone_assignments
                   WHERE zone_id = :zone_id AND removed_at IS NULL) AS technicians,
+                (SELECT COUNT(*) FROM restocker_zone_assignments
+                  WHERE zone_id = :zone_id AND removed_at IS NULL) AS restockers,
                 (SELECT COUNT(*) FROM locations
                   WHERE zone_id = :zone_id AND deleted_at IS NULL) AS locations"
         );
@@ -425,6 +427,7 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
         return [
             'postal_codes' => (int)($row['postal_codes'] ?? 0),
             'technicians' => (int)($row['technicians'] ?? 0),
+            'restockers' => (int)($row['restockers'] ?? 0),
             'locations' => (int)($row['locations'] ?? 0),
         ];
     }
@@ -475,6 +478,19 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
             $stmt->execute();
             $removedTechnicians = $stmt->rowCount();
 
+            // Módulo 31 (RF-02.3, C3): el cuadrante de carga de la zona se
+            // extingue con ella en la misma transacción. `removed_at` conserva
+            // la fila y su historial; la cobertura deja de verla de inmediato.
+            $stmt = $this->pdo->prepare(
+                'UPDATE restocker_zone_assignments
+                 SET removed_at = CURRENT_TIMESTAMP
+                 WHERE zone_id = :zone_id
+                   AND removed_at IS NULL'
+            );
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->execute();
+            $removedRestockers = $stmt->rowCount();
+
             $stmt = $this->pdo->prepare(
                 'UPDATE operational_zones SET is_active = :is_active WHERE id = :zone_id'
             );
@@ -496,6 +512,7 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
                     'released_postal_codes' => $released,
                     'unassigned_locations_count' => $unassignedLocations,
                     'removed_technicians_count' => $removedTechnicians,
+                    'removed_restockers_count' => $removedRestockers,
                 ]
             ));
 
@@ -505,6 +522,7 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
                 'released_postal_codes' => $released,
                 'unassigned_locations' => $unassignedLocations,
                 'removed_technicians' => $removedTechnicians,
+                'removed_restockers' => $removedRestockers,
             ];
         } catch (Throwable $exception) {
             if ($this->pdo->inTransaction()) {

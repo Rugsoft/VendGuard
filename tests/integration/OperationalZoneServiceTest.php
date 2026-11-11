@@ -304,6 +304,9 @@ try {
             && array_keys($service->listZones()[0]->toArray()) === [
                 'id', 'code', 'name', 'color_hex', 'description', 'is_active',
                 'locations_count', 'primary_technicians_count', 'backup_technicians_count',
+                // Módulo 31 (QA 2): los contadores del cuadrante de carga viajan en la
+                // misma ficha de zona, entre el cuadrante SAT y el territorio.
+                'primary_restockers_count', 'backup_restockers_count',
                 'postal_codes_count', 'postal_codes', 'created_at', 'updated_at',
             ]
     );

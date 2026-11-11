@@ -62,7 +62,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `C1`, `C3`, `D3`.
   - **Verificación:** `php tests/unit/AdminStaffRestockerServiceTest.php`
 
-- [ ] **T-RES-08 · Implementar cuadrante de carga en `OperationalZoneService` y `RestockerZoneCoverageService` (`RF-02`, `RF-03`)**
+- [x] **T-RES-08 · Implementar cuadrante de carga en `OperationalZoneService` y `RestockerZoneCoverageService` (`RF-02`, `RF-03`)**
   - **Requisitos:** `RF-02.2`–`RF-02.4`, `RF-03.1`–`RF-03.3`, `D3`, `C2`, `QA 2`, `QA 3`, `QA 4`.
   - **Verificación:** `php tests/unit/RestockerZoneCoverageServiceTest.php`
 

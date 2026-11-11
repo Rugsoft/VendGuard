@@ -154,7 +154,7 @@ interface OperationalZoneRepositoryInterface
      * sedes quedan «Sin Zona Asignada» y cuántos técnicos salen del cuadrante.
      *
      * @param int $zoneId Identificador de la zona.
-     * @return array{postal_codes: int, technicians: int, locations: int}
+     * @return array{postal_codes: int, technicians: int, restockers: int, locations: int}
      */
     public function inspectReleaseImpact(int $zoneId): array;
 
@@ -163,13 +163,14 @@ interface OperationalZoneRepositoryInterface
      * (RF-01.3, QA 7, QA 10, QA 13).
      *
      * Pasos, todos o ninguno: las sedes (heredadas y forzadas) quedan con
-     * `zone_id = NULL`, los CP vivos se liberan con `released_at`, el cuadrante se
-     * extingue con `removed_at`, la zona pasa a inactiva y se registra
-     * `ZONE_DEACTIVATED` con el balance. Nunca se borra una fila (Art. III.1).
+     * `zone_id = NULL`, los CP vivos se liberan con `released_at`, el cuadrante SAT
+     * **y el cuadrante de carga** se extinguen con `removed_at` (Módulo 31,
+     * `RF-02.3`), la zona pasa a inactiva y se registra `ZONE_DEACTIVATED` con el
+     * balance. Nunca se borra una fila (Art. III.1).
      *
      * @param int $zoneId Identificador de la zona.
      * @param int $userId Coordinador que firma la desactivación.
-     * @return array{released_postal_codes: int, unassigned_locations: int, removed_technicians: int}
+     * @return array{released_postal_codes: int, unassigned_locations: int, removed_technicians: int, removed_restockers: int}
      *
      * @throws ZoneValidationException Si la zona no existe.
      */

@@ -39,6 +39,8 @@ final readonly class OperationalZoneDto implements JsonSerializable
      * @param int $locationsCount Sedes cuya zona efectiva es esta.
      * @param int $primaryTechniciansCount Titulares vivos del cuadrante.
      * @param int $backupTechniciansCount Suplentes vivos del cuadrante.
+     * @param int $primaryRestockersCount Reponedores titulares vivos del cuadrante de carga (QA 2).
+     * @param int $backupRestockersCount Reponedores suplentes vivos del cuadrante de carga (QA 2).
      * @param int $postalCodesCount Códigos postales vivos gobernados por la zona.
      * @param list<string> $postalCodes Códigos postales vivos, ordenados.
      * @param string|null $createdAt Marca de creación tal y como la da el motor.
@@ -56,6 +58,8 @@ final readonly class OperationalZoneDto implements JsonSerializable
         public int $locationsCount,
         public int $primaryTechniciansCount,
         public int $backupTechniciansCount,
+        public int $primaryRestockersCount,
+        public int $backupRestockersCount,
         public int $postalCodesCount,
         public array $postalCodes,
         public ?string $createdAt,
@@ -65,6 +69,8 @@ final readonly class OperationalZoneDto implements JsonSerializable
             'locations_count' => $locationsCount,
             'primary_technicians_count' => $primaryTechniciansCount,
             'backup_technicians_count' => $backupTechniciansCount,
+            'primary_restockers_count' => $primaryRestockersCount,
+            'backup_restockers_count' => $backupRestockersCount,
             'postal_codes_count' => $postalCodesCount,
         ] as $field => $value) {
             if ($value < 0) {
@@ -83,6 +89,8 @@ final readonly class OperationalZoneDto implements JsonSerializable
      *     locations_count: int,
      *     primary_technicians_count: int,
      *     backup_technicians_count: int,
+     *     primary_restockers_count: int,
+     *     backup_restockers_count: int,
      *     postal_codes_count: int
      * } $row
      * @param list<string> $postalCodes
@@ -101,6 +109,8 @@ final readonly class OperationalZoneDto implements JsonSerializable
             (int)$row['locations_count'],
             (int)$row['primary_technicians_count'],
             (int)$row['backup_technicians_count'],
+            (int)($row['primary_restockers_count'] ?? 0),
+            (int)($row['backup_restockers_count'] ?? 0),
             (int)$row['postal_codes_count'],
             array_values($postalCodes),
             $zone->getCreatedAt(),
@@ -123,6 +133,8 @@ final readonly class OperationalZoneDto implements JsonSerializable
             $zone->getColorHex(),
             $zone->getDescription(),
             $zone->isActive(),
+            0,
+            0,
             0,
             0,
             0,
@@ -150,6 +162,8 @@ final readonly class OperationalZoneDto implements JsonSerializable
             'locations_count' => $this->locationsCount,
             'primary_technicians_count' => $this->primaryTechniciansCount,
             'backup_technicians_count' => $this->backupTechniciansCount,
+            'primary_restockers_count' => $this->primaryRestockersCount,
+            'backup_restockers_count' => $this->backupRestockersCount,
             'postal_codes_count' => $this->postalCodesCount,
             'postal_codes' => $this->postalCodes,
             'created_at' => $this->createdAt,
