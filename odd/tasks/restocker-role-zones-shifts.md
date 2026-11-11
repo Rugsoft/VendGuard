@@ -23,7 +23,7 @@ S7 — **Gestión Unificada de Ausencias, Turnos y Registro de Jornada + CSV con
 
 | ID | Specs | Ruta | Commit | Estado |
 | :--- | :--- | :--- | :--- | :--- |
-| **WU-1 / T-RES-01** | S1 | inline | pendiente | ⏳ pendiente |
+| **WU-1 / T-RES-01** | S1 | inline | `ffed623` | ✅ hecho |
 | **WU-1 / T-RES-02** | S1 | inline | pendiente | ⏳ pendiente |
 | **WU-2 / T-RES-03** | S1, S5 | inline | pendiente | ⏳ pendiente |
 | **WU-2 / T-RES-04** | S3 | inline | pendiente | ⏳ pendiente |
@@ -42,3 +42,6 @@ S7 — **Gestión Unificada de Ausencias, Turnos y Registro de Jornada + CSV con
 
 * **L1 (2026-11-11):** Petición original del usuario: `"antes de empezar con el mecanismo sdd y escribir la spec, vamos a definir un poco esta feature de docs/features_pendientes-md: 21. 👤 Rol de Cargador/Reponedor de Ruta (RESTOCKER), Zonificación de Carga y Control de Jornada"`.
 * **L2 (2026-11-11):** Consensuadas con el Product Owner las decisiones de diseño `D1`–`D3`, los casos límite `C1`–`C3` y las resoluciones de auditoría QA `QA 1`–`QA 4`. Superadas las Puertas SDD de Fase 1 y Fase 2 (`spec.md` v2.0, `restocker_role_zones_shifts_contracts.md` v1.0, `plan.md` v1.0 y `tasks.md` v1.0). Creación de `odd/tasks/restocker-role-zones-shifts.md` y apertura de la rama `feat/restocker-role-zones-shifts`.
+* **L3 (2026-11-11):** **T-RES-01 completada y certificada** (commit `ffed623`). Migración `027_restocker_role_and_zone_assignments.sql` con los valores `RESTOCKER` y `RESTOCKER_ZONE`, la guarda `chk_users_restocker_not_on_call` y la Tabla 41 `restocker_zone_assignments`; convergencia 1:1 en `supabase_init.sql` (41 tablas), semillas `REP-01`/`REP-02` en `supabase_seeds.sql` y `SeedRunner::seedRestockerZoneAssignments()`. La guarda compara `role::text` porque el literal del enumerado devuelve `55P04` en la transacción que lo añade (verificado en el motor y documentado en la migración).
+  **Evidencia:** `SchemaConvergenceParityTest` 29/29 (41 tablas + libro de 27 migraciones), `SeedRunnerSingleEngineTest` 26/26 y `HarnessResidueGuardTest` 27/27 sobre una base temporal convergida; sonda de esquema con las cuatro guardas mordiendo (`chk_users_restocker_not_on_call`, `chk_restocker_zone_role_coherence`, `uq_restocker_zone_live` y `ART_III_1_VIOLATION` en el borrado físico) y ruta de actualización real sobre la base anterior al módulo (27 migraciones aplicadas, `user_role` con `RESTOCKER`, Tabla 41 y disparador presentes, esquema convergido).
+  **Desviación declarada:** la restricción `chk_users_restocker_not_on_call` se escribe `role::text <> 'RESTOCKER'` en lugar del literal `role <> 'RESTOCKER'` del contrato técnico (§2.2); la regla es idéntica y la forma literal es imposible en la transacción de la migración. Riesgo asumido: el banco compartido de pruebas (`vendguard_pg_test`) arrastra una deriva previa en la huella de la migración 025 que impide ejecutar el ejecutor completo sobre él; no se corrigió en esta tarea. Siguiente tarea pendiente: **T-RES-02**.

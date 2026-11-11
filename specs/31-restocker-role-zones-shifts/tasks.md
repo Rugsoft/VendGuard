@@ -34,7 +34,7 @@ flowchart LR
 
 ## Detalle de Tareas
 
-- [ ] **T-RES-01 · Crear migración `027_restocker_role_and_zone_assignments.sql`, converger `supabase_init.sql` y sembrar `REP-01` / `REP-02`**
+- [x] **T-RES-01 · Crear migración `027_restocker_role_and_zone_assignments.sql`, converger `supabase_init.sql` y sembrar `REP-01` / `REP-02`**
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `D3`, `QA 1`, `Art. III.1`.
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
 
