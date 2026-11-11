@@ -147,7 +147,7 @@ $resLoginRestocker = httpRequest('POST', "{$baseUrl}/api/auth/login", [
 $assert("2.5 Login Reponedor (Lucía) responde HTTP 200 OK", $resLoginRestocker['status'] === 200, "Status: {$resLoginRestocker['status']}");
 $restockerToken = $resLoginRestocker['body']['data']['token'] ?? null;
 $restockerRole = $resLoginRestocker['body']['data']['user']['role'] ?? null;
-$assert("2.6 Token de Reponedor válido y rol RESTOCKER", !empty($restockerToken) && $restockerRole === 'RESTOCKER', "Rol: {$restockerRole}");
+$assert("2.6 Token de Reponedor válido, rol RESTOCKER y operator_code en login", !empty($restockerToken) && $restockerRole === 'RESTOCKER' && ($resLoginRestocker['body']['data']['user']['operator_code'] ?? '') === 'REP-01', "Rol: {$restockerRole}");
 
 // Login Sede
 $resSiteLogin = httpRequest('POST', "{$baseUrl}/api/auth/site-login", [

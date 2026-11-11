@@ -120,6 +120,7 @@ class AuthController
                 'name' => $user->getName(),
                 'email' => $user->getEmail(),
                 'role' => $user->getRole()->value,
+                'operator_code' => $user->getOperatorCode(),
                 'phone' => $user->getPhone(),
             ],
         ], 200, 'Sesión iniciada correctamente');

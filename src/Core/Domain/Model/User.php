@@ -132,6 +132,11 @@ class User implements ArrayAccess, JsonSerializable
         return $this->phone;
     }
 
+    public function getOperatorCode(): ?string
+    {
+        return $this->operatorCode;
+    }
+
     public function isOnCall(): bool
     {
         return $this->isOnCall;
