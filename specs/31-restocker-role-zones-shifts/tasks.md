@@ -42,7 +42,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RNF-01`, `QA 1`, `Art. III.1`.
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresRestockerZoneSchemaTest.php`
 
-- [ ] **T-RES-03 · Ampliar `UserRole` con `RESTOCKER`, crear entidad `RestockerZoneAssignment` y `RestockerZoneCoverageRanker`**
+- [x] **T-RES-03 · Ampliar `UserRole` con `RESTOCKER`, crear entidad `RestockerZoneAssignment` y `RestockerZoneCoverageRanker`**
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-03.1`, `RF-03.2`, `C2`, `QA 1`, `QA 3`.
   - **Verificación:** `php tests/unit/RestockerZoneCoverageRankerTest.php`
 

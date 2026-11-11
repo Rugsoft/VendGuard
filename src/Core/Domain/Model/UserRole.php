@@ -10,11 +10,17 @@ use InvalidArgumentException;
  * UserRole
  * 
  * Roles internos de usuario en la plataforma VendGuard.
+ *
+ * `RESTOCKER` es el cuarto actor operativo (Módulo 31): el Cargador/Reponedor de
+ * Ruta abastece el parque de máquinas con demarcaciones territoriales propias y
+ * queda fuera del escalafón SAT, de la guardia 24/7 y de la asignación de
+ * averías electromecánicas (RF-01.1, D3, Art. V.3).
  */
 enum UserRole: string
 {
     case COORDINATOR = 'COORDINATOR';
     case TECHNICIAN = 'TECHNICIAN';
+    case RESTOCKER = 'RESTOCKER';
 
     /**
      * Devuelve la etiqueta descriptiva en castellano.
@@ -24,6 +30,7 @@ enum UserRole: string
         return match ($this) {
             self::COORDINATOR => 'Coordinador de Servicios',
             self::TECHNICIAN => 'Técnico de Ruta',
+            self::RESTOCKER => 'Cargador / Reponedor de Ruta',
         };
     }
 
@@ -41,6 +48,26 @@ enum UserRole: string
     public function isTechnician(): bool
     {
         return $this === self::TECHNICIAN;
+    }
+
+    /**
+     * Comprueba si el usuario tiene rol de cargador/reponedor de ruta.
+     */
+    public function isRestocker(): bool
+    {
+        return $this === self::RESTOCKER;
+    }
+
+    /**
+     * ¿El rol opera en ruta y ficha jornada propia? (Módulo 31, `D1`)
+     *
+     * Técnicos y reponedores comparten el ciclo de turno y la autoconsulta de
+     * horas, pero no las mismas superficies: el reponedor nunca entra en el
+     * escalafón SAT ni en la guardia 24/7 del Art. II.
+     */
+    public function isFieldOperator(): bool
+    {
+        return $this === self::TECHNICIAN || $this === self::RESTOCKER;
     }
 
     /**
