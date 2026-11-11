@@ -217,14 +217,14 @@ $assert(
 $activeUsers = $column('SELECT email FROM users WHERE deleted_at IS NULL ORDER BY email');
 $missingUsers = array_values(array_diff($canonicalUsers, $activeUsers));
 $assert(
-    '2.3 Las seis cuentas del catálogo están activas tras sembrar',
-    $missingUsers === [] && count($canonicalUsers) === 6,
+    '2.3 Las ocho cuentas del catálogo están activas tras sembrar',
+    $missingUsers === [] && count($canonicalUsers) === 8,
     'faltan: ' . json_encode($missingUsers, JSON_UNESCAPED_UNICODE) . ' · activas: ' . count($activeUsers)
 );
 
 $assert(
-    '2.4 El resumen de la siembra declara el catálogo completo (10 sedes · 13 máquinas · 6 cuentas)',
-    (int)$summary['locations'] === 10 && (int)$summary['machines'] === 13 && (int)$summary['users'] === 6,
+    '2.4 El resumen de la siembra declara el catálogo completo (10 sedes · 13 máquinas · 8 cuentas)',
+    (int)$summary['locations'] === 10 && (int)$summary['machines'] === 13 && (int)$summary['users'] === 8,
     'resumen: ' . json_encode($summary, JSON_UNESCAPED_UNICODE)
 );
 

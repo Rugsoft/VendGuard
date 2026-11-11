@@ -194,10 +194,10 @@ $assert(
 
 $seededSites = $column("SELECT site_code FROM locations WHERE deleted_at IS NULL AND is_active = TRUE");
 $assert(
-    '1.3 El catálogo coincide exactamente con el parque sembrado (10 sedes, 13 máquinas, 6 cuentas)',
+    '1.3 El catálogo coincide exactamente con el parque sembrado (10 sedes, 13 máquinas, 8 cuentas)',
     count($catalog['locations']['site_code']) === 10
         && count($catalog['machines']['code']) === 13
-        && count($catalog['users']['email']) === 6
+        && count($catalog['users']['email']) === 8
         && $asSet($column('SELECT code FROM machines')) === $asSet($catalog['machines']['code'])
         && $asSet($column('SELECT email FROM users WHERE deleted_at IS NULL')) === $asSet($catalog['users']['email'])
         && array_values(array_intersect($catalog['locations']['site_code'], $seededSites)) === $catalog['locations']['site_code'],
@@ -545,9 +545,9 @@ $assert(
 );
 
 $assert(
-    '5.3 Las seis cuentas del catálogo siguen ahí: restituir el estado no drena filas',
+    '5.3 Las ocho cuentas del catálogo siguen ahí: restituir el estado no drena filas',
     TestDataCleaner::countParkResidue($pdo)['by_table']['users'] === 0
-        && count($column('SELECT email FROM users WHERE deleted_at IS NULL')) === 6,
+        && count($column('SELECT email FROM users WHERE deleted_at IS NULL')) === 8,
     'cuentas: ' . json_encode($column('SELECT email FROM users WHERE deleted_at IS NULL ORDER BY email'), JSON_UNESCAPED_UNICODE)
 );
 

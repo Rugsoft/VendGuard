@@ -2954,6 +2954,10 @@ class SeedRunner
             $zoneCount = $this->seedOperationalZones();
             $zonePostalCodeCount = $this->seedZonePostalCodes();
             $zoneTechnicianCount = $this->seedTechnicianZoneAssignments();
+            // El cuadrante de carga (Módulo 31) se siembra cuando usuarios y zonas
+            // ya existen: lo resuelve por la clave canónica del reponedor y por el
+            // código de la zona.
+            $zoneRestockerCount = $this->seedRestockerZoneAssignments();
             $this->seedTerritorialInheritance();
             $prevCount = $this->seedPreventiveSettings();
             // El catálogo de taxonomía (Módulo 25) no depende de otras maestras: se
@@ -3000,6 +3004,7 @@ class SeedRunner
                 'operational_zones' => $zoneCount,
                 'zone_postal_codes' => $zonePostalCodeCount,
                 'technician_zone_assignments' => $zoneTechnicianCount,
+                'restocker_zone_assignments' => $zoneRestockerCount,
                 'preventive_settings' => $prevCount,
                 'root_causes' => $taxonomyCounts['root_causes'],
                 'standard_solutions' => $taxonomyCounts['standard_solutions'],
@@ -3099,6 +3104,85 @@ class SeedRunner
             ['email' => 'marc.ruta@vendguard.internal', 'zone_code' => 'ZONA-BCN-SUR', 'is_primary' => false],
             ['email' => 'marc.ruta@vendguard.internal', 'zone_code' => 'ZONA-BCN-NORTE', 'is_primary' => false],
         ];
+    }
+
+    /**
+     * Cuadrante de carga demo (Módulo 31): un titular y su suplente.
+     *
+     * `REP-01` es Titular (`PRIMARY`) de la zona centro y `REP-02` su suplente
+     * (`BACKUP`) allí y en la zona sur. Es el mismo cuadrante que declara
+     * `database/supabase_seeds.sql` (sección 11 ·b), y se resuelve por la clave
+     * canónica del usuario y el código de la zona, nunca por identificadores.
+     *
+     * @return list<array{email: string, zone_code: string, role_in_zone: string, is_primary: bool}>
+     */
+    private static function canonicalRestockerZoneRows(): array
+    {
+        return [
+            ['email' => 'lucia.repostaje@vendguard.internal', 'zone_code' => 'ZONA-BCN-CENTRO', 'role_in_zone' => 'PRIMARY', 'is_primary' => true],
+            ['email' => 'oscar.repostaje@vendguard.internal', 'zone_code' => 'ZONA-BCN-CENTRO', 'role_in_zone' => 'BACKUP', 'is_primary' => false],
+            ['email' => 'oscar.repostaje@vendguard.internal', 'zone_code' => 'ZONA-BCN-SUR', 'role_in_zone' => 'BACKUP', 'is_primary' => false],
+        ];
+    }
+
+    /**
+     * Siembra el cuadrante de carga de los reponedores (Módulo 31).
+     *
+     * `role_in_zone` e `is_primary` viajan siempre sincronizados porque la base
+     * los ata con `chk_restocker_zone_role_coherence` (QA 1): el sembrador no
+     * puede declarar una combinación que la restricción rechazaría. Como en el
+     * cuadrante técnico, la alta es «insertar si no existe» y la baja es lógica,
+     * de modo que resembrar no reabre una vinculación retirada por coordinación.
+     *
+     * @return int Vinculaciones canónicas de carga efectivamente vivas tras sembrar.
+     */
+    public function seedRestockerZoneAssignments(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+        $sqlTemplate = 'INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
+             SELECT u.id, z.id, :role_in_zone, %s
+               FROM users u, operational_zones z
+              WHERE u.%s = :email
+                AND z.code = :zone_code
+                AND NOT EXISTS (
+                    SELECT 1 FROM restocker_zone_assignments a
+                     WHERE a.restocker_id = u.id
+                       AND a.zone_id = z.id
+                       AND a.removed_at IS NULL
+                )';
+
+        $verify = $this->pdo->prepare(sprintf(
+            'SELECT COUNT(*)
+               FROM restocker_zone_assignments a
+               INNER JOIN users u ON u.id = a.restocker_id
+               INNER JOIN operational_zones z ON z.id = a.zone_id
+              WHERE u.%s = :email
+                AND z.code = :zone_code
+                AND a.removed_at IS NULL',
+            $identityColumn
+        ));
+
+        $count = 0;
+        foreach (self::canonicalRestockerZoneRows() as $row) {
+            $statement = $this->pdo->prepare(sprintf(
+                $sqlTemplate,
+                $this->dialect->booleanLiteral((bool)$row['is_primary']),
+                $identityColumn
+            ));
+            $statement->execute([
+                ':email' => $row['email'],
+                ':zone_code' => $row['zone_code'],
+                ':role_in_zone' => $row['role_in_zone'],
+            ]);
+
+            $verify->execute([
+                ':email' => $row['email'],
+                ':zone_code' => $row['zone_code'],
+            ]);
+            $count += (int)$verify->fetchColumn();
+        }
+
+        return $count;
     }
 
     private static function canonicalLocationRows(): array
@@ -3394,6 +3478,26 @@ class SeedRunner
                 'role' => 'TECHNICIAN',
                 'operator_code' => 'OP-05',
                 'phone' => '677112233',
+            ],
+            // Módulo 31 · los dos reponedores semilla: el titular de carga de la
+            // zona centro y su suplente. La guardia técnica del Art. II no admite
+            // este rol, así que nacen con `is_on_call` en su valor por defecto
+            // (FALSE) y nunca se marcan como técnicos de guardia.
+            [
+                'name' => 'Lucía Reponedora BCN',
+                'email' => 'lucia.repostaje@vendguard.internal',
+                'password_hash' => $passwordHash,
+                'role' => 'RESTOCKER',
+                'operator_code' => 'REP-01',
+                'phone' => '677334455',
+            ],
+            [
+                'name' => 'Óscar Reponedor BCN',
+                'email' => 'oscar.repostaje@vendguard.internal',
+                'password_hash' => $passwordHash,
+                'role' => 'RESTOCKER',
+                'operator_code' => 'REP-02',
+                'phone' => '677445566',
             ],
         ];
     }

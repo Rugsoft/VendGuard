@@ -468,8 +468,8 @@ echo "      · Catálogo: ${BATTERY_LOCATIONS} sedes · ${BATTERY_MACHINES} máq
     || fail "El catálogo del banco no tiene las 10 sedes del arranque en limpio (${BATTERY_LOCATIONS})."
 [ "${BATTERY_MACHINES}" -ge 13 ] \
     || fail "El catálogo del banco no tiene las 13 máquinas del arranque en limpio (${BATTERY_MACHINES})."
-[ "${BATTERY_USERS}" -ge 6 ] \
-    || fail "El catálogo del banco no tiene los 6 usuarios internos del arranque en limpio (${BATTERY_USERS})."
+[ "${BATTERY_USERS}" -ge 8 ] \
+    || fail "El catálogo del banco no tiene los 8 usuarios internos del arranque en limpio (${BATTERY_USERS})."
 [ "${BATTERY_INCIDENTS}" = "0" ] \
     || fail "El banco de la batería arrancó con histórico de demostración (${BATTERY_INCIDENTS} averías)."
 
