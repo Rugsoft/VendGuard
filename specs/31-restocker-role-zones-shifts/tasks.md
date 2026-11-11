@@ -46,7 +46,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-03.1`, `RF-03.2`, `C2`, `QA 1`, `QA 3`.
   - **Verificación:** `php tests/unit/RestockerZoneCoverageRankerTest.php`
 
-- [ ] **T-RES-04 · Verificar exclusión estricta de `RESTOCKER` en `TechnicianAssignmentSuggester` (`RF-01.4` / Art. V.3)**
+- [x] **T-RES-04 · Verificar exclusión estricta de `RESTOCKER` en `TechnicianAssignmentSuggester` (`RF-01.4` / Art. V.3)**
   - **Requisitos:** `RF-01.4`, `Art. V.3`.
   - **Verificación:** `php tests/unit/TechnicianAssignmentSuggesterTest.php`
 
