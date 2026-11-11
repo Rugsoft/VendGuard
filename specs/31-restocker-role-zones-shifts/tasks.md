@@ -66,7 +66,7 @@ flowchart LR
   - **Requisitos:** `RF-02.2`–`RF-02.4`, `RF-03.1`–`RF-03.3`, `D3`, `C2`, `QA 2`, `QA 3`, `QA 4`.
   - **Verificación:** `php tests/unit/RestockerZoneCoverageServiceTest.php`
 
-- [ ] **T-RES-09 · Actualizar `TechnicianShiftService` (cierre directo `D1`), `AbsenceService` y `TechnicianWorkHoursService` + CSV con columna `Rol` (`D2`, `QA 4`)**
+- [x] **T-RES-09 · Actualizar `TechnicianShiftService` (cierre directo `D1`), `AbsenceService` y `TechnicianWorkHoursService` + CSV con columna `Rol` (`D2`, `QA 4`)**
   - **Requisitos:** `RF-04.2`, `RF-04.3`, `RF-05.1`, `RF-05.2`, `D1`, `D2`, `QA 4`.
   - **Verificación:** `php tests/unit/RestockerShiftAndWorkHoursTest.php`
 
