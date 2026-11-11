@@ -95,10 +95,18 @@ class AdminStaffService
         $requestedRole = strtoupper(trim((string)($data['role'] ?? '')));
         $isOnCall = self::readBooleanFlag($data['is_on_call'] ?? null, 'is_on_call');
 
-        if ($requestedRole === UserRole::RESTOCKER->value && $isOnCall) {
-            throw new RestockerCannotBeOnCallException(
-                isset($data['operator_code']) ? (string)$data['operator_code'] : null
-            );
+        if ($requestedRole === UserRole::RESTOCKER->value) {
+            $operatorCode = self::normalizeOperatorCode($data['operator_code'] ?? null);
+            if ($operatorCode === null) {
+                throw new InvalidArgumentException(
+                    'El código de operador es obligatorio para un reponedor de ruta (por ejemplo REP-01).'
+                );
+            }
+            $data['operator_code'] = $operatorCode;
+
+            if ($isOnCall) {
+                throw new RestockerCannotBeOnCallException($operatorCode);
+            }
         }
 
         // La guardia no se crea desde el alta de personal: nace apagada y se
@@ -301,6 +309,28 @@ class AdminStaffService
         return $this->transactions !== null
             ? $this->transactions->runInTransaction($operation)
             : $operation();
+    }
+
+    /**
+     * Normaliza y valida el código de operador del reponedor (`REP-01`).
+     *
+     * La unicidad la garantiza el índice `uq_users_operator_code`; aquí solo se
+     * exige presencia y forma para que un alta incompleta no llegue a la base.
+     */
+    private static function normalizeOperatorCode(mixed $rawCode): ?string
+    {
+        $code = strtoupper(trim((string)($rawCode ?? '')));
+        if ($code === '') {
+            return null;
+        }
+
+        if (preg_match('/^[A-Z]{2,6}-[0-9]{1,4}$/', $code) !== 1) {
+            throw new InvalidArgumentException(
+                'El código de operador debe tener el formato REP-01: de 2 a 6 letras, guion y hasta 4 dígitos.'
+            );
+        }
+
+        return $code;
     }
 
     /**

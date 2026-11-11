@@ -8,6 +8,7 @@ use Closure;
 use InvalidArgumentException;
 use VendGuard\Application\Service\AdminLocationService;
 use VendGuard\Application\Service\AdminMachineService;
+use VendGuard\Application\Service\AdminStaffService;
 use VendGuard\Application\Service\AdminUserService;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\GeoDistanceService;
@@ -22,12 +23,17 @@ use VendGuard\Core\Domain\Exception\MachineTypeChangeBlockedException;
 use VendGuard\Core\Domain\Exception\MinimumActiveStaffException;
 use VendGuard\Core\Domain\Exception\OnCallOnlyForTechniciansException;
 use VendGuard\Core\Domain\Exception\PendingIncidentsBlockedException;
+use VendGuard\Core\Domain\Exception\RestockerCannotBeOnCallException;
+use VendGuard\Core\Domain\Exception\RoleChangeForbiddenException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
 use VendGuard\Core\Domain\Exception\ZoneValidationException;
 use VendGuard\Core\Domain\Model\User;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianShiftLogRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -50,11 +56,13 @@ class CoordinatorAdminController
     private AdminLocationService $locationService;
     private AdminMachineService $machineService;
     private AdminUserService $userService;
+    private AdminStaffService $staffService;
 
     public function __construct(
         ?AdminLocationService $locationService = null,
         ?AdminMachineService $machineService = null,
-        ?AdminUserService $userService = null
+        ?AdminUserService $userService = null,
+        ?AdminStaffService $staffService = null
     ) {
         $auditLogger = new AuditLogger(new PdoAuditLogRepository());
         $locationRepo = new PdoLocationRepository();
@@ -64,6 +72,14 @@ class CoordinatorAdminController
         $this->locationService = $locationService ?? new AdminLocationService($locationRepo, $auditLogger);
         $this->machineService = $machineService ?? new AdminMachineService($machineRepo, $locationRepo, $auditLogger);
         $this->userService = $userService ?? new AdminUserService($userRepo, $auditLogger);
+        $this->staffService = $staffService ?? new AdminStaffService(
+            $this->userService,
+            $userRepo,
+            new PdoTechnicianShiftRepository(),
+            $auditLogger,
+            new PdoTechnicianShiftLogRepository(),
+            new PdoTransactionManager()
+        );
     }
 
     // =========================================================================
@@ -543,6 +559,60 @@ class CoordinatorAdminController
     }
 
     // =========================================================================
+    // 3.b Personal Interno con reglas del Módulo 31 (RF-01, C1, C3)
+    // =========================================================================
+
+    /**
+     * GET /api/coordinator/staff
+     * Lista el personal interno con filtro opcional por rol.
+     */
+    public function listStaff(Request $request): Response
+    {
+        return $this->handleExecution(function () use ($request): Response {
+            $status = (string)$request->getQuery('status', 'all');
+            $role = (string)$request->getQuery('role', 'all');
+            $search = $request->getQuery('search') !== null ? (string)$request->getQuery('search') : null;
+
+            return Response::json($this->userService->listUsers($status, $role, $search), 200);
+        });
+    }
+
+    /**
+     * POST /api/coordinator/staff
+     * Alta de personal interno con las reglas del rol RESTOCKER (RF-01.1).
+     */
+    public function createStaff(Request $request): Response
+    {
+        return $this->handleExecution(function () use ($request): Response {
+            $body = $request->getParsedBody();
+            $actor = $this->extractActor($request);
+            $ip = $this->extractClientIp($request);
+
+            $created = $this->staffService->createUser($body, $actor, $ip);
+
+            return Response::json($created->toArray(), 201, 'Personal interno dado de alta exitosamente.');
+        });
+    }
+
+    /**
+     * PUT /api/coordinator/staff/{id}
+     * Edición con rol inmutable (C1) y baja con cierre de turno (C3).
+     */
+    public function updateStaff(Request $request): Response
+    {
+        return $this->handleExecution(function () use ($request): Response {
+            $id = $this->extractIdFromRoute($request);
+            $body = $request->getParsedBody();
+            $actor = $this->extractActor($request);
+            $ip = $this->extractClientIp($request);
+
+            $updated = $this->staffService->updateUser($id, $body, $actor, $ip);
+
+            return Response::json($updated->toArray(), 200, 'Personal interno actualizado exitosamente.');
+        });
+    }
+
+    // =========================================================================
     // Métodos Auxiliares y Mapeo Canónico de Excepciones
     // =========================================================================
 
@@ -616,6 +686,14 @@ class CoordinatorAdminController
             return $this->errorResponse(404, $e->getErrorCode(), $e->getMessage(), [
                 'user_id' => $e->getUserId(),
             ]);
+        } catch (RoleChangeForbiddenException $e) {
+            return $this->errorResponse($e->getHttpStatusCode(), $e->getErrorCode(), $e->getMessage(), [
+                'user_id' => $e->getUserId(),
+                'current_role' => $e->getCurrentRole(),
+                'requested_role' => $e->getRequestedRole(),
+            ]);
+        } catch (RestockerCannotBeOnCallException $e) {
+            return $this->errorResponse($e->getHttpStatusCode(), $e->getErrorCode(), $e->getMessage(), $e->getDetails());
         } catch (ZoneValidationException $e) {
             // El CP de la sede y los atributos de zona viajan con el detalle del
             // contrato (400/422), no como un 500 de validación de dominio.

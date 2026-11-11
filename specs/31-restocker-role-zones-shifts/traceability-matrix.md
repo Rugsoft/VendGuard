@@ -14,9 +14,9 @@
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **01.1** Rol en el enum nativo y alta con `operator_code`, `is_on_call = FALSE` y auditoría (D1, D3) | `database/supabase_migrations/027_restocker_role_and_zone_assignments.sql`, `UserRole`, `AdminStaffService`, `database/supabase_seeds.sql` (`REP-01`, `REP-02`) | `DomainEnumsTest` · `AdminStaffRestockerServiceTest` 1.x–2.x · `RestockerRoleZonesShiftsApiTest` 4.x, 5.x · `PostgresRestockerZoneSchemaTest` | 3 roles ✅ · 26/26 ✅ · 21/21 ✅ · 27/27 ✅ |
-| **01.2** Inmutabilidad estricta del rol tras el alta (`C1`, Art. III.3) | `AdminStaffService::updateUser` (`RoleChangeForbiddenException`) | `AdminStaffRestockerServiceTest` 3.x · `RestockerRbacConstitutionalTest` | 26/26 ✅ · 27/27 ✅ |
-| **01.3** Desactivación con cierre automático de turno y `FORCE_CLOSE_SHIFT` (`C3`) | `AdminStaffService::deactivateUser`, `ShiftLifecycleService` | `AdminStaffRestockerServiceTest` 4.x · `RestockerShiftAndWorkHoursTest` | 26/26 ✅ · 38/38 ✅ |
+| **01.1** Rol en el enum nativo y alta con `operator_code`, `is_on_call = FALSE` y auditoría (D1, D3) | `database/supabase_migrations/027_restocker_role_and_zone_assignments.sql`, `UserRole`, `AdminStaffService`, `CoordinatorAdminController::createStaff`, `database/supabase_seeds.sql` (`REP-01`, `REP-02`) | `DomainEnumsTest` · `AdminStaffRestockerServiceTest` 1.x–2.x · `RestockerStaffHttpTest` 2.x · `RestockerRoleZonesShiftsApiTest` 4.x, 5.x · `PostgresRestockerZoneSchemaTest` | 3 roles ✅ · 26/26 ✅ · 18/18 ✅ · 21/21 ✅ · 27/27 ✅ |
+| **01.2** Inmutabilidad estricta del rol tras el alta (`C1`, Art. III.3) | `AdminStaffService::updateUser`, `CoordinatorAdminController::updateStaff` (`RoleChangeForbiddenException`) | `AdminStaffRestockerServiceTest` 3.x · `RestockerStaffHttpTest` 3.x · `RestockerRbacConstitutionalTest` | 26/26 ✅ · 18/18 ✅ · 27/27 ✅ |
+| **01.3** Desactivación con cierre automático de turno y `FORCE_CLOSE_SHIFT` (`C3`) | `AdminStaffService::deactivateUser`, `CoordinatorAdminController::updateStaff`, `ShiftLifecycleService` | `AdminStaffRestockerServiceTest` 4.x · `RestockerStaffHttpTest` 4.x · `RestockerShiftAndWorkHoursTest` | 26/26 ✅ · 18/18 ✅ · 38/38 ✅ |
 | **01.4** Separación SAT ↔ reposición y exclusión del motor de triaje (Art. V.3/V.4) | `InternalAuthMiddleware`, `AppRouter`, `TechnicianAssignmentSuggester::isEligibleTechnicianRole` | `RestockerRbacConstitutionalTest` (seis superficies SAT, `401/403`) · `TechnicianAssignmentSuggesterTest` 8.x · `RestockerRoleZonesShiftsApiTest` 1.x–3.x | 27/27 ✅ · 41/41 ✅ · 21/21 ✅ |
 
 ### RF-02 · Zonificación de carga y cuadrante dual en Zonas Operativas
@@ -86,7 +86,7 @@
 
 | DoD | Evidencia |
 |---|---|
-| **1.** Rol en enum, CRUD con `is_on_call = FALSE`, rol inmutable y cierre en baja | `DomainEnumsTest` · `AdminStaffRestockerServiceTest` 26/26 · `PostgresRestockerZoneSchemaTest` 27/27 |
+| **1.** Rol en enum, CRUD con `is_on_call = FALSE`, rol inmutable y cierre en baja | `DomainEnumsTest` · `AdminStaffRestockerServiceTest` 26/26 · `RestockerStaffHttpTest` 18/18 · `PostgresRestockerZoneSchemaTest` 27/27 |
 | **2.** RBAC `403` y exclusión del triaje SAT | `RestockerRbacConstitutionalTest` 27/27 · `TechnicianAssignmentSuggesterTest` 41/41 |
 | **3.** Tabla 41, guardas, auditoría, contadores y CRUD idempotente | `PostgresRestockerZoneSchemaTest` 27/27 · `PdoRestockerZoneRepositoryTest` 26/26 · `RestockerRoleZonesShiftsApiTest` 21/21 |
 | **4.** Cobertura determinista de 6 niveles y promoción del `BACKUP` | `RestockerZoneCoverageRankerTest` 42/42 · `RestockerZoneCoverageServiceTest` 23/23 |

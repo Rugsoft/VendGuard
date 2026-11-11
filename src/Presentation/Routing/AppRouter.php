@@ -241,6 +241,11 @@ class AppRouter
         $router->patch('/api/coordinator/users/{id}/reset-password', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'resetUserPassword'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/users/{id}/deactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'deactivateUser'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/users/{id}/reactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reactivateUser'], [$coordinatorAuth]);
+
+        // Personal Interno con las reglas del Módulo 31 (RF-01, C1, C3).
+        $router->get('/api/coordinator/staff', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'listStaff'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/staff', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'createStaff'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/staff/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'updateStaff'], [$coordinatorAuth]);
         // Guardia de alertas críticas de frío (Módulo 14: T-NOTIF-08, RF-02.5).
         // Sólo Técnicos de Campo en activo pueden lucir la marca; la baja de personal
         // ya la retira en el repositorio y cancela sus avisos pendientes (RF-02.6).

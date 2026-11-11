@@ -107,6 +107,9 @@ class AdminUserService
         $email = strtolower(trim((string)($data['email'] ?? '')));
         $rawRole = strtoupper(trim((string)($data['role'] ?? '')));
         $phone = isset($data['phone']) && $data['phone'] !== '' ? trim((string)$data['phone']) : null;
+        $operatorCode = isset($data['operator_code']) && trim((string)$data['operator_code']) !== ''
+            ? strtoupper(trim((string)$data['operator_code']))
+            : null;
         $password = (string)($data['password'] ?? '');
 
         $this->validateName($name);
@@ -149,6 +152,7 @@ class AdminUserService
                 'name'              => $name,
                 'email'             => $email,
                 'role'              => $role->value,
+                'operator_code'     => $operatorCode,
                 'phone'             => $phone,
                 'password'          => $password,
                 'telegram_chat_id'  => $telegramChatId,
@@ -172,6 +176,7 @@ class AdminUserService
                 'name'  => $created->getName(),
                 'email' => $created->getEmail(),
                 'role'  => $created->getRole()->value,
+                'operator_code' => $operatorCode,
                 'phone' => $created->getPhone(),
                 'telegram_chat_id' => self::maskChatId($created->getTelegramChatId()),
             ],
@@ -628,6 +633,12 @@ class AdminUserService
                 null,
                 'USER',
                 false
+            );
+        }
+
+        if (UniqueViolationDetector::matches($exception, 'uq_users_operator_code')) {
+            return new InvalidArgumentException(
+                'El código de operador indicado ya está en uso. Cada operario necesita un código único.'
             );
         }
 

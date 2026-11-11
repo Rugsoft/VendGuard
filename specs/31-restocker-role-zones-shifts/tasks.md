@@ -89,3 +89,7 @@ flowchart LR
 - [x] **T-RES-14 · Ejecutar batería global, sincronizar `DocMetricsGuard`, generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
   - **Requisitos:** `DoD 1`–`DoD 7`.
   - **Verificación:** `php tests/run_all.php`
+
+- [x] **T-RES-15 · Exponer `AdminStaffService` en `/api/coordinator/staff` y certificar `C1`/`C3` por HTTP**
+  - **Requisitos:** `RF-01.1`, `RF-01.2`, `RF-01.3`, `C1`, `C3`.
+  - **Verificación:** `php tests/integration/RestockerStaffHttpTest.php`
