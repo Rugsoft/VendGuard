@@ -500,6 +500,7 @@ try {
                 'has_in_progress_stop',
                 'in_progress_location_name',
                 'distance_km',
+                'selection_reason',
                 'is_available',
                 'unavailability_reason',
                 'shift_status',
