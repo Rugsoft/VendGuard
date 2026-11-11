@@ -58,7 +58,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `RF-05.1`, `RF-05.2`, `C1`, `C3`, `QA 4`.
   - **Verificación:** `php tests/integration/PdoWorkHoursRoleFilterTest.php`
 
-- [ ] **T-RES-07 · Actualizar `AdminStaffService` con alta de `RESTOCKER` (`is_on_call = FALSE`), inmutabilidad de rol (`C1`) y cierre automático de turno en baja (`C3`)**
+- [x] **T-RES-07 · Actualizar `AdminStaffService` con alta de `RESTOCKER` (`is_on_call = FALSE`), inmutabilidad de rol (`C1`) y cierre automático de turno en baja (`C3`)**
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `C1`, `C3`, `D3`.
   - **Verificación:** `php tests/unit/AdminStaffRestockerServiceTest.php`
 

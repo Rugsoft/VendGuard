@@ -158,6 +158,7 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'RESUME_TECHNICIAN_SHIFT', label: 'Reanudación de Turno tras Comida', tone: 'info', group: 'user' },
   { code: 'CLOSE_TECHNICIAN_SHIFT', label: 'Cierre Regular de Turno', tone: 'neutral', group: 'user' },
   { code: 'FORCE_CLOSE_TECHNICIAN_SHIFT', label: 'Cierre Forzado de Turno por Coordinación', tone: 'danger', group: 'user' },
+  { code: 'FORCE_CLOSE_SHIFT', label: 'Cierre Automático de Turno por Baja de Cuenta', tone: 'danger', group: 'user' },
   { code: 'ADJUST_TECHNICIAN_SHIFT', label: 'Rectificación Horaria de Turno', tone: 'warning', group: 'user' },
   { code: 'CREATE_PREVENTIVE_ORDER', label: 'Alta de Orden Preventiva', tone: 'primary', group: 'preventive' },
   { code: 'ASSIGN_PREVENTIVE_ORDER', label: 'Asignación de Orden Preventiva', tone: 'purple', group: 'preventive' },
