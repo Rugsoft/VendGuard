@@ -78,7 +78,7 @@ flowchart LR
   - **Requisitos:** `RF-01` a `RF-05`, `C1`–`C3`, `QA 1`–`QA 4`, `Art. II`, `Art. III`, `Art. V.3`, `Art. V.4`.
   - **Verificación:** `php tests/integration/RestockerRoleZonesShiftsApiTest.php && php tests/integration/RestockerRbacConstitutionalTest.php`
 
-- [ ] **T-RES-12 · Construir `RestockerRouteView.js` y enrutamiento de sesión para `RESTOCKER` en el Shell Vue 3 (`D1`, `RF-04`)**
+- [x] **T-RES-12 · Construir `RestockerRouteView.js` y enrutamiento de sesión para `RESTOCKER` en el Shell Vue 3 (`D1`, `RF-04`)**
   - **Requisitos:** `RF-04.1`–`RF-04.3`, `RNF-03`, `D1`.
   - **Verificación:** `node tests/frontend/restocker_route_view.test.mjs`
 
