@@ -108,6 +108,11 @@ final class PostgresFixtureBuilder
         // Acta de merma del Módulo 29: todos los hechos sanitarios y físicos son
         // inmutables (Art. III.3); el `UPDATE` genérico certifica el único cambio
         // legítimo, el coste estimado que ajusta Coordinación.
+        // Cuadrante de carga del Módulo 31: `role_in_zone` e `is_primary` son las
+        // dos formas del mismo vínculo y `chk_restocker_zone_role_coherence` exige
+        // que viajen de la mano. El `UPDATE` genérico toca el instante del alta, que
+        // no participa en ningún `CHECK` de rama.
+        'restocker_zone_assignments' => ['role_in_zone', 'is_primary'],
         'sanitary_spoilage_records' => [
             'record_code', 'machine_id', 'incident_id', 'maintenance_order_id',
             'technician_id', 'registered_by', 'quarantine_origin',

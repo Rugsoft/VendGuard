@@ -38,7 +38,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `D3`, `QA 1`, `Art. III.1`.
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
 
-- [ ] **T-RES-02 · Actualizar contratos de esquema (41 tablas) y crear `PostgresRestockerZoneSchemaTest.php`**
+- [x] **T-RES-02 · Actualizar contratos de esquema (41 tablas) y crear `PostgresRestockerZoneSchemaTest.php`**
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RNF-01`, `QA 1`, `Art. III.1`.
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresRestockerZoneSchemaTest.php`
 
