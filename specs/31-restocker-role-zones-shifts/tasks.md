@@ -82,7 +82,7 @@ flowchart LR
   - **Requisitos:** `RF-04.1`–`RF-04.3`, `RNF-03`, `D1`.
   - **Verificación:** `node tests/frontend/restocker_route_view.test.mjs`
 
-- [ ] **T-RES-13 · Actualizar `AdminStaffTab.js`, `AdminZonesTab.js`, `CoordinatorAbsencesTab.js` y `CoordinatorWorkHoursTab.js` (`D2`, `D3`, `C1`)**
+- [x] **T-RES-13 · Actualizar `AdminStaffTab.js`, `AdminZonesTab.js`, `CoordinatorAbsencesTab.js` y `CoordinatorWorkHoursTab.js` (`D2`, `D3`, `C1`)**
   - **Requisitos:** `RF-01.1`, `RF-01.2`, `RF-02.4`, `RF-03.2`, `RF-05.1`, `RF-05.2`, `RNF-03`.
   - **Verificación:** `node tests/frontend/coordinator_restocker_tabs.test.mjs`
 
