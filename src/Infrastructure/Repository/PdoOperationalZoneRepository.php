@@ -10,6 +10,7 @@ use PDOException;
 use PDOStatement;
 use RuntimeException;
 use Throwable;
+use VendGuard\Core\Domain\Exception\PrimaryRestockerConflictException;
 use VendGuard\Core\Domain\Exception\PrimaryTechnicianConflictException;
 use VendGuard\Core\Domain\Exception\ZoneNotFoundException;
 use VendGuard\Core\Domain\Exception\ZoneValidationException;
@@ -195,6 +196,20 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
                 ) AS backup_technicians_count,
                 (
                     SELECT COUNT(*)
+                    FROM restocker_zone_assignments r
+                    WHERE r.zone_id = z.id
+                      AND r.is_primary = {$booleanTrue}
+                      AND r.removed_at IS NULL
+                ) AS primary_restockers_count,
+                (
+                    SELECT COUNT(*)
+                    FROM restocker_zone_assignments r
+                    WHERE r.zone_id = z.id
+                      AND r.is_primary = {$booleanFalse}
+                      AND r.removed_at IS NULL
+                ) AS backup_restockers_count,
+                (
+                    SELECT COUNT(*)
                     FROM operational_zone_postal_codes p
                     WHERE p.zone_id = z.id
                       AND p.released_at IS NULL
@@ -229,6 +244,8 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
                 'locations_count' => (int)$row['locations_count'],
                 'primary_technicians_count' => (int)$row['primary_technicians_count'],
                 'backup_technicians_count' => (int)$row['backup_technicians_count'],
+                'primary_restockers_count' => (int)$row['primary_restockers_count'],
+                'backup_restockers_count' => (int)$row['backup_restockers_count'],
                 'postal_codes_count' => (int)$row['postal_codes_count'],
             ];
         }
@@ -887,6 +904,355 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
     /**
      * {@inheritDoc}
      */
+    public function findRestockerAssignments(int $zoneId): array
+    {
+        $sql = "
+            SELECT
+                a.id,
+                a.restocker_id,
+                a.role_in_zone,
+                a.is_primary,
+                a.assigned_at,
+                u.name,
+                u.operator_code,
+                u.is_active
+            FROM restocker_zone_assignments a
+            INNER JOIN users u ON u.id = a.restocker_id
+            WHERE a.zone_id = :zone_id
+              AND a.removed_at IS NULL
+            ORDER BY a.is_primary DESC, u.name ASC
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return array_map(static function (array $row): array {
+            $isPrimary = self::toBoolean($row['is_primary']);
+
+            return [
+                'assignment_id' => (int)$row['id'],
+                'restocker_id' => (int)$row['restocker_id'],
+                'name' => (string)$row['name'],
+                'operator_code' => $row['operator_code'] !== null ? (string)$row['operator_code'] : null,
+                'role_in_zone' => (string)$row['role_in_zone'],
+                'role_label' => $isPrimary ? 'Titular' : 'Suplente',
+                'is_primary' => $isPrimary,
+                'is_active' => self::toBoolean($row['is_active']),
+                'assigned_at' => $row['assigned_at'] !== null ? (string)$row['assigned_at'] : null,
+            ];
+        }, $stmt->fetchAll());
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findRestockerQuadrantsByTechnician(): array
+    {
+        // Mismo criterio que el cuadrante SAT: una sola sentencia con `LEFT JOIN`
+        // para incluir al reponedor activo sin zona sin pagar una consulta por
+        // operario, y el predicado entre paréntesis porque `AND` precede a `OR`.
+        $sql = "
+            SELECT
+                u.id AS restocker_id,
+                u.name,
+                u.operator_code,
+                u.is_active,
+                a.zone_id,
+                z.code AS zone_code,
+                z.name AS zone_name,
+                z.color_hex,
+                a.role_in_zone,
+                a.is_primary,
+                a.assigned_at
+            FROM users u
+            LEFT JOIN restocker_zone_assignments a
+                   ON a.restocker_id = u.id
+                  AND a.removed_at IS NULL
+            LEFT JOIN operational_zones z ON z.id = a.zone_id
+            WHERE u.role = 'RESTOCKER'
+              AND (
+                    (u.deleted_at IS NULL AND u.is_active = " . $this->dialect->booleanLiteral(true) . ")
+                    OR a.id IS NOT NULL
+                  )
+            ORDER BY u.name ASC, a.is_primary DESC, z.name ASC
+        ";
+
+        $stmt = $this->pdo->query($sql);
+
+        $quadrants = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $restockerId = (int)$row['restocker_id'];
+
+            if (!isset($quadrants[$restockerId])) {
+                $quadrants[$restockerId] = [
+                    'restocker_id' => $restockerId,
+                    'name' => (string)$row['name'],
+                    'operator_code' => $row['operator_code'] !== null ? (string)$row['operator_code'] : null,
+                    'is_active' => self::toBoolean($row['is_active']),
+                    'zones' => [],
+                ];
+            }
+
+            if ($row['zone_id'] !== null) {
+                $isPrimary = self::toBoolean($row['is_primary']);
+                $quadrants[$restockerId]['zones'][] = [
+                    'zone_id' => (int)$row['zone_id'],
+                    'code' => (string)$row['zone_code'],
+                    'name' => (string)$row['zone_name'],
+                    'color_hex' => (string)$row['color_hex'],
+                    'role_in_zone' => (string)$row['role_in_zone'],
+                    'is_primary' => $isPrimary,
+                    'assigned_at' => $row['assigned_at'] !== null ? (string)$row['assigned_at'] : null,
+                ];
+            }
+        }
+
+        return array_values($quadrants);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function assignRestocker(
+        int $restockerId,
+        int $zoneId,
+        bool $isPrimary,
+        ?int $userId = null,
+        bool $demotePreviousPrimary = false
+    ): int {
+        $zone = $this->findById($zoneId, true);
+        if ($zone === null) {
+            throw ZoneValidationException::forField(
+                'zone_id',
+                sprintf('No existe la zona operativa %d.', $zoneId)
+            );
+        }
+        if (!$zone->isActive()) {
+            throw ZoneValidationException::unprocessable(
+                'No se puede vincular a un reponedor con una zona desactivada.',
+                ['zone_id' => 'La zona está inactiva.']
+            );
+        }
+
+        if (!$this->isActiveRestocker($restockerId)) {
+            throw ZoneValidationException::unprocessable(
+                'Solo un usuario activo con rol Reponedor puede formar parte del cuadrante de carga.',
+                ['restocker_id' => 'El usuario no es un reponedor activo.']
+            );
+        }
+
+        // RF-02.2: el traslado de titularidad exige confirmación expresa; sin ella
+        // el conflicto viaja al coordinador con la zona que se perdería.
+        $demotion = null;
+        if ($isPrimary) {
+            $demotion = $demotePreviousPrimary
+                ? $this->findOtherPrimaryRestockerZone($restockerId, $zoneId)
+                : null;
+
+            if (!$demotePreviousPrimary) {
+                $this->assertNoOtherPrimaryRestockerZone($restockerId, $zoneId);
+            }
+        }
+
+        $roleInZone = $isPrimary ? 'PRIMARY' : 'BACKUP';
+        $actor = $userId !== null ? $this->resolveActor($userId) : null;
+        $previousPrimaryZoneId = $demotion['zone_id'] ?? null;
+        $this->pdo->beginTransaction();
+
+        try {
+            if ($demotion !== null) {
+                $stmt = $this->pdo->prepare(
+                    'UPDATE restocker_zone_assignments
+                        SET is_primary = :is_primary, role_in_zone = :role_in_zone
+                      WHERE id = :assignment_id'
+                );
+                $stmt->bindValue(':is_primary', false, PDO::PARAM_BOOL);
+                $stmt->bindValue(':role_in_zone', 'BACKUP', PDO::PARAM_STR);
+                $stmt->bindValue(':assignment_id', $demotion['assignment_id'], PDO::PARAM_INT);
+                $stmt->execute();
+
+                if ($userId !== null && $actor !== null) {
+                    $this->auditRepo->log(new AuditEvent(
+                        null,
+                        AuditEvent::ENTITY_RESTOCKER_ZONE,
+                        $demotion['assignment_id'],
+                        'RESTOCKER_ZONE_PRIMARY_DEMOTED',
+                        $userId,
+                        $actor['role'],
+                        $actor['name'],
+                        ['zone_id' => $demotion['zone_id'], 'role_in_zone' => 'PRIMARY', 'is_primary' => true],
+                        ['zone_id' => $demotion['zone_id'], 'role_in_zone' => 'BACKUP', 'is_primary' => false],
+                        [
+                            'restocker_id' => $restockerId,
+                            'demoted_zone_id' => $demotion['zone_id'],
+                            'demoted_zone_name' => $demotion['zone_name'],
+                            'new_primary_zone_id' => $zoneId,
+                        ]
+                    ));
+                }
+            }
+
+            $live = $this->findLiveRestockerAssignment($restockerId, $zoneId);
+            if ($live !== null) {
+                if ($live['role_in_zone'] !== $roleInZone) {
+                    $stmt = $this->pdo->prepare(
+                        'UPDATE restocker_zone_assignments
+                            SET is_primary = :is_primary, role_in_zone = :role_in_zone
+                          WHERE id = :assignment_id'
+                    );
+                    $stmt->bindValue(':is_primary', $isPrimary, PDO::PARAM_BOOL);
+                    $stmt->bindValue(':role_in_zone', $roleInZone, PDO::PARAM_STR);
+                    $stmt->bindValue(':assignment_id', $live['id'], PDO::PARAM_INT);
+                    $stmt->execute();
+
+                    if ($userId !== null && $actor !== null) {
+                        $this->auditRepo->log(new AuditEvent(
+                            null,
+                            AuditEvent::ENTITY_RESTOCKER_ZONE,
+                            $live['id'],
+                            'RESTOCKER_ZONE_ASSIGNED',
+                            $userId,
+                            $actor['role'],
+                            $actor['name'],
+                            ['zone_id' => $zoneId, 'role_in_zone' => $live['role_in_zone']],
+                            ['zone_id' => $zoneId, 'role_in_zone' => $roleInZone],
+                            [
+                                'restocker_id' => $restockerId,
+                                'is_primary' => $isPrimary,
+                                'previous_primary_zone_id' => $previousPrimaryZoneId,
+                            ]
+                        ));
+                    }
+                }
+
+                $this->pdo->commit();
+
+                return $live['id'];
+            }
+
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
+                 VALUES (:restocker_id, :zone_id, :role_in_zone, :is_primary)'
+            );
+            $stmt->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->bindValue(':role_in_zone', $roleInZone, PDO::PARAM_STR);
+            $stmt->bindValue(':is_primary', $isPrimary, PDO::PARAM_BOOL);
+            $stmt->execute();
+
+            $assignmentId = (int)$this->pdo->lastInsertId();
+            if ($assignmentId <= 0) {
+                $created = $this->findLiveRestockerAssignment($restockerId, $zoneId);
+                if ($created === null) {
+                    throw new RuntimeException(
+                        "Error al recuperar la vinculación de carga del reponedor {$restockerId} con la zona {$zoneId}."
+                    );
+                }
+                $assignmentId = $created['id'];
+            }
+
+            if ($userId !== null && $actor !== null) {
+                $this->auditRepo->log(new AuditEvent(
+                    null,
+                    AuditEvent::ENTITY_RESTOCKER_ZONE,
+                    $assignmentId,
+                    'RESTOCKER_ZONE_ASSIGNED',
+                    $userId,
+                    $actor['role'],
+                    $actor['name'],
+                    null,
+                    [
+                        'zone_id' => $zoneId,
+                        'restocker_id' => $restockerId,
+                        'role_in_zone' => $roleInZone,
+                        'is_primary' => $isPrimary,
+                    ],
+                    ['previous_primary_zone_id' => $previousPrimaryZoneId]
+                ));
+            }
+
+            $this->pdo->commit();
+
+            return $assignmentId;
+        } catch (PDOException $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            if (UniqueViolationDetector::matches($exception, 'uq_restocker_primary_zone')) {
+                $this->assertNoOtherPrimaryRestockerZone($restockerId, $zoneId);
+                throw new PrimaryRestockerConflictException($restockerId);
+            }
+
+            throw $exception;
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function removeRestocker(int $restockerId, int $zoneId, ?int $userId = null): bool
+    {
+        $actor = $userId !== null ? $this->resolveActor($userId) : null;
+        $this->pdo->beginTransaction();
+
+        try {
+            $live = $this->findLiveRestockerAssignment($restockerId, $zoneId);
+
+            $stmt = $this->pdo->prepare(
+                'UPDATE restocker_zone_assignments
+                 SET removed_at = CURRENT_TIMESTAMP
+                 WHERE restocker_id = :restocker_id
+                   AND zone_id = :zone_id
+                   AND removed_at IS NULL'
+            );
+            $stmt->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->execute();
+            $removed = $stmt->rowCount() > 0;
+
+            if ($removed && $userId !== null && $actor !== null && $live !== null) {
+                $this->auditRepo->log(new AuditEvent(
+                    null,
+                    AuditEvent::ENTITY_RESTOCKER_ZONE,
+                    $live['id'],
+                    'RESTOCKER_ZONE_REMOVED',
+                    $userId,
+                    $actor['role'],
+                    $actor['name'],
+                    [
+                        'zone_id' => $zoneId,
+                        'role_in_zone' => $live['role_in_zone'],
+                        'is_primary' => $live['is_primary'],
+                        'removed_at' => null,
+                    ],
+                    ['removed_at' => 'CURRENT_TIMESTAMP'],
+                    ['restocker_id' => $restockerId]
+                ));
+            }
+
+            $this->pdo->commit();
+
+            return $removed;
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function create(array $data, ?int $userId = null): OperationalZone
     {
         // La entidad es la única puerta de entrada al catálogo: valida código,
@@ -1289,6 +1655,128 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
 
             throw $exception;
         }
+    }
+
+    /**
+     * ¿El usuario existe, es reponedor y está activo? (RF-02.2, `D3`)
+     */
+    private function isActiveRestocker(int $restockerId): bool
+    {
+        $sql = "
+            SELECT 1
+            FROM users
+            WHERE id = :restocker_id
+              AND role = 'RESTOCKER'
+              AND is_active = " . $this->dialect->booleanLiteral(true) . '
+              AND deleted_at IS NULL
+            LIMIT 1
+        ';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Rechaza la segunda titularidad viva del reponedor con la zona que se perdería.
+     *
+     * @throws PrimaryRestockerConflictException
+     */
+    private function assertNoOtherPrimaryRestockerZone(int $restockerId, int $zoneId): void
+    {
+        $sql = "
+            SELECT a.zone_id, z.code, z.name
+            FROM restocker_zone_assignments a
+            INNER JOIN operational_zones z ON z.id = a.zone_id
+            WHERE a.restocker_id = :restocker_id
+              AND a.is_primary = " . $this->dialect->booleanLiteral(true) . '
+              AND a.removed_at IS NULL
+              AND a.zone_id <> :zone_id
+            LIMIT 1
+        ';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+        $conflict = $stmt->fetch();
+
+        if ($conflict !== false) {
+            throw new PrimaryRestockerConflictException(
+                $restockerId,
+                (int)$conflict['zone_id'],
+                (string)$conflict['code'],
+                (string)$conflict['name']
+            );
+        }
+    }
+
+    /**
+     * Titularidad viva del reponedor en **otra** zona, para el traslado confirmado.
+     *
+     * @return array{assignment_id: int, zone_id: int, zone_name: string}|null
+     */
+    private function findOtherPrimaryRestockerZone(int $restockerId, int $zoneId): ?array
+    {
+        $sql = "
+            SELECT a.id, a.zone_id, z.name
+            FROM restocker_zone_assignments a
+            INNER JOIN operational_zones z ON z.id = a.zone_id
+            WHERE a.restocker_id = :restocker_id
+              AND a.is_primary = " . $this->dialect->booleanLiteral(true) . '
+              AND a.removed_at IS NULL
+              AND a.zone_id <> :zone_id
+            LIMIT 1
+        ';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        if ($row === false) {
+            return null;
+        }
+
+        return [
+            'assignment_id' => (int)$row['id'],
+            'zone_id' => (int)$row['zone_id'],
+            'zone_name' => (string)$row['name'],
+        ];
+    }
+
+    /**
+     * Vinculación viva del reponedor con la zona, si existe.
+     *
+     * @return array{id: int, role_in_zone: string, is_primary: bool}|null
+     */
+    private function findLiveRestockerAssignment(int $restockerId, int $zoneId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, role_in_zone, is_primary
+             FROM restocker_zone_assignments
+             WHERE restocker_id = :restocker_id
+               AND zone_id = :zone_id
+               AND removed_at IS NULL
+             LIMIT 1'
+        );
+        $stmt->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        if ($row === false) {
+            return null;
+        }
+
+        return [
+            'id' => (int)$row['id'],
+            'role_in_zone' => (string)$row['role_in_zone'],
+            'is_primary' => self::toBoolean($row['is_primary']),
+        ];
     }
 
     /**

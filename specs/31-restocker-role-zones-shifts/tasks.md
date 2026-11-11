@@ -50,7 +50,7 @@ flowchart LR
   - **Requisitos:** `RF-01.4`, `Art. V.3`.
   - **Verificación:** `php tests/unit/TechnicianAssignmentSuggesterTest.php`
 
-- [ ] **T-RES-05 · Extender `PdoOperationalZoneRepository` para la Tabla 41 `restocker_zone_assignments` y contadores `QA 2`**
+- [x] **T-RES-05 · Extender `PdoOperationalZoneRepository` para la Tabla 41 `restocker_zone_assignments` y contadores `QA 2`**
   - **Requisitos:** `RF-02.1`–`RF-02.4`, `QA 1`, `QA 2`, `QA 4`.
   - **Verificación:** `php tests/integration/PdoRestockerZoneRepositoryTest.php`
 
