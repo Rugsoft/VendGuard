@@ -3603,27 +3603,29 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             // 1.c Serialización de la escritura (EARS 03.4, R4): la foto con la que
             //     llegó el coordinador puede haber quedado obsoleta mientras el
-            //     formulario estaba abierto. Se toma el bloqueo exclusivo de la fila
-            //     y se revalida contra esa expectativa; si otro actor resolvió,
-            //     canceló o cambió el titular en paralelo, la operación se rechaza
-            //     como colisión (409) sin tocar la cadena de custodia. El bloqueo se
-            //     mantiene hasta el COMMIT, así que comprobación y escritura son una
-            //     sola unidad y no queda ventana para colarse entre ambas.
-            $incident = $this->findByIdForUpdate($numericId);
-            if ($incident === null) {
-                throw new DomainException("No se encontró ninguna incidencia con ID {$numericId}.");
-            }
-            if (
-                $incident->getStatus() !== $snapshot->getStatus()
-                || $incident->getAssignedTechnicianId() !== $snapshot->getAssignedTechnicianId()
-            ) {
-                throw new AssignmentStateChangedException(
-                    expectedStatus: $snapshot->getStatus(),
-                    expectedTechnicianId: $snapshot->getAssignedTechnicianId(),
-                    currentStatus: $incident->getStatus(),
-                    currentTechnicianId: $incident->getAssignedTechnicianId(),
-                    currentTechnicianName: $incident->getTechnicianName()
-                );
+            //     formulario estaba abierto. En PostgreSQL la propia sentencia de
+            //     escritura toma el bloqueo de fila y revalida estado, titular y
+            //     urgencia contra esa foto; si otro actor cambió el expediente, no
+            //     actualiza nada y se traduce a 409 sin tocar la custodia. En el
+            //     motor heredado se conserva la lectura bloqueada explícita.
+            $incident = $snapshot;
+            if (!$this->dialect->isPostgres()) {
+                $incident = $this->findByIdForUpdate($numericId);
+                if ($incident === null) {
+                    throw new DomainException("No se encontró ninguna incidencia con ID {$numericId}.");
+                }
+                if (
+                    $incident->getStatus() !== $snapshot->getStatus()
+                    || $incident->getAssignedTechnicianId() !== $snapshot->getAssignedTechnicianId()
+                ) {
+                    throw new AssignmentStateChangedException(
+                        expectedStatus: $snapshot->getStatus(),
+                        expectedTechnicianId: $snapshot->getAssignedTechnicianId(),
+                        currentStatus: $incident->getStatus(),
+                        currentTechnicianId: $incident->getAssignedTechnicianId(),
+                        currentTechnicianName: $incident->getTechnicianName()
+                    );
+                }
             }
 
             // 2. Resolver urgencia final (posible reclasificación coordinador, EARS 5.3)
@@ -3746,6 +3748,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                         SET {$setClause}
                         WHERE id = :id
                           AND deleted_at IS NULL
+                          AND status = CAST(:expected_status AS incident_status)
+                          AND assigned_technician_id IS NOT DISTINCT FROM CAST(:expected_technician_id AS bigint)
+                          AND urgency = CAST(:expected_urgency AS urgency_level)
                         RETURNING *
                     ),
                     new_hist AS (
@@ -3790,6 +3795,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             CAST(:audit_metadata AS jsonb),
                             CAST(:audit_created_at AS timestamptz)
                         WHERE CAST(:audit_action AS text) IS NOT NULL
+                          AND EXISTS (SELECT 1 FROM updated)
                         RETURNING id
                     ),
                     closed_custody AS (
@@ -3805,6 +3811,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             reassignment_reason = :close_reason
                         WHERE incident_id = :close_incident_id
                           AND unassigned_at IS NULL
+                          AND EXISTS (SELECT 1 FROM updated)
                         RETURNING id
                     ),
                     -- El agregado fuerza la dependencia cierre -> apertura y devuelve
@@ -3833,6 +3840,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                         LEFT JOIN users actor ON actor.id = CAST(:custody_assigned_by AS bigint)
                         CROSS JOIN (SELECT COUNT(*) AS closed_rows FROM closed_custody) AS custody_close
                         WHERE u.id = :custody_technician_id
+                          AND EXISTS (SELECT 1 FROM updated)
                         RETURNING id
                     )
                     SELECT updated.*, (SELECT COUNT(*) FROM new_audit) AS audit_rows,
@@ -3848,6 +3856,13 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     $stmt->bindValue(':sla_target_at', $recalculatedSlaTargetAt, PDO::PARAM_STR);
                 }
                 $stmt->bindValue(':id', $numericId, PDO::PARAM_INT);
+                $stmt->bindValue(':expected_status', $snapshot->getStatus()->value, PDO::PARAM_STR);
+                $stmt->bindValue(
+                    ':expected_technician_id',
+                    $snapshot->getAssignedTechnicianId(),
+                    $snapshot->getAssignedTechnicianId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL
+                );
+                $stmt->bindValue(':expected_urgency', $snapshot->getUrgency()->value, PDO::PARAM_STR);
                 $stmt->bindValue(':user_id', $coordinatorId, $coordinatorId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
                 $stmt->bindValue(':from_status', $incident->getStatus()->value, PDO::PARAM_STR);
                 $stmt->bindValue(':to_status', $isReassignment ? $incident->getStatus()->value : 'ASSIGNED', PDO::PARAM_STR);
@@ -3902,7 +3917,18 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if ($row === false) {
-                    throw new DomainException('Error al recuperar la incidencia asignada.');
+                    $current = $this->findById($numericId);
+                    if ($current === null) {
+                        throw new DomainException("No se encontró ninguna incidencia con ID {$numericId}.");
+                    }
+
+                    throw new AssignmentStateChangedException(
+                        expectedStatus: $snapshot->getStatus(),
+                        expectedTechnicianId: $snapshot->getAssignedTechnicianId(),
+                        currentStatus: $current->getStatus(),
+                        currentTechnicianId: $current->getAssignedTechnicianId(),
+                        currentTechnicianName: $current->getTechnicianName()
+                    );
                 }
                 if ((int)($row['custody_rows'] ?? 0) === 0) {
                     throw new DomainException(
