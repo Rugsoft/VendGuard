@@ -74,7 +74,7 @@ flowchart LR
   - **Requisitos:** `RF-01.4`, `RF-02` a `RF-05`, `Art. V.4`.
   - **Verificación:** `php tests/integration/RestockerRoleZonesShiftsApiTest.php`
 
-- [ ] **T-RES-11 · Certificar suite de integración HTTP y blindaje constitucional (`RestockerRoleZonesShiftsApiTest.php` y `RestockerRbacConstitutionalTest.php`)**
+- [x] **T-RES-11 · Certificar suite de integración HTTP y blindaje constitucional (`RestockerRoleZonesShiftsApiTest.php` y `RestockerRbacConstitutionalTest.php`)**
   - **Requisitos:** `RF-01` a `RF-05`, `C1`–`C3`, `QA 1`–`QA 4`, `Art. II`, `Art. III`, `Art. V.3`, `Art. V.4`.
   - **Verificación:** `php tests/integration/RestockerRoleZonesShiftsApiTest.php && php tests/integration/RestockerRbacConstitutionalTest.php`
 
