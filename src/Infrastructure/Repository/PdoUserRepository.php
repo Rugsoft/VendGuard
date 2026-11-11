@@ -621,7 +621,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         $stmt = $this->pdo->prepare(
             "SELECT id FROM users
               WHERE id = :id
-                AND role = 'TECHNICIAN'
+                AND role IN ('TECHNICIAN', 'RESTOCKER')
                 AND deleted_at IS NULL
               FOR UPDATE"
         );

@@ -162,10 +162,19 @@ final class CoordinatorShiftController
     {
         try {
             $filter = MetricFilter::fromQueryParams($request->getQueryParams());
+            $role = $request->getQuery('role');
 
-            return Response::json($this->workHoursService->getWorkHoursReport($filter)->toArray());
+            return Response::json($this->workHoursService->getWorkHoursReport(
+                $filter,
+                null,
+                $role !== null ? (string)$role : null
+            )->toArray());
         } catch (InvalidArgumentException $e) {
-            return Response::error('INVALID_FILTER_PARAMS', $e->getMessage(), 400);
+            return Response::error(
+                str_contains($e->getMessage(), 'Rol no válido') ? 'INVALID_ROLE_FILTER' : 'INVALID_FILTER_PARAMS',
+                $e->getMessage(),
+                400
+            );
         } catch (Throwable $e) {
             error_log('[vendguard] Fallo al generar el informe de jornada: ' . $e);
 
@@ -185,7 +194,12 @@ final class CoordinatorShiftController
     {
         try {
             $filter = MetricFilter::fromQueryParams($request->getQueryParams());
-            $csvContent = $this->workHoursService->exportWorkHoursCsv($filter);
+            $role = $request->getQuery('role');
+            $csvContent = $this->workHoursService->exportWorkHoursCsv(
+                $filter,
+                null,
+                $role !== null ? (string)$role : null
+            );
 
             $fromDate = $filter->getFrom()->format('Ymd');
             $toDate = $filter->getTo()->format('Ymd');
@@ -197,7 +211,11 @@ final class CoordinatorShiftController
                 'Cache-Control' => 'no-cache, no-store, must-revalidate',
             ]);
         } catch (InvalidArgumentException $e) {
-            return Response::error('INVALID_FILTER_PARAMS', $e->getMessage(), 400);
+            return Response::error(
+                str_contains($e->getMessage(), 'Rol no válido') ? 'INVALID_ROLE_FILTER' : 'INVALID_FILTER_PARAMS',
+                $e->getMessage(),
+                400
+            );
         } catch (Throwable $e) {
             error_log('[vendguard] Fallo al exportar el registro de jornada: ' . $e);
 

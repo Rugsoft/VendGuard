@@ -27,26 +27,34 @@ use VendGuard\Presentation\Http\Response;
  */
 class InternalAuthMiddleware
 {
-    private ?UserRole $requiredRole;
+    /** @var list<UserRole> Roles admitidos; lista vacía = cualquier personal interno. */
+    private array $allowedRoles;
     private AuthService $authService;
     private UserRepositoryInterface $userRepo;
 
     /**
-     * @param UserRole|string|null $requiredRole Rol obligatorio para superar el middleware.
+     * @param UserRole|string|array<int, UserRole|string>|null $requiredRole Rol o roles que superan el middleware.
      * @param AuthService|null $authService
      * @param UserRepositoryInterface|null $userRepo
      * @param bool $allowInactive Permite usuarios inactivos (p. ej. volcado por baja de cuenta QA 5).
      */
     public function __construct(
-        UserRole|string|null $requiredRole = null,
+        UserRole|string|array|null $requiredRole = null,
         ?AuthService $authService = null,
         ?UserRepositoryInterface $userRepo = null,
         private readonly bool $allowInactive = false
     ) {
-        if (is_string($requiredRole)) {
-            $this->requiredRole = UserRole::fromString($requiredRole);
-        } else {
-            $this->requiredRole = $requiredRole;
+        $candidates = is_array($requiredRole) ? $requiredRole : [$requiredRole];
+        $this->allowedRoles = [];
+
+        foreach ($candidates as $candidate) {
+            $role = $candidate instanceof UserRole
+                ? $candidate
+                : (is_string($candidate) && trim($candidate) !== '' ? UserRole::fromString($candidate) : null);
+
+            if ($role !== null && !in_array($role, $this->allowedRoles, true)) {
+                $this->allowedRoles[] = $role;
+            }
         }
 
         $this->authService = $authService ?? new AuthService();
@@ -90,13 +98,20 @@ class InternalAuthMiddleware
         }
 
         // 4. Verificación de permisos según Rol (RBAC)
-        if ($this->requiredRole !== null && $user->getRole() !== $this->requiredRole) {
+        if ($this->allowedRoles !== [] && !in_array($user->getRole(), $this->allowedRoles, true)) {
+            $requiredLabels = array_map(
+                static fn (UserRole $role): string => $role->value,
+                $this->allowedRoles
+            );
+
+            // Una sola puerta conserva el código histórico `FORBIDDEN`; las rutas
+            // compartidas por varios roles publican el `FORBIDDEN_ROLE` del Módulo 31.
             return Response::error(
-                'FORBIDDEN',
-                "Acceso denegado: se requiere rol {$this->requiredRole->value} para acceder a este recurso.",
+                count($this->allowedRoles) === 1 ? 'FORBIDDEN' : 'FORBIDDEN_ROLE',
+                'Acceso denegado: se requiere rol ' . implode(' o ', $requiredLabels) . ' para acceder a este recurso.',
                 403,
                 [
-                    'required_role' => $this->requiredRole->value,
+                    'required_role' => implode('|', $requiredLabels),
                     'user_role' => $user->getRole()->value,
                 ]
             );

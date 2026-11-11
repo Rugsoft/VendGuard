@@ -9,6 +9,7 @@ use VendGuard\Presentation\Controller\CoordinatorRootCauseController;
 use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
 use VendGuard\Presentation\Controller\CoordinatorVanRestockOrderController;
 use VendGuard\Presentation\Controller\CoordinatorZoneController;
+use VendGuard\Presentation\Controller\RestockerRouteController;
 use VendGuard\Presentation\Controller\HealthController;
 use VendGuard\Presentation\Controller\LocationRefundController;
 use VendGuard\Presentation\Controller\PublicRefundController;
@@ -197,7 +198,10 @@ class AppRouter
         // Ausencias y turnos de técnicos (Módulo 21, T-ASH-07).
         // Las rutas estáticas (/absences) se registran ANTES de los segmentos dinámicos ({id}).
         $router->get('/api/coordinator/technicians/absences', [\VendGuard\Presentation\Controller\CoordinatorAbsenceController::class, 'listAbsences'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/absences', [\VendGuard\Presentation\Controller\CoordinatorAbsenceController::class, 'listAbsences'], [$coordinatorAuth]);
         $router->post('/api/coordinator/technicians/{id}/absences', [\VendGuard\Presentation\Controller\CoordinatorAbsenceController::class, 'createAbsence'], [$coordinatorAuth]);
+        // Alias del contrato del Módulo 31: el operario viaja en el cuerpo.
+        $router->post('/api/coordinator/absences', [\VendGuard\Presentation\Controller\CoordinatorAbsenceController::class, 'createAbsence'], [$coordinatorAuth]);
         $router->delete('/api/coordinator/absences/{id}', [\VendGuard\Presentation\Controller\CoordinatorAbsenceController::class, 'cancelAbsence'], [$coordinatorAuth]);
         $router->get('/api/coordinator/technicians/{id}/shift', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'getShift'], [$coordinatorAuth]);
         $router->post('/api/coordinator/technicians/{id}/shifts/force-close', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'forceClose'], [$coordinatorAuth]);
@@ -209,6 +213,16 @@ class AppRouter
 
         $router->get('/api/coordinator/zones/{id}/technicians', [CoordinatorZoneController::class, 'listZoneTechnicians'], [$coordinatorAuth]);
         $router->post('/api/coordinator/locations/{id}/override-zone', [CoordinatorZoneController::class, 'overrideLocationZone'], [$coordinatorAuth]);
+
+        // Cuadrante de Carga y cobertura en vivo (Módulo 31, RF-02 y RF-03).
+        // La consulta inversa es una ruta estática propia para que `{id}` no la
+        // capture; la cobertura se registra junto al cuadrante para que el panel
+        // resuelva zona, reponedores y recomendación con las mismas puertas.
+        $router->get('/api/coordinator/restockers/quadrants', [CoordinatorZoneController::class, 'listRestockerQuadrants'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/zones/{id}/restockers', [CoordinatorZoneController::class, 'listZoneRestockers'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/zones/{id}/restockers', [CoordinatorZoneController::class, 'assignRestocker'], [$coordinatorAuth]);
+        $router->delete('/api/coordinator/zones/{id}/restockers/{restocker_id}', [CoordinatorZoneController::class, 'removeRestocker'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/zones/{id}/restocker-coverage', [CoordinatorZoneController::class, 'restockerCoverage'], [$coordinatorAuth]);
 
         // Máquinas (Machines)
         $router->get('/api/coordinator/machines', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'listMachines'], [$coordinatorAuth]);
@@ -449,14 +463,35 @@ class AppRouter
         // Compañeros activos para el relevo: endpoint propio del técnico, sin exponer
         // el cuadrante interno de Coordinación ni datos de contacto.
         $router->get('/api/technician/handover-targets', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'handoverTargets'], [$technicianAuth]);
-        $router->get('/api/technician/shift/status', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'status'], [$technicianAuth]);
-        // Horas propias del técnico autenticado (Módulo 22, contrato §5.6, Art. V.4).
+        // Jornada compartida por los dos roles de campo (Módulo 31, D1, RF-04.2).
+        // Las rutas exclusivas del SAT —ruta, averías, repuestos, preventivos—
+        // siguen detrás de `$technicianAuth`, de modo que el reponedor recibe 403.
+        $fieldOperatorAuth = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware([
+            \VendGuard\Core\Domain\Model\UserRole::TECHNICIAN,
+            \VendGuard\Core\Domain\Model\UserRole::RESTOCKER,
+        ]);
+        $router->get('/api/technician/shift/status', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'status'], [$fieldOperatorAuth]);
+        $router->get('/api/technician/shifts/status', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'status'], [$fieldOperatorAuth]);
+        // Horas propias del operario autenticado (Módulo 22, contrato §5.6, Art. V.4).
         // El alcance sale del token; el Portal de Sede no tiene ruta equivalente.
-        $router->get('/api/technician/shift/my-hours', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'myHours'], [$technicianAuth]);
-        $router->post('/api/technician/shift/start', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'start'], [$technicianAuth]);
-        $router->post('/api/technician/shift/pause-meal', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'pauseMeal'], [$technicianAuth]);
-        $router->post('/api/technician/shift/resume', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'resume'], [$technicianAuth]);
+        $router->get('/api/technician/shift/my-hours', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'myHours'], [$fieldOperatorAuth]);
+        $router->get('/api/technician/shifts/my-hours', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'myHours'], [$fieldOperatorAuth]);
+        $router->post('/api/technician/shift/start', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'start'], [$fieldOperatorAuth]);
+        $router->post('/api/technician/shifts/start', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'start'], [$fieldOperatorAuth]);
+        $router->post('/api/technician/shift/pause-meal', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'pauseMeal'], [$fieldOperatorAuth]);
+        $router->post('/api/technician/shifts/meal-start', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'pauseMeal'], [$fieldOperatorAuth]);
+        $router->post('/api/technician/shift/resume', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'resume'], [$fieldOperatorAuth]);
+        $router->post('/api/technician/shifts/meal-end', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'resume'], [$fieldOperatorAuth]);
+        $router->post('/api/technician/shift/close', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'close'], [$fieldOperatorAuth]);
+        $router->post('/api/technician/shifts/close', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'close'], [$fieldOperatorAuth]);
         $router->post('/api/technician/shift/close-handover', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'closeAndHandover'], [$technicianAuth]);
+
+        // Bootstrap móvil del reponedor (`D1`, `RF-04.1`). Exclusivo RESTOCKER:
+        // Coordinación y el técnico SAT no alcanzan su cuadrante de carga.
+        $restockerAuth = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware(
+            \VendGuard\Core\Domain\Model\UserRole::RESTOCKER
+        );
+        $router->get('/api/restocker/my-route', [RestockerRouteController::class, 'myRoute'], [$restockerAuth]);
 
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)
