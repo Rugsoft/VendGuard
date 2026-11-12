@@ -74,7 +74,7 @@ flowchart LR
   - **Requisitos:** `RF-01` a `RF-05`, `D2`, `QA 2`, `Art. V.4`.
   - **Verificación:** `php tests/integration/ProductCatalogPlanogramApiTest.php`
 
-- [ ] **T-PLN-11 · Certificar suites de integración HTTP y blindaje constitucional (`ProductCatalogPlanogramApiTest.php` y `PlanogramConstitutionalTest.php`)**
+- [x] **T-PLN-11 · Certificar suites de integración HTTP y blindaje constitucional (`ProductCatalogPlanogramApiTest.php` y `PlanogramConstitutionalTest.php`)**
   - **Requisitos:** `RF-01` a `RF-05`, `D1`–`D3`, `C1`–`C3`, `QA 1`–`QA 4`, `Art. II`, `Art. III.1`, `Art. V.4`.
   - **Verificación:** `php tests/integration/ProductCatalogPlanogramApiTest.php && php tests/integration/PlanogramConstitutionalTest.php`
 
