@@ -21,8 +21,9 @@ declare(strict_types=1);
  *   8. El disparador anti-borrado físico rechaza cualquier `DELETE`.
  *
  * La suite crea una referencia `TEST-PLN-T6HOT`, carriles numéricos y `T6HOP`
- * en la máquina 2, y restaura cualquier fila semilla que toque (zona 7626,
- * asignación del reponedor 8319 y estado de la máquina 8) en el `finally`.
+ * en la máquina 2, y restaura cualquier fila semilla que toque (zona canónica
+ * `ZONA-BCN-CENTRO`, asignación del reponedor 8319 y estado de la máquina 8)
+ * en el `finally`. La zona se resuelve por código, nunca por un ID de secuencia.
  */
 
 require_once __DIR__ . '/../bootstrap.php';
@@ -45,12 +46,15 @@ $pdo = ConnectionFactory::getConnection();
 $repo = new PdoMachinePlanogramRepository($pdo);
 $productRepo = new PdoVendingProductRepository($pdo);
 
-const TEST_MACHINE_ID = 2;       // VEND-0102 · HOT_DRINKS · zona 7626
-const RESTOCKER_ONE_ZONE = 8319; // ZONA-BCN-CENTRO (7626)
+const TEST_MACHINE_ID = 2;       // VEND-0102 · HOT_DRINKS
+const RESTOCKER_ONE_ZONE = 8319; // Titular de ZONA-BCN-CENTRO
 const RESTOCKER_TWO_ZONES = 8320;
-const ZONE_BCN_CENTRO = 7626;
 
-$cleanup = static function (PDO $pdo): void {
+// La secuencia de `operational_zones` avanza con cada re-siembra: el vínculo
+// canónico es el código, tal como declara `supabase_seeds.sql`.
+$zoneId = (int)$pdo->query("SELECT id FROM operational_zones WHERE code = 'ZONA-BCN-CENTRO'")->fetchColumn();
+
+$cleanup = static function (PDO $pdo) use ($zoneId): void {
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo): void {
         $pdo->exec("
             DELETE FROM machine_planogram_slots
@@ -59,7 +63,7 @@ $cleanup = static function (PDO $pdo): void {
         $pdo->exec("DELETE FROM vending_products WHERE sku LIKE 'TEST-PLN-T6%'");
     });
 
-    $pdo->exec('UPDATE operational_zones SET is_active = TRUE WHERE id = ' . ZONE_BCN_CENTRO);
+    $pdo->exec('UPDATE operational_zones SET is_active = TRUE WHERE id = ' . $zoneId);
     $pdo->exec('UPDATE restocker_zone_assignments SET removed_at = NULL WHERE restocker_id = ' . RESTOCKER_ONE_ZONE);
     $pdo->exec('UPDATE machines SET is_active = TRUE WHERE id = 8');
 };
@@ -96,7 +100,7 @@ try {
         && $machine['model'] === 'Sanden Vendo G-Drink'
         && $machine['machine_type'] === MachineType::PERISHABLE_FOOD
         && $machine['site_code'] === 'SEDE-BCN-01'
-        && $machine['zone_id'] === ZONE_BCN_CENTRO
+        && $machine['zone_id'] === $zoneId
         && $machine['zone_code'] === 'ZONA-BCN-CENTRO',
         json_encode($machine)
     );
@@ -361,7 +365,7 @@ try {
             $oneZoneMachines,
             static fn (bool $carry, array $row): bool => $carry
                 && $row['zone_code'] === 'ZONA-BCN-CENTRO'
-                && $row['zone_id'] === ZONE_BCN_CENTRO,
+                && $row['zone_id'] === $zoneId,
             true
         )
     );
@@ -402,12 +406,12 @@ try {
     );
     $pdo->exec('UPDATE restocker_zone_assignments SET removed_at = NULL WHERE restocker_id = ' . RESTOCKER_ONE_ZONE);
 
-    $pdo->exec('UPDATE operational_zones SET is_active = FALSE WHERE id = ' . ZONE_BCN_CENTRO);
+    $pdo->exec('UPDATE operational_zones SET is_active = FALSE WHERE id = ' . $zoneId);
     $assert(
         '6.7 Una zona inactiva deja el perímetro vacío',
         $repo->findMachinesForRestocker(RESTOCKER_ONE_ZONE) === []
     );
-    $pdo->exec('UPDATE operational_zones SET is_active = TRUE WHERE id = ' . ZONE_BCN_CENTRO);
+    $pdo->exec('UPDATE operational_zones SET is_active = TRUE WHERE id = ' . $zoneId);
 
     $pdo->exec('UPDATE machines SET is_active = FALSE WHERE id = 8');
     $activeAfterMachineOff = array_column($repo->findMachinesForRestocker(RESTOCKER_ONE_ZONE), 'code');

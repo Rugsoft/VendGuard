@@ -2,7 +2,7 @@
 
 **Módulo:** `32-product-catalog-planogram`\
 **Versión:** 1.0 (Alineado con `spec.md` v2.0, `product_catalog_planogram_contracts.md` v1.0 y `plan.md` v1.0)\
-**Estado:** Aprobado por el Product Owner el 2026-11-12 · Puerta SDD cerrada · Listo para Ejecución de las Tareas `T-PLN-01` a `T-PLN-14` (Fase 3: tests y código)\
+**Estado:** Aprobado por el Product Owner el 2026-11-12 · Puerta SDD cerrada · Tareas `T-PLN-01` a `T-PLN-14` ejecutadas y certificadas (Fase 7: cierre y batería global)\
 **Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño\
 **Ley Suprema:** [`constitution.md`](../../constitution.md), [`AGENTS.md`](../../AGENTS.md) y [`docs/design.md`](../../docs/design.md)
 
@@ -86,6 +86,6 @@ flowchart LR
   - **Requisitos:** `RF-05.2`, `RNF-03`, `D2`, `QA 2`, `Art. V.4`.
   - **Verificación:** `node tests/frontend/restocker_route_view.test.mjs`
 
-- [ ] **T-PLN-14 · Ejecutar batería global (`php tests/run_all.php`), sincronizar `DocMetricsGuard`, generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
+- [x] **T-PLN-14 · Ejecutar batería global (`php tests/run_all.php`), sincronizar `DocMetricsGuard`, generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
   - **Requisitos:** `DoD 1`–`DoD 5`.
   - **Verificación:** `php tests/run_all.php`
