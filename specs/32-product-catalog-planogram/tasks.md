@@ -58,7 +58,7 @@ flowchart LR
   - **Requisitos:** `RF-02.1`–`RF-02.3`, `RF-05.2`, `C1`, `C2`, `QA 2`, `QA 3`, `Art. III.1`.
   - **Verificación:** `php tests/integration/PdoMachinePlanogramRepositoryTest.php`
 
-- [ ] **T-PLN-07 · Implementar `VendingProductService` (CRUD catálogo, `sku` inmutable `C1`, bloqueo inverso `D3` y auditoría `VENDING_PRODUCT`)**
+- [x] **T-PLN-07 · Implementar `VendingProductService` (CRUD catálogo, `sku` inmutable `C1`, bloqueo inverso `D3` y auditoría `VENDING_PRODUCT`)**
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `RF-03.2`, `C1`–`C3`, `D3`, `QA 1`, `Art. II`, `Art. III.3`.
   - **Verificación:** `php tests/unit/VendingProductServiceTest.php`
 
