@@ -340,6 +340,26 @@ export const CoordinatorPlanogramTab = {
       return Number(product.sale_price_eur || 0) - Number(product.unit_cost_eur || 0);
     },
 
+    hasUnitSalePrice(product) {
+      const salePrice = Number(product.sale_price_eur);
+      return Number.isFinite(salePrice) && salePrice > 0;
+    },
+
+    productMarginLabel(product) {
+      return this.hasUnitSalePrice(product) ? this.formatMoney(this.productMargin(product)) : 'No aplica';
+    },
+
+    productMarginStyle(product) {
+      if (!this.hasUnitSalePrice(product)) {
+        return { color: 'var(--color-ink-muted)' };
+      }
+      return {
+        color: this.productMargin(product) < 0
+          ? 'var(--color-error-text)'
+          : 'var(--color-success-text)'
+      };
+    },
+
     stockStatusLabel(status) {
       return STOCK_STATUS_LABELS[status] || status || '—';
     },
@@ -724,7 +744,7 @@ export const CoordinatorPlanogramTab = {
                 <td>{{ categoryLabel(product.category) }}<br><span style="color: var(--color-ink-muted);">{{ unitTypeLabel(product.unit_type) }}</span></td>
                 <td style="white-space: nowrap;">{{ formatMoney(product.unit_cost_eur) }}</td>
                 <td style="white-space: nowrap;">{{ formatMoney(product.sale_price_eur) }}</td>
-                <td style="white-space: nowrap; color: var(--color-success-text);">{{ formatMoney(productMargin(product)) }}</td>
+                <td style="white-space: nowrap;" :style="productMarginStyle(product)">{{ productMarginLabel(product) }}</td>
                 <td>{{ product.active_slots_count ?? 0 }}</td>
                 <td>
                   <span

@@ -277,6 +277,26 @@ async function runTests() {
     return filtered.length === 1 && filtered[0].sku === 'CAFE-GRANO-1K';
   })());
   assert('1.7 El margen publicado se usa tal cual', component.productMargin(products[0]) === 1.25);
+  assert(
+    '1.7a Un PVP 0 muestra No aplica en tono neutro',
+    component.productMarginLabel(products[2]) === 'No aplica'
+    && component.productMarginStyle(products[2]).color === 'var(--color-ink-muted)'
+  );
+  const lossProduct = { ...products[1], unit_cost_eur: 2, sale_price_eur: 1, unit_margin_eur: -1 };
+  assert(
+    '1.7b Un margen negativo no usa el color de éxito',
+    component.productMarginLabel(lossProduct) === '-1.00 €'
+    && component.productMarginStyle(lossProduct).color === 'var(--color-error-text)'
+  );
+  assert(
+    '1.7c La tabla usa la etiqueta y el estilo calculados del margen',
+    CoordinatorPlanogramTab.template.includes('{{ productMarginLabel(product) }}')
+    && CoordinatorPlanogramTab.template.includes(':style="productMarginStyle(product)"')
+  );
+  assert(
+    '1.7d Un margen positivo conserva el color de éxito',
+    component.productMarginStyle(products[0]).color === 'var(--color-success-text)'
+  );
   assert('1.8 Las categorías del formulario cubren las cinco del dominio', PRODUCT_CATEGORIES.length === 5 && component.categoryLabel('SNACK') === 'Snack y sólido');
 
   // ─────────────────────────────────────────────────────────────────────
