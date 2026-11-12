@@ -909,7 +909,7 @@ export const RestockerRouteView = {
                   <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
                     <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-surface-1); color: var(--color-slate);">{{ categoryLabel(slot.product_category) }} · {{ unitTypeLabel(slot.product_unit_type) }}</span>
                     <span v-if="slot.requires_cold_chain" style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-info-bg); color: var(--color-info-text);">❄️ Frío</span>
-                    <span v-if="slot.product_is_active === false" style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-error-bg); color: var(--color-error-text);">⚠️ Sustituir</span>
+                    <span v-if="slot.product_is_active === false" style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-error-bg); color: var(--color-error-text);">⚠️ Producto dado de baja (Sustituir)</span>
                   </div>
 
                   <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin-top: 8px;">

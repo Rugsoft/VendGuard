@@ -7,9 +7,9 @@
 **Referencias:** [`spec.md`](../specs/32-product-catalog-planogram/spec.md) v2.0 · [`product_catalog_planogram_spec.md`](../specs/functional/product_catalog_planogram_spec.md) · [`product_catalog_planogram_contracts.md`](../specs/technical/product_catalog_planogram_contracts.md) · [`design.md`](design.md) · [`tasks.md`](../specs/32-product-catalog-planogram/tasks.md) · [`traceability-matrix.md`](../specs/32-product-catalog-planogram/traceability-matrix.md)\
 **Fecha de la revisión:** 2026-11-12\
 **Alcance:** revisión de solo lectura de `RF-01`–`RF-05`, criterios EARS, `RNF-01`–`RNF-03`, Sistema de Diseño, casos límite §6, decisiones `D1`–`D3`, invariantes `C1`–`C3`, resoluciones `QA 1`–`QA 4`, los 5 criterios de Definition of Done y las 14 tareas `T-PLN-01`–`T-PLN-14`.\
-**Resultado:** **la Spec 32 sigue sin estar cumplida al 100 %**, pero ya no quedan bloqueantes funcionales ni contractuales abiertos. De las **7 brechas** detectadas, **H-01, H-02 y H-04 están resueltas**; permanecen **cuatro desviaciones menores** de copy y documentación (H-03, H-05, H-06 y H-07).
+**Resultado:** **la Spec 32 sigue sin estar cumplida al 100 %**, pero ya no quedan bloqueantes funcionales ni contractuales abiertos. De las **7 brechas** detectadas, **H-01, H-02, H-03 y H-04 están resueltas**; permanecen **tres desviaciones menores** de documentación (H-05, H-06 y H-07).
 
-**Última actualización:** 2026-11-12 · H-01, H-02 y H-04 resueltos y certificados.
+**Última actualización:** 2026-11-12 · H-01, H-02, H-03 y H-04 resueltos y certificados.
 
 > Este documento es un acta viva de hallazgos: registra la evidencia y el estado de resolución, sin sustituir a la Spec ni a los tests.
 
@@ -21,15 +21,15 @@ La implementación del catálogo, la matriz de planogramas, el cerrojo sanitario
 
 ```text
 php tests/run_all.php
-420 suites · 15.667 aserciones · 0 fallos
+420 suites · 15.669 aserciones · 0 fallos
 Cifras documentadas: COHERENTES
 RESULTADO: 100% EN VERDE
 exit=0
 ```
 
-Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. **H-01, H-02 y H-04 ya están corregidas y certificadas** (commits `b382ca1` y `957d8dc`). El veredicto sigue sin ser 100 % porque quedan H-03 (copy) y H-05/H-06/H-07 (referencias, contrato y mensajes), todas desviaciones menores sin impacto funcional.
+Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. **H-01, H-02, H-03 y H-04 ya están corregidas y certificadas.** El veredicto sigue sin ser 100 % porque quedan H-05/H-06/H-07 (referencias, contrato y mensajes), desviaciones menores sin impacto funcional.
 
-**Veredicto:** **NO al 100 %, pero sin hallazgos bloqueantes abiertos**: quedan cuatro desviaciones menores de copy y documentación.
+**Veredicto:** **NO al 100 %, pero sin hallazgos bloqueantes abiertos**: quedan tres desviaciones menores de documentación.
 
 ---
 
@@ -52,8 +52,8 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 | `tests/integration/PostgresSchemaTest.php` | **135/135**, exit 0 |
 | `tests/integration/PostgresConstitutionalTest.php` | **80/80**, exit 0 |
 | `tests/integration/OpportunisticSchemaCorrespondenceTest.php` | **32/32**, exit 0 |
-| `tests/frontend/coordinator_planogram_tab.test.mjs` | **37/37**, exit 0 |
-| `tests/frontend/restocker_route_view.test.mjs` | **81/81**, exit 0 |
+| `tests/frontend/coordinator_planogram_tab.test.mjs` | **38/38**, exit 0 |
+| `tests/frontend/restocker_route_view.test.mjs` | **82/82**, exit 0 |
 | `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` | **22/22**, exit 0 |
 | `tests/unit/LegacyButtonPaletteRetirementTest.mjs` | **18/18**, exit 0 |
 | `tests/unit/DesignTokenDebtRatchetTest.mjs` | **3/3**, exit 0 |
@@ -61,7 +61,7 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 | `tests/unit/MobileShellLayoutGuardTest.mjs` | **7/7**, exit 0 |
 | `tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs` | **45/45**, exit 0 |
 | `tests/unit/AuditEntityTypesTest.php` | **41/41**, exit 0 |
-| Batería global `php tests/run_all.php` | **420 suites · 15.667 aserciones · 0 fallos**, exit 0 |
+| Batería global `php tests/run_all.php` | **420 suites · 15.669 aserciones · 0 fallos**, exit 0 |
 
 ### 2.1. Nombres de suite solicitados que no existen
 
@@ -76,7 +76,7 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 | :--- | :--- | :---: | :---: |
 | **H-01** | Falta el estado sanitario en la tarjeta de máquina del reponedor | **Bloqueante** | Resuelto |
 | **H-02** | Falta `compatible_source_machines` en la respuesta del planograma de Coordinación | **Alta** | Resuelto |
-| **H-03** | Copy de la insignia de producto dado de baja no coincide con la Spec | **Baja** | Abierto |
+| **H-03** | Copy de la insignia de producto dado de baja no coincide con la Spec | **Baja** | Resuelto |
 | **H-04** | Cobertura de tests parcial en filtros y en la invariante de clonación fallida | **Media** | Resuelto |
 | **H-05** | Nombres de suite solicitados inexistentes o con extensión incorrecta | **Informativa** | Abierto |
 | **H-06** | El contrato técnico declara 27 tipos ENUM y el motor certifica 37 | **Baja documental** | Abierto |
@@ -98,7 +98,7 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 **Impacto original.** El reponedor no veía una cuarentena sanitaria en la tarjeta de la máquina. Es un dato operativo crítico del Art. II: podía abrir y reponer un equipo en cuarentena sin advertirlo.
 
-**Corrección aplicada.** La tarjeta muestra una insignia `Sanidad · …` con etiquetas para `OK`, `ATTENTION_REQUIRED`, `EXPIRED`, `QUARANTINE` y `SEASONAL_PAUSE`, estilos basados exclusivamente en tokens semánticos (`success`, `warning`, `error` y superficie neutra) y un fallback neutro. `restocker_route_view.test.mjs` certifica el `data-testid`, las etiquetas y los tokens; la suite pasó de 79 a **81/81**.
+**Corrección aplicada.** La tarjeta muestra una insignia `Sanidad · …` con etiquetas para `OK`, `ATTENTION_REQUIRED`, `EXPIRED`, `QUARANTINE` y `SEASONAL_PAUSE`, estilos basados exclusivamente en tokens semánticos (`success`, `warning`, `error` y superficie neutra) y un fallback neutro. `restocker_route_view.test.mjs` certifica el `data-testid`, las etiquetas y los tokens; la suite suma las aserciones de H-01 y H-03 y queda en **82/82**.
 
 ---
 
@@ -118,17 +118,19 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 ---
 
-### H-03 · Copy de la insignia de producto inactivo
+### H-03 · Copy canónico de la insignia de producto inactivo
 
-**Severidad:** Baja · **Requisito afectado:** `EARS 01.3.2`, `C1`, caso §6.5.
+**Severidad:** Baja · **Estado:** Resuelto · **Requisito afectado:** `EARS 01.3.2`, `C1`, caso §6.5.
 
 **Qué exige la Spec.** La insignia literal es **`⚠️ Producto dado de baja (Sustituir)`** ([`spec.md:146`](../specs/32-product-catalog-planogram/spec.md)).
 
-**Qué implementa el código.** [`CoordinatorPlanogramTab.js:833`](../public/assets/js/components/CoordinatorPlanogramTab.js) pinta `⚠️ Producto dado de baja`; [`RestockerRouteView.js:882`](../public/assets/js/components/RestockerRouteView.js) pinta `⚠️ Sustituir`.
+**Qué implementaba el código antes de la corrección.** [`CoordinatorPlanogramTab.js`](../public/assets/js/components/CoordinatorPlanogramTab.js) pintaba `⚠️ Producto dado de baja`; [`RestockerRouteView.js`](../public/assets/js/components/RestockerRouteView.js) pintaba `⚠️ Sustituir`.
 
-**Impacto.** El estado y la acción se comunican, pero no con el texto canónico. Es una desviación de copy, no de lógica.
+**Qué faltaba certificar.** Las suites comprobaban el estado `product_is_active`, pero no el literal canónico en ninguna de las dos superficies.
 
-**Corrección propuesta.** Unificar el texto exacto en ambas superficies y añadir una aserción de copy si se considera contrato visual.
+**Impacto original.** El estado y la acción se comunicaban, pero no con el texto canónico. Era una desviación de copy, no de lógica.
+
+**Corrección aplicada.** Ambas superficies muestran el literal **`⚠️ Producto dado de baja (Sustituir)`**. `coordinator_planogram_tab.test.mjs` lo certifica en 4.7 y `restocker_route_view.test.mjs` en su aserción de copy; las suites quedan en **38/38** y **82/82**.
 
 ---
 
@@ -144,7 +146,7 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 **Impacto original.** No se había demostrado una regresión funcional, pero estas invariantes podían romperse sin que la batería lo detectase.
 
-**Corrección aplicada.** La suite de Coordinación añade 3.7 (búsqueda por `Zona Norte`), la suite API añade 4.1b (`stock_alert_only=true` con comparación exacta de ids y mezcla de máquinas con y sin alerta) y el test unitario añade 5.5b (snapshot del destino antes/después del clon rechazado). Resultados: **37/37**, **30/30** y **35/35**.
+**Corrección aplicada.** La suite de Coordinación añade 3.7 (búsqueda por `Zona Norte`), la suite API añade 4.1b (`stock_alert_only=true` con comparación exacta de ids y mezcla de máquinas con y sin alerta) y el test unitario añade 5.5b (snapshot del destino antes/después del clon rechazado). Resultados actuales: **38/38**, **30/30** y **35/35**.
 
 ---
 
@@ -194,10 +196,10 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 | **1.** Tablas 42/43, tipos, `CHECK`, anti-borrado y entidades auditables | Schema 35/35 · Convergencia 29/29 · AuditEntityTypes 41/41 | ✅ |
 | **2.** CRUD con SKU inmutable, cotas, cerrojo inverso y contador | VendingProductService 32/32 · PdoVendingProduct 30/30 · API 30/30 | ✅ |
 | **3.** `UPSERT`, orden físico, semáforo, presets, clonación y QA 4 | MachinePlanogramService 35/35 · PdoMachinePlanogram 32/32 · AdminGuard 9/9 | ✅ |
-| **4.** Consola de Coordinación y consulta móvil sin costes | UI 37/37 + 81/81; **H-01 resuelto** y EARS 05.2.1 certificado | ✅ |
-| **5.** Batería global al 100 % | 420 suites · 15.667 aserciones · 0 fallos · exit 0 | ✅ |
+| **4.** Consola de Coordinación y consulta móvil sin costes | UI 38/38 + 82/82; **H-01 y H-03 resueltos** y EARS 05.2.1 certificado | ✅ |
+| **5.** Batería global al 100 % | 420 suites · 15.669 aserciones · 0 fallos · exit 0 | ✅ |
 
-**Las 14 tareas** `T-PLN-01`–`T-PLN-14` están completadas en `tasks.md` (14/14 `[x]`) y en `odd/tasks/product-catalog-planogram.md` (14/14 `✅ hecho`). H-01, H-02 y H-04 se detectaron después de marcar las tareas y ya están corregidas; el episodio confirma que el cierre de tareas no equivale por sí solo al cierre funcional de la Spec.
+**Las 14 tareas** `T-PLN-01`–`T-PLN-14` están completadas en `tasks.md` (14/14 `[x]`) y en `odd/tasks/product-catalog-planogram.md` (14/14 `✅ hecho`). H-01, H-02, H-03 y H-04 se detectaron después de marcar las tareas y ya están corregidas; el episodio confirma que el cierre de tareas no equivale por sí solo al cierre funcional de la Spec.
 
 ---
 
@@ -205,11 +207,10 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 El módulo tiene una base sólida: esquema convergente, cerrojo sanitario en dominio y PostgreSQL, `UPSERT` sin borrado físico, presets y clonación, segregación de costes y una batería global de 420 suites en verde.
 
-**H-01, H-02 y H-04 están cerrados y certificados**, y la batería global permanece en verde. La Spec 32 aún no puede declararse 100 % cumplida por cuatro desviaciones menores, sin bloqueantes funcionales:
+**H-01, H-02, H-03 y H-04 están cerrados y certificados**, y la batería global permanece en verde. La Spec 32 aún no puede declararse 100 % cumplida por tres desviaciones menores de documentación, sin bloqueantes funcionales:
 
-1. **H-03** · copy de la insignia de producto dado de baja.
-2. **H-05** · referencias a nombres de suite inexistentes.
-3. **H-06** · recuento de tipos ENUM desactualizado en el contrato.
-4. **H-07** · etiqueta «once columnas» para una tabla de diez.
+1. **H-05** · referencias a nombres de suite inexistentes.
+2. **H-06** · recuento de tipos ENUM desactualizado en el contrato.
+3. **H-07** · etiqueta «once columnas» para una tabla de diez.
 
-El siguiente cierre requiere resolver esas cuatro desviaciones y repetir la batería global; H-01, H-02 y H-04 ya no forman parte del bloqueo.
+El siguiente cierre requiere resolver esas tres desviaciones y repetir la batería global; H-01, H-02, H-03 y H-04 ya no forman parte del bloqueo.

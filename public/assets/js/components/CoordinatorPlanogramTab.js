@@ -830,7 +830,7 @@ export const CoordinatorPlanogramTab = {
                     <div style="font-weight: 600;">{{ slot.product_name }}</div>
                     <div style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ slot.product_sku }}</div>
                     <span v-if="slot.requires_cold_chain" style="font-size: var(--font-size-caption); color: var(--color-info-text);">❄️ Cadena de frío</span>
-                    <span v-if="slot.product_is_active === false" style="margin-left: 6px; font-size: var(--font-size-caption); color: var(--color-error-text);">⚠️ Producto dado de baja</span>
+                    <span v-if="slot.product_is_active === false" style="margin-left: 6px; font-size: var(--font-size-caption); color: var(--color-error-text);">⚠️ Producto dado de baja (Sustituir)</span>
                   </td>
                   <td>{{ categoryLabel(slot.category || slot.product_category) }}</td>
                   <td style="min-width: 150px;">

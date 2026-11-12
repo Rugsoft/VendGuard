@@ -423,6 +423,7 @@ assert('categoryLabel() y unitTypeLabel() traducen la referencia', routeVm.categ
 assert('slotFillPercent() respeta el porcentaje del servidor', routeVm.slotFillPercent(routeVm.planogramSlots[1]) === 30);
 assert('formatPrice() publica el PVP sin coste interno', routeVm.formatPrice(routeVm.planogramSlots[0].sale_price_eur) === '2.40 €');
 assert('El modal identifica el producto dado de baja para sustituirlo', routeVm.planogramSlots[1].product_is_active === false);
+assert('La insignia de baja usa el copy canónico', viewSource.includes('⚠️ Producto dado de baja (Sustituir)'));
 
 routeVm.closePlanogram();
 assert('Cerrar el modal limpia selección y planograma', routeVm.showPlanogramModal === false && routeVm.selectedMachine === null && routeVm.planogram === null);

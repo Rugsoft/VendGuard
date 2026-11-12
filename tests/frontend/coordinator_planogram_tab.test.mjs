@@ -403,6 +403,7 @@ async function runTests() {
   await component.submitClone();
   const cloneCall = calls.find((call) => call.method === 'clonePlanogram');
   assert('4.6 Clonar envía origen y modo de stock', Boolean(cloneCall) && cloneCall.sourceMachineId === 12 && cloneCall.mode === 'ZERO');
+  assert('4.7 La insignia de baja usa el copy canónico', CoordinatorPlanogramTab.template.includes('⚠️ Producto dado de baja (Sustituir)'));
 
   // ─────────────────────────────────────────────────────────────────────
   // 5. Integración en el panel y sistema de diseño
