@@ -7,9 +7,9 @@
 **Referencias:** [`spec.md`](../specs/32-product-catalog-planogram/spec.md) v2.0 · [`product_catalog_planogram_spec.md`](../specs/functional/product_catalog_planogram_spec.md) · [`product_catalog_planogram_contracts.md`](../specs/technical/product_catalog_planogram_contracts.md) · [`design.md`](design.md) · [`tasks.md`](../specs/32-product-catalog-planogram/tasks.md) · [`traceability-matrix.md`](../specs/32-product-catalog-planogram/traceability-matrix.md)\
 **Fecha de la revisión:** 2026-11-12\
 **Alcance:** revisión de solo lectura de `RF-01`–`RF-05`, criterios EARS, `RNF-01`–`RNF-03`, Sistema de Diseño, casos límite §6, decisiones `D1`–`D3`, invariantes `C1`–`C3`, resoluciones `QA 1`–`QA 4`, los 5 criterios de Definition of Done y las 14 tareas `T-PLN-01`–`T-PLN-14`.\
-**Resultado:** **la Spec 32 sigue sin estar cumplida al 100 %**, pero ya no quedan bloqueantes funcionales ni contractuales abiertos. De las **7 brechas** detectadas, **H-01, H-02, H-03, H-04, H-05 y H-06 están resueltas**; permanece **una desviación menor** de documentación (H-07).
+**Resultado:** **la Spec 32 está cumplida al 100 %**: las **7 brechas** detectadas están resueltas y no quedan bloqueantes funcionales, contractuales ni documentales abiertos.
 
-**Última actualización:** 2026-11-12 · H-01, H-02, H-03, H-04, H-05 y H-06 resueltos y certificados.
+**Última actualización:** 2026-11-12 · H-01 a H-07 resueltos y certificados.
 
 > Este documento es un acta viva de hallazgos: registra la evidencia y el estado de resolución, sin sustituir a la Spec ni a los tests.
 
@@ -27,9 +27,9 @@ RESULTADO: 100% EN VERDE
 exit=0
 ```
 
-Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. **H-01, H-02, H-03, H-04, H-05 y H-06 ya están corregidas y certificadas.** El veredicto sigue sin ser 100 % porque queda H-07 (mensajes), una desviación menor sin impacto funcional.
+Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. **H-01 a H-07 ya están corregidas y certificadas.**
 
-**Veredicto:** **NO al 100 %, pero sin hallazgos bloqueantes abiertos**: queda una desviación menor de documentación.
+**Veredicto:** **SÍ al 100 %**: no quedan desviaciones abiertas.
 
 ---
 
@@ -80,7 +80,7 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 | **H-04** | Cobertura de tests parcial en filtros y en la invariante de clonación fallida | **Media** | Resuelto |
 | **H-05** | Nombres de suite solicitados inexistentes o con extensión incorrecta | **Informativa** | Resuelto |
 | **H-06** | El contrato técnico fijaba 27 tipos ENUM y el motor certifica 37 | **Baja documental** | Resuelto |
-| **H-07** | Etiqueta «once columnas» para una tabla de diez columnas | **Informativa** | Abierto |
+| **H-07** | Etiqueta «once columnas» para una tabla de diez columnas | **Informativa** | Resuelto |
 
 ---
 
@@ -178,15 +178,17 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 ---
 
-### H-07 · Etiqueta «once columnas» para una tabla de diez
+### H-07 · Etiqueta de columnas corregida
 
-**Severidad:** Informativa · **Requisito afectado:** mensaje del test de esquema.
+**Severidad:** Informativa · **Estado:** Resuelto · **Requisito afectado:** mensaje del test de esquema.
 
-**Qué ocurre.** [`PostgresProductPlanogramSchemaTest.php:316`](../tests/integration/PostgresProductPlanogramSchemaTest.php) titula «La tabla declara sus once columnas canónicas», pero el array comparado contiene **diez** columnas y el DDL de la Tabla 43 también declara diez.
+**Qué ocurría.** [`PostgresProductPlanogramSchemaTest.php:316`](../tests/integration/PostgresProductPlanogramSchemaTest.php) titulaba «La tabla declara sus once columnas canónicas», pero el array comparado contenía **diez** columnas y el DDL de la Tabla 43 también declara diez.
 
-**Impacto.** El test pasa porque compara el array correcto; solo el mensaje está mal. Puede inducir a error al leer el reporte.
+**Impacto original.** El test pasaba porque comparaba el array correcto; solo el mensaje estaba mal y podía inducir a error al leer el reporte.
 
-**Corrección propuesta.** Cambiar «once» por «diez» en el título de la aserción.
+**Corrección aplicada.** El título de la aserción declara ahora «sus diez columnas canónicas en el orden del contrato».
+
+**Verificación.** `PostgresProductPlanogramSchemaTest` **35/35**, con `exit=0`, y la salida enumera las diez columnas de la Tabla 43.
 
 ---
 
@@ -194,13 +196,13 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 | DoD | Evidencia | Estado |
 | :--- | :--- | :---: |
-| **1.** Tablas 42/43, tipos, `CHECK`, anti-borrado y entidades auditables | Schema 35/35 · Convergencia 29/29 · AuditEntityTypes 41/41 | ✅ |
+| **1.** Tablas 42/43, tipos, `CHECK`, anti-borrado y entidades auditables | Schema 35/35 · Convergencia 30/30 · AuditEntityTypes 41/41 | ✅ |
 | **2.** CRUD con SKU inmutable, cotas, cerrojo inverso y contador | VendingProductService 32/32 · PdoVendingProduct 30/30 · API 30/30 | ✅ |
 | **3.** `UPSERT`, orden físico, semáforo, presets, clonación y QA 4 | MachinePlanogramService 35/35 · PdoMachinePlanogram 32/32 · AdminGuard 9/9 | ✅ |
 | **4.** Consola de Coordinación y consulta móvil sin costes | UI 38/38 + 82/82; **H-01 y H-03 resueltos** y EARS 05.2.1 certificado | ✅ |
 | **5.** Batería global al 100 % | 420 suites · 15.669 aserciones · 0 fallos · exit 0 | ✅ |
 
-**Las 14 tareas** `T-PLN-01`–`T-PLN-14` están completadas en `tasks.md` (14/14 `[x]`) y en `odd/tasks/product-catalog-planogram.md` (14/14 `✅ hecho`). H-01, H-02, H-03 y H-04 se detectaron después de marcar las tareas y ya están corregidas; el episodio confirma que el cierre de tareas no equivale por sí solo al cierre funcional de la Spec.
+**Las 14 tareas** `T-PLN-01`–`T-PLN-14` están completadas en `tasks.md` (14/14 `[x]`) y en `odd/tasks/product-catalog-planogram.md` (14/14 `✅ hecho`). Las siete brechas H-01–H-07 se detectaron después de marcar las tareas y ya están corregidas; el episodio confirma que el cierre de tareas no equivale por sí solo al cierre funcional de la Spec.
 
 ---
 
@@ -208,8 +210,6 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 El módulo tiene una base sólida: esquema convergente, cerrojo sanitario en dominio y PostgreSQL, `UPSERT` sin borrado físico, presets y clonación, segregación de costes y una batería global de 420 suites en verde.
 
-**H-01, H-02, H-03, H-04, H-05 y H-06 están cerrados y certificados**, y la batería global permanece en verde. La Spec 32 aún no puede declararse 100 % cumplida por una desviación menor de documentación, sin bloqueantes funcionales:
+**H-01 a H-07 están cerrados y certificados**, y la batería global permanece en verde. La Spec 32 queda **cumplida al 100 %**, sin bloqueantes funcionales ni desviaciones documentales abiertas.
 
-1. **H-07** · etiqueta «once columnas» para una tabla de diez.
-
-El siguiente cierre requiere resolver esa desviación y repetir la batería global; H-01, H-02, H-03, H-04, H-05 y H-06 ya no forman parte del bloqueo.
+El último ajuste corrigió la etiqueta de la Tabla 43 y `PostgresProductPlanogramSchemaTest` certifica **35/35** aserciones.

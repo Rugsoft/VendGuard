@@ -313,7 +313,7 @@ try {
 
     $slotColumns = PostgresFixtureBuilder::columns($pgPdo, 'machine_planogram_slots');
     $assert(
-        'La tabla declara sus once columnas canónicas en el orden del contrato',
+        'La tabla declara sus diez columnas canónicas en el orden del contrato',
         array_keys($slotColumns) === [
             'id', 'machine_id', 'slot_code', 'product_id', 'max_capacity',
             'current_estimated_qty', 'min_threshold', 'is_active', 'created_at', 'updated_at',
