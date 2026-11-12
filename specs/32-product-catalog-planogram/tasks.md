@@ -54,7 +54,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `RF-03.2`, `C1`, `D3`.
   - **Verificación:** `php tests/integration/PdoVendingProductRepositoryTest.php`
 
-- [ ] **T-PLN-06 · Implementar `PdoMachinePlanogramRepository` (`UPSERT` sin `DELETE`, ordenación física `QA 3`, resúmenes y filtrado por zonas de reponedor `QA 2`)**
+- [x] **T-PLN-06 · Implementar `PdoMachinePlanogramRepository` (`UPSERT` sin `DELETE`, ordenación física `QA 3`, resúmenes y filtrado por zonas de reponedor `QA 2`)**
   - **Requisitos:** `RF-02.1`–`RF-02.3`, `RF-05.2`, `C1`, `C2`, `QA 2`, `QA 3`, `Art. III.1`.
   - **Verificación:** `php tests/integration/PdoMachinePlanogramRepositoryTest.php`
 
