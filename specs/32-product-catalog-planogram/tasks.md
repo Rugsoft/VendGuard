@@ -42,7 +42,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-03.1`, `RF-03.2`, `RNF-01`, `RNF-02`, `QA 1`, `Art. II`, `Art. III.1`.
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresProductPlanogramSchemaTest.php`
 
-- [ ] **T-PLN-03 · Crear enums (`ProductCategory`, `ProductUnitType`, `SlotStockStatus`), entidades (`VendingProduct`, `MachinePlanogramSlot`) y `PlanogramCompatibilityValidator`**
+- [x] **T-PLN-03 · Crear enums (`ProductCategory`, `ProductUnitType`, `SlotStockStatus`), entidades (`VendingProduct`, `MachinePlanogramSlot`) y `PlanogramCompatibilityValidator`**
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-02.3`, `RF-03.1`, `D3`, `C2`, `QA 1`, `Art. II`.
   - **Verificación:** `php tests/unit/PlanogramCompatibilityValidatorTest.php`
 
