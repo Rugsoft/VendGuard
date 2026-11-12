@@ -362,6 +362,12 @@ async function runTests() {
     component.machineFilters.machine_type = '';
     return filtered.length === 1 && filtered[0].id === 11;
   })());
+  assert('3.7 El filtro por zona deja la máquina de la zona norte', (() => {
+    component.machineFilters.search = 'Zona Norte';
+    const filtered = component.filteredMachines;
+    component.machineFilters.search = '';
+    return filtered.length === 1 && filtered[0].id === 11;
+  })());
 
   // ─────────────────────────────────────────────────────────────────────
   // 4. Carriles, preset y clonación

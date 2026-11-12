@@ -783,6 +783,7 @@ $assert('5.4 Un origen sin productos activos devuelve SOURCE_PLANOGRAM_EMPTY', $
 
 // Origen con perecedero de frío hacia una máquina SNACKS.
 $planograms->upsertSlot(new MachinePlanogramSlot(null, 4, '12', (int)$sandwich->getId(), 10, 5, 3, true));
+$targetBefore = $planograms->findSlotsByMachine(2, true);
 $coldCloneCode = null;
 try {
     $service->clonePlanogram(2, 4);
@@ -790,6 +791,13 @@ try {
     $coldCloneCode = $exception->getErrorCode();
 }
 $assert('5.5 Clonar frío hacia SNACKS devuelve COLD_CHAIN_MACHINE_INCOMPATIBLE', $coldCloneCode === 'COLD_CHAIN_MACHINE_INCOMPATIBLE');
+$targetAfter = $planograms->findSlotsByMachine(2, true);
+$assert(
+    '5.5b La clonación rechazada conserva intacto el planograma destino',
+    $targetAfter === $targetBefore
+    && count($targetAfter) === 3
+    && array_column($targetAfter, 'slot_code') === ['11', '12', '21']
+);
 
 $sameMachine = false;
 try {

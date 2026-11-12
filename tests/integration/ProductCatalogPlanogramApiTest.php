@@ -389,6 +389,21 @@ try {
         throw new RuntimeException('El reponedor semilla no tiene máquinas en sus zonas vivas.');
     }
 
+    $stockAlertOnly = $call('GET', '/api/restocker/machines', ['stock_alert_only' => 'true'], [], $restockerToken);
+    $stockAlertData = $json($stockAlertOnly)['data']['machines'] ?? [];
+    $expectedAlertIds = [];
+    foreach ($routeMachinesData as $machine) {
+        if ((int)$machine['stockout_slots_count'] + (int)$machine['low_stock_slots_count'] > 0) {
+            $expectedAlertIds[] = (int)$machine['id'];
+        }
+    }
+    $assert(
+        '4.1b GET /api/restocker/machines?stock_alert_only=true devuelve sólo máquinas con alerta',
+        $stockAlertOnly->getStatusCode() === 200
+        && array_map('intval', array_column($stockAlertData, 'id')) === $expectedAlertIds
+        && count($expectedAlertIds) < count($routeMachinesData)
+    );
+
     $restockerMachineId = (int)$routeMachinesData[0]['id'];
     $restockerPlanogram = $call('GET', "/api/restocker/machines/{$restockerMachineId}/planogram", [], [], $restockerToken);
     $restockerBody = $json($restockerPlanogram);
