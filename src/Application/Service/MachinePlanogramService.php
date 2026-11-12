@@ -83,13 +83,14 @@ final class MachinePlanogramService
     /**
      * Lectura completa para Coordinación, con coste y margen por carril (D2).
      *
-     * @return array{machine: array<string, mixed>, summary: array<string, mixed>, slots: list<array<string, mixed>>}
+     * @return array{machine: array<string, mixed>, summary: array<string, mixed>, slots: list<array<string, mixed>>, compatible_source_machines: list<array<string, mixed>>}
      *
      * @throws MachineNotFoundException
      */
     public function getCoordinatorPlanogram(int $machineId): array
     {
         $machine = $this->requireMachine($machineId);
+        $machineType = $machine['machine_type'] ?? null;
         $slots = $this->enrichWithCommercialData(
             $this->planogramRepository->findSlotsByMachine($machineId, true)
         );
@@ -98,6 +99,9 @@ final class MachinePlanogramService
             'machine' => $machine,
             'summary' => $this->planogramRepository->summarize($machineId),
             'slots' => $slots,
+            'compatible_source_machines' => $machineType instanceof MachineType
+                ? $this->planogramRepository->findCompatibleSourceMachines($machineId, $machineType)
+                : [],
         ];
     }
 

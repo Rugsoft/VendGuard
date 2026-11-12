@@ -260,6 +260,11 @@ final class GuardPlanogramRepository implements MachinePlanogramRepositoryInterf
         return [];
     }
 
+    public function findCompatibleSourceMachines(int $machineId, MachineType $machineType): array
+    {
+        return [];
+    }
+
     public function findMachinesForRestocker(int $restockerId): array
     {
         return [];

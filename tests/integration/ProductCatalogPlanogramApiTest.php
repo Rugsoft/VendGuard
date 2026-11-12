@@ -278,6 +278,15 @@ try {
         && isset($planogramData['slots'][0]['unit_cost_eur'])
     );
 
+    $compatibleSources = $planogramData['compatible_source_machines'] ?? [];
+    $compatibleIds = array_map('intval', array_column($compatibleSources, 'id'));
+    $assert(
+        '3.3b GET devuelve las fuentes compatibles sin incluir la máquina actual',
+        in_array($machineB, $compatibleIds, true)
+        && !in_array($machineA, $compatibleIds, true)
+        && array_key_exists('active_slots_count', $compatibleSources[0] ?? [])
+    );
+
     $slotCode = 'T10A';
     $slotPayload = [
         'product_id' => $productId,

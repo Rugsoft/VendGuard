@@ -348,6 +348,30 @@ export const RestockerRouteView = {
       return labels[type] || type || '—';
     },
 
+    sanitaryStatusLabel(status) {
+      const labels = {
+        OK: 'Operativa y vigente',
+        ATTENTION_REQUIRED: 'Requiere atención',
+        EXPIRED: 'Inspección vencida',
+        QUARANTINE: 'Cuarentena sanitaria',
+        SEASONAL_PAUSE: 'Pausa estacional'
+      };
+      return labels[status] || 'Sin estado sanitario';
+    },
+
+    sanitaryStatusStyle(status) {
+      if (status === 'OK') {
+        return { backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success-text)' };
+      }
+      if (status === 'ATTENTION_REQUIRED') {
+        return { backgroundColor: 'var(--color-warning-bg)', color: 'var(--color-warning-text)' };
+      }
+      if (status === 'EXPIRED' || status === 'QUARANTINE') {
+        return { backgroundColor: 'var(--color-error-bg)', color: 'var(--color-error-text)' };
+      }
+      return { backgroundColor: 'var(--color-surface-1)', color: 'var(--color-ink-muted)' };
+    },
+
     categoryLabel(category) {
       const labels = {
         COLD_DRINK: 'Bebida fría',
@@ -767,6 +791,12 @@ export const RestockerRouteView = {
               </div>
 
               <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
+                <span
+                  data-testid="restocker-machine-sanitary-status"
+                  :data-sanitary-status="machine.sanitary_status || 'UNKNOWN'"
+                  :style="sanitaryStatusStyle(machine.sanitary_status)"
+                  style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive);"
+                >Sanidad · {{ sanitaryStatusLabel(machine.sanitary_status) }}</span>
                 <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-surface-1); color: var(--color-slate);">{{ machine.active_slots_count }} carriles</span>
                 <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-error-bg); color: var(--color-error-text);">{{ machine.stockout_slots_count }} agotados</span>
                 <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text);">{{ machine.low_stock_slots_count }} bajo umbral</span>

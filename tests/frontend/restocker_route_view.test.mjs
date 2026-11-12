@@ -442,6 +442,23 @@ const planogramModalSource = viewSource.slice(
 );
 assert('La vista declara el listado de máquinas de zona', viewSource.includes('data-testid="restocker-machines"') && viewSource.includes('data-testid="restocker-machine-card"'));
 assert('La tarjeta muestra resumen de agotados y bajo umbral', viewSource.includes('machine.stockout_slots_count') && viewSource.includes('machine.low_stock_slots_count'));
+assert(
+  'La tarjeta publica el estado sanitario y traduce sus valores',
+  viewSource.includes('data-testid="restocker-machine-sanitary-status"')
+    && viewSource.includes('machine.sanitary_status')
+    && routeVm.sanitaryStatusLabel('OK') === 'Operativa y vigente'
+    && routeVm.sanitaryStatusLabel('ATTENTION_REQUIRED') === 'Requiere atención'
+    && routeVm.sanitaryStatusLabel('QUARANTINE') === 'Cuarentena sanitaria'
+    && routeVm.sanitaryStatusLabel(null) === 'Sin estado sanitario'
+);
+assert(
+  'La insignia sanitaria usa exclusivamente tokens semánticos',
+  routeVm.sanitaryStatusStyle('OK').backgroundColor === 'var(--color-success-bg)'
+    && routeVm.sanitaryStatusStyle('ATTENTION_REQUIRED').color === 'var(--color-warning-text)'
+    && routeVm.sanitaryStatusStyle('EXPIRED').backgroundColor === 'var(--color-error-bg)'
+    && routeVm.sanitaryStatusStyle('QUARANTINE').color === 'var(--color-error-text)'
+    && routeVm.sanitaryStatusStyle('SEASONAL_PAUSE').backgroundColor === 'var(--color-surface-1)'
+);
 assert('La tarjeta abre el planograma con su acción', viewSource.includes('data-testid="btn-open-planogram"') && viewSource.includes('@click="openPlanogram(machine)"'));
 assert('El modal de planograma y sus carriles existen', viewSource.includes('data-testid="modal-restocker-planogram"') && viewSource.includes('data-testid="restocker-planogram-slot"'));
 assert('El modal se declara de solo lectura', planogramModalSource.includes('Solo lectura') && !/savePlanogram|deactivatePlanogram|applyPlanogram|clonePlanogram/.test(planogramModalSource));

@@ -345,6 +345,49 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
     /**
      * {@inheritdoc}
      */
+    public function findCompatibleSourceMachines(int $machineId, MachineType $machineType): array
+    {
+        if ($machineId <= 0) {
+            return [];
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT
+                m.id,
+                m.code,
+                m.model,
+                m.machine_type,
+                COUNT(s.id) AS active_slots_count
+            FROM machines m
+            LEFT JOIN machine_planogram_slots s
+                ON s.machine_id = m.id
+               AND s.is_active = TRUE
+            WHERE m.id <> :machine_id
+              AND m.machine_type::text = :machine_type
+              AND m.is_active = TRUE
+              AND m.deleted_at IS NULL
+            GROUP BY m.id, m.code, m.model, m.machine_type
+            ORDER BY m.code ASC
+        ");
+        $stmt->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
+        $stmt->bindValue(':machine_type', $machineType->value, PDO::PARAM_STR);
+        $stmt->execute();
+
+        return array_map(
+            static fn (array $row): array => [
+                'id' => (int)$row['id'],
+                'code' => (string)$row['code'],
+                'model' => (string)$row['model'],
+                'machine_type' => MachineType::from((string)$row['machine_type']),
+                'active_slots_count' => (int)$row['active_slots_count'],
+            ],
+            $stmt->fetchAll(PDO::FETCH_ASSOC)
+        );
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function findMachinesForRestocker(int $restockerId): array
     {
         if ($restockerId <= 0) {

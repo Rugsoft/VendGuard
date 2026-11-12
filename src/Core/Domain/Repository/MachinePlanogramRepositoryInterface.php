@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Core\Domain\Repository;
 
 use VendGuard\Core\Domain\Model\MachinePlanogramSlot;
+use VendGuard\Core\Domain\Model\MachineType;
 
 /**
  * MachinePlanogramRepositoryInterface
@@ -69,6 +70,16 @@ interface MachinePlanogramRepositoryInterface
      * @return array{active_slots_count: int, stockout_slots_count: int, low_stock_slots_count: int, ok_slots_count: int, inactive_product_slots_count: int, total_capacity: int, total_estimated_qty: int, fill_rate_percent: float}
      */
     public function summarize(int $machineId): array;
+
+    /**
+     * Máquinas activas compatibles para clonar el planograma de una máquina.
+     *
+     * Devuelve las máquinas de la misma tipología, excluyendo la propia, con el
+     * número de carriles activos (D1, RF-04).
+     *
+     * @return list<array{id: int, code: string, model: string, machine_type: MachineType, active_slots_count: int}>
+     */
+    public function findCompatibleSourceMachines(int $machineId, MachineType $machineType): array;
 
     /**
      * Máquinas activas de las zonas operativas vivas del reponedor, con el

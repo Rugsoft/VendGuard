@@ -313,6 +313,29 @@ final class InMemoryMachinePlanogramRepository implements MachinePlanogramReposi
         return $summary;
     }
 
+    public function findCompatibleSourceMachines(int $machineId, MachineType $machineType): array
+    {
+        $rows = [];
+        foreach ($this->machines as $machine) {
+            if ($machine['id'] === $machineId
+                || $machine['machine_type'] !== $machineType
+                || ($machine['is_active'] ?? true) === false) {
+                continue;
+            }
+
+            $rows[] = [
+                'id' => $machine['id'],
+                'code' => $machine['code'],
+                'model' => $machine['model'],
+                'machine_type' => $machine['machine_type'],
+                'active_slots_count' => count($this->findSlotsByMachine((int)$machine['id'], true)),
+            ];
+        }
+        usort($rows, static fn (array $a, array $b): int => strcmp($a['code'], $b['code']));
+
+        return $rows;
+    }
+
     public function findMachinesForRestocker(int $restockerId): array
     {
         $rows = [];
@@ -477,6 +500,13 @@ $planograms->machines = [
         'zone_id' => 200, 'zone_code' => 'ZONA-2', 'zone_name' => 'Zona Dos',
         'sanitary_status' => 'CERTIFIED', 'is_active' => true,
     ],
+    5 => [
+        'id' => 5, 'code' => 'T8-HOT-B', 'model' => 'Necta Korinto',
+        'machine_type' => MachineType::HOT_DRINKS,
+        'location_name' => 'Sede Cinco', 'site_code' => 'SEDE-5',
+        'zone_id' => 100, 'zone_code' => 'ZONA-1', 'zone_name' => 'Zona Uno',
+        'sanitary_status' => 'CERTIFIED', 'is_active' => true,
+    ],
 ];
 $planograms->restockerMachines = [10 => [1, 2]];
 
@@ -485,6 +515,7 @@ $planograms->upsertSlot(new MachinePlanogramSlot(null, 1, 'TUBE_CUPS', (int)$cup
 $planograms->upsertSlot(new MachinePlanogramSlot(null, 2, '11', (int)$snack->getId(), 16, 6, 5, true));
 $planograms->upsertSlot(new MachinePlanogramSlot(null, 2, '21', (int)$cola->getId(), 14, 10, 4, true));
 $planograms->upsertSlot(new MachinePlanogramSlot(null, 2, '12', (int)$inactiveSnack->getId(), 16, 2, 5, true));
+$planograms->upsertSlot(new MachinePlanogramSlot(null, 5, 'HOPPER_MILK', (int)$milk->getId(), 1000, 400, 200, true));
 $planograms->operations = [];
 
 $audit = new RecordingPlanogramAuditLogger();
@@ -520,6 +551,13 @@ try {
     $missingMachine = $exception->getErrorCode();
 }
 $assert('1.3 Una máquina inexistente devuelve MACHINE_NOT_FOUND', $missingMachine === 'MACHINE_NOT_FOUND');
+
+$compatibleSources = $coordinator['compatible_source_machines'];
+$assert(
+    '1.4 La lectura incluye fuentes compatibles de la misma tipología y excluye la propia',
+    array_column($compatibleSources, 'code') === ['T8-HOT-B']
+    && (int)$compatibleSources[0]['active_slots_count'] === 1
+);
 
 // =====================================================================
 // 2. Guardado del mapa completo y cerrojo directo
