@@ -236,6 +236,11 @@ export const CoordinatorPlanogramTab = {
       );
     }
   },
+  watch: {
+    filteredMachines: {
+      handler: 'syncMachineSelection'
+    }
+  },
   mounted() {
     this.loadProducts();
     this.loadMachines();
@@ -253,6 +258,24 @@ export const CoordinatorPlanogramTab = {
         this.productError = error.message || 'No se pudo cargar el catálogo de productos.';
       } finally {
         this.isLoadingProducts = false;
+      }
+    },
+
+    // Keeps the selected machine inside the filtered set. A single match is
+    // auto-selected; otherwise the stale planogram is cleared.
+    async syncMachineSelection() {
+      const filtered = this.filteredMachines;
+      const selectedId = String(this.selectedMachineId || '');
+
+      if (selectedId !== '' && filtered.some((machine) => String(machine.id) === selectedId)) {
+        return;
+      }
+      if (filtered.length === 1) {
+        await this.selectMachine(filtered[0].id);
+        return;
+      }
+      if (selectedId !== '') {
+        await this.selectMachine('');
       }
     },
 

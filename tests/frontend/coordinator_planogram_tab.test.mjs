@@ -369,6 +369,46 @@ async function runTests() {
     return filtered.length === 1 && filtered[0].id === 11;
   })());
 
+  component.machineFilters.search = 'VEND-0201';
+  await component.syncMachineSelection();
+  assert(
+    '3.8 Un único resultado se autoselecciona y carga su planograma',
+    String(component.selectedMachineId) === '11' && component.planogram?.machine?.id === 11
+  );
+
+  component.machineFilters.search = '';
+  await component.selectMachine(10);
+  component.machineFilters.search = 'Jofemar';
+  await component.syncMachineSelection();
+  assert(
+    '3.9 La máquina seleccionada se conserva si sigue en el filtro',
+    String(component.selectedMachineId) === '10' && component.planogram?.machine?.id === 10
+  );
+
+  component.machineFilters.search = 'VEND-0201';
+  await component.syncMachineSelection();
+  component.machineFilters.search = 'Jofemar';
+  await component.syncMachineSelection();
+  assert(
+    '3.10 Varios resultados sin la máquina activa limpian el planograma',
+    component.selectedMachineId === '' && component.planogram === null
+  );
+
+  await component.selectMachine(10);
+  component.machineFilters.search = 'NO-EXISTE';
+  await component.syncMachineSelection();
+  assert(
+    '3.11 Un filtro sin resultados limpia el planograma',
+    component.selectedMachineId === '' && component.planogram === null
+  );
+  assert(
+    '3.12 El componente observa el filtro de máquinas',
+    CoordinatorPlanogramTab.watch?.filteredMachines?.handler === 'syncMachineSelection'
+  );
+
+  component.machineFilters.search = '';
+  await component.selectMachine(10);
+
   // ─────────────────────────────────────────────────────────────────────
   // 4. Carriles, preset y clonación
   // ─────────────────────────────────────────────────────────────────────
