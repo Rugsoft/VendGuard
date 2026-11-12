@@ -86,7 +86,12 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   SANITARY_SPOILAGE_RECORD: 'Acta de Merma APPCC',
   // Entidad del Módulo 31: el cuadrante de carga se audita con tipo propio y el
   // filtro del visor necesita su etiqueta o perdería las filas del cuadrante.
-  RESTOCKER_ZONE: 'Cuadrante de Carga'
+  RESTOCKER_ZONE: 'Cuadrante de Carga',
+  // Entidades del Módulo 32: el catálogo comercial y la matriz de carriles se
+  // auditan con tipo propio; sin etiqueta, el filtro del visor perdería esas
+  // filas del historial de planogramas y productos.
+  VENDING_PRODUCT: 'Producto Comercial',
+  MACHINE_PLANOGRAM: 'Planograma por Máquina'
 });
 
 /**

@@ -2939,6 +2939,208 @@ class SeedRunner
         ];
     }
 
+    /**
+     * Catálogo maestro comercial y de consumibles (Módulo 32 · C3, `vending_products`).
+     *
+     * Las quince referencias cubren las cinco categorías del módulo: refrescos y
+     * zumos de venta directa, snacks, perecederos con cadena de frío obligatoria,
+     * ingredientes de tolva en gramos y consumibles de tira. El `sku` identifica la
+     * fila y no se refresca (C1); `is_active` tampoco, para que una resemilla no
+     * resucite una baja lógica decidida por Coordinación.
+     *
+     * @return int Número de productos procesados.
+     */
+    public function seedVendingProducts(): int
+    {
+        $sql = sprintf(
+            'INSERT INTO vending_products (
+                sku, name, category, unit_type, requires_cold_chain,
+                max_shelf_life_days, unit_cost_eur, sale_price_eur
+            ) VALUES (
+                :sku, :name, :category, :unit_type, :requires_cold_chain,
+                :max_shelf_life_days, :unit_cost_eur, :sale_price_eur
+            ) %s',
+            $this->dialect->upsertAssignments(['sku'], [
+                'name' => SqlDialectAdapter::PROPOSED_VALUE,
+                'category' => SqlDialectAdapter::PROPOSED_VALUE,
+                'unit_type' => SqlDialectAdapter::PROPOSED_VALUE,
+                'requires_cold_chain' => SqlDialectAdapter::PROPOSED_VALUE,
+                'max_shelf_life_days' => SqlDialectAdapter::PROPOSED_VALUE,
+                'unit_cost_eur' => SqlDialectAdapter::PROPOSED_VALUE,
+                'sale_price_eur' => SqlDialectAdapter::PROPOSED_VALUE,
+            ])
+        );
+
+        $stmt = $this->pdo->prepare($sql);
+        $count = 0;
+
+        foreach (self::canonicalVendingProductRows() as $product) {
+            $stmt->bindValue(':sku', $product['sku'], PDO::PARAM_STR);
+            $stmt->bindValue(':name', $product['name'], PDO::PARAM_STR);
+            $stmt->bindValue(':category', $product['category'], PDO::PARAM_STR);
+            $stmt->bindValue(':unit_type', $product['unit_type'], PDO::PARAM_STR);
+            $stmt->bindValue(':requires_cold_chain', $product['requires_cold_chain'], PDO::PARAM_BOOL);
+            $stmt->bindValue(
+                ':max_shelf_life_days',
+                $product['max_shelf_life_days'],
+                $product['max_shelf_life_days'] === null ? PDO::PARAM_NULL : PDO::PARAM_INT
+            );
+            $stmt->bindValue(':unit_cost_eur', $product['unit_cost_eur'], PDO::PARAM_STR);
+            $stmt->bindValue(':sale_price_eur', $product['sale_price_eur'], PDO::PARAM_STR);
+            $stmt->execute();
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
+     * Planograma de las trece máquinas sembradas (Módulo 32 · C3, `machine_planogram_slots`).
+     *
+     * Cada carril respeta la matriz `MachineType × ProductCategory` (D3): los
+     * perecederos solo caen en `PERISHABLE_FOOD` o `COMBO`, y las tolvas de café
+     * solo en máquinas de bebida caliente o combo. Se inserta **solo si no
+     * existe**: `current_estimated_qty` es existencia operativa y una resemilla no
+     * debe borrar el trabajo del reponedor ni reactivar un carril retirado (C1).
+     *
+     * @return int Número de carriles procesados.
+     */
+    public function seedMachinePlanograms(): int
+    {
+        $sql = sprintf(
+            "INSERT INTO machine_planogram_slots (
+                machine_id, slot_code, product_id, max_capacity,
+                current_estimated_qty, min_threshold, is_active
+            ) VALUES (
+                (SELECT id FROM machines WHERE code = :machine_code LIMIT 1),
+                :slot_code,
+                (SELECT id FROM vending_products WHERE sku = :sku LIMIT 1),
+                :max_capacity,
+                :current_estimated_qty,
+                :min_threshold,
+                %s
+            ) %s",
+            $this->dialect->booleanLiteral(true),
+            $this->dialect->upsertDoNothing(['machine_id', 'slot_code'])
+        );
+
+        $stmt = $this->pdo->prepare($sql);
+        $count = 0;
+
+        foreach (self::canonicalPlanogramSlotRows() as $slot) {
+            $stmt->bindValue(':machine_code', $slot['machine_code'], PDO::PARAM_STR);
+            $stmt->bindValue(':slot_code', $slot['slot_code'], PDO::PARAM_STR);
+            $stmt->bindValue(':sku', $slot['sku'], PDO::PARAM_STR);
+            $stmt->bindValue(':max_capacity', $slot['max_capacity'], PDO::PARAM_INT);
+            $stmt->bindValue(':current_estimated_qty', $slot['current_estimated_qty'], PDO::PARAM_INT);
+            $stmt->bindValue(':min_threshold', $slot['min_threshold'], PDO::PARAM_INT);
+            $stmt->execute();
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
+     * Catálogo canónico de productos comerciales y consumibles (Módulo 32 · C3).
+     *
+     * Los importes cruzan como cadena decimal para que el redondeo binario del
+     * flotante no altere un céntimo. La caducidad es `NULL` salvo cuando la
+     * cadena de frío la exige (`QA 1`).
+     *
+     * @return list<array{sku: string, name: string, category: string, unit_type: string, requires_cold_chain: bool, max_shelf_life_days: ?int, unit_cost_eur: string, sale_price_eur: string}>
+     */
+    private static function canonicalVendingProductRows(): array
+    {
+        return [
+            ['sku' => 'COLA-LATA-33', 'name' => 'Lata de Cola 33cl', 'category' => 'COLD_DRINK', 'unit_type' => 'UNIT', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '0.35', 'sale_price_eur' => '1.20'],
+            ['sku' => 'AGUA-MIN-50', 'name' => 'Agua Mineral Natural 50cl', 'category' => 'COLD_DRINK', 'unit_type' => 'UNIT', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '0.18', 'sale_price_eur' => '0.90'],
+            ['sku' => 'ZUMO-NAR-33', 'name' => 'Zumo de Naranja 33cl', 'category' => 'COLD_DRINK', 'unit_type' => 'UNIT', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '0.32', 'sale_price_eur' => '1.30'],
+            ['sku' => 'SNACK-PATAT-40', 'name' => 'Patatas Fritas Clásicas 40g', 'category' => 'SNACK', 'unit_type' => 'UNIT', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '0.42', 'sale_price_eur' => '1.10'],
+            ['sku' => 'SNACK-FRUTSEC-50', 'name' => 'Frutos Secos Tostados 50g', 'category' => 'SNACK', 'unit_type' => 'UNIT', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '0.55', 'sale_price_eur' => '1.40'],
+            ['sku' => 'BARRA-ENERG-45', 'name' => 'Barrita Energética de Cereales 45g', 'category' => 'SNACK', 'unit_type' => 'UNIT', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '0.48', 'sale_price_eur' => '1.30'],
+            ['sku' => 'SAND-MIXTO-01', 'name' => 'Sándwich Mixto Jamón y Queso Fresco', 'category' => 'PERISHABLE_FOOD', 'unit_type' => 'UNIT', 'requires_cold_chain' => true, 'max_shelf_life_days' => 5, 'unit_cost_eur' => '1.15', 'sale_price_eur' => '2.40'],
+            ['sku' => 'ENSALADA-CESAR', 'name' => 'Ensalada César Preparada 220g', 'category' => 'PERISHABLE_FOOD', 'unit_type' => 'UNIT', 'requires_cold_chain' => true, 'max_shelf_life_days' => 4, 'unit_cost_eur' => '1.95', 'sale_price_eur' => '3.60'],
+            ['sku' => 'YOGUR-NAT-125', 'name' => 'Yogur Natural Azucarado 125g', 'category' => 'PERISHABLE_FOOD', 'unit_type' => 'UNIT', 'requires_cold_chain' => true, 'max_shelf_life_days' => 20, 'unit_cost_eur' => '0.38', 'sale_price_eur' => '1.10'],
+            ['sku' => 'CAFE-GRANO-1K', 'name' => 'Café en Grano Natural 1kg', 'category' => 'HOT_BEVERAGE_INGREDIENT', 'unit_type' => 'GRAMS', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '9.80', 'sale_price_eur' => '0.00'],
+            ['sku' => 'LECHE-POLVO-1K', 'name' => 'Leche en Polvo Espumante 1kg', 'category' => 'HOT_BEVERAGE_INGREDIENT', 'unit_type' => 'GRAMS', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '6.40', 'sale_price_eur' => '0.00'],
+            ['sku' => 'CHOCO-SOLUBLE-1K', 'name' => 'Chocolate en Polvo Soluble 1kg', 'category' => 'HOT_BEVERAGE_INGREDIENT', 'unit_type' => 'GRAMS', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '5.10', 'sale_price_eur' => '0.00'],
+            ['sku' => 'AZUCAR-BLANCO-1K', 'name' => 'Azúcar Blanco 1kg', 'category' => 'HOT_BEVERAGE_INGREDIENT', 'unit_type' => 'GRAMS', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '1.20', 'sale_price_eur' => '0.00'],
+            ['sku' => 'VASOS-7OZ-TIRA', 'name' => 'Tira de Vasos de Cartón 7oz', 'category' => 'CUP_STIRRER_CONSUMABLE', 'unit_type' => 'SLEEVE', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '1.80', 'sale_price_eur' => '0.00'],
+            ['sku' => 'PALETINAS-MAD', 'name' => 'Paletinas Removedoras de Madera', 'category' => 'CUP_STIRRER_CONSUMABLE', 'unit_type' => 'SLEEVE', 'requires_cold_chain' => false, 'max_shelf_life_days' => null, 'unit_cost_eur' => '0.75', 'sale_price_eur' => '0.00'],
+        ];
+    }
+
+    /**
+     * Planograma canónico de las trece máquinas sembradas (Módulo 32 · C3).
+     *
+     * Los carriles numerados usan el orden físico de bandeja y las tolvas/tubos
+     * su código alfabético (`QA 3`). Un carril nace agotado (`VEND-0401.11`) y otro
+     * bajo umbral (`VEND-0501.13`) para que el semáforo sea demostrable.
+     *
+     * @return list<array{machine_code: string, slot_code: string, sku: string, max_capacity: int, current_estimated_qty: int, min_threshold: int}>
+     */
+    private static function canonicalPlanogramSlotRows(): array
+    {
+        return [
+            ['machine_code' => 'VEND-0101', 'slot_code' => '11', 'sku' => 'SAND-MIXTO-01', 'max_capacity' => 10, 'current_estimated_qty' => 4, 'min_threshold' => 3],
+            ['machine_code' => 'VEND-0101', 'slot_code' => '12', 'sku' => 'ENSALADA-CESAR', 'max_capacity' => 8, 'current_estimated_qty' => 0, 'min_threshold' => 2],
+            ['machine_code' => 'VEND-0101', 'slot_code' => '13', 'sku' => 'YOGUR-NAT-125', 'max_capacity' => 12, 'current_estimated_qty' => 5, 'min_threshold' => 4],
+            ['machine_code' => 'VEND-0101', 'slot_code' => '21', 'sku' => 'AGUA-MIN-50', 'max_capacity' => 12, 'current_estimated_qty' => 8, 'min_threshold' => 3],
+            ['machine_code' => 'VEND-0301', 'slot_code' => '11', 'sku' => 'SAND-MIXTO-01', 'max_capacity' => 10, 'current_estimated_qty' => 3, 'min_threshold' => 3],
+            ['machine_code' => 'VEND-0301', 'slot_code' => '12', 'sku' => 'ENSALADA-CESAR', 'max_capacity' => 8, 'current_estimated_qty' => 2, 'min_threshold' => 2],
+            ['machine_code' => 'VEND-0301', 'slot_code' => '13', 'sku' => 'YOGUR-NAT-125', 'max_capacity' => 12, 'current_estimated_qty' => 9, 'min_threshold' => 4],
+            ['machine_code' => 'VEND-0301', 'slot_code' => '21', 'sku' => 'AGUA-MIN-50', 'max_capacity' => 12, 'current_estimated_qty' => 6, 'min_threshold' => 3],
+            ['machine_code' => 'VEND-0701', 'slot_code' => '11', 'sku' => 'SAND-MIXTO-01', 'max_capacity' => 10, 'current_estimated_qty' => 7, 'min_threshold' => 3],
+            ['machine_code' => 'VEND-0701', 'slot_code' => '12', 'sku' => 'ENSALADA-CESAR', 'max_capacity' => 8, 'current_estimated_qty' => 0, 'min_threshold' => 2],
+            ['machine_code' => 'VEND-0701', 'slot_code' => '13', 'sku' => 'YOGUR-NAT-125', 'max_capacity' => 12, 'current_estimated_qty' => 4, 'min_threshold' => 4],
+            ['machine_code' => 'VEND-0701', 'slot_code' => '21', 'sku' => 'AGUA-MIN-50', 'max_capacity' => 12, 'current_estimated_qty' => 10, 'min_threshold' => 3],
+            ['machine_code' => 'VEND-0102', 'slot_code' => 'HOPPER_COFFEE', 'sku' => 'CAFE-GRANO-1K', 'max_capacity' => 2000, 'current_estimated_qty' => 1400, 'min_threshold' => 400],
+            ['machine_code' => 'VEND-0102', 'slot_code' => 'HOPPER_MILK', 'sku' => 'LECHE-POLVO-1K', 'max_capacity' => 1500, 'current_estimated_qty' => 900, 'min_threshold' => 300],
+            ['machine_code' => 'VEND-0102', 'slot_code' => 'HOPPER_SUGAR', 'sku' => 'AZUCAR-BLANCO-1K', 'max_capacity' => 1000, 'current_estimated_qty' => 700, 'min_threshold' => 200],
+            ['machine_code' => 'VEND-0102', 'slot_code' => 'TUBE_CUPS', 'sku' => 'VASOS-7OZ-TIRA', 'max_capacity' => 600, 'current_estimated_qty' => 420, 'min_threshold' => 150],
+            ['machine_code' => 'VEND-0302', 'slot_code' => 'HOPPER_COFFEE', 'sku' => 'CAFE-GRANO-1K', 'max_capacity' => 2000, 'current_estimated_qty' => 1800, 'min_threshold' => 400],
+            ['machine_code' => 'VEND-0302', 'slot_code' => 'HOPPER_MILK', 'sku' => 'LECHE-POLVO-1K', 'max_capacity' => 1500, 'current_estimated_qty' => 200, 'min_threshold' => 300],
+            ['machine_code' => 'VEND-0302', 'slot_code' => 'HOPPER_SUGAR', 'sku' => 'AZUCAR-BLANCO-1K', 'max_capacity' => 1000, 'current_estimated_qty' => 500, 'min_threshold' => 200],
+            ['machine_code' => 'VEND-0302', 'slot_code' => 'TUBE_CUPS', 'sku' => 'VASOS-7OZ-TIRA', 'max_capacity' => 600, 'current_estimated_qty' => 0, 'min_threshold' => 150],
+            ['machine_code' => 'VEND-0302', 'slot_code' => 'TUBE_STIRRERS', 'sku' => 'PALETINAS-MAD', 'max_capacity' => 400, 'current_estimated_qty' => 260, 'min_threshold' => 100],
+            ['machine_code' => 'VEND-0502', 'slot_code' => 'HOPPER_COFFEE', 'sku' => 'CAFE-GRANO-1K', 'max_capacity' => 2000, 'current_estimated_qty' => 1500, 'min_threshold' => 400],
+            ['machine_code' => 'VEND-0502', 'slot_code' => 'HOPPER_CHOCOLATE', 'sku' => 'CHOCO-SOLUBLE-1K', 'max_capacity' => 1200, 'current_estimated_qty' => 800, 'min_threshold' => 250],
+            ['machine_code' => 'VEND-0502', 'slot_code' => 'HOPPER_SUGAR', 'sku' => 'AZUCAR-BLANCO-1K', 'max_capacity' => 1000, 'current_estimated_qty' => 600, 'min_threshold' => 200],
+            ['machine_code' => 'VEND-0502', 'slot_code' => 'TUBE_CUPS', 'sku' => 'VASOS-7OZ-TIRA', 'max_capacity' => 600, 'current_estimated_qty' => 380, 'min_threshold' => 150],
+            ['machine_code' => 'VEND-0502', 'slot_code' => 'TUBE_STIRRERS', 'sku' => 'PALETINAS-MAD', 'max_capacity' => 400, 'current_estimated_qty' => 300, 'min_threshold' => 100],
+            ['machine_code' => 'VEND-1001', 'slot_code' => 'HOPPER_COFFEE', 'sku' => 'CAFE-GRANO-1K', 'max_capacity' => 2500, 'current_estimated_qty' => 2100, 'min_threshold' => 500],
+            ['machine_code' => 'VEND-1001', 'slot_code' => 'HOPPER_MILK', 'sku' => 'LECHE-POLVO-1K', 'max_capacity' => 1800, 'current_estimated_qty' => 1200, 'min_threshold' => 400],
+            ['machine_code' => 'VEND-1001', 'slot_code' => 'HOPPER_SUGAR', 'sku' => 'AZUCAR-BLANCO-1K', 'max_capacity' => 1200, 'current_estimated_qty' => 850, 'min_threshold' => 250],
+            ['machine_code' => 'VEND-1001', 'slot_code' => 'TUBE_CUPS', 'sku' => 'VASOS-7OZ-TIRA', 'max_capacity' => 800, 'current_estimated_qty' => 640, 'min_threshold' => 200],
+            ['machine_code' => 'VEND-0201', 'slot_code' => '11', 'sku' => 'SAND-MIXTO-01', 'max_capacity' => 10, 'current_estimated_qty' => 5, 'min_threshold' => 3],
+            ['machine_code' => 'VEND-0201', 'slot_code' => '21', 'sku' => 'SNACK-PATAT-40', 'max_capacity' => 14, 'current_estimated_qty' => 9, 'min_threshold' => 4],
+            ['machine_code' => 'VEND-0201', 'slot_code' => '31', 'sku' => 'COLA-LATA-33', 'max_capacity' => 14, 'current_estimated_qty' => 11, 'min_threshold' => 4],
+            ['machine_code' => 'VEND-0201', 'slot_code' => 'HOPPER_COFFEE', 'sku' => 'CAFE-GRANO-1K', 'max_capacity' => 2000, 'current_estimated_qty' => 1600, 'min_threshold' => 400],
+            ['machine_code' => 'VEND-0201', 'slot_code' => 'TUBE_CUPS', 'sku' => 'VASOS-7OZ-TIRA', 'max_capacity' => 600, 'current_estimated_qty' => 450, 'min_threshold' => 150],
+            ['machine_code' => 'VEND-0401', 'slot_code' => '11', 'sku' => 'SAND-MIXTO-01', 'max_capacity' => 10, 'current_estimated_qty' => 0, 'min_threshold' => 3],
+            ['machine_code' => 'VEND-0401', 'slot_code' => '21', 'sku' => 'SNACK-PATAT-40', 'max_capacity' => 14, 'current_estimated_qty' => 6, 'min_threshold' => 4],
+            ['machine_code' => 'VEND-0401', 'slot_code' => '31', 'sku' => 'COLA-LATA-33', 'max_capacity' => 14, 'current_estimated_qty' => 12, 'min_threshold' => 4],
+            ['machine_code' => 'VEND-0401', 'slot_code' => 'HOPPER_COFFEE', 'sku' => 'CAFE-GRANO-1K', 'max_capacity' => 2000, 'current_estimated_qty' => 1300, 'min_threshold' => 400],
+            ['machine_code' => 'VEND-0401', 'slot_code' => 'TUBE_CUPS', 'sku' => 'VASOS-7OZ-TIRA', 'max_capacity' => 600, 'current_estimated_qty' => 300, 'min_threshold' => 150],
+            ['machine_code' => 'VEND-0801', 'slot_code' => '11', 'sku' => 'SAND-MIXTO-01', 'max_capacity' => 10, 'current_estimated_qty' => 4, 'min_threshold' => 3],
+            ['machine_code' => 'VEND-0801', 'slot_code' => '21', 'sku' => 'SNACK-PATAT-40', 'max_capacity' => 14, 'current_estimated_qty' => 10, 'min_threshold' => 4],
+            ['machine_code' => 'VEND-0801', 'slot_code' => '31', 'sku' => 'COLA-LATA-33', 'max_capacity' => 14, 'current_estimated_qty' => 8, 'min_threshold' => 4],
+            ['machine_code' => 'VEND-0801', 'slot_code' => 'HOPPER_COFFEE', 'sku' => 'CAFE-GRANO-1K', 'max_capacity' => 2000, 'current_estimated_qty' => 1750, 'min_threshold' => 400],
+            ['machine_code' => 'VEND-0801', 'slot_code' => 'TUBE_CUPS', 'sku' => 'VASOS-7OZ-TIRA', 'max_capacity' => 600, 'current_estimated_qty' => 520, 'min_threshold' => 150],
+            ['machine_code' => 'VEND-0501', 'slot_code' => '11', 'sku' => 'SNACK-PATAT-40', 'max_capacity' => 16, 'current_estimated_qty' => 12, 'min_threshold' => 5],
+            ['machine_code' => 'VEND-0501', 'slot_code' => '12', 'sku' => 'BARRA-ENERG-45', 'max_capacity' => 16, 'current_estimated_qty' => 7, 'min_threshold' => 5],
+            ['machine_code' => 'VEND-0501', 'slot_code' => '13', 'sku' => 'SNACK-FRUTSEC-50', 'max_capacity' => 14, 'current_estimated_qty' => 4, 'min_threshold' => 5],
+            ['machine_code' => 'VEND-0501', 'slot_code' => '21', 'sku' => 'COLA-LATA-33', 'max_capacity' => 14, 'current_estimated_qty' => 9, 'min_threshold' => 4],
+            ['machine_code' => 'VEND-0601', 'slot_code' => '11', 'sku' => 'AGUA-MIN-50', 'max_capacity' => 18, 'current_estimated_qty' => 14, 'min_threshold' => 5],
+            ['machine_code' => 'VEND-0601', 'slot_code' => '12', 'sku' => 'COLA-LATA-33', 'max_capacity' => 18, 'current_estimated_qty' => 10, 'min_threshold' => 5],
+            ['machine_code' => 'VEND-0601', 'slot_code' => '13', 'sku' => 'ZUMO-NAR-33', 'max_capacity' => 16, 'current_estimated_qty' => 3, 'min_threshold' => 5],
+            ['machine_code' => 'VEND-0901', 'slot_code' => '11', 'sku' => 'AGUA-MIN-50', 'max_capacity' => 18, 'current_estimated_qty' => 16, 'min_threshold' => 5],
+            ['machine_code' => 'VEND-0901', 'slot_code' => '12', 'sku' => 'COLA-LATA-33', 'max_capacity' => 18, 'current_estimated_qty' => 12, 'min_threshold' => 5],
+            ['machine_code' => 'VEND-0901', 'slot_code' => '13', 'sku' => 'ZUMO-NAR-33', 'max_capacity' => 16, 'current_estimated_qty' => 8, 'min_threshold' => 5],
+        ];
+    }
+
     public function seedAll(string $defaultPassword = 'Password123!'): array
     {
         $this->pdo->beginTransaction();
@@ -2968,6 +3170,11 @@ class SeedRunner
             $checklistOrders = $this->seedPreventiveChecklistItems();
             $auditEvents = $this->seedPreventiveAuditTrail();
             $partsRes = $this->seedSpareParts();
+            // Catálogo comercial y planogramas del Módulo 32 (C3): las referencias
+            // entran antes que los carriles, que las resuelven por `sku`. El
+            // planograma se inserta solo si no existe, para no pisar existencias.
+            $vendingProductCount = $this->seedVendingProducts();
+            $planogramSlotCount = $this->seedMachinePlanograms();
             // Las guías de diagnóstico (Módulo 28) resuelven repuesto y causa por sus
             // códigos: entran cuando ambas maestras ya están sembradas. `Fas Perla`
             // queda sin guía a propósito para el indicador de cobertura (QA 1).
@@ -3012,6 +3219,8 @@ class SeedRunner
                 'preventive_audit_events' => $auditEvents,
                 'spare_parts' => $partsRes['parts'],
                 'spare_part_compatibilities' => $partsRes['compatibilities'],
+                'vending_products' => $vendingProductCount,
+                'machine_planogram_slots' => $planogramSlotCount,
                 'troubleshooting_guides' => $troubleshootingGuideCount,
                 'technician_van_stocks' => $vanStockCount,
                 'van_restock_orders' => $vanRestockOrderCount,

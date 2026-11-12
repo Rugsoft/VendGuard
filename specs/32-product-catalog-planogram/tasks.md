@@ -34,7 +34,7 @@ flowchart LR
 
 ## Detalle de Tareas
 
-- [ ] **T-PLN-01 · Crear migración `028_product_catalog_and_planogram_slots.sql`, converger `supabase_init.sql` y sembrar catálogo y planogramas en `supabase_seeds.sql` y `SeedRunner`**
+- [x] **T-PLN-01 · Crear migración `028_product_catalog_and_planogram_slots.sql`, converger `supabase_init.sql` y sembrar catálogo y planogramas en `supabase_seeds.sql` y `SeedRunner`**
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-03.1`, `RF-03.2`, `D1`, `D3`, `C1`–`C3`, `QA 1`, `Art. II`, `Art. III.1`.
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
 
