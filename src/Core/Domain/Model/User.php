@@ -32,6 +32,9 @@ class User implements ArrayAccess, JsonSerializable
      * esté roto.
      */
     private ?string $telegramChatId;
+
+    /** Código de operador único del personal de ruta (Módulo 31, EARS 01.1). */
+    private ?string $operatorCode;
     private ?string $createdAt;
     private ?string $updatedAt;
     private ?string $deletedAt;
@@ -48,7 +51,8 @@ class User implements ArrayAccess, JsonSerializable
         ?string $updatedAt = null,
         ?string $deletedAt = null,
         bool $isOnCall = false,
-        ?string $telegramChatId = null
+        ?string $telegramChatId = null,
+        ?string $operatorCode = null
     ) {
         $this->id = $id;
         $this->name = trim($name);
@@ -63,6 +67,8 @@ class User implements ArrayAccess, JsonSerializable
         $this->deletedAt = $deletedAt;
         $trimmedChatId = $telegramChatId !== null ? trim($telegramChatId) : null;
         $this->telegramChatId = $trimmedChatId !== null && $trimmedChatId !== '' ? $trimmedChatId : null;
+        $trimmedOperatorCode = $operatorCode !== null ? trim($operatorCode) : null;
+        $this->operatorCode = $trimmedOperatorCode !== null && $trimmedOperatorCode !== '' ? $trimmedOperatorCode : null;
     }
 
     /**
@@ -89,6 +95,9 @@ class User implements ArrayAccess, JsonSerializable
             (bool)($row['is_on_call'] ?? false),
             isset($row['telegram_chat_id']) && $row['telegram_chat_id'] !== null
                 ? (string)$row['telegram_chat_id']
+                : null,
+            isset($row['operator_code']) && $row['operator_code'] !== null
+                ? (string)$row['operator_code']
                 : null
         );
     }
@@ -121,6 +130,11 @@ class User implements ArrayAccess, JsonSerializable
     public function getPhone(): ?string
     {
         return $this->phone;
+    }
+
+    public function getOperatorCode(): ?string
+    {
+        return $this->operatorCode;
     }
 
     public function isOnCall(): bool
@@ -204,6 +218,7 @@ class User implements ArrayAccess, JsonSerializable
             'name' => $this->name,
             'email' => $this->email,
             'role' => $this->role->value,
+            'operator_code' => $this->operatorCode,
             'phone' => $this->phone,
             'is_active' => $this->isActive,
             'is_on_call' => $this->isOnCall,

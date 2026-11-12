@@ -24,6 +24,7 @@ import { store } from '../store.js';
 
 export const USER_ROLES = [
   { value: 'TECHNICIAN', label: 'Técnico de Ruta', badgeClass: 'bg-info text-dark' },
+  { value: 'RESTOCKER', label: 'Cargador / Reponedor de Ruta', badgeClass: 'bg-warning text-dark' },
   { value: 'COORDINATOR', label: 'Coordinador de Servicios', badgeClass: 'bg-primary' }
 ];
 
@@ -38,7 +39,7 @@ export const AdminUsersTab = {
 
       // Filtros
       filterStatus: 'all', // 'all' | 'active' | 'inactive'
-      filterRole: 'all',   // 'all' | 'TECHNICIAN' | 'COORDINATOR'
+      filterRole: 'all',   // 'all' | 'TECHNICIAN' | 'RESTOCKER' | 'COORDINATOR'
       searchQuery: '',
 
       // Modal Alta
@@ -47,6 +48,7 @@ export const AdminUsersTab = {
         name: '',
         email: '',
         role: 'TECHNICIAN',
+        operator_code: '',
         phone: '',
         telegram_chat_id: '',
         password: ''
@@ -62,6 +64,7 @@ export const AdminUsersTab = {
         email: '',
         role: '',
         role_label: '',
+        operator_code: '',
         phone: '',
         telegram_chat_id: ''
       },
@@ -141,6 +144,9 @@ export const AdminUsersTab = {
      */
     activeTechniciansCount() {
       return this.users.filter(u => u.is_active && u.role === 'TECHNICIAN').length;
+    },
+    activeRestockersCount() {
+      return this.users.filter(u => u.is_active && u.role === 'RESTOCKER').length;
     },
 
     /**
@@ -306,6 +312,7 @@ export const AdminUsersTab = {
         name: '',
         email: '',
         role: 'TECHNICIAN',
+        operator_code: '',
         phone: '',
         telegram_chat_id: '',
         password: ''
@@ -344,6 +351,15 @@ export const AdminUsersTab = {
       const passError = this.validatePassword(this.createForm.password);
       if (passError) this.createErrors.password = passError;
 
+      // El código de operador es la identidad visible del reponedor en ruta
+      // (`REP-01`): sin él, el cuadrante de carga no puede nombrarlo (RF-01.1).
+      if (this.createForm.role === 'RESTOCKER') {
+        const operatorCode = String(this.createForm.operator_code || '').trim().toUpperCase();
+        if (!/^[A-Z]{2,4}-\d{2,4}$/.test(operatorCode)) {
+          this.createErrors.operator_code = 'El código de operador debe tener el formato REP-01.';
+        }
+      }
+
       if (Object.keys(this.createErrors).length > 0) {
         return;
       }
@@ -354,6 +370,11 @@ export const AdminUsersTab = {
           name: this.createForm.name.trim(),
           email: this.createForm.email.trim().toLowerCase(),
           role: this.createForm.role,
+          operator_code: this.createForm.role === 'RESTOCKER'
+            ? String(this.createForm.operator_code || '').trim().toUpperCase()
+            : null,
+          // El reponedor nunca ostenta la guardia técnica 24/7 (Art. II, D3).
+          is_on_call: false,
           phone: this.createForm.phone ? this.createForm.phone.trim().replace(/\s+/g, '') : null,
           telegram_chat_id: this.createForm.role === 'TECHNICIAN' && this.createForm.telegram_chat_id
             ? this.createForm.telegram_chat_id.trim()
@@ -386,6 +407,7 @@ export const AdminUsersTab = {
         email: user.email,
         role: user.role,
         role_label: user.role_label || this.getRoleLabel(user.role),
+        operator_code: user.operator_code || '',
         phone: user.phone || '',
         telegram_chat_id: user.telegram_chat_id || ''
       };
@@ -704,6 +726,7 @@ export const AdminUsersTab = {
                 <select class="form-select form-select-sm" v-model="filterRole" @change="loadUsers">
                   <option value="all">Todos los roles</option>
                   <option value="TECHNICIAN">🧑‍🔧 Técnicos de Ruta</option>
+                  <option value="RESTOCKER">📦 Reponedores de Ruta</option>
                   <option value="COORDINATOR">📋 Coordinadores</option>
                 </select>
               </div>
@@ -716,6 +739,7 @@ export const AdminUsersTab = {
             <span class="text-success"><strong>Activos:</strong> {{ summaryMetrics.active }}</span>
             <span class="text-secondary"><strong>De Baja:</strong> {{ summaryMetrics.inactive }}</span>
             <span class="text-info text-dark"><strong>Técnicos:</strong> {{ summaryMetrics.technicians }}</span>
+            <span class="text-warning text-dark"><strong>Reponedores:</strong> {{ activeRestockersCount }}</span>
             <span class="text-primary"><strong>Coordinadores:</strong> {{ summaryMetrics.coordinators }}</span>
             <span class="text-warning"><strong>Averías Asignadas en Curso:</strong> {{ summaryMetrics.activeAssignedTroubles }}</span>
             <span :class="summaryMetrics.onCall > 0 ? 'text-success' : 'text-danger'">
@@ -767,6 +791,7 @@ export const AdminUsersTab = {
                     </div>
                     <div class="text-muted small">
                       <span>✉️ {{ u.email }}</span>
+                      <span v-if="u.operator_code" class="ms-2 font-monospace">🏷️ {{ u.operator_code }}</span>
                       <span v-if="u.phone" class="ms-2">📞 {{ u.phone }}</span>
                     </div>
                   </td>
@@ -958,9 +983,27 @@ export const AdminUsersTab = {
                     <label class="form-label small fw-bold">Rol Operativo <span class="text-danger">*</span></label>
                     <select class="form-select" v-model="createForm.role">
                       <option value="TECHNICIAN">🧑‍🔧 Técnico de Ruta</option>
+                      <option value="RESTOCKER">📦 Cargador / Reponedor de Ruta</option>
                       <option value="COORDINATOR">📋 Coordinador de Servicios</option>
                     </select>
                     <div class="form-text small">El rol es inmutable tras el alta para prevenir escaladas accidentales.</div>
+                  </div>
+
+                  <!-- Código de operador: obligatorio para el reponedor y visible
+                       en su cabecera móvil y en el cuadrante de carga. -->
+                  <div v-if="createForm.role === 'RESTOCKER'" class="col-md-6">
+                    <label class="form-label small fw-bold">Código de Operador <span class="text-danger">*</span></label>
+                    <input
+                      type="text"
+                      class="form-control font-monospace"
+                      :class="{'is-invalid': createErrors.operator_code}"
+                      v-model="createForm.operator_code"
+                      placeholder="Ej: REP-01"
+                      maxlength="12"
+                      data-testid="staff-operator-code"
+                    />
+                    <div v-if="createErrors.operator_code" class="invalid-feedback small">{{ createErrors.operator_code }}</div>
+                    <div class="form-text small">Identidad única del reponedor en su ruta móvil.</div>
                   </div>
 
                   <!-- Teléfono Móvil -->
@@ -1043,10 +1086,15 @@ export const AdminUsersTab = {
                   <input type="text" class="form-control font-monospace bg-light" :value="editForm.email" disabled />
                 </div>
 
-                <!-- Rol (Inmutable) -->
+                <!-- Rol (Inmutable): C1 impide cambiarlo tras el alta. -->
                 <div class="mb-3">
                   <label class="form-label small fw-bold">Rol Operativo (Inmutable)</label>
-                  <input type="text" class="form-control bg-light" :value="editForm.role_label" disabled />
+                  <input type="text" class="form-control bg-light" :value="editForm.role_label" disabled data-testid="staff-role-locked" />
+                </div>
+
+                <div v-if="editForm.operator_code" class="mb-3">
+                  <label class="form-label small fw-bold">Código de Operador (Inmutable)</label>
+                  <input type="text" class="form-control font-monospace bg-light" :value="editForm.operator_code" disabled />
                 </div>
 
                 <!-- Nombre Completo -->

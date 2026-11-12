@@ -120,7 +120,7 @@ if ($coordinatorId > 0) {
     $expectRejection(
         '2.2 Sólo un técnico de campo puede vincular un chat',
         fn () => $service->updateUser($coordinatorId, ['telegram_chat_id' => '123456789'], $actor),
-        'Sólo un técnico de campo'
+        'operario de campo'
     );
 }
 

@@ -125,19 +125,19 @@ $shiftRepo = new class($shiftStorage, $autoShiftId) implements TechnicianShiftRe
         return null;
     }
 
-    public function findShiftsByDateRange(string $fromDate, string $toDate, ?int $technicianId = null): array {
+    public function findShiftsByDateRange(string $fromDate, string $toDate, ?int $technicianId = null, ?string $role = null): array {
         return array_values($this->storage);
     }
 
-    public function findOrphanOpenShiftsBefore(string $beforeDate, ?int $technicianId = null): array {
+    public function findOrphanOpenShiftsBefore(string $beforeDate, ?int $technicianId = null, ?string $role = null): array {
         return [];
     }
 
-    public function getClosedInterventionMetricsByTechnician(DateTimeImmutable $from, DateTimeImmutable $to, ?int $technicianId = null): array {
+    public function getClosedInterventionMetricsByTechnician(DateTimeImmutable $from, DateTimeImmutable $to, ?int $technicianId = null, ?string $role = null): array {
         return [];
     }
 
-    public function getActiveShiftsMap(): array {
+    public function getActiveShiftsMap(?string $role = null): array {
         $res = [];
         foreach ($this->storage as $s) {
             if ($s->isOpen()) {
@@ -153,7 +153,7 @@ $absenceRepo = new class($activeAbsence) implements TechnicianAbsenceRepositoryI
     public function __construct(public ?TechnicianAbsence &$activeAbsence) {}
     public function create(int $technicianId, AbsenceReason $reason, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, ?string $notes, int $createdBy): TechnicianAbsence { throw new \Exception('unused'); }
     public function findById(int $id): ?TechnicianAbsence { return null; }
-    public function findAll(?int $technicianId = null, ?string $status = null): array { return []; }
+    public function findAll(?int $technicianId = null, ?string $status = null, ?string $role = null): array { return []; }
     public function findActiveAbsenceForTechnician(int $technicianId, ?DateTimeImmutable $referenceTime = null): ?TechnicianAbsence {
         return $this->activeAbsence;
     }

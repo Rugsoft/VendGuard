@@ -81,7 +81,7 @@ $absenceRepo = new class($absenceStorage, $autoId) implements TechnicianAbsenceR
         return $this->storage[$id] ?? null;
     }
 
-    public function findAll(?int $technicianId = null, ?string $status = null): array {
+    public function findAll(?int $technicianId = null, ?string $status = null, ?string $role = null): array {
         $res = [];
         $now = new DateTimeImmutable('now');
         foreach ($this->storage as $a) {

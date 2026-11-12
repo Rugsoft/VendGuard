@@ -14,6 +14,7 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
+use VendGuard\Infrastructure\Repository\PdoOperationalZoneRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
@@ -42,7 +43,8 @@ final class CoordinatorAbsenceController
                 new PdoAuditLogRepository($pdo),
                 new PdoTransactionManager($pdo),
                 $users,
-                new SuggestedTechniciansService()
+                new SuggestedTechniciansService(),
+                new PdoOperationalZoneRepository($pdo)
             );
         }
     }
@@ -51,11 +53,13 @@ final class CoordinatorAbsenceController
     {
         $techId = $request->getQuery('technician_id');
         $status = $request->getQuery('status');
+        $role = $request->getQuery('role');
 
         $parsedTechId = $techId !== null && is_numeric($techId) ? (int)$techId : null;
         $parsedStatus = $status !== null ? (string)$status : null;
+        $parsedRole = $role !== null ? (string)$role : null;
 
-        $dtos = $this->service->listAbsences($parsedTechId, $parsedStatus);
+        $dtos = $this->service->listAbsences($parsedTechId, $parsedStatus, $parsedRole);
         $data = array_map(static fn ($dto): array => $dto->toArray(), $dtos);
 
         return Response::json($data, 200);
@@ -63,7 +67,9 @@ final class CoordinatorAbsenceController
 
     public function createAbsence(Request $request): Response
     {
-        $rawId = $request->getRouteParam('id') ?? $request->getRouteParam('technician_id');
+        $rawId = $request->getRouteParam('id')
+            ?? $request->getRouteParam('technician_id')
+            ?? ($request->getParsedBody()['technician_id'] ?? null);
         if (!is_numeric($rawId)) {
             return Response::error('INVALID_TECHNICIAN_IDENTIFIER', 'Identificador de técnico no válido.', 400);
         }
@@ -94,6 +100,7 @@ final class CoordinatorAbsenceController
             return Response::json([
                 'absence' => $result['absence']->toArray(),
                 'affected_incidents' => $result['affected_incidents'],
+                'promoted_zones' => $result['promoted_zones'] ?? [],
             ], 201, 'Ausencia registrada correctamente.');
         } catch (UserNotFoundException $e) {
             return Response::error('TECHNICIAN_NOT_FOUND', $e->getMessage(), 404);

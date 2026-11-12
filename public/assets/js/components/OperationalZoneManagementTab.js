@@ -166,7 +166,19 @@ export const OperationalZoneManagementTab = {
       // Lectura inversa: «qué cubre este técnico» (RF-02.3).
       catalogView: 'zones', // 'zones' | 'technicians'
       technicianQuadrants: [],
-      isLoadingTechnicianQuadrants: false
+      isLoadingTechnicianQuadrants: false,
+
+      // Cuadrante de carga del reponedor (Módulo 31, RF-02.4, D3, QA 2)
+      restockerDirectory: [],
+      quadrantRestockers: [],
+      restockerForm: { restocker_id: '', is_primary: false },
+      restockerErrors: {},
+      restockerNotice: '',
+      restockerCoverage: null,
+      isLoadingRestockers: false,
+      isLoadingRestockerCoverage: false,
+      isSubmittingRestocker: false,
+      isRemovingRestockerId: null
     };
   },
   computed: {
@@ -333,6 +345,8 @@ export const OperationalZoneManagementTab = {
         + Number(zone.locations_count || 0)
         + Number(zone.primary_technicians_count || 0)
         + Number(zone.backup_technicians_count || 0)
+        + Number(zone.primary_restockers_count || 0)
+        + Number(zone.backup_restockers_count || 0)
       );
     },
 
@@ -708,11 +722,23 @@ export const OperationalZoneManagementTab = {
       this.primaryConflict = null;
       this.quadrantNotice = '';
       this.quadrantTechnicians = [];
+      this.restockerDirectory = [];
+      this.quadrantRestockers = [];
+      this.restockerForm = { restocker_id: '', is_primary: false };
+      this.restockerErrors = {};
+      this.restockerNotice = '';
+      this.restockerCoverage = null;
       this.showTechniciansModal = true;
 
-      // Dos lecturas independientes: el directorio para **vincular** y el cuadrante vivo
-      // para **nombrar** a quien ya cubre la zona (RF-02.3, QA 15).
-      await Promise.all([this.loadTechnicianDirectory(), this.loadZoneQuadrant(zone.id)]);
+      // El modal publica los dos cuadrantes de la zona: técnicos SAT (RF-02.3,
+      // QA 15) y cargadores de reposición (RF-02.4, D3, QA 2).
+      await Promise.all([
+        this.loadTechnicianDirectory(),
+        this.loadZoneQuadrant(zone.id),
+        this.loadRestockerDirectory(),
+        this.loadZoneRestockers(zone.id),
+        this.loadRestockerCoverage(zone.id)
+      ]);
     },
 
     /** Directorio de técnicos activos que alimenta el selector de alta. */
@@ -752,6 +778,12 @@ export const OperationalZoneManagementTab = {
       this.quadrantErrors = {};
       this.quadrantNotice = '';
       this.quadrantTechnicians = [];
+      this.restockerDirectory = [];
+      this.quadrantRestockers = [];
+      this.restockerForm = { restocker_id: '', is_primary: false };
+      this.restockerErrors = {};
+      this.restockerNotice = '';
+      this.restockerCoverage = null;
     },
 
     /**
@@ -798,6 +830,137 @@ export const OperationalZoneManagementTab = {
       }
 
       return parsed.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    },
+
+    // ─────────────────────────────────────────────────────────────────
+    // Cuadrante de carga (Módulo 31, RF-02.4, RF-03.2, D3)
+    // ─────────────────────────────────────────────────────────────────
+
+    /** Directorio de reponedores activos que alimenta el selector de carga. */
+    async loadRestockerDirectory() {
+      try {
+        const restockers = await api.admin.getUsers({ role: 'RESTOCKER', status: 'active' });
+        this.restockerDirectory = Array.isArray(restockers) ? restockers : [];
+      } catch (error) {
+        this.restockerErrors.general = error?.message || 'No se pudo cargar el directorio de reponedores.';
+      }
+    },
+
+    async loadZoneRestockers(zoneId) {
+      this.isLoadingRestockers = true;
+      try {
+        const data = (await api.get(`/coordinator/zones/${zoneId}/restockers`)) || {};
+        this.quadrantRestockers = Array.isArray(data.restockers) ? data.restockers : [];
+      } catch (error) {
+        this.restockerErrors.general = error?.message || 'No se pudo cargar el cuadrante de carga.';
+      } finally {
+        this.isLoadingRestockers = false;
+      }
+    },
+
+    /** Cobertura en vivo de la zona, con la promoción automática del suplente. */
+    async loadRestockerCoverage(zoneId) {
+      this.isLoadingRestockerCoverage = true;
+      try {
+        const data = (await api.get(`/coordinator/zones/${zoneId}/restocker-coverage`)) || {};
+        this.restockerCoverage = data && typeof data === 'object' ? data : null;
+      } catch (error) {
+        this.restockerCoverage = null;
+      } finally {
+        this.isLoadingRestockerCoverage = false;
+      }
+    },
+
+    /** Etiqueta semántica en castellano para el estado de cobertura de carga. */
+    restockerCoverageLabel(status) {
+      const labels = {
+        'COVERED_BY_PRIMARY': 'Titular en turno activo',
+        'COVERED_BY_PROMOTED_BACKUP': 'Suplente en cobertura activa',
+        'UNCOVERED': 'Sin cobertura activa',
+        'SIN_COBERTURA': 'Sin cobertura activa',
+      };
+      return labels[status] || status || 'Sin cobertura activa';
+    },
+
+    /** Clase de chip semántico según el estado de cobertura de carga. */
+    restockerCoverageChipClass(status) {
+      if (status === 'COVERED_BY_PRIMARY' || status === 'COVERED_BY_PROMOTED_BACKUP') {
+        return 'vg-chip-success';
+      }
+      return 'vg-chip-warning';
+    },
+
+    /**
+     * Alta o cambio de rol en el cuadrante de carga. La titularidad única se
+     * resuelve en el servidor: si el reponedor ya es PRIMARY de otra zona, la
+     * interfaz pide confirmación explícita antes de degradar al anterior.
+     */
+    async submitRestockerAssignment(confirmPrimaryTransfer = false) {
+      this.restockerErrors = {};
+      this.restockerNotice = '';
+      if (this.quadrantZone === null) return;
+
+      const restockerId = Number(this.restockerForm.restocker_id);
+      if (!Number.isInteger(restockerId) || restockerId <= 0) {
+        this.restockerErrors.restocker_id = 'Seleccione un reponedor del directorio.';
+        return;
+      }
+
+      this.isSubmittingRestocker = true;
+      try {
+        const body = {
+          restocker_id: restockerId,
+          is_primary: this.restockerForm.is_primary === true
+        };
+        if (confirmPrimaryTransfer) {
+          body.confirm_primary_transfer = true;
+        }
+
+        await api.post(`/coordinator/zones/${this.quadrantZone.id}/restockers`, body);
+        const role = this.restockerForm.is_primary ? 'titular' : 'suplente';
+        this.restockerNotice = `Reponedor vinculado como ${role} de «${this.quadrantZone.name}».`;
+        const zoneId = this.quadrantZone.id;
+        this.restockerForm = { restocker_id: '', is_primary: false };
+        await this.loadZones();
+        await this.loadZoneRestockers(zoneId);
+        await this.loadRestockerCoverage(zoneId);
+      } catch (error) {
+        if (error?.code === 'PRIMARY_ZONE_ALREADY_ASSIGNED') {
+          this.restockerErrors.primary = 'Ese reponedor ya es titular de otra zona. Confirme el traslado para degradar la titularidad anterior.';
+          this.restockerErrors.requiresConfirmation = true;
+        } else if (error?.code === 'INVALID_RESTOCKER_USER') {
+          this.restockerErrors.restocker_id = error.message || 'El usuario no es un reponedor activo.';
+        } else {
+          this.restockerErrors.general = error?.message || 'No se pudo vincular al reponedor.';
+        }
+      } finally {
+        this.isSubmittingRestocker = false;
+      }
+    },
+
+    async confirmRestockerPrimaryTransfer() {
+      await this.submitRestockerAssignment(true);
+    },
+
+    /** Retirada lógica: conserva la fila y su histórico (Art. III.1, QA 4). */
+    async removeRestockerFromQuadrant(restockerId) {
+      if (this.quadrantZone === null) return;
+
+      this.isRemovingRestockerId = restockerId;
+      this.restockerErrors = {};
+      this.restockerNotice = '';
+      try {
+        const zoneId = this.quadrantZone.id;
+        await api.delete(`/coordinator/zones/${zoneId}/restockers/${restockerId}`);
+        this.restockerNotice = 'Reponedor retirado del cuadrante de carga. Su histórico se conserva.';
+        await this.loadZones();
+        await this.loadZoneRestockers(zoneId);
+        await this.loadRestockerCoverage(zoneId);
+      } catch (error) {
+        this.restockerErrors.general = error?.message || 'No se pudo retirar al reponedor.';
+      } finally {
+        this.isRemovingRestockerId = null;
+      }
     },
 
     async submitQuadrantAssignment(confirmPrimaryOverride = false) {
@@ -1049,6 +1212,7 @@ export const OperationalZoneManagementTab = {
                 </span>
                 <span class="vg-chip" :title="quadrantSummary(zone)">
                   🧑‍🔧 {{ zone.primary_technicians_count }}T / {{ zone.backup_technicians_count }}S
+                  <span class="ms-1" data-testid="zone-restockers-count">📦 {{ zone.primary_restockers_count || 0 }}T / {{ zone.backup_restockers_count || 0 }}S</span>
                 </span>
               </div>
 
@@ -1482,6 +1646,103 @@ export const OperationalZoneManagementTab = {
             </div>
 
           </form>
+
+          <hr style="border-color: var(--color-hairline); margin: 18px 0 14px;" />
+
+          <!-- Cuadrante de carga del reponedor (Módulo 31, RF-02.4, RF-03.2) -->
+          <div data-testid="zone-restockers-block">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+              <h5 class="mb-0" style="font-family: var(--font-display); font-size: 15px; color: var(--color-slate);">
+                📦 Cuadrante de Carga (Reponedores)
+              </h5>
+              <div class="d-flex flex-wrap gap-2">
+                <span class="vg-chip">Titulares: {{ quadrantZone.primary_restockers_count || 0 }}</span>
+                <span class="vg-chip">Suplentes: {{ quadrantZone.backup_restockers_count || 0 }}</span>
+              </div>
+            </div>
+
+            <div v-if="restockerNotice" class="vg-alert vg-alert-info" data-testid="zone-restockers-notice">{{ restockerNotice }}</div>
+            <div v-if="restockerErrors.general" class="vg-alert vg-alert-error">{{ restockerErrors.general }}</div>
+
+            <div v-if="isLoadingRestockerCoverage" style="font-size: 12px; color: var(--color-ink-muted);">Calculando cobertura…</div>
+            <div v-else-if="restockerCoverage" class="mb-2" data-testid="zone-restockers-coverage">
+              <span class="vg-chip" :class="restockerCoverageChipClass(restockerCoverage.coverage_status)">
+                {{ restockerCoverageLabel(restockerCoverage.coverage_status) }}
+              </span>
+              <span v-if="restockerCoverage.recommended_restocker_name" class="ms-2" style="font-size: 12px; color: var(--color-slate);">
+                #1 recomendado: <strong>{{ restockerCoverage.recommended_restocker_name }}</strong>
+              </span>
+            </div>
+
+            <div v-if="isLoadingRestockers" style="font-size: 12px; color: var(--color-ink-muted);">Cargando reponedores…</div>
+            <div v-else-if="quadrantRestockers.length === 0" class="vg-alert vg-alert-info" data-testid="zone-restockers-empty">
+              Esta zona no tiene reponedores vinculados todavía.
+            </div>
+            <ul v-else class="list-unstyled mb-3" data-testid="zone-restockers-list">
+              <li
+                v-for="restocker in quadrantRestockers"
+                :key="restocker.assignment_id || restocker.restocker_id"
+                class="d-flex flex-wrap align-items-center gap-2 py-2"
+                style="border-bottom: 1px solid var(--color-hairline);"
+                data-testid="zone-restockers-row"
+              >
+                <span v-if="restocker.role_in_zone === 'PRIMARY'" class="vg-chip vg-chip-success">Titular</span>
+                <span v-else class="vg-chip">Suplente</span>
+                <strong style="font-size: 14px;">{{ restocker.name }}</strong>
+                <span class="font-monospace" style="font-size: 12px; color: var(--color-ink-secondary);">
+                  {{ restocker.operator_code || ('ID #' + restocker.restocker_id) }}
+                </span>
+                <span v-if="restocker.availability_badge" class="vg-chip" :class="restocker.availability_badge === 'ACTIVO' ? 'vg-chip-success' : 'vg-chip-warning'">
+                  {{ restocker.availability_badge }}
+                </span>
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-sm vg-btn-danger-soft ms-auto"
+                  :disabled="isRemovingRestockerId !== null"
+                  data-testid="zone-restockers-remove"
+                  @click="removeRestockerFromQuadrant(restocker.restocker_id)"
+                >
+                  <span v-if="isRemovingRestockerId === restocker.restocker_id" class="spinner-border spinner-border-sm me-1" role="status"></span>
+                  <span>Retirar</span>
+                </button>
+              </li>
+            </ul>
+
+            <form data-testid="zone-restockers-form" @submit.prevent="submitRestockerAssignment(false)">
+              <div class="mb-3">
+                <label class="form-label fw-bold" style="font-size: 13px;" for="zone-restocker-select">Reponedor</label>
+                <select id="zone-restocker-select" class="vg-select" v-model="restockerForm.restocker_id" data-testid="zone-restocker-select" style="border-radius: var(--radius-interactive);">
+                  <option value="">Seleccione un reponedor activo…</option>
+                  <option v-for="restocker in restockerDirectory" :key="restocker.id" :value="restocker.id">
+                    {{ restocker.name }} · {{ restocker.operator_code || ('ID #' + restocker.id) }}
+                  </option>
+                </select>
+                <div v-if="restockerErrors.restocker_id" class="text-danger" style="font-size: 12px;">{{ restockerErrors.restocker_id }}</div>
+              </div>
+
+              <div class="form-check mb-3">
+                <input id="zone-restocker-primary" class="form-check-input" type="checkbox" v-model="restockerForm.is_primary" data-testid="zone-restocker-primary" />
+                <label class="form-check-label" for="zone-restocker-primary" style="font-size: 13px;">
+                  Titular de carga (máximo una zona viva)
+                </label>
+                <div style="font-size: 12px; color: var(--color-ink-muted);">
+                  Sin marcar queda como suplente y entra en la cobertura cuando el titular no está disponible.
+                </div>
+              </div>
+
+              <div v-if="restockerErrors.primary" class="vg-alert vg-alert-warning" data-testid="zone-restockers-conflict">
+                <p class="mb-2" style="font-size: 13px;">{{ restockerErrors.primary }}</p>
+                <button type="button" class="vg-btn vg-btn-sm vg-btn-danger" :disabled="isSubmittingRestocker" data-testid="zone-restockers-confirm" @click="confirmRestockerPrimaryTransfer">
+                  Trasladar titularidad
+                </button>
+              </div>
+
+              <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingRestocker" data-testid="zone-restockers-submit">
+                <span v-if="isSubmittingRestocker" class="spinner-border spinner-border-sm me-1" role="status"></span>
+                <span>Vincular reponedor</span>
+              </button>
+            </form>
+          </div>
 
           <p class="mt-3 mb-0" style="font-size: 12px; color: var(--color-ink-muted);">
             La baja de una fila es lógica: la vinculación se extingue con su fecha y el histórico de asignaciones se conserva.

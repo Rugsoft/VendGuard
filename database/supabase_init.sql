@@ -1,5 +1,5 @@
 -- =============================================================================
--- VendGuard · DDL canónico del motor nuevo · COMPLETO (36 tablas)
+-- VendGuard · DDL canónico del motor nuevo · COMPLETO (41 tablas)
 -- PostgreSQL 15+ (certificado contra PostgreSQL 16.15 en deploy/local/postgres/)
 -- Fichero: database/supabase_init.sql
 -- Módulo: 12-hybrid-supabase-migration · T-HYBRID-01 (tablas 1-10) y T-HYBRID-02 (tablas 11-20)
@@ -114,7 +114,7 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 -- |  2| conformity_verdict                | ('CONFORME','CONFORME_CON_OBSERVACIONES')                     | sanitary_certificates.result                                                     | Parte 2       |
 -- |  3| inspection_result                 | ('CONFORME','CONFORME_CON_OBSERVACIONES','NO_CONFORME',       | preventive_orders.result                                                         | Parte 1       |
 -- |   |                                   |  'NO_EVALUABLE_POR_CAUSA_EXTERNA')                            |                                                                                  |               |
--- |  4| user_role                         | ('COORDINATOR','TECHNICIAN')                                  | users.role                                                                       | Parte 1       |
+-- |  4| user_role                         | ('COORDINATOR','TECHNICIAN','RESTOCKER')                      | users.role                                                                       | Parte 1       |
 -- |  5| part_destination                  | ('DESGUACE','TALLER')                                         | incident_replaced_parts.old_part_destination                                     | Parte 2       |
 -- |  6| compensation_method               | ('EN_MANO_SEDE','BIZUM','TRANSFERENCIA_BANCARIA')             | refund_requests.compensation_method                                              | Parte 2       |
 -- |  7| technician_finding                | ('FOUND_PHYSICAL','CONFIRMED_NO_CASH','UNVERIFIED_NO_CASH')   | refund_requests.technician_finding                                               | Parte 2       |
@@ -145,7 +145,8 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 -- |   |                                   |  'SANITARY_CERTIFICATE','REFUND_REQUEST','UNCLAIMED_CASH_FINDING',|                                                                                  |               |
 -- |   |                                   |  'NOTIFICATION_OUTBOX','NOTIFICATION_CHANNEL_SETTING',       |                                                                                  |               |
 -- |   |                                   |  'OPERATIONAL_ZONE','TECHNICIAN_ZONE',                       |                                                                                  |               |
--- |   |                                   |  'TECHNICIAN_VAN_STOCK','VAN_RESTOCK_ORDER')                 |                                                                                  |               |
+-- |   |                                   |  'TECHNICIAN_VAN_STOCK','VAN_RESTOCK_ORDER',                 |
+--   |                                   |  'RESTOCKER_ZONE')                                            |                                                                                  |               |
 -- | 24| certificate_status                | ('VALID','SUSPENDED','REVOKED')                              | sanitary_certificates.status                                                     | Parte 2       |
 -- | 25| sla_tier                          | ('STANDARD','PRIORITY_CORPORATE',                            | locations.sla_tier, incidents.sla_tier_snapshot                                  | Parte 1       |
 -- |   |                                   |  'CRITICAL_INFRASTRUCTURE_24_7')                              |                                                                                  |               |
@@ -163,7 +164,11 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 DO $do$
 BEGIN
-    CREATE TYPE user_role AS ENUM ('COORDINATOR', 'TECHNICIAN');
+    -- `RESTOCKER` (Módulo 31): el cuarto actor operativo del sistema, el
+    -- Cargador/Reponedor de Ruta, con permisos segregados del técnico SAT
+    -- (RF-01.1). El orden se añade al final para no alterar el ordinal de los dos
+    -- roles históricos.
+    CREATE TYPE user_role AS ENUM ('COORDINATOR', 'TECHNICIAN', 'RESTOCKER');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
@@ -259,7 +264,9 @@ BEGIN
         -- Gobierno del catálogo de causas raíz (Módulo 25): cada alta, edición,
         -- cambio de predeterminada o baja lógica se registra contra esta entidad,
         -- no contra la avería que se clasifica con ella.
-        'ROOT_CAUSE_TAXONOMY'
+        -- Cuadrante de carga del Módulo 31 (QA 1): la vinculación reponedor ↔ zona
+        -- se audita con entidad propia, no como edición de la zona ni del usuario.
+        'ROOT_CAUSE_TAXONOMY', 'RESTOCKER_ZONE'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -668,6 +675,14 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT uq_users_operator_code UNIQUE (operator_code),
     CONSTRAINT chk_users_on_call_active_tech CHECK (
         is_on_call = FALSE OR (role = 'TECHNICIAN' AND is_active = TRUE)
+    ),
+    -- Módulo 31 (D3, EARS 01.1): un Cargador/Reponedor de Ruta nunca ostenta la
+    -- guardia técnica 24/7 del Art. II. La comparación va sobre `role::text`
+    -- porque esta misma guarda la declara la migración 027 dentro de la
+    -- transacción que añade el valor al enumerado, donde el literal no puede
+    -- resolverse todavía (SQLSTATE 55P04). La regla es la misma.
+    CONSTRAINT chk_users_restocker_not_on_call CHECK (
+        role::text <> 'RESTOCKER' OR is_on_call = FALSE
     ),
     CONSTRAINT chk_users_telegram_chat_id CHECK (
         telegram_chat_id IS NULL OR telegram_chat_id ~ '^-?[0-9]{5,20}$'
@@ -1974,6 +1989,63 @@ CREATE INDEX IF NOT EXISTS idx_tech_zone_assignments_tech_id
 
 CREATE OR REPLACE TRIGGER trg_no_delete_technician_zone_assignments
     BEFORE DELETE ON technician_zone_assignments
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 41 · restocker_zone_assignments — cuadrante de carga (M31, RF-02.1)
+-- -----------------------------------------------------------------------------
+-- El cuadrante de carga es independiente del técnico a propósito (D3): una zona
+-- tiene a la vez su técnico titular y su reponedor titular sin que la regla de
+-- técnico único responsable del Art. V.3 se vea afectada, porque esa regla se
+-- evalúa solo sobre `technician_zone_assignments`.
+--
+-- `role_in_zone` es la forma legible del vínculo y `is_primary` la que consultan
+-- los índices parciales; `chk_restocker_zone_role_coherence` impide que se
+-- contradigan (QA 1). La baja es lógica (`removed_at`) y el disparador cierra el
+-- borrado físico (Art. III.1).
+CREATE TABLE IF NOT EXISTS restocker_zone_assignments (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY,
+    restocker_id  BIGINT NOT NULL,
+    zone_id       BIGINT NOT NULL,
+    role_in_zone  VARCHAR(10) NOT NULL DEFAULT 'BACKUP',
+    is_primary    BOOLEAN NOT NULL DEFAULT FALSE,
+    assigned_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    removed_at    TIMESTAMPTZ,
+    CONSTRAINT pk_restocker_zone_assignments PRIMARY KEY (id),
+    CONSTRAINT fk_restocker_zone_restocker FOREIGN KEY (restocker_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_restocker_zone_zone FOREIGN KEY (zone_id)
+        REFERENCES operational_zones (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_restocker_zone_role_values CHECK (role_in_zone IN ('PRIMARY', 'BACKUP')),
+    CONSTRAINT chk_restocker_zone_role_coherence CHECK (
+        (role_in_zone = 'PRIMARY' AND is_primary = TRUE)
+        OR (role_in_zone = 'BACKUP' AND is_primary = FALSE)
+    ),
+    CONSTRAINT chk_restocker_zone_removed_order CHECK (
+        removed_at IS NULL OR removed_at >= assigned_at
+    )
+);
+
+-- Unicidad solo sobre vinculaciones vivas: permite reingresos con histórico.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_restocker_zone_live
+    ON restocker_zone_assignments (restocker_id, zone_id)
+    WHERE removed_at IS NULL;
+
+-- Titularidad única: un reponedor es Titular (`PRIMARY`) de una sola zona viva y
+-- suplente (`BACKUP`) de cuantas haga falta (RF-02.1, D3).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_restocker_primary_zone
+    ON restocker_zone_assignments (restocker_id)
+    WHERE is_primary = TRUE AND removed_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_restocker_zone_assignments_zone_id
+    ON restocker_zone_assignments (zone_id);
+
+CREATE INDEX IF NOT EXISTS idx_restocker_zone_assignments_restocker_id
+    ON restocker_zone_assignments (restocker_id);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_restocker_zone_assignments
+    BEFORE DELETE ON restocker_zone_assignments
     FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
 
 
@@ -3418,7 +3490,7 @@ CREATE TRIGGER trg_immutable_sanitary_spoilage_records
 
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 40 tablas (las 40 del contrato de correspondencia) · 34 tipos del dominio en sus
+-- 41 tablas (las 41 del contrato de correspondencia) · 34 tipos del dominio en sus
 -- 39 columnas `ENUM` · 8 funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
 -- `prevent_satisfaction_survey_rewrite()`, `prevent_service_sheet_update()`
@@ -3426,17 +3498,18 @@ CREATE TRIGGER trg_immutable_sanitary_spoilage_records
 -- `enforce_incident_assignments_immutability()` (Módulo 26) y
 -- `enforce_troubleshooting_guides_immutability()` (Módulo 28) y
 -- `enforce_sanitary_spoilage_records_immutability()` (Módulo 29)
--- 71 disparadores: 40 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 23
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 8 `BEFORE UPDATE` de
+-- 73 disparadores: 41 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 23
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 9 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
 -- `trg_no_update_technician_shift_logs`, `trg_immutable_root_causes`,
 -- `trg_immutable_standard_solutions`, `trg_immutable_incident_assignments` y
--- `trg_immutable_machine_troubleshooting_guides` y
--- `trg_immutable_sanitary_spoilage_records`)
--- 66 restricciones nombradas: 40 claves primarias (la del mapeo de códigos postales
+-- `trg_immutable_machine_troubleshooting_guides`,
+-- `trg_immutable_sanitary_spoilage_records` y
+-- `trg_incidents_protect_sla_tier_snapshot`)
+-- 67 restricciones nombradas: 41 claves primarias (la del mapeo de códigos postales
 -- es el propio CP, no un identificador sintético) y 26 únicas
--- 76 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- 82 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
 -- en la bitácora), las 12 del Módulo 23 (5 en órdenes y 7 en líneas) y las 4 del
 -- Módulo 24 (formato del identificador, tipo de parada, operación y resultado) y
@@ -3447,18 +3520,21 @@ CREATE TRIGGER trg_immutable_sanitary_spoilage_records
 -- error, de pasos y de repuestos recomendados) y las 8 del Módulo 29 (origen de
 -- cuarentena, cotas de unidades, coherencia de máquina vacía, longitud de lotes,
 -- rango térmico, fotografía no vacía, longitud de observaciones y coherencia
--- contable del coste y su ajuste)
--- · 95 claves foráneas con las reglas declaradas en el contrato §2.4
--- 103 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- contable del coste y su ajuste) y las 4 del Módulo 31 (valores y coherencia de
+-- `role_in_zone` con `is_primary`, orden de la baja lógica y prohibición de que un
+-- reponedor quede de guardia técnica)
+-- · 97 claves foráneas con las reglas declaradas en el contrato §2.4
+-- 108 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
 -- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2), el Módulo 23 (5) y el
 -- Módulo 24 (2), el Módulo 26 (3), el Módulo 27 (6), el Módulo 28 (3) y el
--- Módulo 29 (4)— y nueve índices únicos parciales:
+-- Módulo 29 (4) y el Módulo 31 (2)— y once índices únicos parciales:
 -- `uq_incident_assignments_active_custody` (M26, Art. V.3), `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
 -- `uq_users_telegram_chat_id` (M16), `uq_zone_postal_codes_live` (M17),
--- `uq_tech_shifts_single_active` (M21, Resolución R3) y
--- `uq_van_restock_open_per_tech` (M23, Decisión D3)
+-- `uq_tech_shifts_single_active` (M21, Resolución R3),
+-- `uq_van_restock_open_per_tech` (M23, Decisión D3), `uq_restocker_zone_live` y
+-- `uq_restocker_primary_zone` (M31, RF-02.1 y QA 1)
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)
 -- 1 columna derivada (`incident_replaced_parts.total_cost_snapshot`, D-7)
 -- 8 columnas `JSONB`: 3 en `audit_log` (D-4), 2 en `technician_shift_logs` (M22),

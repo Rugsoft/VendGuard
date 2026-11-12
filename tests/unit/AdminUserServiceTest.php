@@ -393,7 +393,9 @@ try {
     ], $coordinatorActor);
 } catch (InvalidArgumentException $e) {
     $invalidRoleCaught = true;
-    assertCondition(str_contains($e->getMessage(), 'TECHNICIAN o COORDINATOR'), '1.5 Rechaza rol no contemplado');
+    // Módulo 31: el catálogo de roles del alta pasa a COORDINATOR, TECHNICIAN y
+    // RESTOCKER; el rol fuera de catálogo sigue rechazándose con el mismo 422.
+    assertCondition(str_contains($e->getMessage(), 'COORDINATOR, TECHNICIAN o RESTOCKER'), '1.5 Rechaza rol no contemplado');
 }
 assertCondition($invalidRoleCaught, '1.6 Excepción lanzada ante rol inválido');
 

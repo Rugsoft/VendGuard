@@ -83,7 +83,10 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   MACHINE_TROUBLESHOOTING_GUIDE: 'Guía de Diagnóstico',
   // Entidad del Módulo 29: el alta del acta, la lectura del documento oficial
   // y el ajuste financiero se auditan bajo el tipo propio del registro APPCC.
-  SANITARY_SPOILAGE_RECORD: 'Acta de Merma APPCC'
+  SANITARY_SPOILAGE_RECORD: 'Acta de Merma APPCC',
+  // Entidad del Módulo 31: el cuadrante de carga se audita con tipo propio y el
+  // filtro del visor necesita su etiqueta o perdería las filas del cuadrante.
+  RESTOCKER_ZONE: 'Cuadrante de Carga'
 });
 
 /**
@@ -138,6 +141,9 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'TECHNICIAN_ZONE_ASSIGNED', label: 'Técnico Vinculado al Cuadrante', tone: 'purple', group: 'zone' },
   { code: 'TECHNICIAN_ZONE_REMOVED', label: 'Técnico Retirado del Cuadrante', tone: 'warning', group: 'zone' },
   { code: 'TECHNICIAN_ZONE_PRIMARY_DEMOTED', label: 'Titularidad Degradada a Suplencia', tone: 'danger', group: 'zone' },
+  { code: 'RESTOCKER_ZONE_ASSIGNED', label: 'Reponedor Vinculado al Cuadrante de Carga', tone: 'purple', group: 'zone' },
+  { code: 'RESTOCKER_ZONE_PRIMARY_DEMOTED', label: 'Titularidad de Carga Degradada a Suplencia', tone: 'danger', group: 'zone' },
+  { code: 'RESTOCKER_ZONE_REMOVED', label: 'Reponedor Retirado del Cuadrante de Carga', tone: 'warning', group: 'zone' },
   { code: 'USER_CREATED', label: 'Alta de Usuario', tone: 'success', group: 'user' },
   { code: 'USER_UPDATED', label: 'Modificación de Usuario', tone: 'neutral', group: 'user' },
   { code: 'USER_DEACTIVATED', label: 'Baja de Usuario', tone: 'danger', group: 'user' },
@@ -152,6 +158,7 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'RESUME_TECHNICIAN_SHIFT', label: 'Reanudación de Turno tras Comida', tone: 'info', group: 'user' },
   { code: 'CLOSE_TECHNICIAN_SHIFT', label: 'Cierre Regular de Turno', tone: 'neutral', group: 'user' },
   { code: 'FORCE_CLOSE_TECHNICIAN_SHIFT', label: 'Cierre Forzado de Turno por Coordinación', tone: 'danger', group: 'user' },
+  { code: 'FORCE_CLOSE_SHIFT', label: 'Cierre Automático de Turno por Baja de Cuenta', tone: 'danger', group: 'user' },
   { code: 'ADJUST_TECHNICIAN_SHIFT', label: 'Rectificación Horaria de Turno', tone: 'warning', group: 'user' },
   { code: 'CREATE_PREVENTIVE_ORDER', label: 'Alta de Orden Preventiva', tone: 'primary', group: 'preventive' },
   { code: 'ASSIGN_PREVENTIVE_ORDER', label: 'Asignación de Orden Preventiva', tone: 'purple', group: 'preventive' },

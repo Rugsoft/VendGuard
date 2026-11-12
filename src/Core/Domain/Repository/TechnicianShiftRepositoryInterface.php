@@ -69,12 +69,19 @@ interface TechnicianShiftRepositoryInterface
      * Devuelve los turnos imputados en [fromDate, toDate] (inclusive, por
      * `shift_date`), en orden cronológico.
      *
+     * `$role` acota por rol del operario (`ALL` | `TECHNICIAN` | `RESTOCKER`,
+     * Módulo 31, `D2`) con una subconsulta sobre `users.role`: el informe de
+     * jornada y su CSV filtran en el motor, nunca en PHP.
+     *
      * @return list<TechnicianShift>
+     *
+     * @throws \InvalidArgumentException Si el rol no pertenece al catálogo.
      */
     public function findShiftsByDateRange(
         string $fromDate,
         string $toDate,
-        ?int $technicianId = null
+        ?int $technicianId = null,
+        ?string $role = null
     ): array;
 
     /**
@@ -86,7 +93,8 @@ interface TechnicianShiftRepositoryInterface
      */
     public function findOrphanOpenShiftsBefore(
         string $beforeDate,
-        ?int $technicianId = null
+        ?int $technicianId = null,
+        ?string $role = null
     ): array;
 
     /**
@@ -103,11 +111,17 @@ interface TechnicianShiftRepositoryInterface
     public function getClosedInterventionMetricsByTechnician(
         DateTimeImmutable $from,
         DateTimeImmutable $to,
-        ?int $technicianId = null
+        ?int $technicianId = null,
+        ?string $role = null
     ): array;
 
     /**
+     * Turnos abiertos por operario, opcionalmente acotados por rol.
+     *
+     * @param string|null $role `ALL` (o null), `TECHNICIAN` o `RESTOCKER`.
      * @return array<int, string> technicianId => shift_status ('ON_SHIFT'|'MEAL_BREAK'|'OFF_SHIFT')
+     *
+     * @throws \InvalidArgumentException Si el rol no pertenece al catálogo.
      */
-    public function getActiveShiftsMap(): array;
+    public function getActiveShiftsMap(?string $role = null): array;
 }

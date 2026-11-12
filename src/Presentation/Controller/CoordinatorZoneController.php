@@ -8,7 +8,9 @@ use InvalidArgumentException;
 use PDO;
 use Throwable;
 use VendGuard\Application\Service\OperationalZoneService;
+use VendGuard\Application\Service\RestockerZoneCoverageService;
 use VendGuard\Core\Domain\Exception\LocationNotFoundException;
+use VendGuard\Core\Domain\Exception\PrimaryRestockerConflictException;
 use VendGuard\Core\Domain\Exception\PostalCodeConflictException;
 use VendGuard\Core\Domain\Exception\PrimaryTechnicianConflictException;
 use VendGuard\Core\Domain\Exception\ZoneNotFoundException;
@@ -17,6 +19,8 @@ use VendGuard\Core\Domain\Model\User;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoOperationalZoneRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -63,12 +67,27 @@ final class CoordinatorZoneController
 {
     private OperationalZoneService $zoneService;
 
-    public function __construct(?OperationalZoneService $zoneService = null, ?PDO $pdo = null)
-    {
+    private RestockerZoneCoverageService $coverageService;
+
+    public function __construct(
+        ?OperationalZoneService $zoneService = null,
+        ?PDO $pdo = null,
+        ?RestockerZoneCoverageService $coverageService = null
+    ) {
         $pdo ??= ConnectionFactory::getConnection();
+        $zoneRepo = new PdoOperationalZoneRepository($pdo);
+        $absenceRepo = new PdoTechnicianAbsenceRepository($pdo);
+
         $this->zoneService = $zoneService ?? new OperationalZoneService(
-            new PdoOperationalZoneRepository($pdo),
-            new PdoLocationRepository($pdo)
+            $zoneRepo,
+            new PdoLocationRepository($pdo),
+            $absenceRepo
+        );
+
+        $this->coverageService = $coverageService ?? new RestockerZoneCoverageService(
+            $zoneRepo,
+            new PdoTechnicianShiftRepository($pdo),
+            $absenceRepo
         );
     }
 
@@ -303,6 +322,121 @@ final class CoordinatorZoneController
     }
 
     /**
+     * GET /api/coordinator/zones/{id}/restockers
+     *
+     * Cuadrante de carga vivo con la insignia de cada operario (RF-02.4, C3).
+     */
+    public function listZoneRestockers(Request $request): Response
+    {
+        return $this->handleExecution(fn (): Response => Response::json(
+            $this->zoneService->listZoneRestockers($this->extractIdFromRoute($request)),
+            200
+        ));
+    }
+
+    /**
+     * POST /api/coordinator/zones/{id}/restockers
+     *
+     * Vincula un reponedor al cuadrante de carga. Acepta `role_in_zone` o
+     * `is_primary`; si llegan ambos y se contradicen, responde `422
+     * ROLE_IN_ZONE_MISMATCH` sin elegir por el cliente.
+     */
+    public function assignRestocker(Request $request): Response
+    {
+        return $this->handleExecution(function () use ($request): Response {
+            $body = $request->getParsedBody();
+            $restockerId = $body['restocker_id'] ?? null;
+            if (!is_int($restockerId) && !(is_string($restockerId) && ctype_digit($restockerId))) {
+                throw new InvalidArgumentException('El campo restocker_id debe ser un número entero positivo.');
+            }
+            $restockerId = (int)$restockerId;
+            if ($restockerId <= 0) {
+                throw new InvalidArgumentException('El campo restocker_id debe ser un número entero positivo.');
+            }
+
+            $roleInZone = isset($body['role_in_zone'])
+                ? strtoupper(trim((string)$body['role_in_zone']))
+                : null;
+            if ($roleInZone !== null && !in_array($roleInZone, ['PRIMARY', 'BACKUP'], true)) {
+                throw ZoneValidationException::unprocessable(
+                    'El rol en zona debe ser PRIMARY o BACKUP.',
+                    ['role_in_zone' => 'Valor fuera del catálogo.']
+                );
+            }
+
+            $explicitPrimary = array_key_exists('is_primary', $body)
+                ? $this->readBoolean($body, 'is_primary', false)
+                : null;
+
+            if ($roleInZone !== null && $explicitPrimary !== null
+                && $explicitPrimary !== ($roleInZone === 'PRIMARY')
+            ) {
+                throw ZoneValidationException::unprocessable(
+                    'role_in_zone e is_primary se contradicen.',
+                    ['role_in_zone' => 'Debe ser coherente con is_primary.']
+                );
+            }
+
+            $assignment = $this->zoneService->assignRestocker(
+                $restockerId,
+                $this->extractIdFromRoute($request),
+                $explicitPrimary ?? ($roleInZone === 'PRIMARY'),
+                $this->actorId($request),
+                $this->readBoolean($body, 'confirm_primary_transfer', false)
+            );
+
+            return Response::json($assignment, 200, 'Reponedor vinculado al cuadrante de carga de la zona.');
+        });
+    }
+
+    /**
+     * DELETE /api/coordinator/zones/{id}/restockers/{restocker_id}
+     *
+     * Baja lógica idempotente: repetirla devuelve `200` sin una segunda auditoría.
+     */
+    public function removeRestocker(Request $request): Response
+    {
+        return $this->handleExecution(function () use ($request): Response {
+            $zoneId = $this->extractIdFromRoute($request);
+            $restockerId = $this->extractPositiveRouteParam($request, 'restocker_id');
+
+            $this->zoneService->removeRestocker($restockerId, $zoneId, $this->actorId($request));
+
+            return Response::json([
+                'zone_id' => $zoneId,
+                'restocker_id' => $restockerId,
+                'removed' => true,
+            ], 200, 'Reponedor dado de baja del cuadrante de carga.');
+        });
+    }
+
+    /**
+     * GET /api/coordinator/restockers/quadrants
+     *
+     * Consulta inversa: cada reponedor con sus zonas vivas (RF-02.4).
+     */
+    public function listRestockerQuadrants(Request $request): Response
+    {
+        return $this->handleExecution(fn (): Response => Response::json(
+            ['restockers' => $this->zoneService->listRestockerQuadrants()],
+            200
+        ));
+    }
+
+    /**
+     * GET /api/coordinator/zones/{id}/restocker-coverage
+     *
+     * Cobertura de carga en vivo con el `#1 RECOMENDADO ⭐` (RF-03.1).
+     */
+    public function restockerCoverage(Request $request): Response
+    {
+        return $this->handleExecution(fn (): Response => Response::json(
+            $this->coverageService->getZoneCoverage($this->extractIdFromRoute($request)),
+            200
+        ));
+    }
+
+    /**
      * Traduce las excepciones de dominio al contrato de errores del módulo.
      */
     private function handleExecution(callable $fn): Response
@@ -317,6 +451,13 @@ final class CoordinatorZoneController
                 $exception->getErrorCode(),
                 $exception->getMessage(),
                 ['conflicts' => $exception->getConflicts()]
+            );
+        } catch (PrimaryRestockerConflictException $exception) {
+            return $this->errorResponse(
+                $exception->getHttpStatusCode(),
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getDetails()
             );
         } catch (PrimaryTechnicianConflictException $exception) {
             return $this->errorResponse(

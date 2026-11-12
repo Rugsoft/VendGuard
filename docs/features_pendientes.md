@@ -1,7 +1,7 @@
 # VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro**Documento:** `docs/features_pendientes.md`  
 **Fecha de Actualización:** Noviembre 2026
   
-**Estado del Proyecto:** batería global: 406 suites · 15.166 aserciones, al 100 % en verde. Documento versionado (ya está en el índice pese a la regla de `.gitignore`), así que su cifra se audita junto con la del README por `DocMetricsGuard`. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
+**Estado del Proyecto:** batería global: 412 suites · 15.398 aserciones, al 100 % en verde. Documento versionado (ya está en el índice pese a la regla de `.gitignore`), así que su cifra se audita junto con la del README por `DocMetricsGuard`. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---
@@ -35,13 +35,14 @@ Tras auditar el código fuente, la base de datos relacional y las suites de prue
 
 ## 📋 Catálogo de Funcionalidades Restantes (Ordenadas por Prioridad Operativa)
 
-Las funcionalidades restantes se han estructurado en **4 bloques ordenados por valor de negocio, impacto operativo y urgencia de implementación**:
+Las funcionalidades del roadmap se estructuran en **5 bloques ordenados por valor de negocio, impacto operativo y urgencia de implementación** (con los Bloques 1, 2 y 3 concluidos al 100%, el nuevo **Bloque 4 de Cargadores y Reponedores** como prioridad operativa activa y el **Bloque 5 de Telemetría IoT** aparcado para fase futura):
 
 ```mermaid
 flowchart TD
     B1["Bloque 1: Comunicación y Protección de SLAs<br>✅ (Completado al 100% · Módulos 10, 11, 14, 15)"] --> B2["Bloque 2: Calidad de Servicio, Validación y Logística<br>✅ (Completado al 100% · Módulos 17–21, 23 y 24)"]
-    B2 --> B3["Bloque 3: Trazabilidad Avanzada, Taller y Eficiencia Operativa<br>(Prioridad Operativa)"]
-    B3 --> B4["Bloque 4: Telemetría e Inteligencia Predictiva<br>(Fase Futura / IoT)"]
+    B2 --> B3["Bloque 3: Trazabilidad Avanzada, Taller y Eficiencia Operativa<br>✅ (Completado al 100% · Módulos 22 y 25–30)"]
+    B3 --> B4["Bloque 4: Operativa de Carga, Reposición y Gestión de Reponedores<br>🟢 (Prioridad Operativa Activa · Features 21–28)"]
+    B4 --> B5["Bloque 5: Telemetría e Inteligencia Predictiva<br>🟣 (Fase Futura / IoT · Aparcada)"]
 ```
 
 ---
@@ -175,9 +176,9 @@ Herramientas para formalizar la entrega de trabajos en sede, evaluar la percepci
 ---
 
 
-### 🔵 Bloque 3: Trazabilidad Avanzada, Taller y Eficiencia Operativa (Prioridad Operativa)
+### 🔵 Bloque 3: Trazabilidad Avanzada, Taller y Eficiencia Operativa (Prioridad Operativa · ✅ Concluido al 100%)
 
-Refinamiento del análisis de averías, economía circular de taller, asistencia técnica sobre el terreno, trazabilidad documental APPCC y contratos diferenciados de SLA.
+Refinamiento del análisis de averías, economía circular de taller, asistencia técnica sobre el terreno, trazabilidad documental APPCC y contratos diferenciados de SLA. **Todas las funcionalidades de este bloque están 100% implementadas y certificadas.**
 
 #### 11. 🔍 Taxonomía de Causas Raíz y Soluciones Estandarizadas
 * **Estado:** ✅ **100% IMPLEMENTADA (Módulo 25: `25-root-cause-taxonomy`)** — Catálogo maestro de 16 causas raíz y 34 soluciones estandarizadas con alta atómica de causa + solución predeterminada inicial, inmutabilidad de código/categoría/causa padre, guardas `409`/`422`, baja lógica y auditoría antes/después bajo `ROOT_CAUSE_TAXONOMY` (Art. III.1 y III.3). Selector obligatorio en toda resolución correctiva de técnico y coordinador, con priorización por categoría, conmutador «Mostrar todas» y preselección 1-Tap de la solución predeterminada, sin autorrellenar el diagnóstico ni la acción de 20 caracteres reales (Art. V.1). Copia local en el paquete offline, tolerancia a causas desactivadas durante la sincronización diferida y preservación en `conflict_dump`. Diagrama de Pareto 80/20 con fabricante normalizado, MTTR y coste de repuestos, gráfico combinado Chart.js local precacheado en `sw.js`, cierre exacto en `100.00%`, CSV UTF-8 BOM en dos secciones y aislamiento total frente a Sede/QR/Albarán A4 (Art. V.4). Certificado por la matriz `specs/25-root-cause-taxonomy/traceability-matrix.md` y la batería global al 100 % en verde. Se conserva a continuación el diseño original de la propuesta para trazabilidad SDD.
@@ -260,16 +261,106 @@ Refinamiento del análisis de averías, economía circular de taller, asistencia
 
 ---
 
-### 🟣 Bloque 4: Telemetría e Inteligencia Predictiva (Fase Futura / IoT)
+### 🟢 Bloque 4: Operativa de Carga, Reposición de Producto y Gestión de Reponedores (Prioridad Operativa Activa)
 
-Ampliación a largo plazo para transformar el gestor de incidencias reactivo en una plataforma telemática autónoma.
+Segunda pata operativa de **VendGuard** para cubrir el ciclo integral de explotación de máquinas de vending: gestión de la plantilla de **Cargadores / Reponedores de Ruta**, planogramas de producto y consumibles, órdenes de carga de furgoneta desde almacén y cámara frigorífica, control sanitario FEFO de caducidades in situ (Art. II), arqueo de efectivo y carga de tubos de cambio bajo confidencialidad estricta (Art. V.4), y sinergia directa con el equipo de Técnicos SAT para resolver incidencias de primer nivel o escalar averías electromecánicas.
 
-#### 18. 📡 Ingesta Telemática IoT (Alarmas Térmicas MDB/DEX en Tiempo Real)
-* **Propósito:** Detección de averías de forma desatendida mediante telemetría conectada a la máquina.
+#### 21. 👤 Rol de Cargador/Reponedor de Ruta (`RESTOCKER`), Zonificación de Carga y Control de Jornada
+* **Estado:** ✅ **100% IMPLEMENTADO (Módulo 31: `31-restocker-role-zones-shifts`)** — Cuarto rol `RESTOCKER` con `operator_code`, rol inmutable y `is_on_call = FALSE`; Tabla 41 `restocker_zone_assignments` con titularidad única y baja lógica; cobertura determinista de 6 niveles con promoción automática del `BACKUP`; vista móvil `RestockerRouteView.js` con cierre directo de turno; e integración con filtro de rol en Zonas, Ausencias y Registro de Horas/CSV. El CRUD de Personal se expone en `/api/coordinator/staff` con la inmutabilidad de rol (`C1`) y el cierre de turno en baja (`C3`) certificados por HTTP (`RestockerStaffHttpTest` 18/18). Certificado por `specs/31-restocker-role-zones-shifts/traceability-matrix.md` y la batería global al 100 % en verde. Se conserva a continuación el diseño original de la propuesta para trazabilidad SDD.
+* **Propósito:** Incorporar en el dominio el cuarto actor operativo del sistema (**Cargador / Reponedor de Ruta**, `UserRole::RESTOCKER`) con permisos segregados del Técnico SAT (`TECHNICIAN`), asignado a demarcaciones territoriales (Módulo 17) y sujeto al control de turnos, pausas de comida, ausencias y relevo de ruta (Módulos 21 y 22).
+* **Componentes Técnicos:**
+  * Ampliación del enum nativo `user_role` y `UserRole` (`RESTOCKER`) con guardas RBAC en router y controladores para separar la vista móvil de reposición de la vista de reparación técnica SAT.
+  * Tabla `restocker_zone_assignments` (`id`, `restocker_id`, `zone_id`, `role_in_zone` [`PRIMARY`, `BACKUP`], `assigned_at`) vinculada a `operational_zones` (Módulo 17), permitiendo que cada zona cuente simultáneamente con su Técnico SAT titular y su Reponedor titular sin colisionar en la regla de asignación única de averías (Art. V.3).
+  * Reutilización de `technician_shifts`, `technician_shift_logs` y `technician_absences` (Módulos 21 y 22) para inicio de jornada móvil, pausa de comida, promoción automática del reponedor `BACKUP` ante ausencias y cómputo de horas efectivas trabajadas.
+* **Valor para el Negocio / Cliente:** Estructura formalmente la plantilla de ruta de carga sin duplicar la arquitectura de turnos, zonas ni auditoría, manteniendo desacopladas las responsabilidades de mantenimiento (SAT) y abastecimiento (Reposición).
+* **Complejidad:** Media (2 días).
+
+#### 22. 🍫 Catálogo Maestro de Productos, Consumibles y Planograma por Máquina (*Machine Planogram & Slot Matrix*)
+* **Propósito:** Modelar el surtido comercial y de consumibles que aloja cada máquina (refrescos, snacks, sándwiches/lácteos frescos, café en grano, leche en polvo, chocolate, azúcar, vasos y paletinas) y el mapa de carriles/selecciones (`slot_code`) con sus capacidades máximas y umbrales de rotura de stock (*stockout*).
+* **Componentes Técnicos:**
+  * Tabla `vending_products` (`id`, `sku`, `name`, `category` [`COLD_DRINK`, `SNACK`, `PERISHABLE_FOOD`, `HOT_BEVERAGE_INGREDIENT`, `CUP_STIRRER_CONSUMABLE`], `unit_type` [`UNIT`, `GRAMS`, `SLEEVE`], `requires_cold_chain`, `max_shelf_life_days`, `unit_cost_eur`, `sale_price_eur`, `is_active`, `created_at`, `updated_at`) con baja lógica obligatoria (Art. III.1 y III.2) y ocultación de `unit_cost_eur` frente a Sede/QR (Art. V.4).
+  * Tabla `machine_planogram_slots` (`id`, `machine_id`, `slot_code` [ej. `11`..`68` para espirales o `HOPPER_COFFEE`, `HOPPER_MILK`, `TUBE_CUPS` para bebidas calientes], `product_id`, `max_capacity`, `current_estimated_qty`, `min_threshold`, `updated_at`) con restricción de unicidad `(machine_id, slot_code)`.
+  * Plantillas de planograma por `machine.model` para clonar el mapa de carriles entre máquinas equivalentes desde el panel de Coordinación en un solo clic.
+  * **Guarda Constitucional Art. II:** Validación de dominio y disparador SQL que bloquea la asignación de cualquier producto con `requires_cold_chain = TRUE` a una máquina cuya tipología (`MachineType`) no sea refrigerada apta para perecederos (`PERISHABLE_FOOD` o `COMBO`).
+* **Valor para el Negocio / Cliente:** Estandariza la configuración de carriles de todo el parque y permite al reponedor saber qué referencias y cantidades exactas requiere cada máquina antes de abrirla.
+* **Complejidad:** Media (2–2.5 días).
+
+#### 23. 🚚 Órdenes de Carga de Furgoneta de Reposición y Picking con Trazabilidad de Frío (*Route Product Loading & Cold Chamber Picking*)
+* **Propósito:** Gestionar el abastecimiento matutino de cajas de producto, consumibles y lotes perecederos desde el Almacén Central y la Cámara Frigorífica hacia la furgoneta de cada reponedor, y cuadrar las existencias sobrantes o mermas al cierre del turno.
+* **Componentes Técnicos:**
+  * Tablas `restocker_van_product_stocks` (`id`, `restocker_id`, `product_id`, `batch_code`, `expiration_date`, `quantity_available`, `updated_at`) y `product_loading_orders` (`id`, `restocker_id`, `status` [`PENDING_PICKING`, `DISPATCHED`, `CONFIRMED_BY_RESTOCKER`, `RECONCILED_AT_CLOSE`, `CANCELLED`], `cold_chamber_exit_temp_celsius`, `created_by`, `created_at`, `confirmed_at`, `reconciled_at`) junto con `product_loading_order_items`.
+  * Generador automático de **Hoja de Picking de Producto A4** calculando la demanda estimada de las máquinas programadas en la ruta del día más un colchón de seguridad configurable.
+  * **Control de Cadena de Frío en Salida de Almacén (Art. II):** Cuando la orden incluye referencias `PERISHABLE_FOOD`, exige declarar el código de lote (`batch_code`), la fecha de caducidad (`expiration_date`) y la temperatura de salida de cámara frigorífica ($\le 4,0\,^\circ\text{C}$), bloqueando el despacho si el lote está caducado o fuera de rango térmico.
+  * Liquidación de furgoneta al cierre de turno: contraste automático entre `stock_cargado - unidades_abastecidas_en_máquinas - mermas_retiradas = stock_retorno_en_furgoneta`, auditando cualquier descuadre de inventario en `audit_log` (Art. III.3).
+* **Valor para el Negocio / Cliente:** Evita que el reponedor se quede sin producto o vasos a mitad de ruta y extiende la trazabilidad sanitaria de lotes perecederos desde la cámara frigorífica central hasta el carril de la máquina.
+* **Complejidad:** Media-Alta (2.5–3 días).
+
+#### 24. 📋 Visita de Reposición In Situ, Control FEFO de Caducidades y Limpieza Diaria (*In-Situ Restock Visit, FEFO Expiry Control & Daily Hygiene*)
+* **Propósito:** Guiar al reponedor a pie de máquina desde su vista móvil (con soporte Offline PWA integrado en la arquitectura del Módulo 24) para ejecutar el llenado de carriles/tolvas, retirar productos caducados o próximos a caducar bajo el principio **FEFO** (*First Expired, First Out*) y certificar la limpieza diaria de ruta.
+* **Componentes Técnicos:**
+  * Tabla inmutable `machine_restock_visits` (`id`, `machine_id`, `restocker_id`, `route_schedule_id`, `started_at`, `completed_at`, `cabin_temp_celsius`, `hygiene_checklist_json`, `photo_evidence_url`, `internal_notes`, `client_mutation_id`) y líneas `machine_restock_visit_items` (`visit_id`, `slot_code`, `product_id`, `qty_before`, `qty_added`, `qty_withdrawn_expired`, `qty_withdrawn_damaged`, `loaded_batch_code`, `loaded_expiration_date`).
+  * **Triple Cerrojo Sanitario Innegociable (Art. II):**
+    1. **Bloqueo por Cuarentena o Fallo Térmico Activo:** Si la máquina se encuentra en `SANITARY_QUARANTINE` (Módulos 05, 11 o 29), en estado `OUT_OF_SERVICE` o con un ticket activo de rotura de frío, el sistema impide registrar la carga de productos perecederos (`409 SANITARY_RESTOCK_BLOCKED`), evitando que se introduzca género fresco en un equipo averiado.
+    2. **Verificación Térmica en Apertura de Puerta:** En máquinas `PERISHABLE_FOOD` y `COMBO`, el reponedor debe registrar obligatoriamente `cabin_temp_celsius` al iniciar la visita; si supera los $4,0\,^\circ\text{C}$ ($8,0\,^\circ\text{C}$ en `COLD_DRINKS`), el sistema bloquea la carga de frescos, ordena el precintado preventivo y genera automáticamente una incidencia `CRITICAL` de cadena de frío para el Técnico SAT de la zona.
+    3. **Retirada Obligatoria por Caducidad (FEFO):** El móvil alerta de los carriles con lotes cuya `expiration_date` sea anterior o igual a la próxima visita programada, obligando a declarar su retirada antes de cargar el nuevo lote y registrando el acta correspondiente en conexión con el Módulo 29 (diferenciando `COMMERCIAL_EXPIRY_IN_ROUTE` de `THERMAL_BREAKDOWN_SPOILAGE`).
+  * **Checklist Rápido de Higiene Diaria de Ruta:** Verificación obligatoria en un toque de: (a) vaciado de cajón de marros/posos de café, (b) vaciado de cubo de residuos líquidos y limpieza de boya, (c) enjuague de batidores/conductos de mezcla y (d) limpieza de bandeja de erogación y frontal cristal.
+* **Valor para el Negocio / Cliente:** Garantiza cero productos caducados a la venta, previene atascos y desbordamientos por falta de limpieza diaria y protege el cumplimiento APPCC en cada apertura de puerta.
+* **Complejidad:** Alta (3–3.5 días).
+
+#### 25. 🪙 Recaudación de Efectivo, Carga de Tubos de Cambio y Arqueo de Caja (*Cash Collection, Coin Changer Refill & Vault Audit*)
+* **Propósito:** Controlar la retirada de efectivo de la máquina (hucha de monedas y apilador de billetes) y la reposición de moneda fraccionaria en los tubos del monedero MDB durante la visita de carga, asegurando la trazabilidad por bolsa precintada y conectando con el fondo de devoluciones (Módulo 08) bajo confidencialidad absoluta frente a la sede (Art. V.4).
+* **Componentes Técnicos:**
+  * Tabla inmutable `machine_cash_collections` (`id`, `restock_visit_id`, `machine_id`, `restocker_id`, `bag_seal_code`, `change_tubes_loaded_eur`, `sales_counter_reading`, `vault_counted_eur`, `expected_cashbox_eur`, `discrepancy_eur`, `status` [`SEALED_IN_ROUTE`, `DELIVERED_TO_VAULT`, `RECONCILED_OK`, `DISCREPANCY_FLAGGED`], `vault_reconciled_by`, `vault_reconciled_at`, `discrepancy_justification`).
+  * **Protocolo de Arqueo Ciego con Bolsa Precintada:** En ruta, el reponedor extrae la hucha, la introduce en una bolsa de seguridad numerada (`bag_seal_code` único), anota el importe recargado en los tubos de cambio (`change_tubes_loaded_eur`) y la lectura del contador de ventas; el recuento monetario real (`vault_counted_eur`) se registra exclusivamente en Administración/Caja Central al abrir el precinto, calculando automáticamente el descuadre (`discrepancy_eur`) y exigiendo justificación $\ge 20$ caracteres reales (Art. V.1) si supera la tolerancia permitida.
+  * **Integración con Reintegros (Módulo M5 / `08-refunds`):** Permite al reponedor registrar entregas de efectivo en la conserjería de la sede para reponer la caja chica de devoluciones por dinero tragado ($\le 10\,\text{€}$), descontándolo del cambio de ruta con justificante digital.
+  * **Blindaje Constitucional Art. V.4:** Opacidad total de importes recaudados, lecturas de contadores, bolsas precintadas y arqueos frente al Portal de Sede, vistas públicas QR y albaranes de visita externos.
+* **Valor para el Negocio / Cliente:** Erradica las pérdidas desconocidas de recaudación en ruta, evita que las máquinas dejen de vender por falta de cambio ("Exact Change Only") y profesionaliza la auditoría de tesorería.
+* **Complejidad:** Media-Alta (2.5–3 días).
+
+#### 26. 🤝 Sinergia Operativa Reponedor ↔ Técnico SAT (Resolución de Nivel 1 y Escalado Técnico In Situ)
+* **Propósito:** Coordinar en tiempo real a los Reponedores y a los Técnicos SAT para que las incidencias operativas leves (falta de producto, falta de vasos, tubos de cambio vacíos o atascos simples de envase) las resuelva el propio reponedor en su ruta, mientras que las averías electromecánicas descubiertas al abrir la máquina se escalen al SAT con contexto técnico completo.
+* **Componentes Técnicos:**
+  * **Despacho de Primer Nivel Operativo (*Level-1 Restocker Dispatch*):** En el panel de Triaje y en la entrada de avisos QR/Sede, los reportes por *"Producto agotado / Carril vacío"*, *"Sin vasos / Sin azúcar / Sin paletinas"*, *"No devuelve cambio (tubos vacíos)"* o *"Atasco leve de producto en espiral"* pueden despacharse directamente a la cola del **Reponedor de la zona** sin ocupar la agenda del Técnico SAT especialista.
+  * **Acción "⚡ Escalar Avería al SAT" desde la Parada de Carga:** Si durante una visita de reposición o al intentar resolver un aviso de Nivel 1 el reponedor detecta una avería técnica que requiere herramientas o repuestos (ej. motor de espiral quemado, electroválvula con fuga, monedero sin comunicación MDB, fallo de grupo de café), genera o reasigna en un toque el ticket hacia la cola de **Técnicos SAT**, adjuntando fotografía ($\le 5\text{ MB}$, Art. V.5) y **Nota Interna de Taller** (`is_internal = TRUE`, oculta a la sede según Art. V.4) con el síntoma observado a puerta abierta.
+  * **Indicador de Coincidencia en Sede:** Si un Técnico SAT y un Reponedor tienen paradas activas en la misma sede y franja horaria, ambas vistas móviles muestran un aviso de coordinación interna para sincronizar la intervención y evitar dobles aperturas de máquina.
+* **Valor para el Negocio / Cliente:** Libera entre un 25% y un 40% de la capacidad de los Técnicos SAT (que dejan de desplazarse por vasos agotados, falta de cambio o bolsas de snack mal colocadas) y reduce el MTTR global del parque.
+* **Complejidad:** Media (2–2.5 días).
+
+#### 27. 🗺️ Planificador de Rutas Periódicas de Carga y Priorización Dinámica por Demanda (*Recurring Restock Schedules & Dynamic Route Cadence*)
+* **Propósito:** Automatizar la generación diaria de las hojas de ruta de cada reponedor según las frecuencias programadas por máquina (diaria, alterna L-M-V / M-J, semanal o quincenal), inyectando con prioridad las paradas urgentes por agotamiento de producto o caducidad inminente de perecederos.
+* **Componentes Técnicos:**
+  * Tabla `machine_restock_schedules` (`id`, `machine_id`, `zone_id`, `assigned_restocker_id`, `cadence_type` [`DAILY`, `MON_WED_FRI`, `TUE_THU`, `WEEKLY`, `BIWEEKLY`], `preferred_time_window`, `is_active`, `updated_at`).
+  * Motor de generación y ordenación de ruta de carga conectado al servicio cartográfico Web Mercator / Haversine (Módulo M4 / `07-route-map`), que ordena las paradas del reponedor combinando:
+    1. **Prioridad Sanitaria FEFO (Art. II):** Máquinas `PERISHABLE_FOOD` / `COMBO` con lotes que alcanzan su fecha de caducidad en el día en curso.
+    2. **Prioridad Contractual y Demanda (Módulo 30):** Máquinas en sedes `CRITICAL_INFRASTRUCTURE_24_7` o `PRIORITY_CORPORATE` con avisos abiertos de *"Sin producto / Sin vasos / Sin cambio"*.
+    3. **Optimización Geográfica:** Secuencia de mínima distancia esférica Haversine entre sedes de la zona operativa.
+* **Valor para el Negocio / Cliente:** Garantiza el abastecimiento puntual en grandes cuentas 24/7 (hospitales, universidades), impide que queden lotes caducados sin retirar y minimiza el consumo de combustible de la flota de reposición.
+* **Complejidad:** Media (2 días).
+
+#### 28. 📊 Cuadro de Mando de Reposición, Roturas de Stock y Mermas Comerciales (*Restocking BI, Stockout Rate & Merchandising Analytics*)
+* **Propósito:** Dotar al Coordinador de analítica ejecutiva sobre el desempeño de la red de reposición, la rotación real del surtido por máquina, las pérdidas por caducidad comercial y la fiabilidad de los arqueos de efectivo.
+* **Componentes Técnicos:**
+  * Sub-pestaña **"📦 Métricas de Carga y Reposición"** en el Cuadro de Mandos de Coordinación (Módulo 03), filtrable por rango de fechas, zona operativa, sede y reponedor.
+  * Indicadores clave (KPIs) y gráficos:
+    * **Tasa de Disponibilidad en Máquina (*In-Stock Rate %* vs. *Stockout Rate %*):** porcentaje de visitas donde las selecciones principales no habían llegado a cero existencias.
+    * **Análisis Comparativo de Mermas (Caducidad Comercial vs. Avería Térmica):** desglose de unidades y coste de género desechado por baja rotación comercial (`COMMERCIAL_EXPIRY_IN_ROUTE`) frente a fallos técnicos de frío (`THERMAL_BREAKDOWN_SPOILAGE`), identificando máquinas con planograma sobredimensionado.
+    * **Rendimiento Operativo por Reponedor:** máquinas abastecidas por turno, tiempo medio en parada, incidencias de Nivel 1 resueltas in situ y porcentaje de exactitud en arqueos de bolsas precintadas.
+  * Exportación CSV con UTF-8 BOM (`;`) neutralizada contra inyección de fórmulas y confidencialidad estricta de importes financieros y costes de producto frente al Portal de Sede (Art. V.4).
+* **Valor para el Negocio / Cliente:** Permite optimizar el planograma de cada máquina según su demanda real, reduciendo drásticamente la merma por caducidad de sándwiches/frescos y maximizando la facturación por punto de venta.
+* **Complejidad:** Media (2 días).
+
+---
+
+### 🟣 Bloque 5: Telemetría e Inteligencia Predictiva (Fase Futura / IoT · Aparcada)
+
+Ampliación a largo plazo para transformar el gestor de incidencias y reposición en una plataforma telemática autónoma conectada al bus de las máquinas.
+
+#### 18. 📡 Ingesta Telemática IoT (Alarmas Térmicas MDB/DEX y Telemetría de Stock en Tiempo Real)
+* **Propósito:** Detección de averías y agotamiento de carriles de forma desatendida mediante telemetría conectada a la máquina.
 * **Componentes Técnicos:**
   * Endpoint seguro de ingesta (`POST /api/telemetry/events`) autenticado por token de gateway o máquina.
   * Detección de rotura de cadena de frío ($T > 8^\circ\text{C}$ durante $> 30\text{ min}$) con creación automática de ticket prioritario `CRITICAL` sin intervención humana.
-  * Detección de eventos MDB: atasco de motor de entrega, error de monedero o falta de agua en caldera de café.
+  * Detección de eventos MDB/EVA-DTS (DEX): atasco de motor de entrega, error de monedero, tubos de cambio vacíos, falta de agua en caldera de café o lectura en tiempo real de ventas por selección para alimentar automáticamente `current_estimated_qty` en el planograma de los reponedores (Feature 22).
 * **Complejidad:** Alta (4–5 días).
 
 #### 19. 📈 Mantenimiento Predictivo por Ciclos de Venta y Dispensaciones
@@ -291,7 +382,7 @@ FASE DE COMUNICACIÓN Y PROTECCIÓN DE SLAs (CONCLUIDA AL 100%):
   3. Hilo de Comentarios con Notas Internas Confidenciales (Art. V.4) [✅ IMPLEMENTADO - Módulo 10]
   *. Avería Oportunista In Situ y Reingreso en Ruta (Art. II, V.4) [✅ IMPLEMENTADO - Módulo 16]
 ------------------------------------------------------------------------------------
-FASE DE CALIDAD, VALIDACIÓN Y LOGÍSTICA MÓVIL:
+FASE DE CALIDAD, VALIDACIÓN Y LOGÍSTICA MÓVIL (CONCLUIDA AL 100%):
   4. Firma Digital en Móvil y Albarán de Servicio A4 [✅ IMPLEMENTADO - Módulo 19]
   5. Stock en Furgoneta del Técnico (Van Stock conectado a M2) [✅ IMPLEMENTADO ALCANCE MÍNIMO - Módulo 18]
   6. Encuesta CSAT de Sede [✅ IMPLEMENTADO - Módulo 20]
@@ -300,18 +391,28 @@ FASE DE CALIDAD, VALIDACIÓN Y LOGÍSTICA MÓVIL:
   9. Órdenes de Carga de Furgoneta y Cruce de Stock en Triaje (Fase 2 de Módulo 18 + Módulo 17) [✅ IMPLEMENTADO - Módulo 23]
  10. Gestión de Ausencias Temporales y Relevo de Fin de Turno (Suplencia Automática en Zona) [✅ IMPLEMENTADO - Módulo 21]
 ------------------------------------------------------------------------------------
-FASE DE TRAZABILIDAD AVANZADA, TALLER Y EFICIENCIA OPERATIVA:
+FASE DE TRAZABILIDAD AVANZADA, TALLER Y EFICIENCIA OPERATIVA (CONCLUIDA AL 100%):
  11. Taxonomía de Causas Raíz y Análisis de Pareto [✅ IMPLEMENTADO - Módulo 25]
  12. Historial Detallado de Reasignaciones de Técnicos [✅ IMPLEMENTADO - Módulo 26]
- 13. Fusión de Tickets Duplicados (Expediente Matriz)
+ 13. Fusión de Tickets Duplicados (Expediente Matriz) [✅ CUBIERTA EN ORIGEN - Módulos 01 y 02]
  14. Bandeja de Taller Central para Piezas Recuperadas (Economía Circular M2 -> Taller -> Stock) [✅ IMPLEMENTADO - Módulo 27]
- 15. Guías Rápidas de Diagnóstico por Modelo (Playbooks In Situ para Reducir Reaperturas 48h)
+ 15. Guías Rápidas de Diagnóstico por Modelo (Playbooks In Situ para Reducir Reaperturas 48h) [✅ IMPLEMENTADO - Módulo 28]
  16. Acta de Merma y Destrucción de Lotes por Cuarentena Sanitaria (Trazabilidad APPCC Art. II) [✅ IMPLEMENTADO - Módulo 29]
- 17. Perfiles de SLA Diferenciados por Tipo de Sede (Contratos Standard / Priority / 24x7)
+ 17. Perfiles de SLA Diferenciados por Tipo de Sede (Contratos Standard / Priority / 24x7) [✅ IMPLEMENTADO - Módulo 30]
  20. Registro de Jornada y Cómputo de Horas Efectivas (Time Tracking derivado de turnos) [✅ IMPLEMENTADO - Módulo 22]
 ------------------------------------------------------------------------------------
-FASE FUTURA (Industria 4.0):
- 18. Ingesta Telemática IoT (MDB/DEX y Alarmas de Frío)
+FASE DE OPERATIVA DE CARGA, REPOSICIÓN Y GESTIÓN DE REPONEDORES (PRIORIDAD ACTIVA):
+ 21. Rol de Cargador/Reponedor de Ruta (RESTOCKER), Zonificación de Carga y Control de Jornada [✅ IMPLEMENTADO - Módulo 31]
+ 22. Catálogo Maestro de Productos, Consumibles y Planograma por Máquina (Slot Matrix + Art. II)
+ 23. Órdenes de Carga de Furgoneta de Reposición y Picking con Trazabilidad de Frío
+ 24. Visita de Reposición In Situ, Control FEFO de Caducidades y Limpieza Diaria (Art. II + Offline)
+ 25. Recaudación de Efectivo, Carga de Tubos de Cambio y Arqueo de Caja con Bolsa Precintada (Art. V.4)
+ 26. Sinergia Operativa Reponedor <-> Técnico SAT (Resolución de Nivel 1 y Escalado Técnico In Situ)
+ 27. Planificador de Rutas Periódicas de Carga y Priorización Dinámica por Demanda y Caducidad
+ 28. Cuadro de Mando de Reposición, Roturas de Stock (Stockout Rate) y Mermas Comerciales
+------------------------------------------------------------------------------------
+FASE FUTURA (Industria 4.0 / IoT · Aparcada):
+ 18. Ingesta Telemática IoT (MDB/DEX, Alarmas de Frío y Lectura Automática de Ventas/Carriles)
  19. Mantenimiento Predictivo por Ciclos de Dispensación
 ====================================================================================
 ```

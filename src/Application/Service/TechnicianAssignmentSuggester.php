@@ -9,6 +9,7 @@ use InvalidArgumentException;
 use Throwable;
 use VendGuard\Application\DTO\SuggestedTechnicianDto;
 use VendGuard\Core\Domain\Model\MachineType;
+use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
@@ -59,7 +60,13 @@ use VendGuard\Core\Service\TechnicianWorkloadScorer;
  * km y el desempate cae en la carga de trabajo.
  *
  * Un técnico inactivo o de baja se excluye del ranking (RF-04.1.5, RF-02.2): su
- * vinculación histórica se conserva, pero no se le puede enviar. Un técnico sin
+ * vinculación histórica se conserva, pero no se le puede enviar. Un candidato que
+ * declare otro rol —`RESTOCKER`, `COORDINATOR` o cualquier rol futuro— se excluye
+ * igual aunque esté activo y en turno: la sugerencia de averías es exclusiva del
+ * `TECHNICIAN` (RF-01.4, Art. V.3). Las consultas del módulo ya filtran por rol en
+ * SQL; esta guarda es la segunda línea, para que una foto compuesta por otra vía
+ * no pueda colar un reponedor. Una foto sin la clave `role` se admite: la ausencia
+ * del dato no declara un rol distinto. Un técnico sin
  * turno abierto está operativamente en `OFF_SHIFT` (RF-03.1): se le marca como no
  * disponible con el motivo «Fuera de turno» y se relega al final (RF-08.1–RF-08.3),
  * salvo que sea guardia 24/7 en una emergencia de frío (RF-08.5 / R6).
@@ -194,6 +201,14 @@ final class TechnicianAssignmentSuggester
                 throw new InvalidArgumentException(
                     sprintf('El candidato en la posición %d no es una foto de técnico válida.', $index + 1)
                 );
+            }
+
+            // RF-01.4 / Art. V.3: el escalafón de averías es exclusivo del
+            // `TECHNICIAN`. El repositorio ya filtra por rol, pero la foto puede
+            // llegar de otra fuente: un reponedor o un coordinador jamás entra en
+            // la sugerencia, ni siquiera como respaldo.
+            if (!self::isEligibleTechnicianRole($technician['role'] ?? null)) {
+                continue;
             }
 
             // Un técnico inactivo no se puede enviar: su vinculación sigue viva para
@@ -947,6 +962,25 @@ final class TechnicianAssignmentSuggester
             mb_strtolower($top['zone_affinity_label']),
             $top['total_score']
         );
+    }
+
+    /**
+     * ¿El rol declarado en la foto pertenece al escalafón SAT? (RF-01.4, Art. V.3)
+     *
+     * Una foto sin rol se admite: las consultas del módulo ya filtran por
+     * `TECHNICIAN` y la ausencia de la clave no es una declaración de otro rol. Un
+     * rol declarado distinto de `TECHNICIAN` queda fuera del ranking, incluido el
+     * `RESTOCKER` del Módulo 31, que nunca cubre una avería electromecánica.
+     */
+    private static function isEligibleTechnicianRole(mixed $declaredRole): bool
+    {
+        if ($declaredRole === null) {
+            return true;
+        }
+
+        $normalized = mb_strtoupper(trim((string)$declaredRole));
+
+        return $normalized === '' || $normalized === UserRole::TECHNICIAN->value;
     }
 
     /**

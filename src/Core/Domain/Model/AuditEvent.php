@@ -66,6 +66,15 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_TECHNICIAN_ZONE  = 'TECHNICIAN_ZONE';
 
     /**
+     * Cuadrante de carga de reponedores (Módulo 31).
+     *
+     * Tiene espacio de identificadores propio en `restocker_zone_assignments`, así
+     * que auditarlo como `TECHNICIAN_ZONE` o `USER` apuntaría a otra fila y rompería
+     * la trazabilidad del cuadrante (QA 1, Art. III.3).
+     */
+    public const ENTITY_RESTOCKER_ZONE = 'RESTOCKER_ZONE';
+
+    /**
      * Saldo de repuestos de la furgoneta (Módulo 18, RF-05.1).
      *
      * El ajuste del stock referencia la pareja técnico/pieza, no una fila de
@@ -148,6 +157,7 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_NOTIFICATION_CHANNEL_SETTING,
         self::ENTITY_OPERATIONAL_ZONE,
         self::ENTITY_TECHNICIAN_ZONE,
+        self::ENTITY_RESTOCKER_ZONE,
         self::ENTITY_TECHNICIAN_VAN_STOCK,
         self::ENTITY_VAN_RESTOCK_ORDER,
         self::ENTITY_ROOT_CAUSE_TAXONOMY,

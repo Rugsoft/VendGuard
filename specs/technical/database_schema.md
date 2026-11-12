@@ -12,7 +12,7 @@
 ## 1. Resumen y Propósito
 
 Este documento formaliza el esquema relacional de base de datos para **VendGuard** bajo el contrato de motor único PostgreSQL (Supabase), cumpliendo con:
-1. **Artículo III de la Constitución:** Prohibición absoluta de borrado físico (`DELETE FROM`). Todas las 40 tablas del dominio cuentan con disparadores `BEFORE DELETE` vinculados a la función constitucional `prevent_hard_delete()`, que rechaza con `SQLSTATE 45000` (`ART_III_1_VIOLATION`) cualquier intento de borrado físico que no ocurra bajo la ventana de purga autorizada del arnés de pruebas. El borrado lógico se gestiona mediante `deleted_at TIMESTAMPTZ NULL` o, en el catálogo de taxonomía, mediante `is_active = FALSE`.
+1. **Artículo III de la Constitución:** Prohibición absoluta de borrado físico (`DELETE FROM`). Todas las 41 tablas del dominio cuentan con disparadores `BEFORE DELETE` vinculados a la función constitucional `prevent_hard_delete()`, que rechaza con `SQLSTATE 45000` (`ART_III_1_VIOLATION`) cualquier intento de borrado físico que no ocurra bajo la ventana de purga autorizada del arnés de pruebas. El borrado lógico se gestiona mediante `deleted_at TIMESTAMPTZ NULL` o, en el catálogo de taxonomía, mediante `is_active = FALSE`.
 2. **Artículo V de la Constitución & EARS 2.1:** Restricción de unicidad estricta mediante el índice único parcial `uq_machine_active_ticket` para garantizar que **ninguna máquina pueda tener más de una incidencia activa de forma simultánea** (incluyendo el estado `RESOLVED` durante la ventana de garantía sanitaria de 48 horas).
 3. **Artículo II de la Constitución:** Integridad en tipos de máquina (`machine_type`), categorías de fallo (`incident_category`) y estados sanitarios (`sanitary_status`) para la supervisión y control estricto de la cadena de frío.
 4. **Artículo V.1 de la Constitución:** Longitudes mínimas exigidas por restricciones `CHECK` nativas en base de datos (`chk_resolution_diagnosis_len`, `chk_resolution_action_len`, etc.) garantizando explicaciones técnicas suficientes (mínimo 20 caracteres no vacíos).
@@ -20,9 +20,9 @@ Este documento formaliza el esquema relacional de base de datos para **VendGuard
 
 ---
 
-## 2. Inventario de Tablas Canónicas del Sistema (40 tablas + Libro)
+## 2. Inventario de Tablas Canónicas del Sistema (41 tablas + Libro)
 
-El sistema opera sobre **40 tablas de dominio** y **1 tabla de infraestructura de migraciones**:
+El sistema opera sobre **41 tablas de dominio** y **1 tabla de infraestructura de migraciones**:
 
 | # | Tabla | Descripción / Responsabilidad |
 |---|---|---|
@@ -66,6 +66,7 @@ El sistema opera sobre **40 tablas de dominio** y **1 tabla de infraestructura d
 | 38 | `workshop_repair_items` | Bandeja de taller central de piezas recuperadas: desglose unitario 1..N, snapshots congelados, dictamen terminal y reintegro (Módulo 27) |
 | 39 | `machine_troubleshooting_guides` | Guías rápidas de diagnóstico por modelo y categoría: códigos de error, pasos y repuestos recomendados (Módulo 28) |
 | 40 | `sanitary_spoilage_records` | Actas de merma y destrucción de lotes por cuarentena sanitaria: hechos sanitarios inmutables y coste segregado (Módulo 29) |
+| 41 | `restocker_zone_assignments` | Cuadrante de carga por zona operativa: titular único y suplencias del reponedor de ruta, con baja lógica (Módulo 31) |
 | + | `schema_migrations` | Libro de control del ejecutor `PostgresMigrationRunner` |
 
 ---
@@ -73,7 +74,7 @@ El sistema opera sobre **40 tablas de dominio** y **1 tabla de infraestructura d
 ## 3. Tipos Enumerados Nativos (ENUM)
 
 El esquema implementa 35 tipos `ENUM` nativos en PostgreSQL:
-- `user_role`: `'COORDINATOR'`, `'TECHNICIAN'`
+- `user_role`: `'COORDINATOR'`, `'TECHNICIAN'`, `'RESTOCKER'` (Módulo 31)
 - `machine_type`: `'HOT_DRINKS'`, `'COLD_DRINKS'`, `'SNACKS'`, `'PERISHABLE_FOOD'`, `'COMBO'`
 - `preventive_machine_type`: `'PERISHABLE_FOOD'`, `'HOT_DRINKS'`, `'COLD_DRINKS'`, `'SNACKS'`, `'COMBO'`
 - `urgency_level`: `'LOW'`, `'MEDIUM'`, `'HIGH'`, `'CRITICAL'`
@@ -81,7 +82,7 @@ El esquema implementa 35 tipos `ENUM` nativos en PostgreSQL:
 - `incident_status`: `'REGISTERED'`, `'ASSIGNED'`, `'IN_PROGRESS'`, `'PENDING_PARTS'`, `'PENDING_INFO'`, `'RESOLVED'`, `'REOPENED'`, `'CLOSED'`, `'CANCELLED'`
 - `sanitary_status`: `'OK'`, `'ATTENTION_REQUIRED'`, `'EXPIRED'`, `'QUARANTINE'`, `'SEASONAL_PAUSE'`
 - `comment_author_type`: `'REPORTER'`, `'TECHNICIAN'`, `'COORDINATOR'`, `'SYSTEM'`
-- `audit_entity_type`: catálogo completo en el contrato de correspondencia (§2), ampliado con `'ROOT_CAUSE_TAXONOMY'` por la migración `021_root_cause_taxonomy.sql` (Módulo 25)
+- `audit_entity_type`: catálogo completo en el contrato de correspondencia (§2), ampliado con `'ROOT_CAUSE_TAXONOMY'` por la migración `021_root_cause_taxonomy.sql` (Módulo 25) y con `'RESTOCKER_ZONE'` por `027_restocker_role_and_zone_assignments.sql` (Módulo 31)
 - `incident_assignment_source`: `'COORDINATOR_ASSIGN'`, `'COORDINATOR_REASSIGN'`, `'ABSENCE_COVERAGE_REASSIGN'`, `'OPPORTUNISTIC_NEW'`, `'OPPORTUNISTIC_ASSUMED'`, `'OPPORTUNISTIC_TAKEOVER'`, `'OPPORTUNISTIC_WARRANTY_REOPEN'`, `'SHIFT_HANDOVER'`, `'SANITARY_FAILSAFE_GUARD'` (Módulo 26)
 - `incident_unassignment_reason_type`: las 10 causas de cierre de tramo, de `'REASSIGNED_BY_COORDINATOR'` a `'CANCELLED'` (Módulo 26)
 - `sla_tier`: `'STANDARD'`, `'PRIORITY_CORPORATE'`, `'CRITICAL_INFRASTRUCTURE_24_7'` (Módulo 30)
@@ -97,7 +98,7 @@ Los dos enumerados del Módulo 27 nacen con la migración `023_workshop_repair_i
 
 ## 4. Disparadores y Funciones Constitucionales
 
-- **`prevent_hard_delete()`**: Función disparadora `BEFORE DELETE` en las 40 tablas del dominio. Si `current_setting('vendguard.purge', true) = 'on'`, autoriza el borrado para tareas de mantenimiento del arnés. De lo contrario, interrumpe la transacción con excepción constitucional `45000`.
+- **`prevent_hard_delete()`**: Función disparadora `BEFORE DELETE` en las 41 tablas del dominio. Si `current_setting('vendguard.purge', true) = 'on'`, autoriza el borrado para tareas de mantenimiento del arnés. De lo contrario, interrumpe la transacción con excepción constitucional `45000`.
 - **`touch_updated_at()`**: Función disparadora `BEFORE UPDATE` que actualiza automáticamente la columna `updated_at` con `statement_timestamp()` si no fue modificada explícitamente en la sentencia.
 - **`enforce_incident_assignments_immutability()` (Módulo 26):** Función disparadora `BEFORE UPDATE` que rechaza con `SQLSTATE 45000` cualquier cambio en los datos de apertura o en los snapshots de un tramo de custodia y cualquier modificación de un tramo ya cerrado (Art. III.3, EARS 01.3). La Tabla 37 `incident_assignments` (15 columnas) conserva los tramos con las identidades congeladas de técnico, asignador y cerrador, la coherencia todo-o-nada entre tramo abierto y cerrado, y el índice único parcial `uq_incident_assignments_active_custody (incident_id) WHERE unassigned_at IS NULL`, que garantiza un solo custodio activo por avería (Art. V.3). El backfill de la migración `022_incident_assignments_custody_chain.sql` reconstruye los expedientes anteriores con los valores de respaldo `SIN-CODIGO`, `Coordinación / Sistema` y `Registro histórico previo` (D4, QA 5).
 - **Guías de diagnóstico por modelo (Módulo 28, RF-05.2):** `machine_troubleshooting_guides` (Tabla 39, 14 columnas) declara el modelo visible y su clave plegada a minúsculas (`chk_troubleshooting_guides_model_not_empty`), `breakdown_type` del tipo `incident_category`, el título de 5 a 150 caracteres y los tres documentos `JSONB`: `error_codes_json` (0 a 20 entradas), `steps_json` (2 a 10 pasos) y `recommended_spare_part_ids` (0 a 10 identificadores). La identidad funcional es la clave única `uq_troubleshooting_guides_model_category (machine_model_key, breakdown_type)`: una sola guía por modelo y categoría, activa o inactiva (C1). `suggested_root_cause_id` referencia `root_causes` con `ON DELETE RESTRICT ON UPDATE CASCADE`, y `created_by`/`updated_by` referencian `users`. Tres índices sirven el conmutador del técnico, el catálogo por categoría y la causa sugerida. Los disparadores `trg_no_delete_machine_troubleshooting_guides` (`prevent_hard_delete()`), `trg_touch_machine_troubleshooting_guides` (`touch_updated_at()`) y `trg_immutable_machine_troubleshooting_guides` rechazan el borrado físico y el cambio de modelo o categoría tras el alta (Art. III.1 y III.3, C1). El valor `MACHINE_TROUBLESHOOTING_GUIDE` amplía `audit_entity_type`; todo llega con la migración `024_machine_troubleshooting_guides.sql`.
@@ -106,6 +107,8 @@ Los dos enumerados del Módulo 27 nacen con la migración `023_workshop_repair_i
 - **Taxonomía de causas raíz (Módulo 25):** `root_causes` (8 columnas) y `standard_solutions` (8 columnas) son maestras de baja lógica, con `trg_no_delete_*` y la unicidad parcial `uq_standard_solutions_default_per_cause (root_cause_id) WHERE is_default = TRUE AND is_active = TRUE`. `incidents` pasa a 50 columnas con las dos referencias y los cinco snapshots congelados, y `chk_incidents_taxonomy_coherence` impone la coherencia todo-o-nada. El índice `idx_incidents_pareto_resolved` sirve la analítica de Pareto por `resolved_at` vigente.
 
 - **Perfiles de SLA diferenciados por sede (Módulo 30, RF-01 a RF-03):** `locations.sla_tier` declara el perfil contractual (`STANDARD`, `PRIORITY_CORPORATE` o `CRITICAL_INFRASTRUCTURE_24_7`) con defecto `STANDARD` e índice parcial `idx_locations_sla_tier` para el catálogo de sedes activas. `incidents` incorpora `sla_tier_snapshot` (perfil congelado en el alta, `NOT NULL DEFAULT 'STANDARD'`), `sla_target_minutes` (`NOT NULL DEFAULT 1440`) y `sla_target_at` (vencimiento). `chk_incidents_sla_target_minutes` acota los cinco objetivos de la matriz RF-01 (240, 360, 480, 720 y 1440 min) y `idx_incidents_sla_target_lookup` sirve la consulta por estado y vencimiento. `trg_fn_incidents_protect_sla_tier_snapshot` y `trg_incidents_protect_sla_tier_snapshot` rechazan con `SQLSTATE 23514` (`IMMUTABLE_SLA_TIER_SNAPSHOT`) cualquier cambio del perfil sellado, mientras que el objetivo y su vencimiento siguen siendo recalculables (C4). El backfill de `026_tiered_sla_contracts.sql` conserva el umbral histórico de los expedientes cerrados (240 min en riesgo de cadena de frío y 1440 min en el resto) y aplica la matriz vigente a los abiertos bajo el perfil de su sede (C5, Art. III.3).
+
+- **Cuadrante de carga del reponedor de ruta (Módulo 31, RF-01.1, RF-02.1, QA 1):** `restocker_zone_assignments` (Tabla 41, 7 columnas) es el cuadrante de carga independiente del técnico: `restocker_id` y `zone_id` (FK `fk_restocker_zone_restocker` y `fk_restocker_zone_zone`, `ON DELETE RESTRICT ON UPDATE CASCADE`), `role_in_zone` (`PRIMARY` | `BACKUP`) e `is_primary` sincronizados por `chk_restocker_zone_role_coherence`, más `assigned_at` y la baja lógica `removed_at` con `chk_restocker_zone_removed_order`. Los índices únicos parciales `uq_restocker_zone_live (restocker_id, zone_id) WHERE removed_at IS NULL` y `uq_restocker_primary_zone (restocker_id) WHERE is_primary = TRUE AND removed_at IS NULL` garantizan una vinculación viva por pareja y una única titularidad viva por reponedor. `trg_no_delete_restocker_zone_assignments` (`prevent_hard_delete()`) prohíbe el borrado físico (Art. III.1) y `chk_users_restocker_not_on_call` impide que un `RESTOCKER` quede marcado de guardia técnica (Art. II). El valor `RESTOCKER` amplía `user_role` y `RESTOCKER_ZONE` el enumerado de auditoría; todo llega con la migración `027_restocker_role_and_zone_assignments.sql`.
 
 ---
 

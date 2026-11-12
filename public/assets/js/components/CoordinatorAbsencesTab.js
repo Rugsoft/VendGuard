@@ -44,6 +44,7 @@ export const CoordinatorAbsencesTab = {
       absences: [],
       technicians: [],
       filterTechnicianId: '',
+      filterRole: 'all', // 'all' | 'TECHNICIAN' | 'RESTOCKER'
       filterStatus: 'all',
       isLoading: false,
       errorMessage: '',
@@ -85,6 +86,12 @@ export const CoordinatorAbsencesTab = {
   },
 
   methods: {
+    roleLabel(role) {
+      if (role === 'RESTOCKER') return 'Reponedor';
+      if (role === 'TECHNICIAN') return 'Técnico SAT';
+      return role || '—';
+    },
+
     async loadAbsences() {
       this.isLoading = true;
       this.errorMessage = '';
@@ -93,11 +100,14 @@ export const CoordinatorAbsencesTab = {
         if (this.filterTechnicianId) {
           params.technician_id = this.filterTechnicianId;
         }
+        if (this.filterRole && this.filterRole !== 'all') {
+          params.role = this.filterRole;
+        }
         if (this.filterStatus && this.filterStatus !== 'all') {
           params.status = this.filterStatus;
         }
 
-        const res = await api.get('/coordinator/technicians/absences', { params });
+        const res = await api.get('/coordinator/absences', { params });
         const list = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
         this.absences = list;
       } catch (err) {
@@ -107,13 +117,22 @@ export const CoordinatorAbsencesTab = {
       }
     },
 
+    /**
+     * Directorio de operarios con ausencias: técnicos SAT y reponedores de ruta
+     * (Módulo 31, RF-05.1). El filtro por rol del listado no recorta el alta.
+     */
     async loadTechnicians() {
       try {
-        const res = await api.get('/coordinator/users', { params: { role: 'TECHNICIAN', status: 'active' } });
-        const list = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
-        this.technicians = list.filter(u => u.is_active !== false);
+        const [techniciansRes, restockersRes] = await Promise.all([
+          api.get('/coordinator/users', { params: { role: 'TECHNICIAN', status: 'active' } }),
+          api.get('/coordinator/users', { params: { role: 'RESTOCKER', status: 'active' } })
+        ]);
+        const toList = (res) => (Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []));
+        this.technicians = [...toList(techniciansRes), ...toList(restockersRes)]
+          .filter(u => u.is_active !== false)
+          .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
       } catch (err) {
-        console.error('Error al cargar técnicos para ausencias:', err);
+        console.error('Error al cargar operarios para ausencias:', err);
       }
     },
 
@@ -158,10 +177,7 @@ export const CoordinatorAbsencesTab = {
       this.isCreating = true;
       this.createError = '';
       try {
-        const res = await api.post(
-          `/coordinator/technicians/${this.createForm.technician_id}/absences`,
-          requestPayload
-        );
+        const res = await api.post('/coordinator/absences', requestPayload);
 
         this.showCreateModal = false;
         await this.loadAbsences();
@@ -339,6 +355,24 @@ export const CoordinatorAbsencesTab = {
         </div>
 
         <div style="display: flex; align-items: center; gap: 6px;">
+          <label for="filter-absence-role" style="font-size: var(--font-size-body-sm); font-weight: 600; color: var(--color-slate);">
+            Rol:
+          </label>
+          <select
+            id="filter-absence-role"
+            v-model="filterRole"
+            class="vg-input"
+            style="height: 34px; font-size: var(--font-size-body-sm);"
+            data-testid="filter-absence-role"
+            @change="loadAbsences"
+          >
+            <option value="all">Todos</option>
+            <option value="TECHNICIAN">🧑‍🔧 Técnicos SAT</option>
+            <option value="RESTOCKER">📦 Reponedores</option>
+          </select>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 6px;">
           <label for="filter-absence-status" style="font-size: var(--font-size-body-sm); font-weight: 600; color: var(--color-slate);">
             Estado:
           </label>
@@ -378,7 +412,8 @@ export const CoordinatorAbsencesTab = {
         <table style="width: 100%; border-collapse: collapse; font-size: var(--font-size-body-sm); text-align: left;">
           <thead>
             <tr style="border-bottom: 1px solid var(--color-hairline); background-color: var(--color-surface-1);">
-              <th style="padding: 10px 14px; font-weight: 700; color: var(--color-slate);">Técnico</th>
+              <th style="padding: 10px 14px; font-weight: 700; color: var(--color-slate);">Operario</th>
+              <th style="padding: 10px 14px; font-weight: 700; color: var(--color-slate);">Rol</th>
               <th style="padding: 10px 14px; font-weight: 700; color: var(--color-slate);">Motivo</th>
               <th style="padding: 10px 14px; font-weight: 700; color: var(--color-slate);">Desde</th>
               <th style="padding: 10px 14px; font-weight: 700; color: var(--color-slate);">Hasta</th>
@@ -389,12 +424,12 @@ export const CoordinatorAbsencesTab = {
           </thead>
           <tbody>
             <tr v-if="isLoading">
-              <td colspan="7" style="padding: 24px; text-align: center; color: var(--color-ink-muted);">
+              <td colspan="8" style="padding: 24px; text-align: center; color: var(--color-ink-muted);">
                 ⏳ Cargando ausencias...
               </td>
             </tr>
             <tr v-else-if="absences.length === 0">
-              <td colspan="7" style="padding: 24px; text-align: center; color: var(--color-ink-muted);">
+              <td colspan="8" style="padding: 24px; text-align: center; color: var(--color-ink-muted);">
                 No hay ausencias registradas con los filtros seleccionados.
               </td>
             </tr>
@@ -406,6 +441,12 @@ export const CoordinatorAbsencesTab = {
             >
               <td style="padding: 10px 14px; font-weight: 600; color: var(--color-ink);">
                 {{ a.technician_name }}
+                <span v-if="a.operator_code" class="font-monospace" style="font-size: 11px; color: var(--color-ink-muted);">· {{ a.operator_code }}</span>
+              </td>
+              <td style="padding: 10px 14px;">
+                <span class="vg-badge" style="background-color: var(--color-surface-2); color: var(--color-primary-dark); padding: 2px 6px; border-radius: var(--radius-interactive); font-weight: 600; font-size: 11px;">
+                  {{ a.technician_role_label || roleLabel(a.technician_role) }}
+                </span>
               </td>
               <td style="padding: 10px 14px;">
                 <span class="vg-badge" style="background-color: var(--color-surface-2); color: var(--color-primary-dark); padding: 2px 6px; border-radius: var(--radius-interactive); font-weight: 600; font-size: 11px;">
@@ -471,7 +512,7 @@ export const CoordinatorAbsencesTab = {
             >
               <option value="" disabled>Selecciona un técnico...</option>
               <option v-for="t in technicians" :key="t.id" :value="t.id">
-                {{ t.name }}
+                {{ t.name }} · {{ roleLabel(t.role) }}
               </option>
             </select>
           </div>

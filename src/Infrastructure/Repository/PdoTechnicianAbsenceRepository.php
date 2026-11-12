@@ -95,10 +95,19 @@ final class PdoTechnicianAbsenceRepository implements TechnicianAbsenceRepositor
     /**
      * @return list<TechnicianAbsence>
      */
-    public function findAll(?int $technicianId = null, ?string $status = null): array
+    public function findAll(?int $technicianId = null, ?string $status = null, ?string $role = null): array
     {
         $where = [];
         $params = [];
+
+        $roleFilter = self::normalizeRoleFilter($role);
+        if ($roleFilter !== null) {
+            // Subconsulta y no `JOIN`: `SELECT *` con dos tablas homónimas
+            // devolvería columnas duplicadas y la hidratación de la ausencia
+            // podría quedarse con el `id` del usuario (Módulo 31, `D2`).
+            $where[] = 'technician_id IN (SELECT id FROM users WHERE role = :role_filter)';
+            $params[':role_filter'] = $roleFilter;
+        }
 
         if ($technicianId !== null) {
             $where[] = 'technician_id = :technician_id';
@@ -219,6 +228,35 @@ final class PdoTechnicianAbsenceRepository implements TechnicianAbsenceRepositor
         $stmt->execute($params);
 
         return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Normaliza el filtro de rol de la consola (`ALL` | `TECHNICIAN` | `RESTOCKER`).
+     *
+     * Devuelve `null` cuando no hay restricción, y rechaza en voz alta cualquier
+     * valor fuera del catálogo: un filtro imposible devolvería una lista vacía y
+     * el coordinador creería que no hay ausencias (Módulo 31, `D2`, `QA 4`).
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function normalizeRoleFilter(?string $role): ?string
+    {
+        if ($role === null) {
+            return null;
+        }
+
+        $normalized = strtoupper(trim($role));
+        if ($normalized === '' || $normalized === 'ALL') {
+            return null;
+        }
+
+        if (!in_array($normalized, ['TECHNICIAN', 'RESTOCKER'], true)) {
+            throw new \InvalidArgumentException(
+                "Filtro de rol no válido: '{$role}'. Se admite ALL, TECHNICIAN o RESTOCKER."
+            );
+        }
+
+        return $normalized;
     }
 
     public function cancel(int $id, int $cancelledBy, string $cancellationReason): bool

@@ -107,6 +107,9 @@ class AdminUserService
         $email = strtolower(trim((string)($data['email'] ?? '')));
         $rawRole = strtoupper(trim((string)($data['role'] ?? '')));
         $phone = isset($data['phone']) && $data['phone'] !== '' ? trim((string)$data['phone']) : null;
+        $operatorCode = isset($data['operator_code']) && trim((string)$data['operator_code']) !== ''
+            ? strtoupper(trim((string)$data['operator_code']))
+            : null;
         $password = (string)($data['password'] ?? '');
 
         $this->validateName($name);
@@ -149,6 +152,7 @@ class AdminUserService
                 'name'              => $name,
                 'email'             => $email,
                 'role'              => $role->value,
+                'operator_code'     => $operatorCode,
                 'phone'             => $phone,
                 'password'          => $password,
                 'telegram_chat_id'  => $telegramChatId,
@@ -172,6 +176,7 @@ class AdminUserService
                 'name'  => $created->getName(),
                 'email' => $created->getEmail(),
                 'role'  => $created->getRole()->value,
+                'operator_code' => $operatorCode,
                 'phone' => $created->getPhone(),
                 'telegram_chat_id' => self::maskChatId($created->getTelegramChatId()),
             ],
@@ -414,8 +419,11 @@ class AdminUserService
         }
 
         // 2. Salvaguarda de guardia mínima operativa (Caso Límite 9, EARS 3.6)
+        //    La regla protege la cobertura de coordinación y de ruta técnica; un
+        //    reponedor no cubre ninguna de las dos, así que su baja no se bloquea
+        //    por ser el último del rol (Módulo 31, C3).
         $activeRoleCount = $this->userRepo->countActiveByRole($targetUser->getRole());
-        if ($activeRoleCount <= 1) {
+        if (!$targetUser->getRole()->isRestocker() && $activeRoleCount <= 1) {
             throw new MinimumActiveStaffException(
                 'No se puede dar de baja al usuario porque debe existir al menos un coordinador y un técnico activo en la plataforma.',
                 $targetUser->getRole()->value
@@ -532,7 +540,7 @@ class AdminUserService
     {
         $role = UserRole::tryFrom($rawRole);
         if ($role === null) {
-            throw new InvalidArgumentException("El rol '{$rawRole}' no es válido. Debe ser TECHNICIAN o COORDINATOR.");
+            throw new InvalidArgumentException("El rol '{$rawRole}' no es válido. Debe ser COORDINATOR, TECHNICIAN o RESTOCKER.");
         }
 
         return $role;
@@ -556,9 +564,9 @@ class AdminUserService
      * Valida la vinculación con Telegram del usuario (Módulo 15, RF-TG-07).
      *
      * Tres reglas, en este orden: un valor vacío significa «sin vincular» y es
-     * legal; sólo un técnico de campo puede tener chat, porque el canal entrega
-     * rutas de trabajo; y el formato es el de un identificador de Telegram. La
-     * unicidad no se comprueba aquí —necesitaría leer por un valor que aún no es
+     * legal; sólo un operario de campo —técnico SAT o reponedor de ruta, que
+     * también recibe una ruta de trabajo— puede tener chat; y el formato es el de
+     * un identificador de Telegram. La unicidad no se comprueba aquí —necesitaría leer por un valor que aún no es
      * columna obligatoria— sino en el índice único parcial, cuya violación se
      * traduce a un mensaje de negocio en {@see translateWriteFailure()}.
      */
@@ -573,9 +581,9 @@ class AdminUserService
             return null;
         }
 
-        if (!$role->isTechnician()) {
+        if (!$role->isFieldOperator()) {
             throw new InvalidArgumentException(
-                'Sólo un técnico de campo puede vincular un chat de Telegram: el canal entrega su ruta de trabajo.'
+                'Sólo un operario de campo (técnico SAT o reponedor de ruta) puede vincular un chat de Telegram: el canal entrega su ruta de trabajo.'
             );
         }
 
@@ -625,6 +633,12 @@ class AdminUserService
                 null,
                 'USER',
                 false
+            );
+        }
+
+        if (UniqueViolationDetector::matches($exception, 'uq_users_operator_code')) {
+            return new InvalidArgumentException(
+                'El código de operador indicado ya está en uso. Cada operario necesita un código único.'
             );
         }
 

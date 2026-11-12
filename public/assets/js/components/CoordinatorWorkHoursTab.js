@@ -76,6 +76,7 @@ export const CoordinatorWorkHoursTab = {
       isLoading: false,
       errorMessage: '',
       technicianId: '',
+      filterRole: 'all', // 'all' | 'TECHNICIAN' | 'RESTOCKER' (Módulo 31, D2)
       successMessage: '',
       adjustShiftTarget: null,
       adjustForm: {
@@ -195,6 +196,9 @@ export const CoordinatorWorkHoursTab = {
       if (this.technicianId !== '' && this.technicianId !== null && this.technicianId !== undefined) {
         params.technician_id = Number(this.technicianId);
       }
+      if (this.filterRole && this.filterRole !== 'all') {
+        params.role = this.filterRole;
+      }
       return params;
     },
 
@@ -257,6 +261,12 @@ export const CoordinatorWorkHoursTab = {
     },
 
     /** `HHh MMm`, el mismo formato legible que publica el backend (RNF-01). */
+    roleLabel(role) {
+      if (role === 'RESTOCKER') return 'Reponedor';
+      if (role === 'TECHNICIAN') return 'Técnico SAT';
+      return role || '—';
+    },
+
     formatDuration(seconds) {
       const total = Math.max(0, Math.round(Number(seconds) || 0));
       const hours = Math.floor(total / 3600);
@@ -525,6 +535,21 @@ export const CoordinatorWorkHoursTab = {
 
         <div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px;">
           <label style="display: flex; flex-direction: column; gap: 4px; font-size: var(--font-size-caption); color: var(--color-ink-muted);">
+            Rol
+            <select
+              v-model="filterRole"
+              data-testid="work-hours-role-filter"
+              class="vg-select"
+              style="min-width: 160px; font-family: var(--font-body);"
+              @change="loadReport"
+            >
+              <option value="all">Todos los roles</option>
+              <option value="TECHNICIAN">🧑‍🔧 Técnicos SAT</option>
+              <option value="RESTOCKER">📦 Reponedores</option>
+            </select>
+          </label>
+
+          <label style="display: flex; flex-direction: column; gap: 4px; font-size: var(--font-size-caption); color: var(--color-ink-muted);">
             Técnico
             <select
               v-model="technicianId"
@@ -693,7 +718,8 @@ export const CoordinatorWorkHoursTab = {
             <table data-testid="work-hours-summary-table" style="width: 100%; border-collapse: collapse; font-size: var(--font-size-body-sm);">
               <thead>
                 <tr style="background-color: var(--color-canvas);">
-                  <th style="text-align: left; padding: 10px 12px; font-size: var(--font-size-caption); font-weight: 600; color: var(--color-ink-muted); border-bottom: 1px solid var(--color-hairline);">Técnico</th>
+                  <th style="text-align: left; padding: 10px 12px; font-size: var(--font-size-caption); font-weight: 600; color: var(--color-ink-muted); border-bottom: 1px solid var(--color-hairline);">Operario</th>
+                  <th style="text-align: left; padding: 10px 12px; font-size: var(--font-size-caption); font-weight: 600; color: var(--color-ink-muted); border-bottom: 1px solid var(--color-hairline);">Rol</th>
                   <th style="text-align: left; padding: 10px 12px; font-size: var(--font-size-caption); font-weight: 600; color: var(--color-ink-muted); border-bottom: 1px solid var(--color-hairline);">Plantilla</th>
                   <th style="text-align: right; padding: 10px 12px; font-size: var(--font-size-caption); font-weight: 600; color: var(--color-ink-muted); border-bottom: 1px solid var(--color-hairline);">Sesiones</th>
                   <th style="text-align: right; padding: 10px 12px; font-size: var(--font-size-caption); font-weight: 600; color: var(--color-ink-muted); border-bottom: 1px solid var(--color-hairline);">Brutas</th>
@@ -710,6 +736,14 @@ export const CoordinatorWorkHoursTab = {
                   <td style="padding: 10px 12px; color: var(--color-slate);">
                     <strong>{{ row.technician_name || 'Técnico #' + row.technician_id }}</strong>
                     <span v-if="row.operator_code" style="color: var(--color-ink-muted);"> · {{ row.operator_code }}</span>
+                  </td>
+                  <td style="padding: 10px 12px;">
+                    <span
+                      data-testid="work-hours-role-badge"
+                      style="display: inline-block; padding: 2px 8px; background-color: var(--color-surface-2); color: var(--color-primary-dark); border-radius: var(--radius-interactive); font-size: var(--font-size-caption); font-weight: 600;"
+                    >
+                      {{ row.technician_role_label || roleLabel(row.technician_role) }}
+                    </span>
                   </td>
                   <td style="padding: 10px 12px; color: var(--color-ink-muted);">{{ row.is_active === false ? 'Inactivo' : 'Activo' }}</td>
                   <td style="padding: 10px 12px; text-align: right; font-family: var(--font-display); color: var(--color-slate);">{{ row.sessions_count || 0 }}</td>
@@ -760,7 +794,16 @@ export const CoordinatorWorkHoursTab = {
                 <template v-for="session in sessions" :key="'session-' + session.id">
                   <tr style="border-bottom: 1px solid var(--color-hairline);">
                     <td style="padding: 10px 12px; color: var(--color-slate); white-space: nowrap;">{{ formatDate(session.shift_date) }}</td>
-                    <td style="padding: 10px 12px; color: var(--color-slate);">{{ session.technician_name || 'Técnico #' + session.technician_id }}</td>
+                    <td style="padding: 10px 12px; color: var(--color-slate);">
+                      {{ session.technician_name || 'Técnico #' + session.technician_id }}
+                      <span
+                        v-if="session.technician_role"
+                        data-testid="work-hours-session-role"
+                        style="display: inline-block; margin-left: 6px; padding: 2px 8px; background-color: var(--color-surface-2); color: var(--color-primary-dark); border-radius: var(--radius-interactive); font-size: var(--font-size-caption);"
+                      >
+                        {{ session.technician_role_label || roleLabel(session.technician_role) }}
+                      </span>
+                    </td>
                     <td style="padding: 10px 12px; font-family: var(--font-display); color: var(--color-slate); white-space: nowrap;">{{ formatTime(session.started_at) }}</td>
                     <td style="padding: 10px 12px; font-family: var(--font-display); color: var(--color-slate); white-space: nowrap;">
                       {{ session.is_open ? 'En curso' : formatTime(session.closed_at) }}

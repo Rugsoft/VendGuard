@@ -744,6 +744,7 @@ try {
         str_starts_with($csv, "\xEF\xBB\xBF")
             && $firstHeader === [
                 'Técnico',
+                'Rol',
                 'Estado en Plantilla',
                 'Sesiones',
                 'Horas Brutas',
@@ -776,6 +777,7 @@ try {
                 'ID Sesión',
                 'Fecha Imputación',
                 'Técnico',
+                'Rol',
                 'Entrada Vigente',
                 'Salida Vigente',
                 'Duración Bruta',
@@ -812,11 +814,11 @@ try {
     $assert(
         '4.13 CSV distingue plantilla activa sin sesiones y técnico inactivo con actividad',
         $elenaRow !== null
-            && ($elenaRow[1] ?? '') === 'Activo'
-            && ($elenaRow[2] ?? '') === '0'
+            && ($elenaRow[2] ?? '') === 'Activo'
+            && ($elenaRow[3] ?? '') === '0'
             && $marcRow !== null
-            && ($marcRow[1] ?? '') === 'Inactivo'
-            && ($marcRow[2] ?? '') === '1',
+            && ($marcRow[2] ?? '') === 'Inactivo'
+            && ($marcRow[3] ?? '') === '1',
         'elena=' . json_encode($elenaRow, JSON_UNESCAPED_UNICODE) . ' marc=' . json_encode($marcRow, JSON_UNESCAPED_UNICODE)
     );
 
@@ -830,8 +832,8 @@ try {
     $assert(
         '4.14 La sesión con cierre forzado y ajuste viaja marcada en el detalle del CSV',
         $forcedSessionRow !== null
-            && ($forcedSessionRow[9] ?? '') === 'Sí'
-            && ($forcedSessionRow[10] ?? '') === 'Sí',
+            && ($forcedSessionRow[10] ?? '') === 'Sí'
+            && ($forcedSessionRow[11] ?? '') === 'Sí',
         'fila=' . json_encode($forcedSessionRow, JSON_UNESCAPED_UNICODE)
     );
 
@@ -884,7 +886,8 @@ try {
     $coordinatorMyHours = $api('GET', '/api/technician/shift/my-hours', $coordToken);
     $assert(
         '5.4 El rol de Coordinación no puede leer las horas propias del técnico => 403',
-        $coordinatorMyHours->getStatusCode() === 403 && $errorCode($coordinatorMyHours) === 'FORBIDDEN'
+        $coordinatorMyHours->getStatusCode() === 403
+            && in_array($errorCode($coordinatorMyHours), ['FORBIDDEN', 'FORBIDDEN_ROLE'], true)
     );
 
     $siteLogin = $api('POST', '/api/auth/site-login', null, [

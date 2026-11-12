@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace VendGuard\Application\Service;
 
+use DateTimeImmutable;
 use VendGuard\Application\DTO\OperationalZoneDto;
 use VendGuard\Application\DTO\PostalCodeTransferResultDto;
 use VendGuard\Application\DTO\TechnicianQuadrantDto;
+use VendGuard\Application\DTO\ZoneRestockerAssignmentDto;
 use VendGuard\Application\DTO\ZoneTechnicianAssignmentDto;
 use VendGuard\Core\Domain\Exception\LocationNotFoundException;
 use VendGuard\Core\Domain\Exception\PostalCodeConflictException;
@@ -16,6 +18,7 @@ use VendGuard\Core\Domain\Exception\ZoneValidationException;
 use VendGuard\Core\Domain\Model\OperationalZone;
 use VendGuard\Core\Domain\Repository\LocationZoneRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\PostalCode;
 
 /**
@@ -60,12 +63,23 @@ class OperationalZoneService
 
     private LocationZoneRepositoryInterface $locationRepo;
 
+    /**
+     * Lectura de ausencias para la insignia «Ausente» del cuadrante de carga.
+     *
+     * Es opcional para no arrastrar a las composiciones y dobles que sólo
+     * administran territorio: sin él, el cuadrante sigue marcando «Baja» y la
+     * ausencia se resuelve en la cobertura en vivo (`RestockerZoneCoverageService`).
+     */
+    private ?TechnicianAbsenceRepositoryInterface $absenceRepo;
+
     public function __construct(
         OperationalZoneRepositoryInterface $zoneRepo,
-        LocationZoneRepositoryInterface $locationRepo
+        LocationZoneRepositoryInterface $locationRepo,
+        ?TechnicianAbsenceRepositoryInterface $absenceRepo = null
     ) {
         $this->zoneRepo = $zoneRepo;
         $this->locationRepo = $locationRepo;
+        $this->absenceRepo = $absenceRepo;
     }
 
     /**
@@ -117,7 +131,7 @@ class OperationalZoneService
      * `ZONE_NOT_FOUND`.
      *
      * @param int $zoneId Identificador de la zona.
-     * @return array{zone_id: int, technicians: list<array<string, mixed>>}
+     * @return array{zone_id: int, technicians: list<array<string, mixed>>, restockers: list<array<string, mixed>>}
      *
      * @throws ZoneNotFoundException Si la zona no existe.
      */
@@ -131,6 +145,9 @@ class OperationalZoneService
                 static fn (array $row): array => ZoneTechnicianAssignmentDto::fromRow($row)->toArray(),
                 $this->zoneRepo->findTechnicianAssignments($zoneId)
             ),
+            // Módulo 31 (D2): el cuadrante de carga es independiente del SAT y
+            // viaja en la misma ficha para que el panel pinte los dos bloques.
+            'restockers' => $this->projectRestockers($zoneId),
         ];
     }
 
@@ -226,17 +243,19 @@ class OperationalZoneService
         }
 
         $impact = $this->zoneRepo->inspectReleaseImpact($zoneId);
-        $total = $impact['postal_codes'] + $impact['technicians'] + $impact['locations'];
+        $restockers = $impact['restockers'] ?? 0;
+        $total = $impact['postal_codes'] + $impact['technicians'] + $restockers + $impact['locations'];
 
         if ($total > 0 && !$confirmRelease) {
             throw ZoneValidationException::unprocessable(
                 sprintf(
-                    'La zona «%s» conserva %d códigos postales, %d sedes y %d técnicos vinculados. '
+                    'La zona «%s» conserva %d códigos postales, %d sedes, %d técnicos y %d reponedores vinculados. '
                         . 'Desactivarla los libera en la misma operación; confirma con confirm_release.',
                     $current->getName(),
                     $impact['postal_codes'],
                     $impact['locations'],
-                    $impact['technicians']
+                    $impact['technicians'],
+                    $restockers
                 ),
                 ['confirm_release' => 'Se requiere confirmación para liberar el territorio de la zona.']
             );
@@ -390,6 +409,129 @@ class OperationalZoneService
         $this->requireZone($zoneId);
 
         return $this->zoneRepo->removeTechnician($technicianId, $zoneId, $userId);
+    }
+
+    /**
+     * Vincula a un reponedor con el «📦 Cuadrante de Carga» de una zona (RF-02.1, RF-02.2).
+     *
+     * La validación de rol, de cuenta activa y de titularidad única vive en el
+     * repositorio, que es quien abre la transacción: la segunda titularidad sin
+     * `confirmPrimaryTransfer` se rechaza con `PRIMARY_ZONE_ALREADY_ASSIGNED` y,
+     * confirmada, degrada la anterior en la misma operación (D3).
+     *
+     * @param int $restockerId Usuario con rol `RESTOCKER` activo.
+     * @param int $zoneId Zona activa de destino.
+     * @param bool $isPrimary True para titular, false para suplente.
+     * @param int $userId Coordinador que firma la vinculación.
+     * @param bool $confirmPrimaryTransfer Degrada la titularidad previa en lugar de rechazarla.
+     * @return array<string, mixed> Vinculación resultante con sus insignias.
+     *
+     * @throws ZoneNotFoundException Si la zona no existe.
+     * @throws ZoneValidationException Si la zona está inactiva o el usuario no es un reponedor activo.
+     * @throws \VendGuard\Core\Domain\Exception\PrimaryRestockerConflictException Si ya es titular de otra zona sin confirmación.
+     */
+    public function assignRestocker(
+        int $restockerId,
+        int $zoneId,
+        bool $isPrimary,
+        int $userId,
+        bool $confirmPrimaryTransfer = false
+    ): array {
+        $this->requireActiveZone($zoneId);
+
+        $assignmentId = $this->zoneRepo->assignRestocker(
+            $restockerId,
+            $zoneId,
+            $isPrimary,
+            $userId,
+            $isPrimary && $confirmPrimaryTransfer
+        );
+
+        foreach ($this->zoneRepo->findRestockerAssignments($zoneId) as $row) {
+            if ((int)$row['restocker_id'] === $restockerId) {
+                return [
+                    'assignment' => ['id' => $assignmentId]
+                        + ZoneRestockerAssignmentDto::fromRow($row, $this->hasActiveAbsence($restockerId))->toArray(),
+                ];
+            }
+        }
+
+        return [
+            'assignment' => [
+                'id' => $assignmentId,
+                'restocker_id' => $restockerId,
+                'zone_id' => $zoneId,
+                'role_in_zone' => $isPrimary ? 'PRIMARY' : 'BACKUP',
+                'is_primary' => $isPrimary,
+                'assigned_at' => null,
+            ],
+        ];
+    }
+
+    /**
+     * Extingue lógicamente la vinculación de un reponedor con una zona (RF-02.3, QA 4).
+     *
+     * Repetir la baja devuelve `false` sin escribir un segundo evento: la consola
+     * puede reintentar sin duplicar el rastro.
+     *
+     * @throws ZoneNotFoundException Si la zona no existe.
+     */
+    public function removeRestocker(int $restockerId, int $zoneId, int $userId): bool
+    {
+        $this->requireZone($zoneId);
+
+        return $this->zoneRepo->removeRestocker($restockerId, $zoneId, $userId);
+    }
+
+    /**
+     * Cuadrante de carga vivo de una zona, con la insignia de cada operario (RF-02.4).
+     *
+     * @return array{zone_id: int, restockers: list<array<string, mixed>>}
+     *
+     * @throws ZoneNotFoundException Si la zona no existe.
+     */
+    public function listZoneRestockers(int $zoneId, ?DateTimeImmutable $now = null): array
+    {
+        $this->requireZone($zoneId);
+
+        return ['zone_id' => $zoneId, 'restockers' => $this->projectRestockers($zoneId, $now)];
+    }
+
+    /**
+     * Lectura inversa del cuadrante de carga: reponedor → zonas vivas (RF-02.4).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listRestockerQuadrants(): array
+    {
+        return $this->zoneRepo->findRestockerQuadrantsByTechnician();
+    }
+
+    /**
+     * Proyecta las filas del cuadrante de carga con su insignia de disponibilidad.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function projectRestockers(int $zoneId, ?DateTimeImmutable $now = null): array
+    {
+        $absences = $this->absenceRepo?->findActiveAbsencesMap($now ?? new DateTimeImmutable('now')) ?? [];
+
+        return array_map(
+            fn (array $row): array => ZoneRestockerAssignmentDto::fromRow(
+                $row,
+                isset($absences[(int)$row['restocker_id']])
+            )->toArray(),
+            $this->zoneRepo->findRestockerAssignments($zoneId)
+        );
+    }
+
+    private function hasActiveAbsence(int $restockerId): bool
+    {
+        if ($this->absenceRepo === null) {
+            return false;
+        }
+
+        return isset($this->absenceRepo->findActiveAbsencesMap(new DateTimeImmutable('now'))[$restockerId]);
     }
 
     /**

@@ -16,6 +16,7 @@ import { ConnectionStateBanner } from './components/ConnectionStateBanner.js';
 import { LocationPortalView } from './views/LocationPortalView.js';
 import { CoordinatorDashboardView } from './views/CoordinatorDashboardView.js?v=26';
 import { TechnicianRouteView } from './views/TechnicianRouteView.js';
+import { RestockerRouteView } from './components/RestockerRouteView.js';
 import { QrReportView } from './views/QrReportView.js';
 import { PublicRefundTrackingView } from './views/PublicRefundTrackingView.js';
 import { mountChatWidget, unmountChatWidget } from './utils/n8nChat.js';
@@ -28,12 +29,13 @@ export const App = {
     LocationPortalView,
     CoordinatorDashboardView,
     TechnicianRouteView,
+    RestockerRouteView,
     QrReportView,
     PublicRefundTrackingView
   },
   data() {
     return {
-      currentView: 'portal', // 'portal' | 'coordinator' | 'technician' | 'qr' | 'tracking'
+      currentView: 'portal', // 'portal' | 'coordinator' | 'technician' | 'restocker' | 'qr' | 'tracking'
       trackingToken: '',
       siteCode: 'SEDE-BCN-01',
       showCredentialsGuide: true,
@@ -102,6 +104,12 @@ export const App = {
         this.deepLinkTicket = (urlParams.get('ticket') || '').trim();
       }
 
+      // 3b. Deep Link a la vista del reponedor (Módulo 31, RF-04.1):
+      //     `/?restocker=1` o `/?repo=1`.
+      if (urlParams.has('restocker') || urlParams.has('repo')) {
+        this.currentView = 'restocker';
+      }
+
       // 4. Deep Link al Portal de Sede desde el correo de seguimiento
       //    (/?site=SEDE-BCN-01&ticket=INC-2026-...). El botón del aviso tiene que
       //    aterrizar en el portal de ESA sede, no en el formulario vacío: el
@@ -135,6 +143,8 @@ export const App = {
         this.currentView = 'coordinator';
       } else if (store.state.user?.role === 'TECHNICIAN') {
         this.currentView = 'technician';
+      } else if (store.state.user?.role === 'RESTOCKER') {
+        this.currentView = 'restocker';
       }
     }
   },
@@ -166,6 +176,10 @@ export const App = {
 
       if (store.state.user?.role === 'TECHNICIAN') {
         return 'technician';
+      }
+
+      if (store.state.user?.role === 'RESTOCKER') {
+        return 'restocker';
       }
 
       return null;
@@ -233,6 +247,15 @@ export const App = {
             >
               📱 3. Técnico Móvil
             </button>
+            <button
+              type="button"
+              class="vg-btn"
+              :class="currentView === 'restocker' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+              style="height: 32px; font-size: 13px; padding: 0 12px; border-radius: var(--radius-interactive, 4px);"
+              @click="switchView('restocker')"
+            >
+              📦 4. Reponedor
+            </button>
           </div>
 
           <!-- Quick Test Credentials Helper Toggle -->
@@ -262,6 +285,9 @@ export const App = {
           </div>
           <div>
             <strong>📱 Técnico de Ruta:</strong> <code>jordi.ruta@vendguard.internal</code> / <code>Password123!</code>
+          </div>
+          <div>
+            <strong>📦 Reponedor:</strong> <code>lucia.repostaje@vendguard.internal</code> / <code>Password123!</code>
           </div>
         </div>
       </div>
@@ -308,6 +334,9 @@ export const App = {
         <TechnicianRouteView
           v-else-if="currentView === 'technician'"
           :initial-ticket-code="deepLinkTicket"
+        />
+        <RestockerRouteView
+          v-else-if="currentView === 'restocker'"
         />
       </main>
 

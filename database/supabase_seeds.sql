@@ -10,7 +10,8 @@
 --   motor nuevo (EARS-02.1): las 10 sedes con su código postal, las 3 zonas
 --   operativas del Módulo 17 con sus códigos postales y el cuadrante técnico demo,
 --   la configuración de la ruta base, las 13 máquinas del parque, el personal
---   interno con su contraseña hasheada, las frecuencias normativas del preventivo,
+--   interno —coordinación, técnicos y los reponedores `REP-01`/`REP-02` del
+--   Módulo 31— con su contraseña hasheada, las frecuencias normativas del preventivo,
 --   el catálogo maestro de repuestos con sus compatibilidades por modelo, el
 --   catálogo de taxonomía de causas raíz y soluciones estandarizadas del Módulo
 --   25 (16 causas y 34 soluciones) y las cuatro órdenes de carga demo del Módulo
@@ -62,6 +63,7 @@
 --   | operational_zones          | `code` (única)                      | ninguno: se inserta solo si no existe (Módulo 17)                                            |
 --   | operational_zone_postal_codes | `postal_code` (clave primaria)    | ninguno: se inserta solo si no existe; el CP es único en todo el catálogo (QA 7)             |
 --   | technician_zone_assignments | `(technician_id, zone_id)` vivo     | ninguno: se inserta solo si no existe (la baja es lógica, QA 10)                              |
+--   | restocker_zone_assignments  | `(restocker_id, zone_id)` vivo      | ninguno: se inserta solo si no existe (Módulo 31; la baja es lógica, Art. III.1)              |
 --   | technician_van_stocks      | `(technician_id, spare_part_id)`    | ninguno: se inserta solo si no existe (Módulo 18)                                            |
 --   | van_restock_orders         | `(technician_id, created_at)` de la semilla | ninguno: se inserta solo si no existe (Módulo 23)                                    |
 --   | van_restock_order_items    | `(order_id, spare_part_id)`         | ninguno: se inserta solo si no existe (Módulo 23; la retirada es lógica, QA 1)              |
@@ -224,7 +226,12 @@ INSERT INTO users (
     ('Marta Técnica Ruta BCN', 'marta.ruta@vendguard.internal', 'marta.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-02', '677444555'),
     ('Carlos Técnico Ruta Sud', 'carlos.ruta@vendguard.internal', 'carlos.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-03', '677666777'),
     ('Elena Técnica Ruta Nord', 'elena.ruta@vendguard.internal', 'elena.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-04', '677888999'),
-    ('Marc Técnico Express BCN', 'marc.ruta@vendguard.internal', 'marc.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-05', '677112233')
+    ('Marc Técnico Express BCN', 'marc.ruta@vendguard.internal', 'marc.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-05', '677112233'),
+    -- Módulo 31 · los dos reponedores semilla. `is_on_call` queda en su valor por
+    -- defecto (FALSE): la guardia técnica 24/7 del Art. II no admite `RESTOCKER`
+    -- y la restricción `chk_users_restocker_not_on_call` lo impide en la base.
+    ('Lucía Reponedora BCN', 'lucia.repostaje@vendguard.internal', 'lucia.repostaje@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'RESTOCKER', 'REP-01', '677334455'),
+    ('Óscar Reponedor BCN', 'oscar.repostaje@vendguard.internal', 'oscar.repostaje@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'RESTOCKER', 'REP-02', '677445566')
 ON CONFLICT (email_key) DO UPDATE SET
     email         = EXCLUDED.email,
     name          = EXCLUDED.name,
@@ -439,6 +446,35 @@ JOIN operational_zones z ON z.code = v.zone_code
 WHERE NOT EXISTS (
     SELECT 1 FROM technician_zone_assignments a
      WHERE a.technician_id = u.id
+       AND a.zone_id = z.id
+       AND a.removed_at IS NULL
+);
+
+
+-- =============================================================================
+-- SECCIÓN 11 ·b restocker_zone_assignments — el cuadrante de carga demo (M31)
+-- =============================================================================
+-- `REP-01` es Titular (`PRIMARY`) de la zona centro y `REP-02` su suplente
+-- (`BACKUP`) en esa misma zona y en la sur. El índice parcial
+-- `uq_restocker_primary_zone` admite exactamente una titularidad viva por
+-- reponedor y cuantas suplencias haga falta, y que el titular de carga conviva
+-- con el titular técnico de la misma zona es el caso `D2` del módulo.
+-- La vinculación se resuelve por la clave canónica del usuario (`email_key`) y
+-- por el código de la zona, nunca por identificadores que la secuencia asigna
+-- distinto en cada base.
+
+INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
+SELECT u.id, z.id, v.role_in_zone, v.is_primary
+FROM (VALUES
+    ('lucia.repostaje@vendguard.internal', 'ZONA-BCN-CENTRO', 'PRIMARY', TRUE),
+    ('oscar.repostaje@vendguard.internal', 'ZONA-BCN-CENTRO', 'BACKUP',  FALSE),
+    ('oscar.repostaje@vendguard.internal', 'ZONA-BCN-SUR',    'BACKUP',  FALSE)
+) AS v(email, zone_code, role_in_zone, is_primary)
+JOIN users u ON u.email_key = v.email
+JOIN operational_zones z ON z.code = v.zone_code
+WHERE NOT EXISTS (
+    SELECT 1 FROM restocker_zone_assignments a
+     WHERE a.restocker_id = u.id
        AND a.zone_id = z.id
        AND a.removed_at IS NULL
 );
@@ -1639,8 +1675,10 @@ FROM (VALUES
 ON CONFLICT (record_code) DO NOTHING;
 
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
---       de cuadrante · 5 saldos de stock de furgoneta · 1 configuración de ruta ·
---       13 máquinas · 6 usuarios internos · 5 frecuencias normativas · 13 repuestos ·
+--       de cuadrante técnico · 3 vinculaciones de cuadrante de carga (M31) ·
+--       5 saldos de stock de furgoneta · 1 configuración de ruta ·
+--       13 máquinas · 8 usuarios internos (6 de coordinación y técnica + 2 reponedores) ·
+--       5 frecuencias normativas · 13 repuestos ·
 --       16 causas raíz · 34 soluciones estandarizadas (Módulo 25) ·
 --       50 compatibilidades · 1 canal emergencias · 2 turnos demo ·
 --       11 eventos de bitácora · 2 eventos de auditoría de jornada ·

@@ -70,9 +70,9 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             SELECT 
                 id, 
                 name, 
-                email, 
-                password_hash, 
-                role, 
+                email,                password_hash,
+                role,
+                operator_code,
                 phone, 
                 is_active, 
                 is_on_call,
@@ -124,9 +124,9 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             SELECT 
                 id, 
                 name, 
-                email, 
-                password_hash, 
-                role, 
+                email,                password_hash,
+                role,
+                operator_code,
                 phone, 
                 is_active, 
                 is_on_call,
@@ -174,9 +174,9 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             SELECT 
                 id, 
                 name, 
-                email, 
-                password_hash, 
-                role, 
+                email,                password_hash,
+                role,
+                operator_code,
                 phone, 
                 is_active, 
                 is_on_call,
@@ -235,6 +235,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 email,
                 {$identityColumns}password_hash,
                 role,
+                operator_code,
                 phone,
                 telegram_chat_id,
                 is_active,
@@ -244,8 +245,9 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             ) VALUES (
                 :name,
                 :email,
-                {$identityValues}:password_hash,
+                {$identityValues}                :password_hash,
                 :role,
+                :operator_code,
                 :phone,
                 :telegram_chat_id,
                 {$this->dialect->booleanLiteral(true)},
@@ -261,6 +263,9 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             ':email'         => $email,
             ':password_hash' => $passwordHash,
             ':role'          => strtoupper(trim((string)$data['role'])),
+            ':operator_code' => isset($data['operator_code']) && $data['operator_code'] !== ''
+                ? strtoupper(trim((string)$data['operator_code']))
+                : null,
             ':phone'         => isset($data['phone']) && $data['phone'] !== '' ? trim((string)$data['phone']) : null,
             ':telegram_chat_id' => isset($data['telegram_chat_id']) && $data['telegram_chat_id'] !== ''
                 ? trim((string)$data['telegram_chat_id'])
@@ -296,6 +301,12 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         if (array_key_exists('phone', $data)) {
             $fields[] = "phone = :phone";
             $params[':phone'] = $data['phone'] !== null && $data['phone'] !== '' ? trim((string)$data['phone']) : null;
+        }
+        if (array_key_exists('operator_code', $data)) {
+            $fields[] = "operator_code = :operator_code";
+            $params[':operator_code'] = $data['operator_code'] !== null && $data['operator_code'] !== ''
+                ? strtoupper(trim((string)$data['operator_code']))
+                : null;
         }
         if (array_key_exists('telegram_chat_id', $data)) {
             $fields[] = "telegram_chat_id = :telegram_chat_id";
@@ -621,7 +632,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         $stmt = $this->pdo->prepare(
             "SELECT id FROM users
               WHERE id = :id
-                AND role = 'TECHNICIAN'
+                AND role IN ('TECHNICIAN', 'RESTOCKER')
                 AND deleted_at IS NULL
               FOR UPDATE"
         );
@@ -685,6 +696,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 u.name,
                 u.email,
                 u.role,
+                u.operator_code,
                 u.phone,
                 u.is_active,
                 u.is_on_call,
@@ -722,9 +734,22 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             $sql .= " AND (u.is_active = {$this->dialect->booleanLiteral(false)} OR u.deleted_at IS NOT NULL)";
         }
 
-        if (!empty($filters['role']) && $filters['role'] !== 'all') {
+        $roleFilter = $filters['role'] ?? null;
+        if ($roleFilter !== null && trim((string)$roleFilter) !== '' && strtoupper(trim((string)$roleFilter)) !== 'ALL') {
+            // Módulo 31, `D2`: el filtro `ALL` no restringe y cualquier otro valor
+            // debe ser un rol real. Un rol inventado devolvería una lista vacía y
+            // el coordinador creería que no hay personal. Se acepta en cualquier
+            // caja porque la consola envía `TECHNICIAN`/`RESTOCKER` y los enlaces
+            // heredados en minúsculas.
+            $normalizedRole = strtoupper(trim((string)$roleFilter));
+            if (!in_array($normalizedRole, UserRole::values(), true)) {
+                throw new \InvalidArgumentException(
+                    "Filtro de rol no válido: '{$roleFilter}'. Valores admitidos: ALL, " . implode(', ', UserRole::values()) . '.'
+                );
+            }
+
             $sql .= " AND u.role = :role";
-            $params[':role'] = strtoupper(trim((string)$filters['role']));
+            $params[':role'] = $normalizedRole;
         }
 
         if (!empty($filters['search'])) {
@@ -754,6 +779,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 'email'                           => (string)$row['email'],
                 'role'                            => (string)$row['role'],
                 'role_label'                      => $roleEnum !== null ? $roleEnum->label() : (string)$row['role'],
+                'operator_code'                   => $row['operator_code'] !== null ? (string)$row['operator_code'] : null,
                 'phone'                           => $row['phone'] !== null ? (string)$row['phone'] : null,
                 'is_active'                       => (bool)$row['is_active'] && $row['deleted_at'] === null,
                 'is_on_call'                      => (bool)($row['is_on_call'] ?? false),

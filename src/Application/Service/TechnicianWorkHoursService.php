@@ -7,6 +7,7 @@ namespace VendGuard\Application\Service;
 use DateTimeImmutable;
 use DateTimeZone;
 use Exception;
+use InvalidArgumentException;
 use VendGuard\Application\DTO\TechnicianShiftDto;
 use VendGuard\Application\DTO\WorkHoursReportDto;
 use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
@@ -16,6 +17,7 @@ use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\MetricFilter;
 use VendGuard\Core\Domain\Model\TechnicianShift;
 use VendGuard\Core\Domain\Model\User;
+use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianShiftLogRepositoryInterface;
@@ -98,8 +100,9 @@ final class TechnicianWorkHoursService
     /**
      * Informe de jornada y horas efectivas del periodo (contrato §5.1).
      */
-    public function getWorkHoursReport(MetricFilter $filter, ?int $technicianId = null): WorkHoursReportDto
+    public function getWorkHoursReport(MetricFilter $filter, ?int $technicianId = null, ?string $role = null): WorkHoursReportDto
     {
+        $scopeRole = self::normalizeRole($role);
         $now = new DateTimeImmutable('now');
         $timezone = new DateTimeZone(self::OPERATIONAL_TIMEZONE);
         $scopeTechnicianId = $technicianId ?? $filter->getTechnicianId();
@@ -107,40 +110,49 @@ final class TechnicianWorkHoursService
         $fromDate = $filter->getFrom()->setTimezone($timezone)->format('Y-m-d');
         $toDate = $filter->getTo()->setTimezone($timezone)->format('Y-m-d');
 
-        $shifts = $this->shiftRepo->findShiftsByDateRange($fromDate, $toDate, $scopeTechnicianId);
-        $orphanShifts = $this->shiftRepo->findOrphanOpenShiftsBefore($fromDate, $scopeTechnicianId);
+        $shifts = $this->shiftRepo->findShiftsByDateRange($fromDate, $toDate, $scopeTechnicianId, $scopeRole);
+        $orphanShifts = $this->shiftRepo->findOrphanOpenShiftsBefore($fromDate, $scopeTechnicianId, $scopeRole);
         $metrics = $this->shiftRepo->getClosedInterventionMetricsByTechnician(
             $filter->getFrom(),
             $filter->getTo(),
-            $scopeTechnicianId
+            $scopeTechnicianId,
+            $scopeRole
         );
 
-        $profiles = $this->loadTechnicianProfiles($scopeTechnicianId);
+        // QA 4 (C5): el universo del informe es la plantilla del rol seleccionado.
+        $profiles = $this->loadWorkforce($scopeTechnicianId, $scopeRole);
         $namesById = [];
+        $rolesById = [];
         foreach ($profiles as $profile) {
-            $namesById[$profile->getId()] = $profile->getName();
+            $namesById[$profile['id']] = $profile['name'];
+            $rolesById[$profile['id']] = $profile['role'];
         }
 
         $sessions = [];
         $shiftsByTechnician = [];
         foreach ($shifts as $shift) {
             $shiftsByTechnician[$shift->technicianId()][] = $shift;
-            $sessions[] = $this->sessionToArray($shift, $namesById[$shift->technicianId()] ?? null, $now);
+            $sessions[] = $this->sessionToArray(
+                $shift,
+                $namesById[$shift->technicianId()] ?? null,
+                $rolesById[$shift->technicianId()] ?? null,
+                $now
+            );
         }
 
         $byTechnician = [];
         foreach ($profiles as $profile) {
-            $profileShifts = $shiftsByTechnician[$profile->getId()] ?? [];
-            $profileMetrics = $metrics[$profile->getId()] ?? [
+            $profileShifts = $shiftsByTechnician[$profile['id']] ?? [];
+            $profileMetrics = $metrics[$profile['id']] ?? [
                 'intervention_seconds' => 0,
                 'resolved_interventions_count' => 0,
             ];
 
             $row = $this->aggregateTechnician($profile, $profileShifts, $profileMetrics, $now);
 
-            // RF-05.2: la plantilla activa aparece aunque no tenga actividad; el
-            // técnico inactivo solo si trabajó en el periodo.
-            if (!$profile->isActive()
+            // RF-05.2 (C5): la plantilla activa aparece aunque no tenga actividad;
+            // el operario inactivo solo si trabajó en el periodo.
+            if (!$profile['is_active']
                 && $row['sessions_count'] === 0
                 && $row['resolved_interventions_count'] === 0
             ) {
@@ -171,6 +183,7 @@ final class TechnicianWorkHoursService
                 'from_date' => $fromDate,
                 'to_date' => $toDate,
                 'technician_id' => $scopeTechnicianId,
+                'role' => $scopeRole ?? 'ALL',
                 'timezone' => self::OPERATIONAL_TIMEZONE,
             ],
             summary: $summary,
@@ -340,9 +353,9 @@ final class TechnicianWorkHoursService
      * UTF-8 BOM, separador `;` y dos secciones separadas por una fila en blanco:
      * el resumen por técnico y el detalle cronológico de sesiones en hora local.
      */
-    public function exportWorkHoursCsv(MetricFilter $filter, ?int $technicianId = null): string
+    public function exportWorkHoursCsv(MetricFilter $filter, ?int $technicianId = null, ?string $role = null): string
     {
-        $report = $this->getWorkHoursReport($filter, $technicianId);
+        $report = $this->getWorkHoursReport($filter, $technicianId, $role);
 
         $handle = fopen('php://temp', 'r+');
         if ($handle === false) {
@@ -351,6 +364,7 @@ final class TechnicianWorkHoursService
 
         fputcsv($handle, [
             'Técnico',
+            'Rol',
             'Estado en Plantilla',
             'Sesiones',
             'Horas Brutas',
@@ -366,6 +380,7 @@ final class TechnicianWorkHoursService
         foreach ($report->byTechnician() as $row) {
             fputcsv($handle, [
                 (string)($row['technician_name'] ?? ''),
+                (string)($row['technician_role'] ?? ''),
                 ($row['is_active'] ?? false) ? 'Activo' : 'Inactivo',
                 (string)$row['sessions_count'],
                 (string)$row['gross_formatted'],
@@ -385,6 +400,7 @@ final class TechnicianWorkHoursService
             'ID Sesión',
             'Fecha Imputación',
             'Técnico',
+            'Rol',
             'Entrada Vigente',
             'Salida Vigente',
             'Duración Bruta',
@@ -403,6 +419,7 @@ final class TechnicianWorkHoursService
                 (string)$session['id'],
                 (string)$session['shift_date'],
                 (string)($session['technician_name'] ?? ''),
+                (string)($session['technician_role'] ?? ''),
                 $this->csvTimestamp($session['started_at'] ?? null),
                 $this->csvTimestamp($session['closed_at'] ?? null),
                 (string)$session['gross_formatted'],
@@ -425,31 +442,91 @@ final class TechnicianWorkHoursService
     }
 
     /**
-     * @return list<User>
+     * Plantilla del rol solicitado, normalizada a filas inmutables.
+     *
+     * `findAllTechnicians(false)` conserva la cobertura histórica del Módulo 22
+     * (incluye bajas lógicas con actividad) y el listado de personal aporta a los
+     * reponedores, que no son técnicos SAT. La selección `ALL` suma ambos roles.
+     *
+     * @return list<array{id: int, name: string, role: string, is_active: bool, operator_code: string|null}>
      */
-    private function loadTechnicianProfiles(?int $scopeTechnicianId): array
+    private function loadWorkforce(?int $scopeTechnicianId, ?string $role): array
     {
-        // `false` incluye a los técnicos dados de baja lógica que el motor aún
-        // conserva: RF-05.2 exige ver a quien tuvo actividad en el periodo.
-        $profiles = $this->userRepo->findAllTechnicians(false);
+        $rows = [];
+
+        if ($role === null || $role === UserRole::TECHNICIAN->value) {
+            foreach ($this->userRepo->findAllTechnicians(false) as $profile) {
+                $rows[] = [
+                    'id' => $profile->getId(),
+                    'name' => $profile->getName(),
+                    'role' => UserRole::TECHNICIAN->value,
+                    'is_active' => $profile->isActive(),
+                    'operator_code' => null,
+                ];
+            }
+        }
+
+        if ($role === null || $role === UserRole::RESTOCKER->value) {
+            foreach ($this->userRepo->findAll(['role' => UserRole::RESTOCKER->value, 'status' => 'all']) as $row) {
+                $rows[] = [
+                    'id' => (int)$row['id'],
+                    'name' => (string)$row['name'],
+                    'role' => UserRole::RESTOCKER->value,
+                    'is_active' => filter_var($row['is_active'] ?? false, FILTER_VALIDATE_BOOL),
+                    'operator_code' => isset($row['operator_code']) && $row['operator_code'] !== ''
+                        ? (string)$row['operator_code']
+                        : null,
+                ];
+            }
+        }
 
         if ($scopeTechnicianId === null) {
-            return $profiles;
+            return $rows;
         }
 
         $filtered = array_values(array_filter(
-            $profiles,
-            static fn (User $profile): bool => $profile->getId() === $scopeTechnicianId
+            $rows,
+            static fn (array $profile): bool => $profile['id'] === $scopeTechnicianId
         ));
 
+        // Un operario concreto puede no estar en el listado de su rol (por ejemplo,
+        // una baja lógica recuperada por ID): se resuelve explícitamente.
         if ($filtered === []) {
             $explicit = $this->userRepo->findById($scopeTechnicianId, false, true);
-            if ($explicit !== null) {
-                $filtered[] = $explicit;
+            if ($explicit !== null && ($role === null || $explicit->getRole()->value === $role)) {
+                $filtered[] = [
+                    'id' => $explicit->getId(),
+                    'name' => $explicit->getName(),
+                    'role' => $explicit->getRole()->value,
+                    'is_active' => $explicit->isActive(),
+                    'operator_code' => null,
+                ];
             }
         }
 
         return $filtered;
+    }
+
+    /**
+     * `ALL`, vacío o `null` no filtra; solo los dos roles de campo son válidos.
+     *
+     * @throws InvalidArgumentException
+     */
+    private static function normalizeRole(?string $role): ?string
+    {
+        $clean = $role !== null ? strtoupper(trim($role)) : '';
+
+        if ($clean === '' || $clean === 'ALL') {
+            return null;
+        }
+
+        if ($clean === UserRole::TECHNICIAN->value || $clean === UserRole::RESTOCKER->value) {
+            return $clean;
+        }
+
+        throw new InvalidArgumentException(
+            "Rol no válido para el informe de jornada: '{$role}'. Valores admitidos: ALL, TECHNICIAN, RESTOCKER."
+        );
     }
 
     /**
@@ -458,7 +535,7 @@ final class TechnicianWorkHoursService
      * @return array<string, mixed>
      */
     private function aggregateTechnician(
-        User $profile,
+        array $profile,
         array $shifts,
         array $metrics,
         DateTimeImmutable $now
@@ -486,8 +563,11 @@ final class TechnicianWorkHoursService
             }
         }
 
-        $interventionSeconds = $metrics['intervention_seconds'];
-        $resolvedCount = $metrics['resolved_interventions_count'];
+        // D2: el reponedor aún no tiene visitas de reposición (Feature 24); sus
+        // métricas de intervención y resolución computan en cero por contrato.
+        $isRestocker = $profile['role'] === UserRole::RESTOCKER->value;
+        $interventionSeconds = $isRestocker ? 0 : $metrics['intervention_seconds'];
+        $resolvedCount = $isRestocker ? 0 : $metrics['resolved_interventions_count'];
         $routeSeconds = max(0, $effectiveSeconds - $interventionSeconds);
 
         $sessionsCount = count($shifts);
@@ -495,10 +575,12 @@ final class TechnicianWorkHoursService
             || ($resolvedCount > 0 && $sessionsCount === 0);
 
         return [
-            'technician_id' => $profile->getId(),
-            'technician_name' => $profile->getName(),
-            'operator_code' => null,
-            'is_active' => $profile->isActive(),
+            'technician_id' => $profile['id'],
+            'technician_name' => $profile['name'],
+            'technician_role' => $profile['role'],
+            'role_label' => UserRole::from($profile['role'])->label(),
+            'operator_code' => $profile['operator_code'],
+            'is_active' => $profile['is_active'],
             'sessions_count' => $sessionsCount,
             'open_sessions_count' => $openSessions,
             'anomalous_sessions_count' => $anomalousSessions,
@@ -585,7 +667,12 @@ final class TechnicianWorkHoursService
     /**
      * @return array<string, mixed>
      */
-    private function sessionToArray(TechnicianShift $shift, ?string $technicianName, DateTimeImmutable $now): array
+    private function sessionToArray(
+        TechnicianShift $shift,
+        ?string $technicianName,
+        ?string $technicianRole,
+        DateTimeImmutable $now
+    ): array
     {
         $grossSeconds = $shift->grossDurationSeconds($now);
         $mealBreakSeconds = $shift->totalMealBreakSeconds($now);
@@ -595,6 +682,7 @@ final class TechnicianWorkHoursService
             'id' => (int)$shift->id(),
             'technician_id' => $shift->technicianId(),
             'technician_name' => $technicianName,
+            'technician_role' => $technicianRole,
             'shift_date' => $shift->shiftDate(),
             'status' => $shift->status()->value,
             'status_label' => $shift->status()->label(),

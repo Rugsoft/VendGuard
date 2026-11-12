@@ -32,9 +32,10 @@ declare(strict_types=1);
  *      paradas vivas la zona queda desatendida aunque haya técnicos; un suplente
  *      libre la mantiene atendida y el profesional en el cupo sigue siendo
  *      asignable (RF-06.3).
- *   7. **Exclusiones y validación.** Los técnicos inactivos no entran, y una foto
- *      imposible (afinidad desconocida, contador negativo, fecha ilegible) falla en
- *      voz alta en lugar de producir un ranking plausible.
+ *   7. **Exclusiones y validación.** Los técnicos inactivos y los candidatos de
+ *      otro rol (`RESTOCKER`, `COORDINATOR`) no entran (RF-01.4, Art. V.3), y una
+ *      foto imposible (afinidad desconocida, contador negativo, fecha ilegible)
+ *      falla en voz alta en lugar de producir un ranking plausible.
  *   8. **Determinismo y forma del contrato.** Dos llamadas con la misma foto
  *      devuelven lo mismo, la foto no se muta y el DTO serializa con las claves de
  *      `GET /api/coordinator/incidents/{id}/suggested-technicians`.
@@ -512,6 +513,73 @@ $assert(
     $emptyZone->recommendation['unattended_zone'] === true
         && str_contains((string)$emptyZone->recommendation['explanation'], 'Sin técnicos disponibles')
         && !str_contains((string)$emptyZone->recommendation['explanation'], 'cupo de')
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. Exclusión estricta del rol RESTOCKER (RF-01.4 / Art. V.3)
+// ─────────────────────────────────────────────────────────────────────────────
+echo "\n--- 8. Exclusión del rol RESTOCKER del escalafón SAT ---\n";
+
+$withRestocker = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(1, ['affinity' => 'NONE']),
+    $technician(9, [
+        'name' => 'Lucía Repostaje',
+        'role' => 'RESTOCKER',
+        'affinity' => 'PRIMARY',
+        'is_on_call' => true,
+    ]),
+], $base);
+$assert(
+    '8.1 Un RESTOCKER titular, en turno y de guardia no entra en el ranking de averías',
+    $order($withRestocker->rankedTechnicians) === [1]
+        && $withRestocker->recommendation['top_technician_id'] === 1,
+    json_encode($order($withRestocker->rankedTechnicians))
+);
+
+$onlyRestockers = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(9, ['role' => 'restocker', 'affinity' => 'PRIMARY']),
+    $technician(10, ['role' => 'RESTOCKER', 'affinity' => 'BACKUP']),
+], $base);
+$assert(
+    '8.2 Un parque con solo reponedores deja el ranking vacío, sin recomendación y con el aviso explícito',
+    $onlyRestockers->rankedTechnicians === []
+        && $onlyRestockers->recommendation['top_technician_id'] === null
+        && str_contains((string)$onlyRestockers->recommendation['explanation'], 'No hay técnicos activos')
+);
+
+$declaredTechnician = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(1, ['role' => 'technician', 'affinity' => 'PRIMARY']),
+], $base);
+$assert(
+    '8.3 Control positivo: un candidato que declara TECHNICIAN sigue entrando en el ranking',
+    $order($declaredTechnician->rankedTechnicians) === [1]
+);
+
+$coordinatorPhoto = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(1, ['affinity' => 'PRIMARY']),
+    $technician(8, ['role' => 'COORDINATOR', 'affinity' => 'PRIMARY']),
+], $base);
+$assert(
+    '8.4 Un coordinador tampoco entra: la exclusión no se limita al rol del Módulo 31',
+    $order($coordinatorPhoto->rankedTechnicians) === [1]
+);
+
+$roleVariants = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(1, ['affinity' => 'NONE']),
+    $technician(9, ['role' => '  Restocker  ', 'affinity' => 'PRIMARY']),
+], $base);
+$assert(
+    '8.5 La variante con espacios y mayúsculas del rol se excluye igual',
+    $order($roleVariants->rankedTechnicians) === [1]
+);
+
+$withoutRole = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(1, ['affinity' => 'PRIMARY']),
+], $base);
+$assert(
+    '8.6 Retrocompatibilidad: una foto sin la clave role conserva el ranking anterior',
+    $order($withoutRole->rankedTechnicians) === [1]
+        && $withoutRole->rankedTechnicians[0]['total_score'] === 50
 );
 
 echo "\n======================================================================\n";

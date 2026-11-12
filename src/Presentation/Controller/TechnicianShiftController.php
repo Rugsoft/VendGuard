@@ -147,6 +147,34 @@ final class TechnicianShiftController
     }
 
     /**
+     * POST /api/technician/shift/close
+     *
+     * Cierre directo de la jornada (`D1`). El servicio sólo lo permite al
+     * `RESTOCKER`; el técnico SAT conserva el cierre con relevo de
+     * `closeAndHandover` y recibe `409 SHIFT_DIRECT_CLOSE_FORBIDDEN` aquí.
+     */
+    public function close(Request $request): Response
+    {
+        $technicianId = (int)($request->getAttribute('user_id') ?? 0);
+        $body = $request->getParsedBody();
+        $reason = isset($body['close_reason']) ? (string)$body['close_reason'] : null;
+
+        try {
+            $dto = $this->lifecycleService->closeShift($technicianId, $reason);
+
+            return Response::json($dto->toArray(), 200, 'Jornada cerrada correctamente.');
+        } catch (UserNotFoundException $e) {
+            return Response::error('TECHNICIAN_NOT_FOUND', $e->getMessage(), 404);
+        } catch (InvalidShiftTransitionException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (Throwable $e) {
+            error_log('[vendguard] Fallo al cerrar el turno: ' . $e);
+
+            return Response::error('SHIFT_CLOSE_FAILED', 'No se pudo cerrar el turno.', 500);
+        }
+    }
+
+    /**
      * GET /api/technician/shift/my-hours
      *
      * Horas propias del mes en curso (contrato §5.6, RF-07 / RF-08.1).

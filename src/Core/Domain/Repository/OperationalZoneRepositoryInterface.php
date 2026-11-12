@@ -60,6 +60,8 @@ interface OperationalZoneRepositoryInterface
      *     locations_count: int,
      *     primary_technicians_count: int,
      *     backup_technicians_count: int,
+     *     primary_restockers_count: int,
+     *     backup_restockers_count: int,
      *     postal_codes_count: int
      * }>
      */
@@ -77,6 +79,8 @@ interface OperationalZoneRepositoryInterface
      *     locations_count: int,
      *     primary_technicians_count: int,
      *     backup_technicians_count: int,
+     *     primary_restockers_count: int,
+     *     backup_restockers_count: int,
      *     postal_codes_count: int
      * }|null Null si la zona no existe.
      */
@@ -150,7 +154,7 @@ interface OperationalZoneRepositoryInterface
      * sedes quedan «Sin Zona Asignada» y cuántos técnicos salen del cuadrante.
      *
      * @param int $zoneId Identificador de la zona.
-     * @return array{postal_codes: int, technicians: int, locations: int}
+     * @return array{postal_codes: int, technicians: int, restockers: int, locations: int}
      */
     public function inspectReleaseImpact(int $zoneId): array;
 
@@ -159,13 +163,14 @@ interface OperationalZoneRepositoryInterface
      * (RF-01.3, QA 7, QA 10, QA 13).
      *
      * Pasos, todos o ninguno: las sedes (heredadas y forzadas) quedan con
-     * `zone_id = NULL`, los CP vivos se liberan con `released_at`, el cuadrante se
-     * extingue con `removed_at`, la zona pasa a inactiva y se registra
-     * `ZONE_DEACTIVATED` con el balance. Nunca se borra una fila (Art. III.1).
+     * `zone_id = NULL`, los CP vivos se liberan con `released_at`, el cuadrante SAT
+     * **y el cuadrante de carga** se extinguen con `removed_at` (Módulo 31,
+     * `RF-02.3`), la zona pasa a inactiva y se registra `ZONE_DEACTIVATED` con el
+     * balance. Nunca se borra una fila (Art. III.1).
      *
      * @param int $zoneId Identificador de la zona.
      * @param int $userId Coordinador que firma la desactivación.
-     * @return array{released_postal_codes: int, unassigned_locations: int, removed_technicians: int}
+     * @return array{released_postal_codes: int, unassigned_locations: int, removed_technicians: int, removed_restockers: int}
      *
      * @throws ZoneValidationException Si la zona no existe.
      */
@@ -283,6 +288,98 @@ interface OperationalZoneRepositoryInterface
      * }>
      */
     public function findQuadrantsByTechnician(): array;
+
+    /**
+     * Cuadrante de carga vivo de una zona, con los datos del reponedor que pinta el panel.
+     *
+     * Es el cuadrante **independiente** del SAT (Tabla 41, `D3`): incluye titulares y
+     * suplentes vivos, y también a los reponedores desactivados o de baja que aún
+     * conservan la vinculación, porque su baja del cuadrante sigue pendiente (`C3`).
+     * El `email` no se proyecta: el panel no lo usa (Art. V.4).
+     *
+     * @param int $zoneId Identificador de la zona.
+     * @return list<array{
+     *     assignment_id: int,
+     *     restocker_id: int,
+     *     name: string,
+     *     operator_code: string|null,
+     *     role_in_zone: string,
+     *     role_label: string,
+     *     is_primary: bool,
+     *     is_active: bool,
+     *     assigned_at: string|null
+     * }>
+     */
+    public function findRestockerAssignments(int $zoneId): array;
+
+    /**
+     * Lectura inversa del cuadrante de carga: cada reponedor con sus zonas vivas (RF-02.4).
+     *
+     * Entran los reponedores activos **sin** zona (trabajo pendiente de configuración)
+     * y los desactivados que conserven una vinculación viva; un reponedor inactivo sin
+     * zona no se publica. Una sola sentencia con `LEFT JOIN`: el panel no paga una
+     * consulta por operario (RNF-01).
+     *
+     * @return list<array{
+     *     restocker_id: int,
+     *     name: string,
+     *     operator_code: string|null,
+     *     is_active: bool,
+     *     zones: list<array{
+     *         zone_id: int,
+     *         code: string,
+     *         name: string,
+     *         color_hex: string,
+     *         role_in_zone: string,
+     *         is_primary: bool,
+     *         assigned_at: string|null
+     *     }>
+     * }>
+     */
+    public function findRestockerQuadrantsByTechnician(): array;
+
+    /**
+     * Vincula a un reponedor con la zona de carga como titular o suplente (RF-02.1, RF-02.2).
+     *
+     * Es idempotente sobre una vinculación viva: si el reponedor ya pertenece a la zona,
+     * solo se ajusta su rol, sin estrenar fila ni duplicar la auditoría. Un reponedor
+     * solo puede ser titular vivo de una zona; el intento de una segunda titularidad se
+     * rechaza con la zona que se perdería, salvo que se pida la degradación expresa
+     * (`confirm_primary_transfer`), que ocurre en la misma transacción.
+     *
+     * @param int $restockerId Usuario con rol `RESTOCKER` activo.
+     * @param int $zoneId Zona activa de destino.
+     * @param bool $isPrimary True para titular, false para suplente.
+     * @param int|null $userId Coordinador que firma la vinculación; con `null` no se audita.
+     * @param bool $demotePreviousPrimary Degrada la titularidad previa en lugar de rechazarla.
+     * @return int Identificador de la vinculación viva.
+     *
+     * @throws \VendGuard\Core\Domain\Exception\PrimaryRestockerConflictException Si el
+     *   reponedor ya es titular de otra zona y no se pidió la degradación.
+     * @throws ZoneValidationException Si la zona no existe, está inactiva o el usuario no
+     *   es un reponedor activo.
+     */
+    public function assignRestocker(
+        int $restockerId,
+        int $zoneId,
+        bool $isPrimary,
+        ?int $userId = null,
+        bool $demotePreviousPrimary = false
+    ): int;
+
+    /**
+     * Extingue lógicamente la vinculación de carga de un reponedor con una zona (QA 4).
+     *
+     * La fila se conserva con `removed_at`; un reingreso posterior estrena vinculación
+     * nueva y auditada. Repetir la baja de una vinculación ya extinta devuelve `false`
+     * sin duplicar el evento, que es la idempotencia que exige la consola.
+     *
+     * @param int $restockerId Identificador del reponedor.
+     * @param int $zoneId Identificador de la zona.
+     * @param int|null $userId Coordinador que firma la baja; con `null` no se audita.
+     * @return bool True si había una vinculación viva y se extinguió.
+     */
+    public function removeRestocker(int $restockerId, int $zoneId, ?int $userId = null): bool;
 
     /**
      * Da de alta una zona operativa.

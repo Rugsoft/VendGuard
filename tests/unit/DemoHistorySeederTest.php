@@ -102,8 +102,8 @@ $enumLabels = static function (string $typeName) use ($initSql): array {
 };
 
 $assert(
-    '1. Las fuentes de verdad del despliegue se leen (13 máquinas maestras y 6 usuarios)',
-    count($masterFleet) === 13 && count($masterStaff) === 6,
+    '1. Las fuentes de verdad del despliegue se leen (13 máquinas maestras y 8 usuarios)',
+    count($masterFleet) === 13 && count($masterStaff) === 8,
     'máquinas: ' . count($masterFleet) . ' · usuarios: ' . count($masterStaff)
 );
 
