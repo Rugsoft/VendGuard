@@ -50,7 +50,7 @@ flowchart LR
   - **Requisitos:** `RF-04.1`, `D1`, `D3`.
   - **Verificación:** `php tests/unit/ModelPlanogramPresetCatalogTest.php`
 
-- [ ] **T-PLN-05 · Implementar `PdoVendingProductRepository` (`vending_products`, conteo de carriles activos y consulta de máquinas vinculadas)**
+- [x] **T-PLN-05 · Implementar `PdoVendingProductRepository` (`vending_products`, conteo de carriles activos y consulta de máquinas vinculadas)**
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `RF-03.2`, `C1`, `D3`.
   - **Verificación:** `php tests/integration/PdoVendingProductRepositoryTest.php`
 
