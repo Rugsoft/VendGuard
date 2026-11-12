@@ -11,7 +11,7 @@ declare(strict_types=1);
  * certificación. Es la sustitución del nombre engañoso `PostgresParityTest`: aquí **no** se
  * compara con el motor local —eso es la correspondencia declarada de T-HYBRID-24, que exige los
  * dos motores a la vez— sino que se demuestra que el motor nuevo **hace** las cuatro operaciones
- * sobre las 41 tablas del contrato.
+ * sobre las 43 tablas del contrato.
  *
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
@@ -19,7 +19,7 @@ declare(strict_types=1);
  *      DDL base y la migración del motor aplicada por el ejecutor canónico. Si el DDL dejara de
  *      compilar o la migración dejara de aplicar, no habría dónde certificar nada.
  *
- *   2. **Alta mínima en las 41 tablas respetando el grafo de claves foráneas.** La fixture no se
+ *   2. **Alta mínima en las 43 tablas respetando el grafo de claves foráneas.** La fixture no se
  *      escribe a mano tabla por tabla: se deriva del catálogo vivo (`information_schema` y
  *      `pg_constraint`), de modo que una columna obligatoria nueva entra sola y una referencia
  *      nueva reordena el alta. Un ciclo en el grafo, o un tipo que el arnés no sepa sintetizar,
@@ -60,7 +60,7 @@ use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 41 tablas del contrato de correspondencia (§2.1, Módulos 14 a 31). */
+/** Las 43 tablas del contrato de correspondencia (§2.1, Módulos 14 a 32). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -85,6 +85,8 @@ const CONTRACT_TABLES = [
     'sanitary_spoilage_records',
     // Módulo 31 · cuadrante de carga de los reponedores de ruta.
     'restocker_zone_assignments',
+    // Módulo 32 · catálogo comercial y matriz de planograma por máquina.
+    'vending_products', 'machine_planogram_slots',
 ];
 
 /**
@@ -278,7 +280,10 @@ try {
         }
 
         $column = PostgresFixtureBuilder::updatableColumn($pgPdo, $table, $rows[$table]);
-        $assignment = PostgresFixtureBuilder::assignment($pgPdo, $table, $column, sprintf('%02d', $index + 1));
+        // El sufijo del UPDATE lleva prefijo propio: el del alta depende del orden de claves
+        // foráneas y puede coincidir con este, y entonces la reescritura sería un no-op que una
+        // tabla append-only dejaría pasar sin que el disparador constitucional llegara a verse.
+        $assignment = PostgresFixtureBuilder::assignment($pgPdo, $table, $column, sprintf('U%02d', $index + 1));
 
         if (in_array($table, APPEND_ONLY_TABLES, true)) {
             [$where, $whereParams] = $primaryKeyWhere($pgPdo, $table, $rows[$table]);

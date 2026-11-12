@@ -90,6 +90,11 @@ final class TestDataCleaner
         // desde `incidents` no alcanza las de origen preventivo ni las de máquina
         // vacía. Entra como raíz propia; el sembrador restituye las tres.
         'sanitary_spoilage_records',
+        // Matriz de planograma del Módulo 32: cuelga de `machines` y de
+        // `vending_products` —ambas maestras protegidas—, así que el grafo desde
+        // `incidents` no la alcanza. Entra como raíz propia; el sembrador
+        // restituye los 55 carriles canónicos del parque.
+        'machine_planogram_slots',
     ];
 
     /**
@@ -110,6 +115,10 @@ final class TestDataCleaner
         // futura raíz no arrastre el catálogo completo por el grafo de FKs.
         'root_causes',
         'standard_solutions',
+        // Catálogo comercial del Módulo 32: sus 15 referencias son la base del
+        // planograma de las máquinas demo y una baja se expresa con
+        // `is_active = FALSE` (C1, Art. III.1); nunca se drena por el grafo.
+        'vending_products',
     ];
 
     /**
