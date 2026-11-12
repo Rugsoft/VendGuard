@@ -39,6 +39,7 @@ import { ModalDialog } from '../components/ModalDialog.js';
 import { QrLabelModal } from '../components/QrLabelModal.js';
 import { QrBatchPrintView } from './QrBatchPrintView.js';
 import { CoordinatorFleetTab } from '../components/CoordinatorFleetTab.js';
+import { CoordinatorPlanogramTab } from '../components/CoordinatorPlanogramTab.js';
 import { CoordinatorMetricsView } from './CoordinatorMetricsView.js';
 import { AdminLocationsTab } from '../components/AdminLocationsTab.js';
 import { AdminMachinesTab } from '../components/AdminMachinesTab.js';
@@ -78,6 +79,7 @@ export const CoordinatorDashboardView = {
     QrLabelModal,
     QrBatchPrintView,
     CoordinatorFleetTab,
+    CoordinatorPlanogramTab,
     CoordinatorMetricsView,
     AdminLocationsTab,
     AdminMachinesTab,
@@ -106,7 +108,7 @@ export const CoordinatorDashboardView = {
   data() {
     return {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
-      activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'pareto-causas' | 'stock-furgonetas' | 'refunds' | 'admin' | 'metrics'
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'planogram' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'pareto-causas' | 'stock-furgonetas' | 'refunds' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'zones' | 'machines' | 'users'
       sparePartsSubTab: 'catalog', // 'catalog' | 'workshop' | 'guides'
       workshopActiveUnits: null, // badge de la sub-pestaña de taller (QA 2)
@@ -1904,6 +1906,16 @@ export const CoordinatorDashboardView = {
           <button
             type="button"
             class="vg-btn"
+            :class="activeTab === 'planogram' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            @click="activeTab = 'planogram'"
+            data-testid="tab-planogram"
+          >
+            🍫 Catálogo y Planogramas
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
             :class="activeTab === 'mapa-territorial' ? 'vg-btn-primary' : 'vg-btn-secondary'"
             @click="activeTab = 'mapa-territorial'"
             data-testid="tab-mapa-territorial"
@@ -2490,6 +2502,9 @@ export const CoordinatorDashboardView = {
         @open-qr="openQrLabelModal($event)"
         @open-batch-print="openQrBatchPrint($event.locationId, $event.locationName)"
       />
+
+      <!-- CONTENIDO PESTAÑA: CATÁLOGO MAESTRO Y PLANOGRAMA (Módulo 32, RF-05.1, D1, D2) -->
+      <CoordinatorPlanogramTab v-else-if="activeTab === 'planogram'" />
 
       <!-- CONTENIDO PESTAÑA: MANTENIMIENTO PREVENTIVO Y SANITARIO (RF-PREV-02, RF-PREV-06) -->
       <div v-else-if="activeTab === 'preventive'" class="vg-preventive-management-container" data-testid="preventive-panel-container">

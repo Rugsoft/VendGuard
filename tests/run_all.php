@@ -280,7 +280,10 @@ foreach ($unitPhpFiles as $filePath) {
 // =====================================================================
 echo "\n{$colorBold}--- Fase 2: Pruebas Unitarias Reactivas Frontend (Node.js ESM) ---{$colorReset}\n";
 
-$unitMjsFiles = glob(__DIR__ . '/unit/*.mjs');
+$unitMjsFiles = array_merge(
+    glob(__DIR__ . '/unit/*.mjs'),
+    glob(__DIR__ . '/frontend/*.mjs')
+);
 sort($unitMjsFiles);
 
 foreach ($unitMjsFiles as $filePath) {

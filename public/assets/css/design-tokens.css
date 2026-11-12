@@ -674,6 +674,24 @@ h4 { font-size: var(--font-size-heading-md); }
   resize: vertical;
 }
 
+/* Etiquetas y errores de campo del formulario: cuerpo Inter y el tono de error
+   del sistema. No son botones ni tarjetas; no toman geometría de acción. */
+.vg-label {
+  display: block;
+  margin-bottom: var(--spacing-xs);
+  font-family: var(--font-body);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--color-slate);
+}
+
+.vg-field-error {
+  margin-top: var(--spacing-xs);
+  font-family: var(--font-body);
+  font-size: var(--font-size-caption);
+  color: var(--color-error-text);
+}
+
 /* Badges y Chips de Estado (Bordes 4px) */
 .vg-badge {
   display: inline-flex;
