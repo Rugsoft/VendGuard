@@ -62,7 +62,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `RF-03.2`, `C1`–`C3`, `D3`, `QA 1`, `Art. II`, `Art. III.3`.
   - **Verificación:** `php tests/unit/VendingProductServiceTest.php`
 
-- [ ] **T-PLN-08 · Implementar `MachinePlanogramService` (guardado `UPSERT`, presets `D1`, clonación `C3`/`QA 3` y lectura segregada de reponedor `D2`/`QA 2`/`Art. V.4`)**
+- [x] **T-PLN-08 · Implementar `MachinePlanogramService` (guardado `UPSERT`, presets `D1`, clonación `C3`/`QA 3` y lectura segregada de reponedor `D2`/`QA 2`/`Art. V.4`)**
   - **Requisitos:** `RF-02.2`, `RF-02.3`, `RF-03.1`, `RF-04.1`, `RF-04.2`, `RF-05.2`, `D1`–`D3`, `C1`–`C3`, `QA 2`, `QA 3`, `Art. II`, `Art. V.4`.
   - **Verificación:** `php tests/unit/MachinePlanogramServiceTest.php`
 

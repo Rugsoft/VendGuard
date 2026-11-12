@@ -48,6 +48,7 @@ final class PlanogramValidationException extends DomainException
 
     // ── 422 · carril ───────────────────────────────────────────────────────
     public const INVALID_PLANOGRAM_SLOT_BOUNDS = 'INVALID_PLANOGRAM_SLOT_BOUNDS';
+    public const SOURCE_PLANOGRAM_EMPTY = 'SOURCE_PLANOGRAM_EMPTY';
 
     private string $errorCode;
 
@@ -288,6 +289,21 @@ final class PlanogramValidationException extends DomainException
             422,
             'product_id',
             ['sku' => $sku]
+        );
+    }
+
+    /**
+     * La máquina origen no conserva ningún carril activo con producto activo
+     * clonable (RF-04.2, QA 3).
+     */
+    public static function sourcePlanogramEmpty(int $sourceMachineId): self
+    {
+        return new self(
+            self::SOURCE_PLANOGRAM_EMPTY,
+            sprintf('La máquina origen %d no tiene carriles activos con producto activo que clonar (QA 3).', $sourceMachineId),
+            422,
+            'source_machine_id',
+            ['source_machine_id' => $sourceMachineId]
         );
     }
 
