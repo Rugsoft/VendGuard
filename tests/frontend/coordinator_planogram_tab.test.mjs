@@ -354,6 +354,70 @@ async function runTests() {
     max_shelf_life_days: ''
   };
   assert('2.5b El perecedero exige vida útil aunque no marque el frío', component.validateProductForm() === false && Boolean(component.productErrors.max_shelf_life_days));
+
+  const originalCreateProduct = api.coordinator.createProduct;
+  const formErrorCases = [
+    {
+      assertion: '2.5c',
+      description: 'SKU duplicado',
+      message: "Ya existe un producto en el catálogo con el SKU 'SAND-MIXTO-01'.",
+      form: {
+        id: null,
+        sku: 'SAND-MIXTO-01',
+        name: 'Duplicado de prueba',
+        category: 'SNACK',
+        unit_type: 'UNIT',
+        unit_cost_eur: '1.00',
+        sale_price_eur: '2.00',
+        requires_cold_chain: false,
+        max_shelf_life_days: ''
+      }
+    },
+    {
+      assertion: '2.5d',
+      description: 'vida útil fuera de rango',
+      message: 'La vida útil debe ser nula o un entero entre 1 y 3650 días; se recibió 5000 (QA 1).',
+      form: {
+        id: null,
+        sku: 'UI-RANGE-01',
+        name: 'Vida útil fuera de rango',
+        category: 'SNACK',
+        unit_type: 'UNIT',
+        unit_cost_eur: '1.00',
+        sale_price_eur: '2.00',
+        requires_cold_chain: true,
+        max_shelf_life_days: '5000'
+      }
+    }
+  ];
+
+  for (const testCase of formErrorCases) {
+    api.coordinator.createProduct = async () => {
+      throw new Error(testCase.message);
+    };
+    component.openProductModal();
+    component.productForm = { ...testCase.form };
+    await component.submitProduct();
+    assert(
+      `${testCase.assertion} ${testCase.description}: el error queda en el diálogo y no en la banda`,
+      component.showProductModal === true
+      && component.productFormError === testCase.message
+      && component.productError === ''
+      && component.isSavingProduct === false
+    );
+  }
+  api.coordinator.createProduct = originalCreateProduct;
+
+  const productModalStart = CoordinatorPlanogramTab.template.indexOf('<!-- Modal de producto -->');
+  const productModalEnd = CoordinatorPlanogramTab.template.indexOf('<!-- Modal de carril -->');
+  const productModalTemplate = CoordinatorPlanogramTab.template.slice(productModalStart, productModalEnd);
+  assert(
+    '2.5e El diálogo del producto renderiza la alerta de error dentro del modal',
+    productModalStart >= 0
+    && productModalEnd > productModalStart
+    && productModalTemplate.includes('v-if="productFormError"')
+    && productModalTemplate.includes('data-testid="planogram-product-form-error"')
+  );
   component.showProductModal = false;
 
   await component.toggleProductStatus(products[0]);

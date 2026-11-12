@@ -86,6 +86,7 @@ export const CoordinatorPlanogramTab = {
       },
       isLoadingProducts: false,
       productError: '',
+      productFormError: '',
       productSuccess: '',
 
       showProductModal: false,
@@ -407,6 +408,7 @@ export const CoordinatorPlanogramTab = {
 
     openProductModal(product = null) {
       this.productError = '';
+      this.productFormError = '';
       this.productSuccess = '';
       this.productErrors = {};
       if (product) {
@@ -460,6 +462,7 @@ export const CoordinatorPlanogramTab = {
       }
       this.isSavingProduct = true;
       this.productError = '';
+      this.productFormError = '';
       try {
         const payload = {
           sku: this.productForm.sku.trim().toUpperCase(),
@@ -483,7 +486,7 @@ export const CoordinatorPlanogramTab = {
         this.showProductModal = false;
         await this.loadProducts();
       } catch (error) {
-        this.productError = error.message || 'No se pudo guardar el producto.';
+        this.productFormError = error.message || 'No se pudo guardar el producto.';
       } finally {
         this.isSavingProduct = false;
       }
@@ -907,6 +910,15 @@ export const CoordinatorPlanogramTab = {
 
       <!-- Modal de producto -->
       <ModalDialog v-model="showProductModal" :title="productForm.id ? 'Editar producto' : 'Nuevo producto'" :subtitle="productForm.id ? 'El SKU es inmutable tras el alta (C1).' : 'Alta en el catálogo maestro con validación sanitaria.'" size="lg">
+        <div
+          v-if="productFormError"
+          class="vg-alert vg-alert-error"
+          role="alert"
+          data-testid="planogram-product-form-error"
+          style="margin-bottom: 14px;"
+        >
+          ⚠️ {{ productFormError }}
+        </div>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
           <div>
             <label class="vg-label" for="product-sku">SKU</label>
