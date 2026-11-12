@@ -519,6 +519,7 @@ final class MachinePlanogramService
 
         return [
             'machine' => $machine,
+            'summary' => $this->planogramRepository->summarize($machineId),
             'slots' => $slots,
         ];
     }

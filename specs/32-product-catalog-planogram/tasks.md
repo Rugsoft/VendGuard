@@ -70,7 +70,7 @@ flowchart LR
   - **Requisitos:** `RF-03.2`, `D3`, `QA 4`, `Art. II`.
   - **Verificación:** `php tests/unit/AdminMachinePlanogramGuardTest.php`
 
-- [ ] **T-PLN-10 · Crear `CoordinatorPlanogramController`, extender `RestockerRouteController` y registrar rutas + guardas RBAC en `public/index.php`**
+- [x] **T-PLN-10 · Crear `CoordinatorPlanogramController`, extender `RestockerRouteController` y registrar rutas + guardas RBAC en `public/index.php`**
   - **Requisitos:** `RF-01` a `RF-05`, `D2`, `QA 2`, `Art. V.4`.
   - **Verificación:** `php tests/integration/ProductCatalogPlanogramApiTest.php`
 

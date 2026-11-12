@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Routing;
 
+use VendGuard\Presentation\Controller\CoordinatorPlanogramController;
 use VendGuard\Presentation\Controller\CoordinatorRefundController;
 use VendGuard\Presentation\Controller\CoordinatorRootCauseController;
 use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
@@ -229,9 +230,28 @@ class AppRouter
         $router->post('/api/coordinator/machines', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'createMachine'], [$coordinatorAuth]);
         $router->get('/api/coordinator/machines/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'getMachine'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/machines/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'updateMachine'], [$coordinatorAuth]);
+        // Alias contractual del cambio de tipología con el cerrojo QA 4 (Módulo 32):
+        // `PUT /api/coordinator/admin/machines/{id}` reutiliza el mismo caso de uso
+        // y responde 409 PLANOGRAM_INCOMPATIBLE_WITH_MACHINE_TYPE si un carril activo
+        // deja de ser compatible con el nuevo machine_type.
+        $router->put('/api/coordinator/admin/machines/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'updateMachine'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/machines/{id}/transfer', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'transferMachine'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/machines/{id}/deactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'deactivateMachine'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/machines/{id}/reactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reactivateMachine'], [$coordinatorAuth]);
+
+        // Catálogo maestro y planograma por máquina (Módulo 32, RF-01 a RF-05).
+        // Toda la superficie exige COORDINATOR: el catálogo publica coste y margen
+        // y el planograma de Coordinación los incluye por carril (Art. V.4, D2).
+        $router->get('/api/coordinator/products', [CoordinatorPlanogramController::class, 'listProducts'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/products', [CoordinatorPlanogramController::class, 'createProduct'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/products/{id}', [CoordinatorPlanogramController::class, 'updateProduct'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/products/{id}/status', [CoordinatorPlanogramController::class, 'changeStatus'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/machines/{id}/planogram', [CoordinatorPlanogramController::class, 'getPlanogram'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/machines/{id}/planogram', [CoordinatorPlanogramController::class, 'savePlanogram'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/machines/{id}/planogram/slots/{slot_code}', [CoordinatorPlanogramController::class, 'saveSlot'], [$coordinatorAuth]);
+        $router->delete('/api/coordinator/machines/{id}/planogram/slots/{slot_code}', [CoordinatorPlanogramController::class, 'deactivateSlot'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/machines/{id}/planogram/apply-preset', [CoordinatorPlanogramController::class, 'applyPreset'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/machines/{id}/planogram/clone', [CoordinatorPlanogramController::class, 'clonePlanogram'], [$coordinatorAuth]);
 
         // Personal Interno (Users)
         $router->get('/api/coordinator/users', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'listUsers'], [$coordinatorAuth]);
@@ -497,6 +517,11 @@ class AppRouter
             \VendGuard\Core\Domain\Model\UserRole::RESTOCKER
         );
         $router->get('/api/restocker/my-route', [RestockerRouteController::class, 'myRoute'], [$restockerAuth]);
+        // Parque de máquinas y planograma de solo lectura del reponedor (Módulo 32,
+        // QA 2, Art. V.4). El servicio acota por las zonas vivas del token y nunca
+        // selecciona unit_cost_eur ni margen; fuera de ellas responde 403.
+        $router->get('/api/restocker/machines', [RestockerRouteController::class, 'listMachines'], [$restockerAuth]);
+        $router->get('/api/restocker/machines/{id}/planogram', [RestockerRouteController::class, 'getPlanogram'], [$restockerAuth]);
 
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)
