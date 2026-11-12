@@ -46,7 +46,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-02.3`, `RF-03.1`, `D3`, `C2`, `QA 1`, `Art. II`.
   - **Verificación:** `php tests/unit/PlanogramCompatibilityValidatorTest.php`
 
-- [ ] **T-PLN-04 · Crear `ModelPlanogramPresetCatalog` con plantillas de dominio por modelo y tipología (`D1`, `RF-04.1`)**
+- [x] **T-PLN-04 · Crear `ModelPlanogramPresetCatalog` con plantillas de dominio por modelo y tipología (`D1`, `RF-04.1`)**
   - **Requisitos:** `RF-04.1`, `D1`, `D3`.
   - **Verificación:** `php tests/unit/ModelPlanogramPresetCatalogTest.php`
 
