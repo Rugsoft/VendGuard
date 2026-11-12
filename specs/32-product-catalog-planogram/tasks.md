@@ -78,7 +78,7 @@ flowchart LR
   - **Requisitos:** `RF-01` a `RF-05`, `D1`–`D3`, `C1`–`C3`, `QA 1`–`QA 4`, `Art. II`, `Art. III.1`, `Art. V.4`.
   - **Verificación:** `php tests/integration/ProductCatalogPlanogramApiTest.php && php tests/integration/PlanogramConstitutionalTest.php`
 
-- [ ] **T-PLN-12 · Construir `CoordinatorPlanogramTab.js` e integrarlo en `CoordinatorDashboard.js` (`RF-05.1`, `D1`, `D2`)**
+- [x] **T-PLN-12 · Construir `CoordinatorPlanogramTab.js` e integrarlo en `CoordinatorDashboard.js` (`RF-05.1`, `D1`, `D2`)**
   - **Requisitos:** `RF-05.1`, `RNF-03`, `D1`, `D2`, `C1`, `C2`, `C3`.
   - **Verificación:** `node tests/frontend/coordinator_planogram_tab.test.mjs`
 
