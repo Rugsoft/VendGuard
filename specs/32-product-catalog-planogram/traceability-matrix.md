@@ -80,7 +80,7 @@
 
 | DoD | Evidencia |
 |---|---|
-| **1.** Tablas 42/43, tipos nativos, `CHECK`, anti-borrado, cerrojos y entidades auditables | `PostgresProductPlanogramSchemaTest` 35/35 · `SchemaConvergenceParityTest` 29/29 · `CloudDeploySchemaParityTest` 55/55 · `AuditEntityTypesTest` 41/41 |
+| **1.** Tablas 42/43, tipos nativos, `CHECK`, anti-borrado, cerrojos y entidades auditables | `PostgresProductPlanogramSchemaTest` 35/35 · `SchemaConvergenceParityTest` 30/30 · `CloudDeploySchemaParityTest` 55/55 · `AuditEntityTypesTest` 41/41 |
 | **2.** CRUD con `sku` inmutable, cotas, cerrojo inverso y `affected_active_slots_count` | `VendingProductServiceTest` 32/32 · `PdoVendingProductRepositoryTest` 30/30 · `ProductCatalogPlanogramApiTest` 30/30 · `PlanogramConstitutionalTest` 31/31 |
 | **3.** Planograma por `UPSERT`, orden físico, semáforo, presets, clonación y cambio de `machine_type` | `PdoMachinePlanogramRepositoryTest` 32/32 · `MachinePlanogramServiceTest` 35/35 · `PlanogramCompatibilityValidatorTest` 47/47 · `AdminMachinePlanogramGuardTest` 9/9 |
 | **4.** Consola de Coordinación y consulta móvil sin costes | `coordinator_planogram_tab.test.mjs` 38/38 · `restocker_route_view.test.mjs` 82/82 |

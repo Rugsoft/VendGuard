@@ -45,7 +45,7 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 | `tests/integration/PdoVendingProductRepositoryTest.php` | **30/30**, exit 0 |
 | `tests/integration/PdoMachinePlanogramRepositoryTest.php` | **32/32**, exit 0 |
 | `tests/unit/FunctionalSpecMirrorParityTest.php` | **24/24**, exit 0 |
-| `tests/integration/SchemaConvergenceParityTest.php` | **29/29**, exit 0 |
+| `tests/integration/SchemaConvergenceParityTest.php` | **30/30**, exit 0 |
 | `tests/integration/PostgresProductPlanogramSchemaTest.php` | **35/35**, exit 0 |
 | `tests/integration/ProductCatalogPlanogramApiTest.php` | **30/30**, exit 0 |
 | `tests/integration/PlanogramConstitutionalTest.php` | **31/31**, exit 0 |
@@ -65,7 +65,7 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 ### 2.1. Nombres de suite normalizados
 
-- La correspondencia de esquema se certifica con `SchemaConvergenceParityTest.php` (29/29) y `PostgresSchemaTest.php` (135/135); `OpportunisticSchemaCorrespondenceTest.php` (32/32) pertenece al Módulo 16.
+- La correspondencia de esquema se certifica con `SchemaConvergenceParityTest.php` (30/30) y `PostgresSchemaTest.php` (135/135); `OpportunisticSchemaCorrespondenceTest.php` (32/32) pertenece al Módulo 16.
 - La guarda de botones se ejecuta como `tests/unit/LegacyButtonPaletteRetirementTest.mjs` (18/18).
 
 ---
@@ -168,13 +168,13 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 **Qué ocurría.** [`product_catalog_planogram_contracts.md:40`](../specs/technical/product_catalog_planogram_contracts.md) afirmaba que el esquema pasaba de «25 a 27 tipos `ENUM` nativos».
 
-**Qué certifica el motor.** `SchemaConvergenceParityTest` 29/29 declara **43 conjuntos ENUM / 37 tipos**; el ODD ya lo había registrado como desviación declarada en `T-PLN-02`.
+**Qué certifica el motor.** `SchemaConvergenceParityTest` 30/30 declara **43 conjuntos ENUM y 37 tipos distintos**; el ODD ya lo había registrado como desviación declarada en `T-PLN-02`.
 
 **Impacto original.** No afectaba al comportamiento, pero contradecía la fuente técnica y podía confundir auditorías futuras.
 
 **Corrección aplicada.** El contrato declara ahora **37 tipos `ENUM` nativos en total** y atribuye a la migración 028 solo `vending_product_category` y `vending_product_unit_type`; se retiraron los ordinales históricos que fijaban un total superado. `database_schema.md` §3 ya declaraba 37 y no requirió cambios.
 
-**Verificación.** `SchemaConvergenceParityTest` **29/29** y `PostgresSchemaTest` **135/135**, ambos con `exit=0`, 43 tablas y 43 conjuntos ENUM sobre 37 tipos.
+**Verificación.** `SchemaConvergenceParityTest` **30/30** —incluida la aserción que cuenta los tipos ENUM distintos— y `PostgresSchemaTest` **135/135**, ambos con `exit=0`, 43 tablas, 43 conjuntos ENUM y 37 tipos distintos.
 
 ---
 
