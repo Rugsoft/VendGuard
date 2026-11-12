@@ -2029,6 +2029,23 @@ export class ApiClient {
   };
 
   /**
+   * 4b. Restocker Operations (Módulo 32: lectura territorial del planograma)
+   *
+   * El backend resuelve el `user_id` del token y devuelve 403 fuera de las
+   * zonas vivas del reponedor. La proyección omite coste y margen (Art. V.4).
+   */
+  restocker = {
+    /**
+     * Read-only planogram of a machine inside the restocker's live zones.
+     * @param {number|string} machineId
+     * @returns {Promise<Object>}
+     */
+    getMachinePlanogram: (machineId) => {
+      return this.get(`/restocker/machines/${encodeURIComponent(machineId)}/planogram`);
+    }
+  };
+
+  /**
    * 5. Field Technician Operations (Mobile Route, Intervention, Resolution)
    */
   technician = {

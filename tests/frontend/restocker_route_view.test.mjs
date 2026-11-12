@@ -1,13 +1,15 @@
 /**
- * VendGuard - Frontend Unit Test Suite (restocker_route_view.test.mjs)
+ * VendGuard - Frontend Test Suite (restocker_route_view.test.mjs)
  *
- * Certifica la vista móvil del Cargador / Reponedor de Ruta (T-RES-12 · D1,
- * RF-04.1 a RF-04.3, Art. V.4, RNF-03):
+ * Certifica la vista móvil del Cargador / Reponedor de Ruta (T-RES-12 y
+ * T-PLN-13 · D1, D2, RF-04.1 a RF-04.3, RF-05.2, QA 2, Art. V.4, RNF-03):
  * - Acceso exclusivo de `RESTOCKER`: otro rol se rechaza y la sesión se descarta.
  * - Cabecera con nombre, `operator_code` e insignias Titular / Suplente.
  * - Ciclo completo de jornada y cierre directo sin modal de relevo SAT.
  * - Contador diario en vivo y «⏱️ Mis Horas» de solo lectura, sin id ajeno.
  * - Estado base de ruta sin paradas inventadas (Features 24, 26 y 27).
+ * - Listado de máquinas de las zonas vivas con resumen de stock y modal de
+ *   planograma de solo lectura, sin coste ni margen (T-PLN-13, QA 2, Art. V.4).
  * - Enrutamiento de sesión del Shell Vue 3 hacia `restocker`.
  * - Fidelidad al sistema de diseño: tokens CSS, cero colores literales.
  *
@@ -30,7 +32,7 @@ import { store } from '../../public/assets/js/store.js';
 import { RestockerRouteView } from '../../public/assets/js/components/RestockerRouteView.js';
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - RestockerRouteView (T-RES-12)');
+console.log(' VendGuard: Frontend Test Suite - RestockerRouteView (T-RES-12 / T-PLN-13)');
 console.log('======================================================================\n');
 
 let assertions = 0;
@@ -65,6 +67,7 @@ const viewSource = readFileSync(
 );
 const appSource = readFileSync(new URL('../../public/assets/js/app.js', import.meta.url), 'utf8');
 const storeSource = readFileSync(new URL('../../public/assets/js/store.js', import.meta.url), 'utf8');
+const apiSource = readFileSync(new URL('../../public/assets/js/api.js', import.meta.url), 'utf8');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Estado inicial y perfil
@@ -103,6 +106,48 @@ const bootstrapPayload = {
       backup_zones: [{ id: 2, code: 'ZONA-BCN-CENTRO', name: 'Barcelona Distrito Centro', role_in_zone: 'BACKUP' }]
     },
     shift: { status: 'MEAL_BREAK', active_shift_id: 45, today_effective_seconds: 7200 },
+    machines: [
+      {
+        id: 7,
+        code: 'VEND-0701',
+        model: 'Jofemar Vision',
+        machine_type: 'COMBO',
+        location_name: 'Hospital del Mar',
+        site_code: 'HOSP-MAR',
+        zone_id: 1,
+        zone_code: 'ZONA-BCN-NORTE',
+        zone_name: 'Barcelona Litoral y Norte',
+        sanitary_status: 'OK',
+        active_slots_count: 6,
+        stockout_slots_count: 1,
+        low_stock_slots_count: 2,
+        ok_slots_count: 3,
+        inactive_product_slots_count: 1,
+        total_capacity: 60,
+        total_estimated_qty: 38,
+        fill_rate_percent: 63.33
+      },
+      {
+        id: 8,
+        code: 'VEND-0801',
+        model: 'Necta Korinto',
+        machine_type: 'HOT_DRINKS',
+        location_name: 'Torre Glòries',
+        site_code: 'TORRE-GLO',
+        zone_id: 2,
+        zone_code: 'ZONA-BCN-CENTRO',
+        zone_name: 'Barcelona Distrito Centro',
+        sanitary_status: 'OK',
+        active_slots_count: 4,
+        stockout_slots_count: 0,
+        low_stock_slots_count: 0,
+        ok_slots_count: 4,
+        inactive_product_slots_count: 0,
+        total_capacity: 40,
+        total_estimated_qty: 36,
+        fill_rate_percent: 90
+      }
+    ],
     route_stops: []
   }
 };
@@ -127,6 +172,9 @@ assert('zoneRoleLabel() distingue Titular y Suplente', routeVm.zoneRoleLabel(rou
 assert('loadMyRoute() aplica el estado de turno del bootstrap', routeVm.shiftStatus === 'MEAL_BREAK' && routeVm.activeShiftId === 45);
 assert('El contador diario formatea los segundos efectivos', routeVm.todayEffectiveFormatted === '02h 00m', routeVm.todayEffectiveFormatted);
 assert('El estado base de ruta queda vacío hasta las Features 24/26/27', routeVm.routeStops.length === 0);
+assert('loadMyRoute() publica las dos máquinas de sus zonas', routeVm.machines.length === 2 && routeVm.machines[0].code === 'VEND-0701');
+assert('machineHasAlert() distingue la máquina con alertas', routeVm.machineHasAlert(routeVm.machines[0]) === true && routeVm.machineHasAlert(routeVm.machines[1]) === false);
+assert('machineTypeLabel() traduce las tipologías', routeVm.machineTypeLabel('COMBO') === 'Mixta' && routeVm.machineTypeLabel('HOT_DRINKS') === 'Bebidas calientes');
 
 requestedUrls = [];
 await routeVm.loadShiftStatus();
@@ -283,6 +331,122 @@ assert(
   'El diseño es mobile-first sin anchos fijos de escritorio',
   styleBlocks.includes('max-width: 480px') && !styleBlocks.includes('min-width: 1024px')
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. Máquinas de zona y planograma de solo lectura (T-PLN-13, D2, QA 2, Art. V.4)
+// ─────────────────────────────────────────────────────────────────────────────
+const originalRestockerPlanogram = api.restocker.getMachinePlanogram;
+let loadedPlanogramMachineId = null;
+
+const restockerPlanogramPayload = {
+  data: {
+    machine: {
+      id: 7,
+      code: 'VEND-0701',
+      model: 'Jofemar Vision',
+      machine_type: 'COMBO',
+      location_name: 'Hospital del Mar',
+      zone_name: 'Barcelona Litoral y Norte',
+      sanitary_status: 'OK'
+    },
+    summary: {
+      active_slots_count: 2,
+      stockout_slots_count: 1,
+      low_stock_slots_count: 1,
+      ok_slots_count: 0,
+      inactive_product_slots_count: 1,
+      total_capacity: 20,
+      total_estimated_qty: 3,
+      fill_rate_percent: 15
+    },
+    slots: [
+      {
+        id: 101,
+        slot_code: '11',
+        product_id: 1,
+        product_sku: 'SAND-JAMON',
+        product_name: 'Sándwich mixto',
+        product_category: 'PERISHABLE_FOOD',
+        product_unit_type: 'UNIT',
+        requires_cold_chain: true,
+        product_is_active: true,
+        sale_price_eur: 2.4,
+        max_capacity: 10,
+        current_estimated_qty: 0,
+        min_threshold: 3,
+        restock_needed_qty: 10,
+        stock_status: 'STOCKOUT',
+        stock_status_label: 'Agotado',
+        is_active: true,
+        fill_rate_percent: 0
+      },
+      {
+        id: 102,
+        slot_code: '12',
+        product_id: 2,
+        product_sku: 'SNACK-PATATAS',
+        product_name: 'Patatas saladas',
+        product_category: 'SNACK',
+        product_unit_type: 'UNIT',
+        requires_cold_chain: false,
+        product_is_active: false,
+        sale_price_eur: 1.2,
+        max_capacity: 10,
+        current_estimated_qty: 3,
+        min_threshold: 3,
+        restock_needed_qty: 7,
+        stock_status: 'LOW_STOCK',
+        stock_status_label: 'Bajo umbral',
+        is_active: true,
+        fill_rate_percent: 30
+      }
+    ]
+  }
+};
+
+api.restocker.getMachinePlanogram = async (machineId) => {
+  loadedPlanogramMachineId = machineId;
+  return restockerPlanogramPayload;
+};
+
+assert('El cliente API expone el planograma territorial del reponedor', typeof api.restocker.getMachinePlanogram === 'function');
+assert('El endpoint del cliente es el planograma /restocker/machines/{id}/planogram', apiSource.includes('/restocker/machines/${encodeURIComponent(machineId)}/planogram'));
+
+await routeVm.openPlanogram(routeVm.machines[0]);
+assert('Abrir el planograma fija la máquina y el modal', routeVm.showPlanogramModal === true && routeVm.selectedMachine.id === 7);
+assert('El modal carga el planograma de la máquina elegida', loadedPlanogramMachineId === 7 && routeVm.planogram.machine.code === 'VEND-0701');
+assert('El resumen publica carriles, agotados, bajo umbral y llenado', routeVm.planogramSummary.active_slots_count === 2 && routeVm.planogramSummary.stockout_slots_count === 1 && routeVm.planogramSummary.low_stock_slots_count === 1 && routeVm.planogramSummary.fill_rate_percent === 15);
+assert('La parrilla conserva los dos carriles activos', routeVm.planogramSlots.length === 2 && routeVm.planogramSlots[0].slot_code === '11');
+assert('Los carriles leídos no incluyen coste ni margen', !('unit_cost_eur' in routeVm.planogramSlots[0]) && !('unit_margin_eur' in routeVm.planogramSlots[0]));
+assert('El semáforo traduce los estados del carril', routeVm.stockStatusLabel('STOCKOUT') === 'Agotado' && routeVm.stockStatusLabel('LOW_STOCK') === 'Bajo umbral' && routeVm.stockStatusLabel('OK') === 'Abastecido');
+assert('categoryLabel() y unitTypeLabel() traducen la referencia', routeVm.categoryLabel('PERISHABLE_FOOD') === 'Perecedero' && routeVm.unitTypeLabel('UNIT') === 'Unidad');
+assert('slotFillPercent() respeta el porcentaje del servidor', routeVm.slotFillPercent(routeVm.planogramSlots[1]) === 30);
+assert('formatPrice() publica el PVP sin coste interno', routeVm.formatPrice(routeVm.planogramSlots[0].sale_price_eur) === '2.40 €');
+assert('El modal identifica el producto dado de baja para sustituirlo', routeVm.planogramSlots[1].product_is_active === false);
+
+routeVm.closePlanogram();
+assert('Cerrar el modal limpia selección y planograma', routeVm.showPlanogramModal === false && routeVm.selectedMachine === null && routeVm.planogram === null);
+
+api.restocker.getMachinePlanogram = async () => {
+  throw new Error('MACHINE_OUTSIDE_RESTOCKER_ZONES');
+};
+await routeVm.openPlanogram(routeVm.machines[0]);
+assert('Un 403 del servidor se declara sin cerrar el modal', routeVm.showPlanogramModal === true && routeVm.planogramError.includes('MACHINE_OUTSIDE_RESTOCKER_ZONES'));
+assert('El fallo de lectura no deja cargando el modal', routeVm.planogramLoading === false);
+routeVm.closePlanogram();
+api.restocker.getMachinePlanogram = originalRestockerPlanogram;
+
+const planogramModalSource = viewSource.slice(
+  viewSource.indexOf('data-testid="modal-restocker-planogram"'),
+  viewSource.indexOf('data-testid="modal-my-hours"')
+);
+assert('La vista declara el listado de máquinas de zona', viewSource.includes('data-testid="restocker-machines"') && viewSource.includes('data-testid="restocker-machine-card"'));
+assert('La tarjeta muestra resumen de agotados y bajo umbral', viewSource.includes('machine.stockout_slots_count') && viewSource.includes('machine.low_stock_slots_count'));
+assert('La tarjeta abre el planograma con su acción', viewSource.includes('data-testid="btn-open-planogram"') && viewSource.includes('@click="openPlanogram(machine)"'));
+assert('El modal de planograma y sus carriles existen', viewSource.includes('data-testid="modal-restocker-planogram"') && viewSource.includes('data-testid="restocker-planogram-slot"'));
+assert('El modal se declara de solo lectura', planogramModalSource.includes('Solo lectura') && !/savePlanogram|deactivatePlanogram|applyPlanogram|clonePlanogram/.test(planogramModalSource));
+assert('La vista no declara campos económicos internos', !viewSource.includes('unit_cost_eur') && !viewSource.includes('unit_margin_eur') && !viewSource.includes('margin_eur'));
+assert('La vista usa el endpoint segregado del reponedor', viewSource.includes('api.restocker.getMachinePlanogram'));
 
 api.get = originalGet;
 api.post = originalPost;

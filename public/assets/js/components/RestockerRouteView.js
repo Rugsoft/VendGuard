@@ -38,8 +38,16 @@ export const RestockerRouteView = {
       restocker: null,
       zones: { primary_zone: null, backup_zones: [] },
       routeStops: [],
+      machines: [],
       isLoading: false,
       loadError: '',
+
+      // Consulta de solo lectura del planograma (T-PLN-13, D2, QA 2, Art. V.4)
+      showPlanogramModal: false,
+      selectedMachine: null,
+      planogram: null,
+      planogramLoading: false,
+      planogramError: '',
 
       // Jornada (RF-04.2)
       shiftStatus: 'OFF_SHIFT',
@@ -80,6 +88,17 @@ export const RestockerRouteView = {
     },
     hasZones() {
       return Boolean(this.primaryZone) || this.backupZones.length > 0;
+    },
+    planogramSlots() {
+      return Array.isArray(this.planogram?.slots) ? this.planogram.slots : [];
+    },
+    planogramSummary() {
+      return this.planogram?.summary || {
+        active_slots_count: 0,
+        stockout_slots_count: 0,
+        low_stock_slots_count: 0,
+        fill_rate_percent: 0
+      };
     },
     shiftStatusLabel() {
       if (this.shiftStatus === 'ON_SHIFT') return 'En turno';
@@ -164,6 +183,7 @@ export const RestockerRouteView = {
           backup_zones: Array.isArray(data.zones?.backup_zones) ? data.zones.backup_zones : []
         };
         this.routeStops = Array.isArray(data.route_stops) ? data.route_stops : [];
+        this.machines = Array.isArray(data.machines) ? data.machines : [];
         this.applyShiftResponse(data.shift || {}, 'OFF_SHIFT');
       } catch (err) {
         this.loadError = err?.message || 'No se pudo cargar tu ruta de reposición.';
@@ -317,11 +337,124 @@ export const RestockerRouteView = {
       return zone?.role_in_zone === 'PRIMARY' ? 'Titular' : 'Suplente';
     },
 
+    machineTypeLabel(type) {
+      const labels = {
+        HOT_DRINKS: 'Bebidas calientes',
+        COLD_DRINKS: 'Bebidas frías',
+        SNACKS: 'Snacks',
+        PERISHABLE_FOOD: 'Perecederos',
+        COMBO: 'Mixta'
+      };
+      return labels[type] || type || '—';
+    },
+
+    categoryLabel(category) {
+      const labels = {
+        COLD_DRINK: 'Bebida fría',
+        SNACK: 'Snack',
+        PERISHABLE_FOOD: 'Perecedero',
+        HOT_BEVERAGE_INGREDIENT: 'Ingrediente',
+        CUP_STIRRER_CONSUMABLE: 'Consumible'
+      };
+      return labels[category] || category || '—';
+    },
+
+    unitTypeLabel(unitType) {
+      const labels = { UNIT: 'Unidad', GRAMS: 'Gramos', SLEEVE: 'Tira' };
+      return labels[unitType] || unitType || '—';
+    },
+
+    machineHasAlert(machine) {
+      return Number(machine?.stockout_slots_count || 0) > 0
+        || Number(machine?.low_stock_slots_count || 0) > 0;
+    },
+
+    stockStatusLabel(status) {
+      const labels = { STOCKOUT: 'Agotado', LOW_STOCK: 'Bajo umbral', OK: 'Abastecido' };
+      return labels[status] || status || '—';
+    },
+
+    stockStatusStyle(status) {
+      if (status === 'STOCKOUT') {
+        return {
+          backgroundColor: 'var(--color-error-bg)',
+          color: 'var(--color-error-text)'
+        };
+      }
+      if (status === 'LOW_STOCK') {
+        return {
+          backgroundColor: 'var(--color-warning-bg)',
+          color: 'var(--color-warning-text)'
+        };
+      }
+      return {
+        backgroundColor: 'var(--color-success-bg)',
+        color: 'var(--color-success-text)'
+      };
+    },
+
+    stockStatusColor(status) {
+      if (status === 'STOCKOUT') return 'var(--color-error)';
+      if (status === 'LOW_STOCK') return 'var(--color-warning)';
+      return 'var(--color-success)';
+    },
+
+    slotFillPercent(slot) {
+      if (slot?.fill_rate_percent !== undefined && slot?.fill_rate_percent !== null) {
+        return Math.max(0, Math.min(100, Math.round(Number(slot.fill_rate_percent))));
+      }
+      const capacity = Number(slot?.max_capacity);
+      if (!Number.isFinite(capacity) || capacity <= 0) return 0;
+      return Math.max(0, Math.min(100, Math.round((Number(slot.current_estimated_qty) / capacity) * 100)));
+    },
+
+    formatPrice(value) {
+      const number = Number(value);
+      return Number.isFinite(number) ? `${number.toFixed(2)} €` : '—';
+    },
+
+    openPlanogram(machine) {
+      if (!machine?.id) return;
+      this.selectedMachine = machine;
+      this.planogram = null;
+      this.planogramError = '';
+      this.showPlanogramModal = true;
+      return this.loadPlanogram(machine.id);
+    },
+
+    closePlanogram() {
+      this.showPlanogramModal = false;
+      this.selectedMachine = null;
+      this.planogram = null;
+      this.planogramError = '';
+    },
+
+    async loadPlanogram(machineId) {
+      this.planogramLoading = true;
+      this.planogramError = '';
+      try {
+        const response = await api.restocker.getMachinePlanogram(machineId);
+        const data = response?.data && typeof response.data === 'object' ? response.data : (response || {});
+        this.planogram = data?.machine ? data : null;
+        if (!this.planogram) {
+          this.planogramError = 'No se pudo leer el planograma de esta máquina.';
+        }
+      } catch (err) {
+        this.planogramError = err?.message || 'No se pudo cargar el planograma. Comprueba que la máquina sigue en tus zonas.';
+      } finally {
+        this.planogramLoading = false;
+      }
+    },
+
     handleLogout() {
       store.clearSession();
       this.restocker = null;
       this.zones = { primary_zone: null, backup_zones: [] };
       this.routeStops = [];
+      this.machines = [];
+      this.showPlanogramModal = false;
+      this.selectedMachine = null;
+      this.planogram = null;
       this.shiftStatus = 'OFF_SHIFT';
       this.todaySummary = null;
     }
@@ -575,6 +708,198 @@ export const RestockerRouteView = {
             </li>
           </ul>
         </section>
+
+        <!-- Máquinas de las zonas vivas y planograma de solo lectura (T-PLN-13, D2, QA 2, Art. V.4) -->
+        <section
+          data-testid="restocker-machines"
+          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 500; margin: 0 0 4px 0;">🗄️ Máquinas de mis zonas</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
+                Consulta de solo lectura. La configuración la define Coordinación.
+              </p>
+            </div>
+            <span
+              v-if="machines.length > 0"
+              data-testid="restocker-machines-count"
+              style="font-size: 11px; padding: 3px 8px; border-radius: var(--radius-interactive); background-color: var(--color-primary-subtle); color: var(--color-primary); white-space: nowrap;"
+            >{{ machines.length }} en zona</span>
+          </div>
+
+          <p v-if="isLoading" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-ink-muted); margin: 12px 0 0 0;">
+            <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; border-width: 2px;"></span>
+            <span>Cargando las máquinas de tus zonas…</span>
+          </p>
+          <p v-else-if="loadError" style="font-size: 13px; color: var(--color-urgency-critical); margin: 12px 0 0 0;">
+            {{ loadError }}
+          </p>
+          <p v-else-if="machines.length === 0" data-testid="restocker-machines-empty" style="font-size: 13px; color: var(--color-ink-muted); margin: 12px 0 0 0;">
+            No hay máquinas activas en tus zonas operativas vivas.
+          </p>
+
+          <ul v-else style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 10px;">
+            <li
+              v-for="machine in machines"
+              :key="machine.id"
+              data-testid="restocker-machine-card"
+              :data-machine-id="machine.id"
+              style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px 12px;"
+            >
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                <div style="min-width: 0;">
+                  <strong style="display: block; font-family: var(--font-display); font-size: 14px; font-weight: 500;">{{ machine.code }}</strong>
+                  <span style="display: block; font-size: 12px; color: var(--color-slate);">{{ machine.model }} · {{ machineTypeLabel(machine.machine_type) }}</span>
+                  <span style="display: block; font-size: 11px; color: var(--color-ink-muted); margin-top: 2px;">
+                    {{ machine.location_name }}<template v-if="machine.zone_name"> · {{ machine.zone_name }}</template>
+                  </span>
+                </div>
+                <span
+                  v-if="machineHasAlert(machine)"
+                  data-testid="restocker-machine-alert"
+                  style="font-size: 10px; font-weight: 600; padding: 3px 7px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text); white-space: nowrap;"
+                >⚠️ Reponer</span>
+                <span
+                  v-else
+                  style="font-size: 10px; font-weight: 600; padding: 3px 7px; border-radius: var(--radius-interactive); background-color: var(--color-success-bg); color: var(--color-success-text); white-space: nowrap;"
+                >Al día</span>
+              </div>
+
+              <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
+                <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-surface-1); color: var(--color-slate);">{{ machine.active_slots_count }} carriles</span>
+                <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-error-bg); color: var(--color-error-text);">{{ machine.stockout_slots_count }} agotados</span>
+                <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text);">{{ machine.low_stock_slots_count }} bajo umbral</span>
+                <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-info-bg); color: var(--color-info-text);">{{ Number(machine.fill_rate_percent || 0).toFixed(0) }} % llenado</span>
+              </div>
+
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary vg-btn-sm"
+                data-testid="btn-open-planogram"
+                :data-machine-id="machine.id"
+                style="margin-top: 8px;"
+                @click="openPlanogram(machine)"
+              >
+                Ver planograma
+              </button>
+            </li>
+          </ul>
+        </section>
+
+        <!-- Modal de planograma en solo lectura (T-PLN-13, D2, QA 2, Art. V.4) -->
+        <div
+          v-if="showPlanogramModal"
+          data-testid="modal-restocker-planogram"
+          style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 70; padding: 0;"
+          @click.self="closePlanogram"
+        >
+          <div
+            style="background-color: var(--color-surface-card); width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto; border-top-left-radius: var(--radius-card); border-top-right-radius: var(--radius-card); border: 1px solid var(--color-hairline); padding: 16px; box-sizing: border-box;"
+          >
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div style="min-width: 0;">
+                <h2 style="font-family: var(--font-display); font-size: 18px; font-weight: 500; margin: 0;">
+                  {{ selectedMachine?.code || 'Planograma' }}
+                </h2>
+                <p style="font-size: 12px; color: var(--color-ink-muted); margin: 2px 0 0 0;">
+                  {{ selectedMachine?.model }} · {{ selectedMachine?.location_name }}<template v-if="selectedMachine?.zone_name"> · {{ selectedMachine.zone_name }}</template>
+                </p>
+              </div>
+              <button
+                type="button"
+                class="vg-btn vg-btn-ghost vg-btn-sm"
+                data-testid="btn-close-planogram"
+                @click="closePlanogram"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <p
+              style="display: inline-flex; align-items: center; gap: 6px; margin: 10px 0 0 0; padding: 4px 8px; font-size: 10px; font-weight: 600; border-radius: var(--radius-interactive); background-color: var(--color-info-bg); color: var(--color-info-text);"
+            >
+              🔒 Solo lectura · sin coste interno
+            </p>
+
+            <p v-if="planogramLoading" style="font-size: 13px; color: var(--color-ink-muted); margin-top: 12px;">
+              Cargando el planograma…
+            </p>
+            <div
+              v-else-if="planogramError"
+              data-testid="restocker-planogram-error"
+              style="font-size: 12px; color: var(--color-urgency-critical); background-color: var(--color-urgency-critical-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 12px;"
+            >
+              {{ planogramError }}
+            </div>
+
+            <template v-else-if="planogram">
+              <div data-testid="restocker-planogram-summary" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px;">
+                <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px;">
+                  <span style="display: block; font-size: 10px; color: var(--color-ink-muted); text-transform: uppercase;">Carriles</span>
+                  <strong style="font-family: var(--font-display); font-size: 16px; font-weight: 500;">{{ planogramSummary.active_slots_count }}</strong>
+                </div>
+                <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px;">
+                  <span style="display: block; font-size: 10px; color: var(--color-ink-muted); text-transform: uppercase;">Llenado</span>
+                  <strong style="font-family: var(--font-display); font-size: 16px; font-weight: 500; color: var(--color-primary);">{{ Number(planogramSummary.fill_rate_percent || 0).toFixed(1) }} %</strong>
+                </div>
+                <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px;">
+                  <span style="display: block; font-size: 10px; color: var(--color-ink-muted); text-transform: uppercase;">Agotados</span>
+                  <strong style="font-family: var(--font-display); font-size: 16px; font-weight: 500; color: var(--color-error-text);">{{ planogramSummary.stockout_slots_count }}</strong>
+                </div>
+                <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px;">
+                  <span style="display: block; font-size: 10px; color: var(--color-ink-muted); text-transform: uppercase;">Bajo umbral</span>
+                  <strong style="font-family: var(--font-display); font-size: 16px; font-weight: 500; color: var(--color-warning-text);">{{ planogramSummary.low_stock_slots_count }}</strong>
+                </div>
+              </div>
+
+              <p v-if="planogramSlots.length === 0" style="font-size: 13px; color: var(--color-ink-muted); margin-top: 12px;">
+                Esta máquina no tiene carriles activos.
+              </p>
+
+              <ul v-else style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 8px;">
+                <li
+                  v-for="slot in planogramSlots"
+                  :key="slot.id || slot.slot_code"
+                  data-testid="restocker-planogram-slot"
+                  :data-slot-code="slot.slot_code"
+                  style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px;"
+                >
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                    <div style="min-width: 0;">
+                      <strong style="display: block; font-family: var(--font-display); font-size: 13px; font-weight: 500;">{{ slot.slot_code }} · {{ slot.product_name }}</strong>
+                      <span style="display: block; font-size: 11px; color: var(--color-ink-muted);">{{ slot.product_sku }}</span>
+                    </div>
+                    <span
+                      style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive); white-space: nowrap;"
+                      :style="stockStatusStyle(slot.stock_status)"
+                    >{{ stockStatusLabel(slot.stock_status) }}</span>
+                  </div>
+
+                  <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
+                    <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-surface-1); color: var(--color-slate);">{{ categoryLabel(slot.product_category) }} · {{ unitTypeLabel(slot.product_unit_type) }}</span>
+                    <span v-if="slot.requires_cold_chain" style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-info-bg); color: var(--color-info-text);">❄️ Frío</span>
+                    <span v-if="slot.product_is_active === false" style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-error-bg); color: var(--color-error-text);">⚠️ Sustituir</span>
+                  </div>
+
+                  <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin-top: 8px;">
+                    <span>{{ slot.current_estimated_qty }} / {{ slot.max_capacity }} uds.</span>
+                    <span style="color: var(--color-ink-muted);">Umbral {{ slot.min_threshold }}</span>
+                  </div>
+                  <div style="height: 6px; background-color: var(--color-surface-1); border-radius: var(--radius-interactive); overflow: hidden; margin-top: 4px;">
+                    <div :style="{ width: slotFillPercent(slot) + '%', height: '100%', backgroundColor: stockStatusColor(slot.stock_status) }"></div>
+                  </div>
+
+                  <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font-size: 11px; margin-top: 6px; color: var(--color-ink-muted);">
+                    <span v-if="Number(slot.restock_needed_qty || 0) > 0">Reponer {{ slot.restock_needed_qty }} uds.</span>
+                    <span v-else>Sin reposición pendiente</span>
+                    <span>PVP {{ formatPrice(slot.sale_price_eur) }}</span>
+                  </div>
+                </li>
+              </ul>
+            </template>
+          </div>
+        </div>
 
         <!-- Modal de solo lectura «⏱️ Mis Horas» (RF-04.3, Art. V.4) -->
         <div
