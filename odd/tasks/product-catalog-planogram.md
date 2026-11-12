@@ -1,0 +1,44 @@
+# Feature: Catálogo Maestro de Productos, Consumibles y Planograma por Máquina (Módulo 32)
+
+**Rama:** `feat/product-catalog-planogram` · **Entrega:** 7 WU (14 tareas `T-PLN-01` a `T-PLN-14`) + 1 PR final · **Batería:** `php tests/run_all.php`.
+**Fuente de verdad:** [`specs/32-product-catalog-planogram/spec.md`](../../specs/32-product-catalog-planogram/spec.md) v2.0 (`D1`–`D3`, `C1`–`C3`, `QA 1`–`QA 4`), [`plan.md`](../../specs/32-product-catalog-planogram/plan.md), [`tasks.md`](../../specs/32-product-catalog-planogram/tasks.md), [`contratos`](../../specs/technical/product_catalog_planogram_contracts.md).
+
+## Specs
+
+S1 — **Esquema PostgreSQL, Tipos Nativos #26/#27 e Inmutabilidad de Tablas 42 y 43 (RF-01.1, RF-02.1, RF-03.1, RF-03.2, D1, D3, C1–C3, QA 1, Art. II, Art. III.1).** Creación de los tipos `vending_product_category` (`'COLD_DRINK'`, `'SNACK'`, `'PERISHABLE_FOOD'`, `'HOT_BEVERAGE_INGREDIENT'`, `'CUP_STIRRER_CONSUMABLE'`) y `vending_product_unit_type` (`'UNIT'`, `'GRAMS'`, `'SLEEVE'`), y adición de `'VENDING_PRODUCT'` y `'MACHINE_PLANOGRAM'` a `audit_entity_type`. Tabla 42 `vending_products` y Tabla 43 `machine_planogram_slots` (`UNIQUE (machine_id, slot_code)`), protegidas con `prevent_hard_delete()` (`Art. III.1`), `CHECK` constraints numéricas (`C2`, `QA 1`) y disparadores bidireccionales del cerrojo sanitario (`trg_enforce_planogram_cold_chain_and_category`, `trg_validate_product_update_against_planograms`, `trg_validate_machine_type_against_planogram`). Semillas de catálogo y planogramas en `supabase_seeds.sql` y `SeedRunner`.
+
+S2 — **Catálogo Maestro de Productos y Consumibles, Inmutabilidad de `sku` y Cotas por Categoría (RF-01.1–RF-01.3, D2, D3, C1, C2, C3, QA 1, Art. III.2, Art. III.3).** CRUD en `/api/coordinator/products*` con `sku` único normalizado (`^[A-Z0-9_-]{3,32}$`, `409 DUPLICATE_PRODUCT_SKU`) e inmutable en edición (`409 SKU_CHANGE_FORBIDDEN`, `C1`). Reglas de precio y unidad (`C2`): `unit_cost_eur > 0.00`; en `COLD_DRINK`/`SNACK`/`PERISHABLE_FOOD` exige `unit_type = 'UNIT'` y `sale_price_eur > 0.00`; en `HOT_BEVERAGE_INGREDIENT`/`CUP_STIRRER_CONSUMABLE` admite `sale_price_eur >= 0.00`. Si `category = 'PERISHABLE_FOOD'` o `requires_cold_chain = TRUE`, exige `max_shelf_life_days` (`1..3650`, `422 PERISHABLE_REQUIRES_COLD_CHAIN_AND_SHELF_LIFE`); si `requires_cold_chain = FALSE`, admite `NULL` o `1..3650` (`QA 1`). La baja lógica (`is_active = FALSE`) conserva la fila y devuelve `affected_active_slots_count` (`C1`).
+
+S3 — **Matriz de Planograma por Máquina (`machine_planogram_slots`), `UPSERT` sin `DELETE` y Semáforo de Stock (RF-02.1–RF-02.3, C1, C2, QA 3, Art. III.1).** Guardado de carril individual (`PUT /api/coordinator/machines/{id}/planogram/slots/{slot_code}`), desactivación lógica idempotente (`DELETE .../slots/{slot_code}` $\rightarrow$ `is_active = FALSE`) y reemplazo de matriz completa (`PUT /api/coordinator/machines/{id}/planogram`) mediante `UPSERT` sin `DELETE` físico (`C1`). Rechazo de asignación de productos inactivos (`422 PRODUCT_INACTIVE`). Ordenación física de bandejas (`QA 3`: numéricos como entero ascendente primero, luego códigos alfanuméricos de tolvas/tubos). Semáforo determinista por carril (`STOCKOUT` cuando `0`, `LOW_STOCK` cuando `1..min_threshold`, `OK` cuando `> min_threshold`) y métricas de resumen por máquina (`fill_rate_percent`, contadores e `inactive_product_slots_count`).
+
+S4 — **Cerrojo Sanitario Bidireccional (Art. II) y Matriz `MachineType × ProductCategory` (RF-03.1, RF-03.2, D3, QA 4).** Bloqueo en dominio y SQL al asignar `requires_cold_chain = TRUE` a máquinas distintas de `PERISHABLE_FOOD` y `COMBO` (`422 COLD_CHAIN_MACHINE_INCOMPATIBLE`) o categorías incompatibles con `MachineType` (`422 PRODUCT_CATEGORY_MACHINE_INCOMPATIBLE`). Bloqueo inverso (`409 Conflict`) al editar `requires_cold_chain` o `category` de un producto asignado en carriles activos de máquinas incompatibles, y bloqueo en `AdminMachineService::updateMachine` (`409 PLANOGRAM_INCOMPATIBLE_WITH_MACHINE_TYPE`, `QA 4`) al cambiar `machine_type` de una máquina con carriles activos incompatibles.
+
+S5 — **Plantillas de Dominio por Modelo y Clonación en 1 Clic (RF-04.1, RF-04.2, D1, C3, QA 3, Art. IV).** Aplicación de preset estándar por `machine.model` normalizado o `machine.machine_type` (`POST /api/coordinator/machines/{id}/planogram/apply-preset`) y clonación directa desde `source_machine_id` (`POST /api/coordinator/machines/{id}/planogram/clone`) con `initial_stock_mode` (`'ZERO'` por defecto o `'FULL'`). En clonación se omiten carriles cuyo producto esté en baja (`skipped_inactive_slots`, `QA 3`; `422 SOURCE_PLANOGRAM_EMPTY` si no queda ninguno activo), se valida compatibilidad sanitaria/física con la máquina destino y se preserva `current_estimated_qty` (acotado a `max_capacity`) en los carriles de destino donde el `product_id` coincida con el que ya tenían activo, sin copiar jamás el `current_estimated_qty` de la máquina origen (`C3`).
+
+S6 — **Aislamiento Territorial del Reponedor y Opacidad Absoluta de `unit_cost_eur` (RF-05.2, D2, QA 2, Art. V.4).** El rol `RESTOCKER` consulta en solo lectura las máquinas activas ubicadas en sus Zonas Operativas vivas (`PRIMARY` y `BACKUP` con `removed_at IS NULL` en `restocker_zone_assignments`) vía `GET /api/restocker/my-route`, `GET /api/restocker/machines` y `GET /api/restocker/machines/{id}/planogram`, recibiendo `403 MACHINE_OUTSIDE_RESTOCKER_ZONES` si solicita una máquina fuera de sus zonas (`QA 2`) y `403 Forbidden` ante cualquier intento de mutación. Ninguna respuesta servida a `RESTOCKER`, Portal de Sede o canal QR incluye `unit_cost_eur` ni márgenes comerciales (`Art. V.4`).
+
+S7 — **Consola en Coordinación (`CoordinatorPlanogramTab.js`) y Consulta Móvil en `RestockerRouteView.js` (RF-05.1, RF-05.2, RNF-03, D1, D2).** Componente Vue 3 ESM en Coordinación con las sub-pestañas «🍫 Catálogo de Productos y Consumibles» (filtros, KPIs, modal alta/edición con `sku` bloqueado en edición `C1`, costes y márgenes) y «🗄️ Planograma por Máquina» (selector de máquina, KPIs, parrilla de carriles con barra de nivel, semáforo e insignia `⚠️ Producto dado de baja`, edición de carriles y acciones «⚡ Aplicar Plantilla del Modelo» y «📋 Clonar desde otra Máquina»). En `RestockerRouteView.js`, listado de máquinas de sus zonas con resumen de agotados/bajo umbral y modal de detalle del planograma en solo lectura sin `unit_cost_eur`.
+
+## Tasks
+
+| ID | Specs | Ruta | Commit | Estado |
+| :--- | :--- | :--- | :--- | :--- |
+| **WU-1 / T-PLN-01** | S1 | inline | — | ⏳ pendiente |
+| **WU-1 / T-PLN-02** | S1 | inline | — | ⏳ pendiente |
+| **WU-2 / T-PLN-03** | S2, S3, S4 | inline | — | ⏳ pendiente |
+| **WU-2 / T-PLN-04** | S5 | inline | — | ⏳ pendiente |
+| **WU-3 / T-PLN-05** | S2, S4 | inline | — | ⏳ pendiente |
+| **WU-3 / T-PLN-06** | S3, S6 | inline | — | ⏳ pendiente |
+| **WU-4 / T-PLN-07** | S2, S4 | inline | — | ⏳ pendiente |
+| **WU-4 / T-PLN-08** | S3, S4, S5, S6 | inline | — | ⏳ pendiente |
+| **WU-4 / T-PLN-09** | S4 | inline | — | ⏳ pendiente |
+| **WU-5 / T-PLN-10** | S2, S3, S4, S5, S6 | inline | — | ⏳ pendiente |
+| **WU-5 / T-PLN-11** | S1–S6 | inline | — | ⏳ pendiente |
+| **WU-6 / T-PLN-12** | S7 | inline | — | ⏳ pendiente |
+| **WU-6 / T-PLN-13** | S6, S7 | inline | — | ⏳ pendiente |
+| **WU-7 / T-PLN-14** | S1–S7 | inline | — | ⏳ pendiente |
+
+## Log
+
+* **L1 (2026-11-12):** Petición original del usuario: `"antes de empezar con el mecanismo sdd y escribir la spec, vamos a definir un poco esta feature de docs/features_pendientes-md: 22. 🍫 Catálogo Maestro de Productos, Consumibles y Planograma por Máquina (Machine Planogram & Slot Matrix)"`.
+* **L2 (2026-11-12):** Consensuadas con el Product Owner las decisiones de diseño `D1`–`D3`, los casos límite `C1`–`C3` y las resoluciones de auditoría QA `QA 1`–`QA 4`. Aprobada la Puerta SDD de Fase 2 (`spec.md` v2.0, `product_catalog_planogram_contracts.md` v1.0, `plan.md` v1.0 y `tasks.md` v1.0). Creación de `odd/tasks/product-catalog-planogram.md`, apertura de la rama `feat/product-catalog-planogram` y primer commit documental de rama sin iniciar aún la ejecución de `T-PLN-01`.
