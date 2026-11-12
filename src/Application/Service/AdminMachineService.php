@@ -14,7 +14,9 @@ use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Service\MachineTypePlanogramGuardInterface;
 use VendGuard\Infrastructure\Database\UniqueViolationDetector;
+use VendGuard\Infrastructure\Repository\PdoMachineTypePlanogramGuard;
 
 /**
  * AdminMachineService
@@ -28,15 +30,21 @@ class AdminMachineService
     private MachineRepositoryInterface $machineRepo;
     private LocationRepositoryInterface $locationRepo;
     private AuditLogger $auditLogger;
+    private ?MachineTypePlanogramGuardInterface $planogramGuard;
 
     public function __construct(
         MachineRepositoryInterface $machineRepo,
         LocationRepositoryInterface $locationRepo,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?MachineTypePlanogramGuardInterface $planogramGuard = null
     ) {
         $this->machineRepo = $machineRepo;
         $this->locationRepo = $locationRepo;
         $this->auditLogger = $auditLogger ?? new AuditLogger();
+        // El cerrojo se instancia de forma perezosa en producción: la suite
+        // unitaria de administración no abre una conexión PDO si no cambia una
+        // tipología. Quien quiera aislarlo inyecta su propio guardián.
+        $this->planogramGuard = $planogramGuard;
     }
 
     /**
@@ -239,6 +247,11 @@ class AdminMachineService
                         $id
                     );
                 }
+
+                // Cerrojo inverso del planograma (QA 4): un carril activo no
+                // puede quedar incompatible con la nueva tipología.
+                ($this->planogramGuard ??= new PdoMachineTypePlanogramGuard())
+                    ->assertMachineTypeChange($id, $newType);
 
                 $cleanData['machine_type'] = $newType->value;
                 $changedFields[] = 'machine_type';

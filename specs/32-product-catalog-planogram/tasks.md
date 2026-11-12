@@ -66,7 +66,7 @@ flowchart LR
   - **Requisitos:** `RF-02.2`, `RF-02.3`, `RF-03.1`, `RF-04.1`, `RF-04.2`, `RF-05.2`, `D1`–`D3`, `C1`–`C3`, `QA 2`, `QA 3`, `Art. II`, `Art. V.4`.
   - **Verificación:** `php tests/unit/MachinePlanogramServiceTest.php`
 
-- [ ] **T-PLN-09 · Integrar validación de carriles activos en `AdminMachineService::updateMachine` al cambiar `machine_type` (`QA 4`, `RF-03.2`)**
+- [x] **T-PLN-09 · Integrar validación de carriles activos en `AdminMachineService::updateMachine` al cambiar `machine_type` (`QA 4`, `RF-03.2`)**
   - **Requisitos:** `RF-03.2`, `D3`, `QA 4`, `Art. II`.
   - **Verificación:** `php tests/unit/AdminMachinePlanogramGuardTest.php`
 

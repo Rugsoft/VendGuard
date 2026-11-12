@@ -27,6 +27,7 @@ use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Service\MachineTypePlanogramGuardInterface;
 
 echo "======================================================================\n";
 echo " VendGuard: Test Unitario - AdminMachineServiceTest (T-ADM-08)\n";
@@ -312,7 +313,14 @@ $machineRepo = new InMemoryMachineRepository();
 $locationRepo = new InMemoryLocationRepository();
 $auditRepo = new InMemoryAuditLogRepository();
 $auditLogger = new AuditLogger($auditRepo);
-$service = new AdminMachineService($machineRepo, $locationRepo, $auditLogger);
+// La suite administrativa no abre base de datos: el cerrojo del planograma se
+// certifica en AdminMachinePlanogramGuardTest con sus propios dobles.
+$noPlanogramGuard = new class implements MachineTypePlanogramGuardInterface {
+    public function assertMachineTypeChange(int $machineId, MachineType $newMachineType): void
+    {
+    }
+};
+$service = new AdminMachineService($machineRepo, $locationRepo, $auditLogger, $noPlanogramGuard);
 
 // Sedes de prueba
 $locationRepo->locations[1] = new Location(1, 'SEDE-BCN-01', 'Hospital del Mar', 'Passeig Marítim 25', 'Marta', '600112233', true, '2026-09-01', '2026-09-01', null);
