@@ -37,12 +37,12 @@
 
 ## 2. Contrato de Esquema de Base de Datos (PostgreSQL 16+ / Supabase)
 
-La persistencia del Módulo 32 se materializa en la migración incremental `database/supabase_migrations/028_product_catalog_and_planogram_slots.sql` y converge 1:1 en `database/supabase_init.sql`, elevando el esquema de **41 a 43 tablas** (`vending_products` Tabla 42 y `machine_planogram_slots` Tabla 43) y de **25 a 27 tipos `ENUM` nativos** (`QA 1`).
+La persistencia del Módulo 32 se materializa en la migración incremental `database/supabase_migrations/028_product_catalog_and_planogram_slots.sql` y converge 1:1 en `database/supabase_init.sql`, elevando el esquema de **41 a 43 tablas** (`vending_products` Tabla 42 y `machine_planogram_slots` Tabla 43) y declarando **37 tipos `ENUM` nativos** en total (`QA 1`). Esta migración incorpora `vending_product_category` y `vending_product_unit_type`.
 
-### 2.1. Nuevos Tipos Enumerados (#26 y #27) y Ampliación de `audit_entity_type`
+### 2.1. Nuevos Tipos Enumerados y Ampliación de `audit_entity_type`
 
 ```sql
--- #26 · Categoría del producto comercial o consumible (RF-01.1, QA 1)
+-- Categoría del producto comercial o consumible (RF-01.1, QA 1)
 DO $do$
 BEGIN
     CREATE TYPE vending_product_category AS ENUM (
@@ -55,7 +55,7 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
--- #27 · Unidad de medida de carga y control de stock (RF-01.1, QA 1)
+-- Unidad de medida de carga y control de stock (RF-01.1, QA 1)
 DO $do$
 BEGIN
     CREATE TYPE vending_product_unit_type AS ENUM (

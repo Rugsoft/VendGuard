@@ -7,9 +7,9 @@
 **Referencias:** [`spec.md`](../specs/32-product-catalog-planogram/spec.md) v2.0 · [`product_catalog_planogram_spec.md`](../specs/functional/product_catalog_planogram_spec.md) · [`product_catalog_planogram_contracts.md`](../specs/technical/product_catalog_planogram_contracts.md) · [`design.md`](design.md) · [`tasks.md`](../specs/32-product-catalog-planogram/tasks.md) · [`traceability-matrix.md`](../specs/32-product-catalog-planogram/traceability-matrix.md)\
 **Fecha de la revisión:** 2026-11-12\
 **Alcance:** revisión de solo lectura de `RF-01`–`RF-05`, criterios EARS, `RNF-01`–`RNF-03`, Sistema de Diseño, casos límite §6, decisiones `D1`–`D3`, invariantes `C1`–`C3`, resoluciones `QA 1`–`QA 4`, los 5 criterios de Definition of Done y las 14 tareas `T-PLN-01`–`T-PLN-14`.\
-**Resultado:** **la Spec 32 sigue sin estar cumplida al 100 %**, pero ya no quedan bloqueantes funcionales ni contractuales abiertos. De las **7 brechas** detectadas, **H-01, H-02, H-03, H-04 y H-05 están resueltas**; permanecen **dos desviaciones menores** de documentación (H-06 y H-07).
+**Resultado:** **la Spec 32 sigue sin estar cumplida al 100 %**, pero ya no quedan bloqueantes funcionales ni contractuales abiertos. De las **7 brechas** detectadas, **H-01, H-02, H-03, H-04, H-05 y H-06 están resueltas**; permanece **una desviación menor** de documentación (H-07).
 
-**Última actualización:** 2026-11-12 · H-01, H-02, H-03, H-04 y H-05 resueltos y certificados.
+**Última actualización:** 2026-11-12 · H-01, H-02, H-03, H-04, H-05 y H-06 resueltos y certificados.
 
 > Este documento es un acta viva de hallazgos: registra la evidencia y el estado de resolución, sin sustituir a la Spec ni a los tests.
 
@@ -27,9 +27,9 @@ RESULTADO: 100% EN VERDE
 exit=0
 ```
 
-Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. **H-01, H-02, H-03, H-04 y H-05 ya están corregidas y certificadas.** El veredicto sigue sin ser 100 % porque quedan H-06/H-07 (contrato y mensajes), desviaciones menores sin impacto funcional.
+Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. **H-01, H-02, H-03, H-04, H-05 y H-06 ya están corregidas y certificadas.** El veredicto sigue sin ser 100 % porque queda H-07 (mensajes), una desviación menor sin impacto funcional.
 
-**Veredicto:** **NO al 100 %, pero sin hallazgos bloqueantes abiertos**: quedan dos desviaciones menores de documentación.
+**Veredicto:** **NO al 100 %, pero sin hallazgos bloqueantes abiertos**: queda una desviación menor de documentación.
 
 ---
 
@@ -79,7 +79,7 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 | **H-03** | Copy de la insignia de producto dado de baja no coincide con la Spec | **Baja** | Resuelto |
 | **H-04** | Cobertura de tests parcial en filtros y en la invariante de clonación fallida | **Media** | Resuelto |
 | **H-05** | Nombres de suite solicitados inexistentes o con extensión incorrecta | **Informativa** | Resuelto |
-| **H-06** | El contrato técnico declara 27 tipos ENUM y el motor certifica 37 | **Baja documental** | Abierto |
+| **H-06** | El contrato técnico fijaba 27 tipos ENUM y el motor certifica 37 | **Baja documental** | Resuelto |
 | **H-07** | Etiqueta «once columnas» para una tabla de diez columnas | **Informativa** | Abierto |
 
 ---
@@ -162,17 +162,19 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 ---
 
-### H-06 · Recuento de tipos ENUM desactualizado en el contrato
+### H-06 · Recuento de tipos ENUM alineado
 
-**Severidad:** Baja documental · **Requisito afectado:** contrato de esquema §2.
+**Severidad:** Baja documental · **Estado:** Resuelto · **Requisito afectado:** contrato de esquema §2.
 
-**Qué declara el contrato.** [`product_catalog_planogram_contracts.md:40`](../specs/technical/product_catalog_planogram_contracts.md) afirma que el esquema pasa de «25 a 27 tipos `ENUM` nativos».
+**Qué ocurría.** [`product_catalog_planogram_contracts.md:40`](../specs/technical/product_catalog_planogram_contracts.md) afirmaba que el esquema pasaba de «25 a 27 tipos `ENUM` nativos».
 
 **Qué certifica el motor.** `SchemaConvergenceParityTest` 29/29 declara **43 conjuntos ENUM / 37 tipos**; el ODD ya lo había registrado como desviación declarada en `T-PLN-02`.
 
-**Impacto.** No afecta al comportamiento, pero contradice la fuente técnica y puede confundir auditorías futuras.
+**Impacto original.** No afectaba al comportamiento, pero contradecía la fuente técnica y podía confundir auditorías futuras.
 
-**Corrección propuesta.** Actualizar la frase del contrato a los 37 tipos reales o eliminar el total absoluto y referenciar la certificación de convergencia.
+**Corrección aplicada.** El contrato declara ahora **37 tipos `ENUM` nativos en total** y atribuye a la migración 028 solo `vending_product_category` y `vending_product_unit_type`; se retiraron los ordinales históricos que fijaban un total superado. `database_schema.md` §3 ya declaraba 37 y no requirió cambios.
+
+**Verificación.** `SchemaConvergenceParityTest` **29/29** y `PostgresSchemaTest` **135/135**, ambos con `exit=0`, 43 tablas y 43 conjuntos ENUM sobre 37 tipos.
 
 ---
 
@@ -206,9 +208,8 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 El módulo tiene una base sólida: esquema convergente, cerrojo sanitario en dominio y PostgreSQL, `UPSERT` sin borrado físico, presets y clonación, segregación de costes y una batería global de 420 suites en verde.
 
-**H-01, H-02, H-03, H-04 y H-05 están cerrados y certificados**, y la batería global permanece en verde. La Spec 32 aún no puede declararse 100 % cumplida por dos desviaciones menores de documentación, sin bloqueantes funcionales:
+**H-01, H-02, H-03, H-04, H-05 y H-06 están cerrados y certificados**, y la batería global permanece en verde. La Spec 32 aún no puede declararse 100 % cumplida por una desviación menor de documentación, sin bloqueantes funcionales:
 
-1. **H-06** · recuento de tipos ENUM desactualizado en el contrato.
-2. **H-07** · etiqueta «once columnas» para una tabla de diez.
+1. **H-07** · etiqueta «once columnas» para una tabla de diez.
 
-El siguiente cierre requiere resolver esas dos desviaciones y repetir la batería global; H-01, H-02, H-03, H-04 y H-05 ya no forman parte del bloqueo.
+El siguiente cierre requiere resolver esa desviación y repetir la batería global; H-01, H-02, H-03, H-04, H-05 y H-06 ya no forman parte del bloqueo.
