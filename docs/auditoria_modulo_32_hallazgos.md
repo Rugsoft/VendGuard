@@ -7,9 +7,9 @@
 **Referencias:** [`spec.md`](../specs/32-product-catalog-planogram/spec.md) v2.0 · [`product_catalog_planogram_spec.md`](../specs/functional/product_catalog_planogram_spec.md) · [`product_catalog_planogram_contracts.md`](../specs/technical/product_catalog_planogram_contracts.md) · [`design.md`](design.md) · [`tasks.md`](../specs/32-product-catalog-planogram/tasks.md) · [`traceability-matrix.md`](../specs/32-product-catalog-planogram/traceability-matrix.md)\
 **Fecha de la revisión:** 2026-11-12\
 **Alcance:** revisión de solo lectura de `RF-01`–`RF-05`, criterios EARS, `RNF-01`–`RNF-03`, Sistema de Diseño, casos límite §6, decisiones `D1`–`D3`, invariantes `C1`–`C3`, resoluciones `QA 1`–`QA 4`, los 5 criterios de Definition of Done y las 14 tareas `T-PLN-01`–`T-PLN-14`.\
-**Resultado:** **la Spec 32 sigue sin estar cumplida al 100 %**, pero ya no quedan bloqueantes funcionales ni contractuales abiertos. De las **7 brechas** detectadas, **H-01, H-02, H-03 y H-04 están resueltas**; permanecen **tres desviaciones menores** de documentación (H-05, H-06 y H-07).
+**Resultado:** **la Spec 32 sigue sin estar cumplida al 100 %**, pero ya no quedan bloqueantes funcionales ni contractuales abiertos. De las **7 brechas** detectadas, **H-01, H-02, H-03, H-04 y H-05 están resueltas**; permanecen **dos desviaciones menores** de documentación (H-06 y H-07).
 
-**Última actualización:** 2026-11-12 · H-01, H-02, H-03 y H-04 resueltos y certificados.
+**Última actualización:** 2026-11-12 · H-01, H-02, H-03, H-04 y H-05 resueltos y certificados.
 
 > Este documento es un acta viva de hallazgos: registra la evidencia y el estado de resolución, sin sustituir a la Spec ni a los tests.
 
@@ -27,9 +27,9 @@ RESULTADO: 100% EN VERDE
 exit=0
 ```
 
-Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. **H-01, H-02, H-03 y H-04 ya están corregidas y certificadas.** El veredicto sigue sin ser 100 % porque quedan H-05/H-06/H-07 (referencias, contrato y mensajes), desviaciones menores sin impacto funcional.
+Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. **H-01, H-02, H-03, H-04 y H-05 ya están corregidas y certificadas.** El veredicto sigue sin ser 100 % porque quedan H-06/H-07 (contrato y mensajes), desviaciones menores sin impacto funcional.
 
-**Veredicto:** **NO al 100 %, pero sin hallazgos bloqueantes abiertos**: quedan tres desviaciones menores de documentación.
+**Veredicto:** **NO al 100 %, pero sin hallazgos bloqueantes abiertos**: quedan dos desviaciones menores de documentación.
 
 ---
 
@@ -63,10 +63,10 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 | `tests/unit/AuditEntityTypesTest.php` | **41/41**, exit 0 |
 | Batería global `php tests/run_all.php` | **420 suites · 15.669 aserciones · 0 fallos**, exit 0 |
 
-### 2.1. Nombres de suite solicitados que no existen
+### 2.1. Nombres de suite normalizados
 
-- `tests/integration/SchemaCorrespondenceTest.php` → **no existe**. Los equivalentes reales son `SchemaConvergenceParityTest.php` (29/29) y `PostgresSchemaTest.php` (135/135). `OpportunisticSchemaCorrespondenceTest.php` (32/32) certifica el Módulo 16, no el 32.
-- `tests/unit/LegacyButtonPaletteRetirementTest.php` → **no existe como `.php`**. El archivo real es `tests/unit/LegacyButtonPaletteRetirementTest.mjs` (18/18).
+- La correspondencia de esquema se certifica con `SchemaConvergenceParityTest.php` (29/29) y `PostgresSchemaTest.php` (135/135); `OpportunisticSchemaCorrespondenceTest.php` (32/32) pertenece al Módulo 16.
+- La guarda de botones se ejecuta como `tests/unit/LegacyButtonPaletteRetirementTest.mjs` (18/18).
 
 ---
 
@@ -78,7 +78,7 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 | **H-02** | Falta `compatible_source_machines` en la respuesta del planograma de Coordinación | **Alta** | Resuelto |
 | **H-03** | Copy de la insignia de producto dado de baja no coincide con la Spec | **Baja** | Resuelto |
 | **H-04** | Cobertura de tests parcial en filtros y en la invariante de clonación fallida | **Media** | Resuelto |
-| **H-05** | Nombres de suite solicitados inexistentes o con extensión incorrecta | **Informativa** | Abierto |
+| **H-05** | Nombres de suite solicitados inexistentes o con extensión incorrecta | **Informativa** | Resuelto |
 | **H-06** | El contrato técnico declara 27 tipos ENUM y el motor certifica 37 | **Baja documental** | Abierto |
 | **H-07** | Etiqueta «once columnas» para una tabla de diez columnas | **Informativa** | Abierto |
 
@@ -150,16 +150,15 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 ---
 
-### H-05 · Nombres de suite solicitados inexistentes
+### H-05 · Nombres de suite normalizados
 
-**Severidad:** Informativa · **Requisito afectado:** reproducibilidad de la auditoría.
+**Severidad:** Informativa · **Estado:** Resuelto · **Requisito afectado:** reproducibilidad de la auditoría.
 
-- `tests/integration/SchemaCorrespondenceTest.php`: **no existe**. Equivalentes reales: `SchemaConvergenceParityTest.php` (29/29), `PostgresSchemaTest.php` (135/135) y `OpportunisticSchemaCorrespondenceTest.php` (32/32, Módulo 16).
-- `tests/unit/LegacyButtonPaletteRetirementTest.php`: **no existe como `.php`**. El real es `LegacyButtonPaletteRetirementTest.mjs` (18/18).
+**Qué ocurría.** Varias tareas y actas citaban suites con extensión `.php` o nombres que no existen en el repositorio, de modo que un comando copiado literalmente fallaba aunque la cobertura real estuviera disponible.
 
-**Impacto.** Un comando de auditoría copiado literalmente fallaría por archivo inexistente, aunque la cobertura real sí existe.
+**Impacto original.** La auditoría no era reproducible sin traducir previamente los nombres de las suites.
 
-**Corrección propuesta.** Corregir las referencias en los documentos de auditoría o tareas que citen esos nombres.
+**Corrección aplicada.** Todas las referencias se sustituyeron por las suites reales: `tests/integration/SchemaConvergenceParityTest.php`, `tests/integration/PostgresSchemaTest.php`, `tests/integration/OpportunisticSchemaCorrespondenceTest.php` (Módulo 16) y `tests/unit/LegacyButtonPaletteRetirementTest.mjs`. Los comandos de aceptación usan `php tests/...` o `node tests/...`.
 
 ---
 
@@ -207,10 +206,9 @@ Las 14 tareas están marcadas como completadas en `tasks.md` y en el acta ODD. *
 
 El módulo tiene una base sólida: esquema convergente, cerrojo sanitario en dominio y PostgreSQL, `UPSERT` sin borrado físico, presets y clonación, segregación de costes y una batería global de 420 suites en verde.
 
-**H-01, H-02, H-03 y H-04 están cerrados y certificados**, y la batería global permanece en verde. La Spec 32 aún no puede declararse 100 % cumplida por tres desviaciones menores de documentación, sin bloqueantes funcionales:
+**H-01, H-02, H-03, H-04 y H-05 están cerrados y certificados**, y la batería global permanece en verde. La Spec 32 aún no puede declararse 100 % cumplida por dos desviaciones menores de documentación, sin bloqueantes funcionales:
 
-1. **H-05** · referencias a nombres de suite inexistentes.
-2. **H-06** · recuento de tipos ENUM desactualizado en el contrato.
-3. **H-07** · etiqueta «once columnas» para una tabla de diez.
+1. **H-06** · recuento de tipos ENUM desactualizado en el contrato.
+2. **H-07** · etiqueta «once columnas» para una tabla de diez.
 
-El siguiente cierre requiere resolver esas tres desviaciones y repetir la batería global; H-01, H-02, H-03 y H-04 ya no forman parte del bloqueo.
+El siguiente cierre requiere resolver esas dos desviaciones y repetir la batería global; H-01, H-02, H-03, H-04 y H-05 ya no forman parte del bloqueo.

@@ -86,7 +86,7 @@ flowchart LR
        - Bloqueo de `DELETE FROM machine_troubleshooting_guides` por `trg_no_delete_machine_troubleshooting_guides` (`Art. III.1`).
        - Bloqueo de `UPDATE` sobre `machine_model`, `machine_model_key` o `breakdown_type` por `trg_immutable_machine_troubleshooting_guides` (`C1`).
        - Rechazo por restricciones `CHECK` de arrays JSONB fuera de cotas (`steps_json` con `< 2` o `> 10` pasos, `error_codes_json` `> 20`, `recommended_spare_part_ids` `> 10`).
-  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php tests/integration/PostgresSchemaTest.php tests/integration/SchemaCorrespondenceTest.php tests/integration/PostgresTroubleshootingGuideSchemaTest.php`
+  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php tests/integration/PostgresSchemaTest.php tests/integration/PostgresTroubleshootingGuideSchemaTest.php`
 
 ---
 
@@ -293,7 +293,7 @@ flowchart LR
     - Modificar `specs/28-troubleshooting-guides/tasks.md` (marcar tareas `[x]`)
   - **Requisitos cubiertos:** `RF-01` a `RF-05`, `RNF-01` a `RNF-03`, `D1`–`D4`, `C1`–`C6`, `QA 1`–`QA 4`, `constitution.md` Art. I–VII.
   - **Detalle de implementación:**
-    1. Ejecutar la batería completa de pruebas (`composer test`) verificando **0 fallos y 0 errores** (incluyendo `SchemaCorrespondenceTest`, `OfflinePwaAppShellContractTest`, `DesignTokenDebtRatchetTest` y `DocMetricsGuard`).
+    1. Ejecutar la batería completa de pruebas (`composer test`) verificando **0 fallos y 0 errores** (incluyendo `SchemaConvergenceParityTest`, `OfflinePwaAppShellContractTest`, `DesignTokenDebtRatchetTest` y `DocMetricsGuard`).
     2. Crear `specs/28-troubleshooting-guides/traceability-matrix.md` cruzando cada criterio EARS (`01.1` a `05.2`), `D1`–`D4`, `C1`–`C6` y `QA 1`–`QA 4` con su código de producción y sus pruebas automatizadas.
     3. Actualizar `docs/features_pendientes.md` marcando la **Feature 15 (`📖 Guías Rápidas de Diagnóstico por Modelo` · Módulo 28)** como **100 % Implementada**.
   - **Hecho cuando:** `composer test`

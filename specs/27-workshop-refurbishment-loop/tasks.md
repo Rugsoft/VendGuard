@@ -88,7 +88,7 @@ flowchart LR
        - Bloqueo de `DELETE FROM workshop_repair_items` por `trg_no_delete_workshop_repair_items`.
        - Rechazo por `chk_workshop_repair_terminal_coherence` de: dictamen sin `bench_diagnosis`, pieza `is_out_of_catalog = TRUE` hacia `TECHNICIAN_VAN`, `SCRAPPED_IRREPARABLE` con `restock_destination IS NOT NULL` o `net_savings_eur > 0`.
        - Ejecución idempotente del backfill con `generate_series(1, irp.quantity)`.
-  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php tests/integration/PostgresSchemaTest.php tests/integration/SchemaCorrespondenceTest.php tests/integration/PostgresWorkshopRepairSchemaTest.php`
+  - **Hecho cuando:** `vendor/bin/phpunit tests/integration/SchemaConvergenceParityTest.php tests/integration/PostgresSchemaTest.php tests/integration/PostgresWorkshopRepairSchemaTest.php`
 
 ---
 

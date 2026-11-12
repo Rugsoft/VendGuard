@@ -63,8 +63,8 @@ Lo que está sólidamente cumplido y certificado: RF-01, RF-02 (Portal, **Coordi
 
 ### 2.1. Nombres de archivo solicitados que no existen
 
-- `tests/integration/SchemaCorrespondenceTest.php` → no existe. Los equivalentes reales son `OpportunisticSchemaCorrespondenceTest.php` (32/32) y `SchemaConvergenceParityTest.php` (29/29).
-- `tests/unit/LegacyButtonPaletteRetirementTest.php` → no existe como `.php`; el real es `LegacyButtonPaletteRetirementTest.mjs` (18/18).
+- La correspondencia de esquema se certifica con `SchemaConvergenceParityTest.php` (29/29) y `PostgresSchemaTest.php` (135/135); `OpportunisticSchemaCorrespondenceTest.php` (32/32) cubre el Módulo 16.
+- La guarda de botones se ejecuta como `tests/unit/LegacyButtonPaletteRetirementTest.mjs` (18/18).
 - `tests/unit/DesignTokenDebtRatchetTest.php` → no existe como `.php`; el real es `DesignTokenDebtRatchetTest.mjs` (3/3).
 - `vendor/bin/phpunit` → **no existe**. Los comandos de aceptación de varias tareas (`vendor/bin/phpunit ...`) no son reproducibles tal como están escritos; el proyecto ejecuta `php tests/...`.
 
@@ -339,7 +339,7 @@ Mantener la suite en la categoría `new_engine` y repetirla tras cualquier cambi
 
 **Resolución implementada en `specs/30-tiered-sla-contracts/tasks.md`:**
 1. **Nombres de archivo corregidos:**
-   - `SchemaCorrespondenceTest.php` corregido a `OpportunisticSchemaCorrespondenceTest.php` (T-SLA-03).
+   - La referencia a la suite de correspondencia se corrigió a `OpportunisticSchemaCorrespondenceTest.php` y `SchemaConvergenceParityTest.php` (T-SLA-03).
    - `OpportunisticInterventionService.php` corregido a `OpportunisticIncidentService.php` (T-SLA-08).
    - `OfflineStorageService.js` corregido a `OfflineStorage.js` (T-SLA-13).
 2. **Comandos de aceptación corregidos:**
