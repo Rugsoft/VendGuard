@@ -82,7 +82,7 @@ flowchart LR
   - **Requisitos:** `RF-05.1`, `RNF-03`, `D1`, `D2`, `C1`, `C2`, `C3`.
   - **Verificación:** `node tests/frontend/coordinator_planogram_tab.test.mjs`
 
-- [ ] **T-PLN-13 · Extender `RestockerRouteView.js` con listado de máquinas de zona y modal de planograma en solo lectura sin `unit_cost_eur` (`RF-05.2`, `D2`, `QA 2`, `Art. V.4`)**
+- [x] **T-PLN-13 · Extender `RestockerRouteView.js` con listado de máquinas de zona y modal de planograma en solo lectura sin `unit_cost_eur` (`RF-05.2`, `D2`, `QA 2`, `Art. V.4`)**
   - **Requisitos:** `RF-05.2`, `RNF-03`, `D2`, `QA 2`, `Art. V.4`.
   - **Verificación:** `node tests/frontend/restocker_route_view.test.mjs`
 
