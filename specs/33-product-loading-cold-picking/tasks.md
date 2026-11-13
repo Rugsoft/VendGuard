@@ -70,7 +70,7 @@ flowchart LR
   - **Requisitos:** `RF-01` a `RF-05`, `Art. V.4`.
   - **Verificación:** `php tests/integration/ProductLoadingColdPickingApiTest.php`
 
-- [ ] **T-PLD-10 · Certificar suites de integración HTTP y blindaje constitucional (`ProductLoadingColdPickingApiTest.php` y `ProductLoadingConstitutionalTest.php`)**
+- [x] **T-PLD-10 · Certificar suites de integración HTTP y blindaje constitucional (`ProductLoadingColdPickingApiTest.php` y `ProductLoadingConstitutionalTest.php`)**
   - **Requisitos:** `RF-01` a `RF-05`, `D1`–`D4`, `C1`–`C4`, `QA 1`–`QA 4`, `Art. II`, `Art. III.1`, `Art. V.1`, `Art. V.4`.
   - **Verificación:** `php tests/integration/ProductLoadingColdPickingApiTest.php && php tests/integration/ProductLoadingConstitutionalTest.php`
 
