@@ -5,23 +5,23 @@
 **Contratos:** [`specs/technical/product_loading_cold_picking_contracts.md`](../specs/technical/product_loading_cold_picking_contracts.md)  
 **Sistema de Diseño:** [`docs/design.md`](design.md)  
 **Fecha de auditoría:** 2026-11-13  
-**Rama:** `feat/product-loading-cold-picking` · HEAD `1d469ea`  
+**Rama:** `feat/product-loading-cold-picking` · HEAD `ee4512d`  
 **Alcance:** contraste requisito por requisito contra código y ejecución directa de suites; no se modificó código de producción.
 
-**Actualización 2026-11-13:** B-01 cerrada tras implementar la propuesta y emisión individual del reponedor ausente, la alerta C2 en consola y su regresión de servicio, repositorio, API y frontend. B-02 cerrada al certificar las omisiones del lote por orden activa y demanda cero. B-03 cerrada al certificar la recepción y la liquidación con un producto desactivado en tránsito. B-04 cerrada al certificar la cancelación justificada desde `DISPATCHED`. B-05 cerrada al ejercer la ruta HTTP de liquidación de Coordinación. B-06 cerrada al certificar la colisión de caducidad al confirmar la recepción. Las demás brechas siguen abiertas.
+**Actualización 2026-11-13:** B-01 cerrada tras implementar la propuesta y emisión individual del reponedor ausente, la alerta C2 en consola y su regresión de servicio, repositorio, API y frontend. B-02 cerrada al certificar las omisiones del lote por orden activa y demanda cero. B-03 cerrada al certificar la recepción y la liquidación con un producto desactivado en tránsito. B-04 cerrada al certificar la cancelación justificada desde `DISPATCHED`. B-05 cerrada al ejercer la ruta HTTP de liquidación de Coordinación. B-06 cerrada al certificar la colisión de caducidad al confirmar la recepción. B-07 cerrada al certificar el doble clic de confirmación y liquidación con conexiones reales. Solo queda B-08.
 
 ---
 
 ## Resultado general
 
-La implementación está muy avanzada. La batería hermética **no observó ningún test en rojo**; el canal `new_engine` mantuvo en rojo únicamente la sonda de latencia remota, ajena a B-05:
+La implementación está muy avanzada. La batería hermética y el canal `new_engine` **quedaron al 100 % en verde** en esta corrida:
 
-- **23 suites ejecutadas directamente**, todas con `exit=0`.
+- **24 suites ejecutadas directamente**, todas con `exit=0`.
 - Batería global: **427/427 suites · 16.053 aserciones · 0 fallos**.
-- Canal `new_engine`: **56 suites · 1.849 aserciones · 55/56 en verde**. La sonda `PoolerLatencyMeasurementTest` falla por latencia remota (251,4 ms frente al presupuesto de 250 ms en «crear»), un límite de red ajeno a B-05; el resto de suites del canal pasa.
+- Canal `new_engine`: **57 suites · 1.861 aserciones · 57/57 en verde**. La sonda `PoolerLatencyMeasurementTest` también quedó dentro de su presupuesto en esta corrida.
 - Tareas del módulo: **13/13 completadas**, 0 pendientes.
 
-Con B-01, B-02, B-03, B-04, B-05 y B-06 cerradas, **quedan dos brechas abiertas**: B-07 es una brecha de certificación y B-08 una desviación de `RNF-03`. La Spec 33 sigue sin poder certificarse al 100 % hasta cerrarlas.
+Con B-01 a B-07 cerradas, **queda una brecha abierta**: B-08, una desviación de `RNF-03`. La Spec 33 sigue sin poder certificarse al 100 % hasta cerrarla.
 
 | ID | Brecha | Tipo | Severidad | Requisito afectado | Estado |
 |---|---|---|---|---|---|
@@ -31,7 +31,7 @@ Con B-01, B-02, B-03, B-04, B-05 y B-06 cerradas, **quedan dos brechas abiertas*
 | **B-04** | No se prueba la cancelación desde `DISPATCHED` | Cobertura | Media | `RF-03.4` | ✅ **Cerrada** (2026-11-13) |
 | **B-05** | La ruta HTTP de liquidación de Coordinación no se ejerce | Cobertura | Media | `RF-04.2`, `RF-05.1` | ✅ **Cerrada** (2026-11-13) |
 | **B-06** | No se prueba `BATCH_EXPIRATION_MISMATCH` al confirmar la recepción | Cobertura | Media | `QA 3`, `RF-04.1` | ✅ **Cerrada** (2026-11-13) |
-| **B-07** | El doble clic no se prueba con concurrencia real | Cobertura | Media | §6.6, `D3`, `RF-04.1`, `RF-04.2` | Abierta |
+| **B-07** | El doble clic no se prueba con concurrencia real | Cobertura | Media | §6.6, `D3`, `RF-04.1`, `RF-04.2` | ✅ **Cerrada** (2026-11-13) |
 | **B-08** | Los botones móviles del Módulo 33 declaran geometría en línea y quedan fuera del guard de Coordinación | Diseño | Baja/Media | `RNF-03`, `docs/design.md` | Abierta |
 
 ---
@@ -143,19 +143,21 @@ Con B-01, B-02, B-03, B-04, B-05 y B-06 cerradas, **quedan dos brechas abiertas*
 
 ---
 
-## B-07 · El doble clic no se prueba con concurrencia real
+## B-07 · El doble clic no se prueba con concurrencia real · ✅ CERRADA
 
 **Requisito.** §6.6 exige que, gracias al bloqueo pesimista `SELECT ... FOR UPDATE`, un segundo clic concurrente detecte el cambio de estado y responda `409 INVALID_ORDER_STATE_TRANSITION` sin duplicar el incremento ni la liquidación.
 
-**Evidencia.**
+**Resolución implementada.**
 
-- `ProductLoadingOrderServiceTest` **6.4** ejecuta una segunda confirmación de forma secuencial, después de que la primera haya terminado.
-- `PdoProductLoadingOrderRepositoryTest` **4.4** verifica que `findById(forUpdate)` bloquea cabecera y líneas dentro de una transacción.
-- No hay dos conexiones simultáneas compitiendo por la misma orden ni una prueba de carrera de liquidación.
+- `ProductLoadingConcurrencyTest` crea un esquema aislado y una orden despachada, retiene su cabecera con `FOR UPDATE` y lanza **dos procesos actores** contra la misma orden.
+- Los dos actores cruzan una barrera común y la suite comprueba en `pg_stat_activity` que ambos esperan el cerrojo antes de liberar la cabecera. No es una llegada secuencial.
+- En la confirmación, uno gana y el otro recibe **`409 INVALID_ORDER_STATE_TRANSITION`**; el stock queda en **4** (un solo incremento de 4) y la auditoría registra una confirmación y una recepción de stock.
+- La misma carrera se repite sobre la liquidación: un solo `RECONCILED_AT_CLOSE`, saldo final **3** y una sola liquidación de orden y de stock.
+- No se tocó código de producción: el `FOR UPDATE` y la comprobación de estado ya existían.
 
-**Impacto.** Se certifica el mecanismo de bloqueo, no la ausencia de doble incremento bajo concurrencia real. La garantía funcional del doble clic queda sin evidencia empírica.
+**Verificación.** `ProductLoadingConcurrencyTest` **12/12**, `exit=0`; canal `new_engine` **57 suites · 1.861 aserciones · 57/57 en verde**. La batería global conserva **427 suites · 16.053 aserciones · 0 fallos**.
 
-**Cierre propuesto.** Añadir una prueba de integración con dos conexiones y sincronización de hilos/procesos que confirme una sola transición y un solo incremento de stock; repetir para liquidación.
+**Estado.** ✅ **CERRADA** el 2026-11-13. El doble clic queda certificado con conexiones reales, una sola transición, un solo incremento y una sola liquidación.
 
 ---
 
@@ -186,17 +188,17 @@ Con B-01, B-02, B-03, B-04, B-05 y B-06 cerradas, **quedan dos brechas abiertas*
 - **B-04 está cerrada**: la cancelación desde `DISPATCHED` deja `CANCELLED`, audita el motivo y no altera el stock, tanto en servicio como en API.
 - **B-05 está cerrada**: la ruta de liquidación de Coordinación liquida de extremo a extremo, sella el actor y deja el stock contado sin costes.
 - **B-06 está cerrada**: la confirmación de recepción rechaza un lote preexistente con otra caducidad mediante `409 BATCH_EXPIRATION_MISMATCH`, sin tocar stock ni estado.
-- **B-07 es una brecha de certificación** sobre concurrencia real.
+- **B-07 está cerrada**: dos conexiones reales compiten por la cabecera; una gana y la otra recibe 409, sin duplicar stock ni auditoría en confirmación y liquidación.
 - **B-08 es una desviación de diseño** respecto a `docs/design.md`.
 
-La matriz de trazabilidad se actualizó para `C2`, `C3`, `QA 3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1` con las pruebas nuevas. Las brechas B-07 y B-08 siguen requiriendo corrección o certificación antes de declarar la Spec 33 completa.
+La matriz de trazabilidad se actualizó para `C2`, `C3`, `QA 3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1` con las pruebas nuevas. Solo B-08 sigue requiriendo corrección antes de declarar la Spec 33 completa.
 
 ---
 
 ## Referencias de evidencia
 
 - [`specs/33-product-loading-cold-picking/tasks.md`](../specs/33-product-loading-cold-picking/tasks.md) · 13/13 tareas.
-- [`specs/33-product-loading-cold-picking/traceability-matrix.md`](../specs/33-product-loading-cold-picking/traceability-matrix.md) · matriz actualizada para `C2`, `C3`, `QA 3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1`; B-07 y B-08 siguen documentadas como brechas.
+- [`specs/33-product-loading-cold-picking/traceability-matrix.md`](../specs/33-product-loading-cold-picking/traceability-matrix.md) · matriz actualizada para `C2`, `C3`, `QA 3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1`; B-08 sigue documentada como brecha.
 - `src/Application/Service/ProductLoadingOrderService.php` · propuesta, emisión individual/lote, confirmación y liquidación.
 - `src/Infrastructure/Repository/PdoProductLoadingOrderRepository.php` · `FOR UPDATE` y consultas de propuesta.
 - `public/assets/js/components/CoordinatorProductLoadingTab.js` · consola de Coordinación.
@@ -204,5 +206,7 @@ La matriz de trazabilidad se actualizó para `C2`, `C3`, `QA 3`, `RF-02.3`, `RF-
 - `tests/unit/ProductLoadingOrderServiceTest.php` · casos 1.5, 1.5b, 2.5, 2.6, 2.7, 5.3, 6.4–6.6, 7.x, 9.3–9.5, 10.1–10.2 y 11.1.
 - `tests/integration/PdoProductLoadingOrderRepositoryTest.php` · caso 6.8 (ausencia con zonas y demanda conservadas).
 - `tests/integration/ProductLoadingColdPickingApiTest.php` · flujo HTTP de propuesta y emisión individual del ausente (3.1b/3.1c), flujo móvil, cancelación desde `DISPATCHED` (6.4–6.5) y liquidación de Coordinación (7.1).
+- `tests/integration/ProductLoadingConcurrencyTest.php` · doble clic concurrente de confirmación y liquidación con dos procesos actores, stock y auditoría únicos (B-07).
+- `tests/Support/ProductLoadingConcurrencyActor.php` · actor externo con conexión propia y barrera común para la carrera de la cabecera.
 - `tests/frontend/coordinator_product_loading_tab.test.mjs` · alerta C2 y emisión desde la propuesta del ausente (2.5b/2.5c).
 - `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` · alcance real del guard de botones.
