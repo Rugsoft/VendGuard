@@ -74,7 +74,7 @@ flowchart LR
   - **Requisitos:** `RF-01` a `RF-05`, `D1`–`D4`, `C1`–`C4`, `QA 1`–`QA 4`, `Art. II`, `Art. III.1`, `Art. V.1`, `Art. V.4`.
   - **Verificación:** `php tests/integration/ProductLoadingColdPickingApiTest.php && php tests/integration/ProductLoadingConstitutionalTest.php`
 
-- [ ] **T-PLD-11 · Construir `CoordinatorProductLoadingTab.js` (con Hoja de Picking A4 en 2 secciones y gestión de lotes) e integrarlo en `CoordinatorDashboardView.js` y `public/sw.js`**
+- [x] **T-PLD-11 · Construir `CoordinatorProductLoadingTab.js` (con Hoja de Picking A4 en 2 secciones y gestión de lotes) e integrarlo en `CoordinatorDashboardView.js` y `public/sw.js`**
   - **Requisitos:** `RF-03.2`, `RF-05.1`, `RNF-03`, `D1`–`D4`, `QA 1`, `Art. V.4`.
   - **Verificación:** `node tests/frontend/coordinator_product_loading_tab.test.mjs`
 

@@ -1797,6 +1797,53 @@ export class ApiClient {
       return this.put('/coordinator/van-stocks', payload);
     },
 
+    // Órdenes de carga de producto y stock por lote (Módulo 33).
+    //
+    // La propuesta es una lectura pura; el ciclo se mueve con mutaciones
+    // separadas y el ajuste de lote exige motivo en el servidor. Ninguna
+    // proyección de esta superficie transporta costes ni precios.
+    getRestockerVanStocks: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/restocker-van-stocks${q ? `?${q}` : ''}`);
+    },
+    adjustRestockerVanStock: (restockerId, payload) => {
+      return this.put(`/coordinator/restocker-van-stocks/${encodeURIComponent(restockerId)}`, payload);
+    },
+    getProductLoadingProposal: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/product-loading-orders/proposal${q ? `?${q}` : ''}`);
+    },
+    getProductLoadingOrders: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/product-loading-orders${q ? `?${q}` : ''}`);
+    },
+    getProductLoadingOrder: (orderId) => {
+      return this.get(`/coordinator/product-loading-orders/${encodeURIComponent(orderId)}`);
+    },
+    getProductLoadingPickingSheet: (orderId) => {
+      return this.get(`/coordinator/product-loading-orders/${encodeURIComponent(orderId)}/picking-sheet`);
+    },
+    createProductLoadingOrder: (payload) => {
+      return this.post('/coordinator/product-loading-orders', payload);
+    },
+    generateProductLoadingBatch: (payload = {}) => {
+      return this.post('/coordinator/product-loading-orders/batch', payload);
+    },
+    updateProductLoadingOrder: (orderId, payload) => {
+      return this.put(`/coordinator/product-loading-orders/${encodeURIComponent(orderId)}`, payload);
+    },
+    dispatchProductLoadingOrder: (orderId, payload) => {
+      return this.post(`/coordinator/product-loading-orders/${encodeURIComponent(orderId)}/dispatch`, payload);
+    },
+    reconcileProductLoadingOrder: (orderId, payload) => {
+      return this.post(`/coordinator/product-loading-orders/${encodeURIComponent(orderId)}/reconcile`, payload);
+    },
+    cancelProductLoadingOrder: (orderId, reason) => {
+      return this.post(`/coordinator/product-loading-orders/${encodeURIComponent(orderId)}/cancel`, {
+        cancel_reason: String(reason ?? '')
+      });
+    },
+
     // Órdenes de carga de furgoneta (Módulo 23, contrato §5.2 a §5.9).
     //
     // El pre-cálculo y el ciclo del albarán son superficies distintas: la propuesta
