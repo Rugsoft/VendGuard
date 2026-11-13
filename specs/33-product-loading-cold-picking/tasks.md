@@ -50,7 +50,7 @@ flowchart LR
   - **Requisitos:** `RF-01.3`, `RF-03.3`, `RF-03.4`, `RF-04.2`, `D2`, `D3`, `C1`, `QA 2`, `QA 3`, `QA 4`, `Art. II`, `Art. V.1`.
   - **Verificación:** `php tests/unit/ProductLoadingValidatorTest.php`
 
-- [ ] **T-PLD-05 · Implementar `PdoRestockerVanStockRepository` (`UPSERT` por lote, ordenación FEFO, stock útil no caducado y filtros de Coordinación)**
+- [x] **T-PLD-05 · Implementar `PdoRestockerVanStockRepository` (`UPSERT` por lote, ordenación FEFO, stock útil no caducado y filtros de Coordinación)**
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `D1`, `D2`, `D4`, `QA 3`, `Art. III.1`, `Art. V.4`.
   - **Verificación:** `php tests/integration/PdoRestockerVanStockRepositoryTest.php`
 
