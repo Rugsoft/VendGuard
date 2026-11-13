@@ -27,7 +27,7 @@ S6 — **Consola en Coordinación (`CoordinatorProductLoadingTab.js`) y Superfic
 | **WU-2 / T-PLD-04** | S2, S4, S5 | inline | `07e6046` | ✅ hecho |
 | **WU-3 / T-PLD-05** | S2, S3, S5 | inline | `2e2101b` | ✅ hecho |
 | **WU-3 / T-PLD-06** | S3, S4, S5 | inline | `cddcc63` | ✅ hecho |
-| **WU-4 / T-PLD-07** | S2 | inline | pendiente | ⏳ pendiente |
+| **WU-4 / T-PLD-07** | S2 | inline | pendiente | ✅ hecho |
 | **WU-4 / T-PLD-08** | S3, S4, S5 | inline | pendiente | ⏳ pendiente |
 | **WU-5 / T-PLD-09** | S2, S3, S4, S5 | inline | pendiente | ⏳ pendiente |
 | **WU-5 / T-PLD-10** | S1–S5 | inline | pendiente | ⏳ pendiente |

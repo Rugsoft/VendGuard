@@ -58,7 +58,7 @@ flowchart LR
   - **Requisitos:** `RF-02.1`–`RF-02.3`, `RF-03.1`, `RF-04.1`, `RF-04.2`, `D1`–`D4`, `C1`, `QA 1`, `Art. III.1`.
   - **Verificación:** `php tests/integration/PdoProductLoadingOrderRepositoryTest.php`
 
-- [ ] **T-PLD-07 · Implementar `RestockerVanStockService` (consulta segregada sin `unit_cost_eur` para reponedor y ajuste manual auditado con `QA 2`, `QA 3` y motivo $\ge 20$ chars)**
+- [x] **T-PLD-07 · Implementar `RestockerVanStockService` (consulta segregada sin `unit_cost_eur` para reponedor y ajuste manual auditado con `QA 2`, `QA 3` y motivo $\ge 20$ chars)**
   - **Requisitos:** `RF-01.2`, `RF-01.3`, `RF-05.2`, `D4`, `QA 2`, `QA 3`, `Art. III.3`, `Art. V.1`, `Art. V.4`.
   - **Verificación:** `php tests/unit/RestockerVanStockServiceTest.php`
 

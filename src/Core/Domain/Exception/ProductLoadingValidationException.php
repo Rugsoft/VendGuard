@@ -35,6 +35,7 @@ final class ProductLoadingValidationException extends DomainException
 
     // ── 422 ────────────────────────────────────────────────────────────────
     public const EMPTY_LOADING_ORDER_ITEMS = 'EMPTY_LOADING_ORDER_ITEMS';
+    public const INVALID_RESTOCKER_RECIPIENT = 'INVALID_RESTOCKER_RECIPIENT';
     public const INVALID_LOADING_QUANTITY = 'INVALID_LOADING_QUANTITY';
     public const COLD_CHAMBER_TEMP_EXCEEDED = 'COLD_CHAMBER_TEMP_EXCEEDED';
     public const EXPIRED_OR_INVALID_BATCH = 'EXPIRED_OR_INVALID_BATCH';
@@ -149,6 +150,21 @@ final class ProductLoadingValidationException extends DomainException
     // ─────────────────────────────────────────────────────────────────────
     // 422 · cantidades, líneas y temperatura
     // ─────────────────────────────────────────────────────────────────────
+
+    public static function invalidRestockerRecipient(int $restockerId, string $detail): self
+    {
+        return new self(
+            self::INVALID_RESTOCKER_RECIPIENT,
+            sprintf(
+                'El reponedor %d no puede recibir carga: %s (C2).',
+                $restockerId,
+                $detail
+            ),
+            422,
+            'restocker_id',
+            ['restocker_id' => $restockerId, 'detail' => $detail]
+        );
+    }
 
     public static function emptyLoadingOrderItems(?string $orderCode = null): self
     {
