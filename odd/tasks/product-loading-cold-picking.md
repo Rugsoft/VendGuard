@@ -1,0 +1,41 @@
+# Feature: Órdenes de Carga de Furgoneta de Reposición y Picking con Trazabilidad de Frío (Módulo 33)
+
+**Rama:** `feat/product-loading-cold-picking` · **Entrega:** 7 WU (13 tareas `T-PLD-01` a `T-PLD-13`) + 1 PR final · **Batería:** `php tests/run_all.php`.
+**Fuente de verdad:** [`specs/33-product-loading-cold-picking/spec.md`](../../specs/33-product-loading-cold-picking/spec.md) v2.0 (`D1`–`D4`, `C1`–`C4`, `QA 1`–`QA 4`), [`plan.md`](../../specs/33-product-loading-cold-picking/plan.md), [`tasks.md`](../../specs/33-product-loading-cold-picking/tasks.md), [`contratos`](../../specs/technical/product_loading_cold_picking_contracts.md).
+
+## Specs
+
+S1 — **Esquema PostgreSQL, Tipos Nativos #28–#30 e Inmutabilidad de Tablas 44, 45 y 46 (RF-01.1, RF-03.1, RF-03.3, D2, D3, C1, QA 4, Art. II, Art. III.1).** Creación de los tipos `product_loading_order_status` (`'PENDING_PICKING'`, `'DISPATCHED'`, `'CONFIRMED_BY_RESTOCKER'`, `'RECONCILED_AT_CLOSE'`, `'CANCELLED'`), `product_loading_demand_mode` (`'ALERTS_ONLY'`, `'ALL_GAPS'`) y `product_loading_item_reason` (`'STOCKOUT_ALERT'`, `'LOW_STOCK_ALERT'`, `'ROUTE_GAP_FILL'`, `'MANUAL_ADDITION'`), y adición de `'RESTOCKER_VAN_STOCK'` y `'PRODUCT_LOADING_ORDER'` a `audit_entity_type`. Tabla 44 `restocker_van_product_stocks` (`UNIQUE (restocker_id, product_id, batch_code)`), Tabla 45 `product_loading_orders` (con índice único parcial de orden activa por reponedor) y Tabla 46 `product_loading_order_items` (`UNIQUE (order_id, product_id)`), protegidas con `prevent_hard_delete()` (`Art. III.1`), `CHECK` constraints numéricas y disparadores del cerrojo sanitario de frío y lote (`trg_enforce_van_stock_cold_chain_batch`, `trg_enforce_loading_order_cold_chain_dispatch`).
+
+S2 — **Inventario de Producto en Furgoneta por Lote, Semáforo FEFO y Ajuste Auditado (RF-01.1–RF-01.3, D2, D4, QA 2, QA 3, Art. II, Art. III.3, Art. V.1, Art. V.4).** Gestión de existencias por `(restocker_id, product_id, batch_code)` con `batch_code` normalizado (`'SIN-LOTE'` en no perecederos sin lote), semáforo `expiry_status` (`'EXPIRED'` si `<= CURRENT_DATE`, `'EXPIRING_SOON'` si `<= CURRENT_DATE + 2`, `'OK'` en caso contrario), exclusión de lotes `'EXPIRED'` del stock útil en propuestas (`D1`), ajuste manual desde Coordinación (`PUT /api/coordinator/restocker-van-stocks/{restockerId}`) con motivo obligatorio $\ge 20$ caracteres reales (`422 INVALID_JUSTIFICATION_LENGTH`), validación de ventana de vida útil (`422 EXPIRED_OR_INVALID_BATCH` / `422 EXPIRATION_EXCEEDS_MAX_SHELF_LIFE`, `QA 2`), bloqueo de colisión de fecha en mismo lote (`409 BATCH_EXPIRATION_MISMATCH`, `QA 3`) y opacidad de `unit_cost_eur` ante el reponedor (`Art. V.4`).
+
+S3 — **Propuesta Automática Matutina y Emisión Individual o en Lote (RF-02.1–RF-02.3, D1, D3, C1, C2, QA 1).** Cálculo de demanda sobre las máquinas activas y operativas (excluyendo `SANITARY_QUARANTINE` y `OUT_OF_SERVICE`, informando `excluded_unavailable_machines_count`, `QA 1`) de las zonas vivas cubiertas hoy por el reponedor (`PRIMARY` o `BACKUP` promovido), filtrando carriles según `demand_mode` (`'ALERTS_ONLY'` o `'ALL_GAPS'`), aplicando `safety_buffer_pct` (`0..50 %`) y descontando únicamente el stock útil no caducado en la furgoneta. Unicidad de orden activa por reponedor (`409 ACTIVE_LOADING_ORDER_EXISTS`), rechazo de destinatarios inactivos o no `RESTOCKER` (`422 INVALID_RESTOCKER_RECIPIENT`) y emisión masiva en lote omitiendo ausentes, con orden activa o sin demanda.
+
+S4 — **Edición con Baja Lógica, Hoja de Picking A4 en 2 Secciones y Despacho con Cerrojo Sanitario de Cámara Frigorífica (RF-03.1–RF-03.4, D2, D4, C1, C3, QA 2, QA 3, Art. II, Art. V.1, Art. V.4).** Edición en `PENDING_PICKING` mediante `UPSERT` y baja lógica (`is_active = FALSE`) sin `DELETE` (`C1`). Hoja de Picking A4 separada en «❄️ Sección 1: Cámara Frigorífica (≤ 4,0 °C · Art. II)» y «📦 Sección 2: Almacén General y Consumibles» libre de importes económicos (`Art. V.4`). En `POST .../dispatch`, si hay líneas activas con `dispatched_qty > 0` y `requires_cold_chain = TRUE`, exige `cold_chamber_exit_temp_celsius` en `[-5.0, 4.0]` (`422 COLD_CHAMBER_TEMP_EXCEEDED`), `batch_code` válido distinto de `'SIN-LOTE'` y `expiration_date` en `(CURRENT_DATE, CURRENT_DATE + max_shelf_life_days]` (`422 EXPIRED_OR_INVALID_BATCH` / `422 EXPIRATION_EXCEEDS_MAX_SHELF_LIFE`, `QA 2`), sin colisión de fecha (`409 BATCH_EXPIRATION_MISMATCH`, `QA 3`). Cancelación en `PENDING_PICKING` o `DISPATCHED` con `cancel_reason` $\ge 20$ caracteres reales (`Art. V.1`).
+
+S5 — **Recepción Móvil en 1 Toque y Liquidación al Cierre (`RECONCILED_AT_CLOSE`) (RF-04.1, RF-04.2, D3, C3, C4, QA 4, Art. III.3, Art. V.1).** Confirmación en 1 toque (`POST /api/restocker/product-loading-orders/{id}/confirm`) con cerrojo `SELECT ... FOR UPDATE`, sumando `dispatched_qty` en `restocker_van_product_stocks` por lote y pasando a `CONFIRMED_BY_RESTOCKER`. Liquidación al cierre (`POST .../reconcile` por Reponedor o Coordinación) sellando en `0` las líneas con `dispatched_qty = 0` (`QA 4`), calculando en las líneas con `dispatched_qty > 0` `expected_return_qty = van_stock_before_reconcile - restocked_in_machines_qty - withdrawn_spoilage_qty` y `discrepancy_qty = counted_return_qty - expected_return_qty`, exigiendo `reconciliation_notes` $\ge 20$ caracteres reales si hay algún descuadre (`422 RECONCILIATION_DISCREPANCY_REASON_REQUIRED`, `Art. V.1`), actualizando `quantity_available = counted_return_qty` y auditando en `audit_log`.
+
+S6 — **Consola en Coordinación (`CoordinatorProductLoadingTab.js`) y Superficie Móvil en `RestockerRouteView.js` (RF-05.1, RF-05.2, RNF-03, D1–D4, C4, Art. V.4).** Pestaña en Coordinación para gestionar órdenes de carga, propuesta individual/lote, despacho con control de cámara frigorífica, liquidación, cancelación, Hoja de Picking A4 imprimible y stock por lote de furgonetas. En `RestockerRouteView.js`, recepción en 1 toque de orden `DISPATCHED`, formulario de liquidación de orden `CONFIRMED_BY_RESTOCKER`, stock de furgoneta ordenado por FEFO con semáforo de caducidad y comprobante de última orden liquidada (`C4`), sin exponer jamás `unit_cost_eur`.
+
+## Tasks
+
+| ID | Specs | Ruta | Commit | Estado |
+| :--- | :--- | :--- | :--- | :--- |
+| **WU-1 / T-PLD-01** | S1 | inline | pendiente | ⏳ pendiente |
+| **WU-1 / T-PLD-02** | S1 | inline | pendiente | ⏳ pendiente |
+| **WU-2 / T-PLD-03** | S2, S3, S4, S5 | inline | pendiente | ⏳ pendiente |
+| **WU-2 / T-PLD-04** | S2, S4, S5 | inline | pendiente | ⏳ pendiente |
+| **WU-3 / T-PLD-05** | S2, S3, S5 | inline | pendiente | ⏳ pendiente |
+| **WU-3 / T-PLD-06** | S3, S4, S5 | inline | pendiente | ⏳ pendiente |
+| **WU-4 / T-PLD-07** | S2 | inline | pendiente | ⏳ pendiente |
+| **WU-4 / T-PLD-08** | S3, S4, S5 | inline | pendiente | ⏳ pendiente |
+| **WU-5 / T-PLD-09** | S2, S3, S4, S5 | inline | pendiente | ⏳ pendiente |
+| **WU-5 / T-PLD-10** | S1–S5 | inline | pendiente | ⏳ pendiente |
+| **WU-6 / T-PLD-11** | S4, S6 | inline | pendiente | ⏳ pendiente |
+| **WU-6 / T-PLD-12** | S5, S6 | inline | pendiente | ⏳ pendiente |
+| **WU-7 / T-PLD-13** | S1–S6 | inline | pendiente | ⏳ pendiente |
+
+## Log
+
+* **L1 (2026-11-13):** Petición original del usuario: `"antes de empezar con el mecanismo sdd y escribir la spec, vamos a definir un poco esta feature de docs/features_pendientes-md: 23. 🚚 Órdenes de Carga de Furgoneta de Reposición y Picking con Trazabilidad de Frío (Route Product Loading & Cold Chamber Picking)"`.
+* **L2 (2026-11-13):** Consensuadas con el Product Owner las decisiones de diseño `D1`–`D4`, los casos límite `C1`–`C4` y las resoluciones de auditoría QA `QA 1`–`QA 4`. Aprobada la Puerta SDD de Fase 2 (`spec.md` v2.0, `product_loading_cold_picking_contracts.md` v1.0, `plan.md` v1.0 y `tasks.md` v1.0). Creación de `odd/tasks/product-loading-cold-picking.md`, apertura de la rama `feat/product-loading-cold-picking` y primer commit documental de rama sin iniciar aún la ejecución de `T-PLD-01`.
