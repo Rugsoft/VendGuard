@@ -1514,6 +1514,47 @@ $assert(
     json_encode($settledWhileInactive['order'])
 );
 
+// =====================================================================
+// 11. Cancelación desde DISPATCHED
+// =====================================================================
+echo "\n--- 11. Cancelación desde DISPATCHED ---\n";
+
+$dispatchedCancelWorld = makeProductLoadingWorld();
+$dispatchedCancelService = $dispatchedCancelWorld['service'];
+$dispatchedCancelDate = $dispatchedCancelWorld['date'];
+$dispatchedCancelOrder = $dispatchedCancelService->createOrder(
+    7,
+    ['items' => $activeProducts($dispatchedCancelWorld)],
+    $dispatchedCancelWorld['actor']
+);
+$dispatchedCancelId = (int)$dispatchedCancelOrder['order']['id'];
+$dispatchedForCancellation = $dispatchedCancelService->dispatchOrder($dispatchedCancelId, [
+    'cold_chamber_exit_temp_celsius' => 3.0,
+    'items' => [
+        ['product_id' => 101, 'dispatched_qty' => 6, 'batch_code' => 'LOTE-T8-A', 'expiration_date' => $dispatchedCancelDate(2)],
+        ['product_id' => 102, 'dispatched_qty' => 4],
+    ],
+], $dispatchedCancelWorld['actor']);
+$stockBeforeDispatchedCancel = array_sum(array_column(
+    $dispatchedCancelWorld['stocks']->findByRestocker(7),
+    'quantity_available'
+));
+$cancelledFromDispatched = $dispatchedCancelService->cancelOrder(
+    $dispatchedCancelId,
+    'Cancelación tras despacho por cambio de ruta del reponedor.',
+    $dispatchedCancelWorld['actor']
+);
+$assert(
+    '11.1 La cancelación desde DISPATCHED deja CANCELLED, audita y no altera el stock',
+    $dispatchedForCancellation['order']['status'] === 'DISPATCHED'
+    && $cancelledFromDispatched['order']['status'] === 'CANCELLED'
+    && $cancelledFromDispatched['order']['cancel_reason'] === 'Cancelación tras despacho por cambio de ruta del reponedor.'
+    && $cancelledFromDispatched['order']['cancelled_at'] !== null
+    && $dispatchedCancelWorld['audit']->events[count($dispatchedCancelWorld['audit']->events) - 1]->getAction() === ProductLoadingOrderService::AUDIT_CANCELLED
+    && array_sum(array_column($dispatchedCancelWorld['stocks']->findByRestocker(7), 'quantity_available')) === $stockBeforeDispatchedCancel,
+    json_encode($cancelledFromDispatched['order'])
+);
+
 echo "\n======================================================================\n";
 echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";
 

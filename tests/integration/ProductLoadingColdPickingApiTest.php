@@ -548,6 +548,51 @@ try {
         '6.3 La cancelación válida deja la orden CANCELLED',
         $cancel->getStatusCode() === 200 && ($data($cancel)['order']['status'] ?? '') === 'CANCELLED'
     );
+
+    $dispatchedCreate = $call('POST', '/api/coordinator/product-loading-orders', [
+        'restocker_id' => $ownerId,
+        'items' => [[
+            'product_id' => $ambientProductId,
+            'reason' => 'ROUTE_GAP_FILL',
+            'requested_qty' => 2,
+        ]],
+    ], $coordinatorToken);
+    $dispatchedId = (int)($data($dispatchedCreate)['order']['id'] ?? 0);
+    $dispatchedDispatch = $call(
+        'POST',
+        '/api/coordinator/product-loading-orders/' . $dispatchedId . '/dispatch',
+        ['items' => [['product_id' => $ambientProductId, 'dispatched_qty' => 1]]],
+        $coordinatorToken
+    );
+    $assert(
+        '6.4 Una nueva orden ambiente se despacha sin temperatura de cámara',
+        $dispatchedCreate->getStatusCode() === 201
+            && $dispatchedId > 0
+            && $dispatchedDispatch->getStatusCode() === 200
+            && ($data($dispatchedDispatch)['order']['status'] ?? '') === 'DISPATCHED',
+        $errorCode($dispatchedDispatch)
+    );
+
+    $stockBeforeDispatchedCancel = array_sum(array_column(
+        $data($call('GET', '/api/restocker/van-stocks', [], $ownerToken))['stocks'] ?? [],
+        'quantity_available'
+    ));
+    $cancelDispatched = $call('POST', '/api/coordinator/product-loading-orders/' . $dispatchedId . '/cancel', [
+        'cancel_reason' => 'Cancelación tras despacho por cambio de ruta del reponedor.',
+    ], $coordinatorToken);
+    $stockAfterDispatchedCancel = array_sum(array_column(
+        $data($call('GET', '/api/restocker/van-stocks', [], $ownerToken))['stocks'] ?? [],
+        'quantity_available'
+    ));
+    $assert(
+        '6.5 La cancelación desde DISPATCHED deja CANCELLED y no altera el stock',
+        $cancelDispatched->getStatusCode() === 200
+            && ($data($cancelDispatched)['order']['status'] ?? '') === 'CANCELLED'
+            && ($data($cancelDispatched)['order']['cancel_reason'] ?? '') === 'Cancelación tras despacho por cambio de ruta del reponedor.'
+            && $stockBeforeDispatchedCancel === 8
+            && $stockAfterDispatchedCancel === $stockBeforeDispatchedCancel,
+        $errorCode($cancelDispatched)
+    );
 } catch (Throwable $exception) {
     echo "\n[FALLO INESPERADO] " . get_class($exception) . ': ' . $exception->getMessage() . "\n";
     echo $exception->getTraceAsString() . "\n";

@@ -8,27 +8,27 @@
 **Rama:** `feat/product-loading-cold-picking` · HEAD `c79c6da`  
 **Alcance:** contraste requisito por requisito contra código y ejecución directa de suites; no se modificó código de producción.
 
-**Actualización 2026-11-13:** B-01 cerrada tras implementar la propuesta y emisión individual del reponedor ausente, la alerta C2 en consola y su regresión de servicio, repositorio, API y frontend. B-02 cerrada al certificar las omisiones del lote por orden activa y demanda cero. B-03 cerrada al certificar la recepción y la liquidación con un producto desactivado en tránsito. Las demás brechas siguen abiertas.
+**Actualización 2026-11-13:** B-01 cerrada tras implementar la propuesta y emisión individual del reponedor ausente, la alerta C2 en consola y su regresión de servicio, repositorio, API y frontend. B-02 cerrada al certificar las omisiones del lote por orden activa y demanda cero. B-03 cerrada al certificar la recepción y la liquidación con un producto desactivado en tránsito. B-04 cerrada al certificar la cancelación justificada desde `DISPATCHED`. Las demás brechas siguen abiertas.
 
 ---
 
 ## Resultado general
 
-La implementación está muy avanzada. La batería hermética **no observó ningún test en rojo**; el canal `new_engine` mantuvo en rojo únicamente la sonda de latencia remota, ajena a B-01/B-02/B-03:
+La implementación está muy avanzada. La batería hermética **no observó ningún test en rojo** y el canal `new_engine` cerró completo en esta corrida:
 
 - **23 suites ejecutadas directamente**, todas con `exit=0`.
-- Batería global: **427/427 suites · 16.050 aserciones · 0 fallos**.
-- Canal `new_engine`: **56 suites · 1.846 aserciones · 55/56 en verde**. La sonda `PoolerLatencyMeasurementTest` falla por latencia remota (265,8 ms frente al presupuesto de 250 ms en «crear»), un límite de red ajeno a B-01/B-02/B-03; el resto de suites del canal pasa.
+- Batería global: **427/427 suites · 16.051 aserciones · 0 fallos**.
+- Canal `new_engine`: **56 suites · 1.848 aserciones · 56/56 en verde · 0 fallos**.
 - Tareas del módulo: **13/13 completadas**, 0 pendientes.
 
-Con B-01, B-02 y B-03 cerradas, **quedan cinco brechas abiertas**: B-04 a B-07 son brechas de certificación y B-08 es una desviación de `RNF-03`. La Spec 33 sigue sin poder certificarse al 100 % hasta cerrarlas.
+Con B-01, B-02, B-03 y B-04 cerradas, **quedan cuatro brechas abiertas**: B-05 a B-07 son brechas de certificación y B-08 es una desviación de `RNF-03`. La Spec 33 sigue sin poder certificarse al 100 % hasta cerrarlas.
 
 | ID | Brecha | Tipo | Severidad | Requisito afectado | Estado |
 |---|---|---|---|---|---|
 | **B-01** | La consola no permite emitir la orden individual de un reponedor ausente | Funcional | **Alta** | `C2`, `RF-02.3`, `RF-05.1` | ✅ **Cerrada** (2026-11-13) |
 | **B-02** | Los omitidos del lote por orden activa o demanda cero no están probados | Cobertura | Media | `RF-02.3`, `C2` | ✅ **Cerrada** (2026-11-13) |
 | **B-03** | No se prueba la recepción/liquidación con producto desactivado en tránsito | Cobertura | Media | `C3`, `RF-04.1`, `RF-04.2` | ✅ **Cerrada** (2026-11-13) |
-| **B-04** | No se prueba la cancelación desde `DISPATCHED` | Cobertura | Media | `RF-03.4` | Abierta |
+| **B-04** | No se prueba la cancelación desde `DISPATCHED` | Cobertura | Media | `RF-03.4` | ✅ **Cerrada** (2026-11-13) |
 | **B-05** | La ruta HTTP de liquidación de Coordinación no se ejerce | Cobertura | Media | `RF-04.2`, `RF-05.1` | Abierta |
 | **B-06** | No se prueba `BATCH_EXPIRATION_MISMATCH` al confirmar la recepción | Cobertura | Media | `QA 3`, `RF-04.1` | Abierta |
 | **B-07** | El doble clic no se prueba con concurrencia real | Cobertura | Media | §6.6, `D3`, `RF-04.1`, `RF-04.2` | Abierta |
@@ -94,20 +94,19 @@ Con B-01, B-02 y B-03 cerradas, **quedan cinco brechas abiertas**: B-04 a B-07 s
 
 ---
 
-## B-04 · No se prueba la cancelación desde `DISPATCHED`
+## B-04 · No se prueba la cancelación desde `DISPATCHED` · ✅ CERRADA
 
 **Requisito.** `RF-03.4` permite cancelar una orden en `PENDING_PICKING` o `DISPATCHED`, con motivo de al menos 20 caracteres reales, sin alterar el stock; y bloquea la cancelación tras la recepción.
 
-**Evidencia.**
+**Resolución implementada.**
 
-- `ProductLoadingOrderStatus::canBeCancelled()` incluye `PENDING_PICKING` y `DISPATCHED`.
-- `ProductLoadingOrderServiceTest` **9.3/9.4** cancela una orden en preparación.
-- El test **9.5** comprueba el rechazo tras `CONFIRMED_BY_RESTOCKER`.
-- No hay test que despache y después cancele una orden `DISPATCHED`.
+- `ProductLoadingOrderServiceTest` **11.1** despacha una orden, la cancela desde `DISPATCHED`, verifica `CANCELLED`, el motivo, el sello `cancelled_at`, la auditoría `PRODUCT_LOADING_ORDER_CANCELLED` y que el stock de furgoneta queda intacto.
+- `ProductLoadingColdPickingApiTest` **6.4** crea una nueva orden de producto ambiente y la despacha sin temperatura de cámara; **6.5** la cancela desde el endpoint de Coordinación y comprueba `200`, `CANCELLED`, el motivo y el stock sin cambios.
+- No se tocó código de producción: `ProductLoadingOrderStatus::canBeCancelled()` ya incluía `PENDING_PICKING` y `DISPATCHED`, y el controlador ya delegaba en `cancelOrder()`.
 
-**Impacto.** La rama permitida del ciclo de despacho no está certificada. Un cambio en `canBeCancelled()` o en el controlador podría romperla sin fallo de batería.
+**Verificación.** `ProductLoadingOrderServiceTest` **49/49** · `ProductLoadingColdPickingApiTest` **33/33**, ambas con `exit=0`. Los casos 9.3–9.5 conservan la cancelación en preparación y el rechazo tras recepción.
 
-**Cierre propuesto.** Añadir un caso servicio y API: despachar, cancelar con motivo válido, verificar `CANCELLED`, auditoría y stock intacto.
+**Estado.** ✅ **CERRADA** el 2026-11-13. La cancelación justificada desde `DISPATCHED` queda certificada en servicio y API, sin alterar el stock.
 
 ---
 
@@ -185,23 +184,24 @@ Con B-01, B-02 y B-03 cerradas, **quedan cinco brechas abiertas**: B-04 a B-07 s
 - **B-01 está cerrada**: `C2` ya permite propuesta y emisión individual del ausente, muestra la alerta en consola y mantiene la exclusión del lote.
 - **B-02 está cerrada**: el lote certifica `SKIP_ACTIVE_ORDER`, `SKIP_NO_DEMAND` y `SKIP_ABSENT` con sus causas exactas.
 - **B-03 está cerrada**: la recepción y la liquidación toleran un producto desactivado después del despacho, con estados y saldos verificados.
-- **B-04 a B-07 son brechas de certificación** sobre ramas exigidas por el contrato.
+- **B-04 está cerrada**: la cancelación desde `DISPATCHED` deja `CANCELLED`, audita el motivo y no altera el stock, tanto en servicio como en API.
+- **B-05 a B-07 son brechas de certificación** sobre ramas exigidas por el contrato.
 - **B-08 es una desviación de diseño** respecto a `docs/design.md`.
 
-La matriz de trazabilidad se actualizó para `C2`, `C3`, `RF-02.3`, `RF-04.1`, `RF-04.2` y `RF-05.1` con las pruebas nuevas. Las brechas B-04 a B-08 siguen requiriendo corrección o certificación antes de declarar la Spec 33 completa.
+La matriz de trazabilidad se actualizó para `C2`, `C3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1` con las pruebas nuevas. Las brechas B-05 a B-08 siguen requiriendo corrección o certificación antes de declarar la Spec 33 completa.
 
 ---
 
 ## Referencias de evidencia
 
 - [`specs/33-product-loading-cold-picking/tasks.md`](../specs/33-product-loading-cold-picking/tasks.md) · 13/13 tareas.
-- [`specs/33-product-loading-cold-picking/traceability-matrix.md`](../specs/33-product-loading-cold-picking/traceability-matrix.md) · matriz actualizada para `C2`, `C3`, `RF-02.3`, `RF-04.1`, `RF-04.2` y `RF-05.1`; B-04 a B-08 siguen documentadas como brechas.
+- [`specs/33-product-loading-cold-picking/traceability-matrix.md`](../specs/33-product-loading-cold-picking/traceability-matrix.md) · matriz actualizada para `C2`, `C3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1`; B-05 a B-08 siguen documentadas como brechas.
 - `src/Application/Service/ProductLoadingOrderService.php` · propuesta, emisión individual/lote, confirmación y liquidación.
 - `src/Infrastructure/Repository/PdoProductLoadingOrderRepository.php` · `FOR UPDATE` y consultas de propuesta.
 - `public/assets/js/components/CoordinatorProductLoadingTab.js` · consola de Coordinación.
 - `public/assets/js/components/RestockerRouteView.js` · móvil del reponedor.
-- `tests/unit/ProductLoadingOrderServiceTest.php` · casos 1.5, 1.5b, 2.5, 2.6, 2.7, 5.3, 6.4, 7.x, 9.3–9.5 y 10.1–10.2.
+- `tests/unit/ProductLoadingOrderServiceTest.php` · casos 1.5, 1.5b, 2.5, 2.6, 2.7, 5.3, 6.4, 7.x, 9.3–9.5, 10.1–10.2 y 11.1.
 - `tests/integration/PdoProductLoadingOrderRepositoryTest.php` · caso 6.8 (ausencia con zonas y demanda conservadas).
-- `tests/integration/ProductLoadingColdPickingApiTest.php` · flujo HTTP de propuesta y emisión individual del ausente (3.1b/3.1c) y flujo móvil.
+- `tests/integration/ProductLoadingColdPickingApiTest.php` · flujo HTTP de propuesta y emisión individual del ausente (3.1b/3.1c), flujo móvil y cancelación desde `DISPATCHED` (6.4–6.5).
 - `tests/frontend/coordinator_product_loading_tab.test.mjs` · alerta C2 y emisión desde la propuesta del ausente (2.5b/2.5c).
 - `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` · alcance real del guard de botones.
