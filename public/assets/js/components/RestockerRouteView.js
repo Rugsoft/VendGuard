@@ -888,7 +888,7 @@ export const RestockerRouteView = {
                 </button>
                 <button
                   type="button"
-                  class="vg-btn vg-btn-sm vg-btn-danger-soft"
+                  class="vg-btn vg-btn-sm vg-btn-danger"
                   data-testid="btn-close-shift"
                   :disabled="isShiftLoading"
                   @click="closeShift"
@@ -909,7 +909,7 @@ export const RestockerRouteView = {
                 </button>
                 <button
                   type="button"
-                  class="vg-btn vg-btn-sm vg-btn-danger-soft"
+                  class="vg-btn vg-btn-sm vg-btn-danger"
                   data-testid="btn-close-shift"
                   :disabled="isShiftLoading"
                   @click="closeShift"

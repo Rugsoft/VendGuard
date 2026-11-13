@@ -319,11 +319,14 @@ h4 { font-size: var(--font-size-heading-md); }
 }
 
 .vg-btn-lg {
-  height: var(--control-height-lg);
-  padding: 0 var(--control-padding-lg);
+  min-height: var(--control-height-lg);
+  height: auto;
+  padding: var(--control-gap-sm) var(--control-padding-lg);
   font-size: var(--control-font-lg);
   font-weight: 600;
   gap: var(--control-gap-md);
+  line-height: 1.25;
+  text-align: center;
 }
 
 /* Tonos de acción. `vg-btn-primary`, `vg-btn-secondary` y `vg-btn-danger` son los
