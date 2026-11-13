@@ -78,7 +78,7 @@ flowchart LR
   - **Requisitos:** `RF-03.2`, `RF-05.1`, `RNF-03`, `D1`–`D4`, `QA 1`, `Art. V.4`.
   - **Verificación:** `node tests/frontend/coordinator_product_loading_tab.test.mjs`
 
-- [ ] **T-PLD-12 · Extender `RestockerRouteView.js` con banner de recepción 1-Tap, modal de liquidación al cierre, stock FEFO con semáforo y comprobante de última orden liquidada (`C4`) sin `unit_cost_eur`**
+- [x] **T-PLD-12 · Extender `RestockerRouteView.js` con banner de recepción 1-Tap, modal de liquidación al cierre, stock FEFO con semáforo y comprobante de última orden liquidada (`C4`) sin `unit_cost_eur`**
   - **Requisitos:** `RF-04.1`, `RF-04.2`, `RF-05.2`, `RNF-03`, `D3`, `D4`, `C4`, `Art. V.4`.
   - **Verificación:** `node tests/frontend/restocker_route_view.test.mjs`
 

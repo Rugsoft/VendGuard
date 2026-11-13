@@ -2089,6 +2089,34 @@ export class ApiClient {
      */
     getMachinePlanogram: (machineId) => {
       return this.get(`/restocker/machines/${encodeURIComponent(machineId)}/planogram`);
+    },
+
+    /**
+     * Stock FEFO del propio reponedor autenticado (Módulo 33, RF-05.2, Art. V.4).
+     * La respuesta no transporta costes ni márgenes.
+     * @returns {Promise<Object>}
+     */
+    getVanStocks: () => {
+      return this.get('/restocker/van-stocks');
+    },
+
+    /**
+     * Recepción en un toque de la orden propia en `DISPATCHED` (D3).
+     * @param {number|string} orderId
+     * @returns {Promise<Object>}
+     */
+    confirmLoadingOrder: (orderId) => {
+      return this.post(`/restocker/product-loading-orders/${encodeURIComponent(orderId)}/confirm`, {});
+    },
+
+    /**
+     * Liquidación al cierre de la orden propia (D3, QA 4, Art. V.1).
+     * @param {number|string} orderId
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    reconcileLoadingOrder: (orderId, payload) => {
+      return this.post(`/restocker/product-loading-orders/${encodeURIComponent(orderId)}/reconcile`, payload);
     }
   };
 

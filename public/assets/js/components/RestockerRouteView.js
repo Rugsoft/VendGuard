@@ -1,8 +1,8 @@
 /**
  * VendGuard - RestockerRouteView (RestockerRouteView.js)
  *
- * Vista móvil dedicada al Cargador / Reponedor de Ruta (`RESTOCKER`), Módulo 31
- * (`D1`, `RF-04.1` a `RF-04.3`, Art. V.4).
+ * Vista móvil dedicada al Cargador / Reponedor de Ruta (`RESTOCKER`), Módulos 31
+ * y 33 (`D1`, `RF-04.1` a `RF-04.3`, `D3`, `D4`, `C4`, Art. V.4).
  *
  * Responsabilidades:
  * 1. Autenticación exclusiva de `RESTOCKER`: cualquier otro rol se rechaza y la
@@ -16,6 +16,9 @@
  *    token (Art. V.4).
  * 5. Estado base informativo de la ruta de abastecimiento, listo para las
  *    Features 24, 26 y 27 sin inventar paradas.
+ * 6. Ciclo móvil de la orden de carga: recepción en un toque, liquidación por
+ *    lote al cierre, stock FEFO con semáforo y comprobante de la última orden
+ *    liquidada (`C4`), siempre sin costes internos (Art. V.4).
  *
  * Dogma Vanilla: Vue 3 Options API en ES Module nativo, sin bundler ni
  * dependencias externas. El diseño sigue `docs/design.md` con tokens CSS.
@@ -48,6 +51,26 @@ export const RestockerRouteView = {
       planogram: null,
       planogramLoading: false,
       planogramError: '',
+
+      // Órdenes de carga de producto y stock por lote (Módulo 33, T-PLD-12)
+      activeLoadingOrder: null,
+      lastReconciledOrder: null,
+      vanProductStocks: [],
+      vanStockKpis: {
+        total_lots: 0,
+        total_units: 0,
+        usable_units: 0,
+        expired_lots: 0,
+        expiring_soon_lots: 0
+      },
+      hasExpiredVanLots: false,
+      isConfirmingLoading: false,
+      loadingActionError: '',
+      loadingActionMessage: '',
+      showReconcileLoadingModal: false,
+      reconcileLoadingForm: { notes: '', items: [] },
+      reconcileLoadingError: '',
+      isReconcilingLoading: false,
 
       // Jornada (RF-04.2)
       shiftStatus: 'OFF_SHIFT',
@@ -128,6 +151,46 @@ export const RestockerRouteView = {
       const [year, monthNumber] = String(month).split('-');
       const name = names[Number(monthNumber) - 1] || '';
       return name ? `${name} de ${year}` : 'Mes en curso';
+    },
+    activeLoadingOrderData() {
+      return this.activeLoadingOrder?.order || null;
+    },
+    activeLoadingOrderItems() {
+      return Array.isArray(this.activeLoadingOrder?.items) ? this.activeLoadingOrder.items : [];
+    },
+    activeLoadingOrderVisibleItems() {
+      return this.activeLoadingOrderItems.filter((item) => item.is_active !== false);
+    },
+    activeLoadingOrderStatus() {
+      return this.activeLoadingOrderData?.status || '';
+    },
+    activeLoadingOrderIsDispatched() {
+      return this.activeLoadingOrderStatus === 'DISPATCHED';
+    },
+    activeLoadingOrderIsConfirmed() {
+      return this.activeLoadingOrderStatus === 'CONFIRMED_BY_RESTOCKER';
+    },
+    lastReconciledOrderData() {
+      return this.lastReconciledOrder?.order || null;
+    },
+    lastReconciledOrderItems() {
+      return Array.isArray(this.lastReconciledOrder?.items) ? this.lastReconciledOrder.items : [];
+    },
+    lastReconciledVisibleItems() {
+      return this.lastReconciledOrderItems.filter((item) => item.is_active !== false);
+    },
+    vanStockLots() {
+      return [...this.vanProductStocks].sort((left, right) => {
+        const leftDate = left?.expiration_date ? String(left.expiration_date) : null;
+        const rightDate = right?.expiration_date ? String(right.expiration_date) : null;
+        if (leftDate === null && rightDate === null) return String(left?.product_sku || '').localeCompare(String(right?.product_sku || ''));
+        if (leftDate === null) return 1;
+        if (rightDate === null) return -1;
+        return leftDate.localeCompare(rightDate) || String(left?.product_sku || '').localeCompare(String(right?.product_sku || ''));
+      });
+    },
+    reconcileLoadingHasDiscrepancy() {
+      return this.reconcileLoadingForm.items.some((item) => this.reconcileLoadingDiscrepancy(item) !== 0);
     }
   },
   mounted() {
@@ -184,6 +247,14 @@ export const RestockerRouteView = {
         };
         this.routeStops = Array.isArray(data.route_stops) ? data.route_stops : [];
         this.machines = Array.isArray(data.machines) ? data.machines : [];
+        this.activeLoadingOrder = data.active_loading_order || null;
+        this.lastReconciledOrder = data.last_reconciled_order || null;
+        this.vanProductStocks = Array.isArray(data.van_product_stocks) ? data.van_product_stocks : [];
+        this.vanStockKpis = data.van_stock_kpis && typeof data.van_stock_kpis === 'object'
+          ? data.van_stock_kpis
+          : this.vanStockKpis;
+        this.hasExpiredVanLots = data.has_expired_van_lots === true
+          || Number(this.vanStockKpis.expired_lots || 0) > 0;
         this.applyShiftResponse(data.shift || {}, 'OFF_SHIFT');
       } catch (err) {
         this.loadError = err?.message || 'No se pudo cargar tu ruta de reposición.';
@@ -470,12 +541,200 @@ export const RestockerRouteView = {
       }
     },
 
+    normalizeApiData(response) {
+      return response?.data && typeof response.data === 'object' ? response.data : (response || {});
+    },
+
+    realLength(value) {
+      return String(value ?? '').trim().length;
+    },
+
+    expiryStatusLabel(status) {
+      const labels = { EXPIRED: 'Lote caducado', EXPIRING_SOON: 'Caducidad próxima ≤ 48 h', OK: 'Vigente' };
+      return labels[status] || status || 'Sin estado';
+    },
+
+    expiryStatusIcon(status) {
+      if (status === 'EXPIRED') return '🔴';
+      if (status === 'EXPIRING_SOON') return '🟡';
+      return '🟢';
+    },
+
+    expiryStatusStyle(status) {
+      if (status === 'EXPIRED') {
+        return { backgroundColor: 'var(--color-error-bg)', color: 'var(--color-error-text)' };
+      }
+      if (status === 'EXPIRING_SOON') {
+        return { backgroundColor: 'var(--color-warning-bg)', color: 'var(--color-warning-text)' };
+      }
+      return { backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success-text)' };
+    },
+
+    async refreshVanStock() {
+      try {
+        const data = this.normalizeApiData(await api.restocker.getVanStocks());
+        this.vanProductStocks = Array.isArray(data.stocks) ? data.stocks : [];
+        this.vanStockKpis = data.kpis && typeof data.kpis === 'object' ? data.kpis : this.vanStockKpis;
+        this.hasExpiredVanLots = data.has_expired_lots === true
+          || Number(this.vanStockKpis.expired_lots || 0) > 0;
+      } catch (error) {
+        this.loadingActionError = error?.message || 'No se pudo refrescar el stock de la furgoneta.';
+      }
+    },
+
+    /** Recepción atómica en un toque de la orden propia despachada (D3). */
+    async confirmActiveLoadingOrder() {
+      const order = this.activeLoadingOrderData;
+      if (!order?.id || !this.activeLoadingOrderIsDispatched) return;
+
+      this.isConfirmingLoading = true;
+      this.loadingActionError = '';
+      this.loadingActionMessage = '';
+      try {
+        const detail = this.normalizeApiData(await api.restocker.confirmLoadingOrder(order.id));
+        if (detail?.order) {
+          this.activeLoadingOrder = detail;
+        } else {
+          await this.loadMyRoute();
+        }
+        this.loadingActionMessage = `Recepción confirmada: ${order.order_code} ya está en tu furgoneta.`;
+        await this.refreshVanStock();
+      } catch (error) {
+        this.loadingActionError = error?.message || 'No se pudo confirmar la recepción de la orden.';
+      } finally {
+        this.isConfirmingLoading = false;
+      }
+    },
+
+    currentLoadingLotBalance(item) {
+      const batch = item?.batch_code || 'SIN-LOTE';
+      const stock = this.vanProductStocks.find(
+        (row) => Number(row.product_id) === Number(item?.product_id)
+          && String(row.batch_code || 'SIN-LOTE') === String(batch)
+      );
+      return Number(stock?.quantity_available ?? item?.van_stock_before_reconcile ?? 0);
+    },
+
+    /** Abre el cuadre con el saldo real por lote de la furgoneta (QA 4). */
+    async openReconcileLoadingModal() {
+      const order = this.activeLoadingOrderData;
+      if (!order?.id || !this.activeLoadingOrderIsConfirmed) return;
+
+      this.reconcileLoadingError = '';
+      await this.refreshVanStock();
+      this.reconcileLoadingForm = {
+        notes: order.reconciliation_notes || '',
+        items: this.activeLoadingOrderItems
+          .filter((item) => item.is_active !== false && Number(item.dispatched_qty || 0) > 0)
+          .map((item) => {
+            const balance = this.currentLoadingLotBalance(item);
+            return {
+              product_id: item.product_id,
+              product_sku: item.product_sku,
+              product_name: item.product_name,
+              batch_code: item.batch_code || 'SIN-LOTE',
+              expiration_date: item.expiration_date,
+              dispatched_qty: Number(item.dispatched_qty),
+              van_stock_before_reconcile: balance,
+              restocked_in_machines_qty: 0,
+              withdrawn_spoilage_qty: 0,
+              counted_return_qty: balance
+            };
+          })
+      };
+      this.showReconcileLoadingModal = true;
+    },
+
+    closeReconcileLoadingModal() {
+      this.showReconcileLoadingModal = false;
+      this.reconcileLoadingError = '';
+    },
+
+    reconcileLoadingExpected(item) {
+      return Number(item.van_stock_before_reconcile || 0)
+        - Number(item.restocked_in_machines_qty || 0)
+        - Number(item.withdrawn_spoilage_qty || 0);
+    },
+
+    reconcileLoadingDiscrepancy(item) {
+      return Number(item.counted_return_qty || 0) - this.reconcileLoadingExpected(item);
+    },
+
+    validateLoadingReconciliation() {
+      this.reconcileLoadingError = '';
+      if (this.reconcileLoadingForm.items.length === 0) {
+        this.reconcileLoadingError = 'No hay líneas despachadas que liquidar.';
+        return false;
+      }
+
+      const invalid = this.reconcileLoadingForm.items.find(
+        (item) => Number(item.restocked_in_machines_qty || 0) < 0
+          || Number(item.withdrawn_spoilage_qty || 0) < 0
+          || Number(item.counted_return_qty || 0) < 0
+          || Number(item.restocked_in_machines_qty || 0) + Number(item.withdrawn_spoilage_qty || 0)
+            > Number(item.van_stock_before_reconcile || 0)
+      );
+      if (invalid) {
+        this.reconcileLoadingError = `El cuadre de ${invalid.product_name} excede el saldo del lote o contiene negativos.`;
+        return false;
+      }
+
+      if (this.reconcileLoadingHasDiscrepancy && this.realLength(this.reconcileLoadingForm.notes) < 20) {
+        this.reconcileLoadingError = 'El descuadre exige una justificación de al menos 20 caracteres reales (Art. V.1).';
+        return false;
+      }
+
+      return true;
+    },
+
+    async submitLoadingReconciliation() {
+      const order = this.activeLoadingOrderData;
+      if (!order?.id || !this.validateLoadingReconciliation()) return;
+
+      this.isReconcilingLoading = true;
+      this.loadingActionError = '';
+      this.loadingActionMessage = '';
+      try {
+        const detail = this.normalizeApiData(await api.restocker.reconcileLoadingOrder(order.id, {
+          reconciliation_notes: this.reconcileLoadingForm.notes,
+          items: this.reconcileLoadingForm.items.map((item) => ({
+            product_id: Number(item.product_id),
+            restocked_in_machines_qty: Number(item.restocked_in_machines_qty || 0),
+            withdrawn_spoilage_qty: Number(item.withdrawn_spoilage_qty || 0),
+            counted_return_qty: Number(item.counted_return_qty || 0)
+          }))
+        }));
+
+        if (detail?.order) {
+          this.lastReconciledOrder = detail;
+          this.activeLoadingOrder = null;
+        } else {
+          await this.loadMyRoute();
+        }
+        this.showReconcileLoadingModal = false;
+        this.loadingActionMessage = `Cierre liquidado: ${order.order_code}. El stock de tu furgoneta queda cuadrado.`;
+        await this.refreshVanStock();
+      } catch (error) {
+        this.reconcileLoadingError = error?.message || 'No se pudo liquidar el cierre de la orden.';
+      } finally {
+        this.isReconcilingLoading = false;
+      }
+    },
+
     handleLogout() {
       store.clearSession();
       this.restocker = null;
       this.zones = { primary_zone: null, backup_zones: [] };
       this.routeStops = [];
       this.machines = [];
+      this.activeLoadingOrder = null;
+      this.lastReconciledOrder = null;
+      this.vanProductStocks = [];
+      this.vanStockKpis = { total_lots: 0, total_units: 0, usable_units: 0, expired_lots: 0, expiring_soon_lots: 0 };
+      this.hasExpiredVanLots = false;
+      this.loadingActionError = '';
+      this.loadingActionMessage = '';
+      this.showReconcileLoadingModal = false;
       this.showPlanogramModal = false;
       this.selectedMachine = null;
       this.planogram = null;
@@ -707,6 +966,217 @@ export const RestockerRouteView = {
           {{ feedbackMessage }}
         </div>
 
+        <div
+          v-if="loadingActionMessage"
+          data-testid="restocker-loading-feedback"
+          style="font-size: 12px; color: var(--color-success-text); background: var(--color-success-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;"
+        >
+          ✅ {{ loadingActionMessage }}
+        </div>
+        <div
+          v-if="loadingActionError"
+          data-testid="restocker-loading-error"
+          style="font-size: 12px; color: var(--color-error-text); background: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;"
+        >
+          ⚠️ {{ loadingActionError }}
+        </div>
+
+        <!-- Orden de carga activa: recepción 1-Tap y liquidación (Módulo 33, D3, D4, C4) -->
+        <section
+          v-if="activeLoadingOrderData"
+          data-testid="restocker-active-loading-order"
+          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 500; margin: 0 0 4px 0;">🚚 Orden de carga</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
+                <strong style="color: var(--color-slate);">{{ activeLoadingOrderData.order_code }}</strong>
+                · {{ activeLoadingOrderData.demand_mode_label }} · {{ activeLoadingOrderData.safety_buffer_pct }} % colchón
+              </p>
+            </div>
+            <span
+              style="font-size: 10px; font-weight: 600; padding: 3px 7px; border-radius: var(--radius-interactive); white-space: nowrap;"
+              :style="activeLoadingOrderIsDispatched ? { backgroundColor: 'var(--color-info-bg)', color: 'var(--color-info-text)' } : { backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success-text)' }"
+            >{{ activeLoadingOrderData.status_label }}</span>
+          </div>
+
+          <div
+            v-if="activeLoadingOrderIsDispatched"
+            data-testid="restocker-loading-confirm-banner"
+            style="margin-top: 12px; padding: 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); background-color: var(--color-primary-subtle);"
+          >
+            <strong style="display: block; font-size: 13px; color: var(--color-slate);">📦 Mercancía despachada desde almacén</strong>
+            <p style="font-size: 12px; color: var(--color-ink-muted); margin: 4px 0 0 0;">
+              Salida de cámara:
+              <strong style="color: var(--color-slate);">{{ activeLoadingOrderData.cold_chamber_exit_temp_celsius ?? '—' }} °C</strong>
+              · Revisa los lotes y confirma en un toque.
+            </p>
+            <button
+              type="button"
+              class="vg-btn vg-btn-primary"
+              data-testid="btn-confirm-loading-order"
+              style="width: 100%; height: 42px; margin-top: 10px; border-radius: var(--radius-interactive);"
+              :disabled="isConfirmingLoading"
+              @click="confirmActiveLoadingOrder"
+            >
+              {{ isConfirmingLoading ? 'Confirmando recepción…' : '✅ Confirmar Recepción en Furgoneta (1 Toque)' }}
+            </button>
+          </div>
+
+          <div
+            v-else-if="activeLoadingOrderIsConfirmed"
+            data-testid="restocker-loading-reconcile-card"
+            style="margin-top: 12px; padding: 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); background-color: var(--color-success-bg);"
+          >
+            <strong style="display: block; font-size: 13px; color: var(--color-success-text);">✅ Orden recibida en tu furgoneta</strong>
+            <p style="font-size: 12px; color: var(--color-ink-muted); margin: 4px 0 0 0;">
+              Al terminar el recorrido, declara abastecidas, mermas y retorno físico.
+            </p>
+            <button
+              type="button"
+              class="vg-btn vg-btn-primary"
+              data-testid="btn-open-reconcile-loading"
+              style="width: 100%; height: 42px; margin-top: 10px; border-radius: var(--radius-interactive);"
+              @click="openReconcileLoadingModal"
+            >
+              📋 Liquidar Cierre de Furgoneta
+            </button>
+          </div>
+
+          <p v-else style="font-size: 12px; color: var(--color-ink-muted); margin: 10px 0 0 0;">
+            Orden en preparación en almacén. Todavía no requiere recepción.
+          </p>
+
+          <ul style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 8px;">
+            <li
+              v-for="item in activeLoadingOrderVisibleItems"
+              :key="item.product_id"
+              data-testid="restocker-loading-item"
+              style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 8px 10px;"
+            >
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                <div style="min-width: 0;">
+                  <strong style="display: block; font-size: 12px; font-family: var(--font-display); font-weight: 500;">{{ item.product_sku }}</strong>
+                  <span style="display: block; font-size: 11px; color: var(--color-ink-muted);">{{ item.product_name }}</span>
+                </div>
+                <span style="font-size: 11px; font-weight: 600; white-space: nowrap;">
+                  {{ item.dispatched_qty ?? item.requested_qty }} uds.
+                </span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px; font-size: 10px; color: var(--color-ink-muted); margin-top: 5px;">
+                <span v-if="item.requires_cold_chain" style="padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-info-bg); color: var(--color-info-text);">❄️ Frío</span>
+                <span>Lote {{ item.batch_code || '—' }}</span>
+                <span>Caduca {{ item.expiration_date || '—' }}</span>
+                <span>{{ item.reason_label }}</span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- Stock de la furgoneta por lote y semáforo FEFO (Módulo 33, D4, Art. V.4) -->
+        <section
+          data-testid="restocker-van-stock"
+          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 500; margin: 0 0 4px 0;">🚐 Mi Stock en Furgoneta (Por Lote / FEFO)</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">Rotación por caducidad más próxima primero.</p>
+            </div>
+            <span style="font-size: 10px; padding: 3px 7px; border-radius: var(--radius-interactive); background-color: var(--color-surface-1); color: var(--color-slate); white-space: nowrap;">
+              {{ vanStockKpis.total_units || 0 }} uds.
+            </span>
+          </div>
+
+          <div
+            v-if="hasExpiredVanLots"
+            data-testid="restocker-van-stock-expired-alert"
+            style="margin-top: 10px; padding: 8px 10px; border-radius: var(--radius-interactive); background-color: var(--color-error-bg); color: var(--color-error-text); font-size: 12px;"
+          >
+            🔴 Hay lotes caducados en la furgoneta. Retíralos antes de continuar la ruta (Art. II).
+          </div>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;">
+            <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-surface-1); color: var(--color-slate);">{{ vanStockKpis.total_lots || 0 }} lotes</span>
+            <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-success-bg); color: var(--color-success-text);">{{ vanStockKpis.usable_units || 0 }} uds. útiles</span>
+            <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text);">{{ vanStockKpis.expiring_soon_lots || 0 }} próximos ≤ 48 h</span>
+          </div>
+
+          <p v-if="vanStockLots.length === 0" style="font-size: 13px; color: var(--color-ink-muted); margin: 12px 0 0 0;">
+            Todavía no hay producto cargado en tu furgoneta.
+          </p>
+          <ul v-else style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 8px;">
+            <li
+              v-for="lot in vanStockLots"
+              :key="lot.id"
+              data-testid="restocker-van-stock-lot"
+              :data-batch-code="lot.batch_code"
+              style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 8px 10px;"
+            >
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                <div style="min-width: 0;">
+                  <strong style="display: block; font-size: 12px; font-family: var(--font-display); font-weight: 500;">{{ lot.product_sku }}</strong>
+                  <span style="display: block; font-size: 11px; color: var(--color-ink-muted);">{{ lot.product_name }}</span>
+                </div>
+                <strong style="font-size: 13px; white-space: nowrap;">{{ lot.quantity_available }} uds.</strong>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 10px; color: var(--color-ink-muted); margin-top: 5px;">
+                <span
+                  data-testid="restocker-van-stock-expiry"
+                  :data-expiry-status="lot.expiry_status"
+                  :style="expiryStatusStyle(lot.expiry_status)"
+                  style="padding: 2px 6px; border-radius: var(--radius-interactive); font-weight: 600;"
+                >{{ expiryStatusIcon(lot.expiry_status) }} {{ lot.expiry_status_label || expiryStatusLabel(lot.expiry_status) }}</span>
+                <span>Lote {{ lot.batch_code }}</span>
+                <span>Caduca {{ lot.expiration_date || '—' }}</span>
+                <span v-if="lot.requires_cold_chain">❄️ Frío</span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- Comprobante C4: última orden liquidada, solo lectura -->
+        <section
+          v-if="lastReconciledOrderData"
+          data-testid="restocker-last-reconciled-order"
+          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 500; margin: 0 0 4px 0;">🧾 Última orden liquidada</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
+                {{ lastReconciledOrderData.order_code }} · {{ formatShiftDate(lastReconciledOrderData.reconciled_at) }}
+              </p>
+            </div>
+            <span style="font-size: 10px; font-weight: 600; padding: 3px 7px; border-radius: var(--radius-interactive); background-color: var(--color-success-bg); color: var(--color-success-text); white-space: nowrap;">Solo lectura</span>
+          </div>
+          <ul style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 8px;">
+            <li
+              v-for="item in lastReconciledVisibleItems"
+              :key="item.product_id"
+              data-testid="restocker-last-reconciled-item"
+              style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 8px 10px;"
+            >
+              <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px;">
+                <span><strong>{{ item.product_sku }}</strong> · {{ item.product_name }}</span>
+                <span style="white-space: nowrap;">{{ item.counted_return_qty ?? 0 }} retorno</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px; font-size: 10px; color: var(--color-ink-muted); margin-top: 4px;">
+                <span>Lote {{ item.batch_code || '—' }}</span>
+                <span>{{ item.restocked_in_machines_qty ?? 0 }} abastecidas</span>
+                <span>{{ item.withdrawn_spoilage_qty ?? 0 }} mermas</span>
+                <span :style="{ color: Number(item.discrepancy_qty || 0) === 0 ? 'var(--color-success-text)' : 'var(--color-error-text)' }">
+                  Descuadre {{ item.discrepancy_qty ?? 0 }}
+                </span>
+              </div>
+            </li>
+          </ul>
+          <p v-if="lastReconciledOrderData.reconciliation_notes" style="font-size: 11px; color: var(--color-ink-muted); margin: 10px 0 0 0;">
+            Nota de cierre: {{ lastReconciledOrderData.reconciliation_notes }}
+          </p>
+        </section>
+
         <!-- Estado base de la ruta de abastecimiento (Features 24, 26 y 27) -->
         <section
           data-testid="restocker-route-base"
@@ -928,6 +1398,123 @@ export const RestockerRouteView = {
                 </li>
               </ul>
             </template>
+          </div>
+        </div>
+
+        <!-- Modal de liquidación al cierre (Módulo 33, D3, QA 4, Art. V.1) -->
+        <div
+          v-if="showReconcileLoadingModal"
+          data-testid="modal-reconcile-loading"
+          style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 80; padding: 0;"
+          @click.self="closeReconcileLoadingModal"
+        >
+          <div
+            style="background-color: var(--color-surface-card); width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; border-top-left-radius: var(--radius-card); border-top-right-radius: var(--radius-card); border: 1px solid var(--color-hairline); padding: 16px; box-sizing: border-box;"
+          >
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div>
+                <h2 style="font-family: var(--font-display); font-size: 18px; font-weight: 500; margin: 0;">📋 Liquidar cierre de furgoneta</h2>
+                <p style="font-size: 12px; color: var(--color-ink-muted); margin: 2px 0 0 0;">
+                  {{ activeLoadingOrderData?.order_code || 'Orden en ruta' }} · declara el cuadre por lote.
+                </p>
+              </div>
+              <button
+                type="button"
+                class="vg-btn vg-btn-ghost vg-btn-sm"
+                data-testid="btn-close-reconcile-loading"
+                @click="closeReconcileLoadingModal"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div
+              v-if="reconcileLoadingError"
+              data-testid="restocker-reconcile-error"
+              style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 12px;"
+            >
+              ⚠️ {{ reconcileLoadingError }}
+            </div>
+
+            <p style="font-size: 11px; color: var(--color-ink-muted); margin: 10px 0 0 0;">
+              Retorno esperado = saldo del lote − abastecidas − mermas. Si el conteo físico no coincide, explica el descuadre.
+            </p>
+
+            <ul style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 10px;">
+              <li
+                v-for="item in reconcileLoadingForm.items"
+                :key="item.product_id"
+                data-testid="restocker-reconcile-line"
+                style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px;"
+              >
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                  <div style="min-width: 0;">
+                    <strong style="display: block; font-size: 12px; font-family: var(--font-display); font-weight: 500;">{{ item.product_sku }}</strong>
+                    <span style="display: block; font-size: 11px; color: var(--color-ink-muted);">{{ item.product_name }} · Lote {{ item.batch_code }}</span>
+                  </div>
+                  <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-surface-1); color: var(--color-slate); white-space: nowrap;">
+                    Saldo {{ item.van_stock_before_reconcile }}
+                  </span>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 9px;">
+                  <label style="display: block; font-size: 10px; color: var(--color-ink-muted);">
+                    Abastecidas
+                    <input v-model.number="item.restocked_in_machines_qty" type="number" min="0" max="99999" data-testid="reconcile-restocked" style="width: 100%; box-sizing: border-box; height: 34px; margin-top: 3px; padding: 0 6px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);" />
+                  </label>
+                  <label style="display: block; font-size: 10px; color: var(--color-ink-muted);">
+                    Mermas
+                    <input v-model.number="item.withdrawn_spoilage_qty" type="number" min="0" max="99999" data-testid="reconcile-spoilage" style="width: 100%; box-sizing: border-box; height: 34px; margin-top: 3px; padding: 0 6px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);" />
+                  </label>
+                  <label style="display: block; font-size: 10px; color: var(--color-ink-muted);">
+                    Retorno contado
+                    <input v-model.number="item.counted_return_qty" type="number" min="0" max="99999" data-testid="reconcile-counted" style="width: 100%; box-sizing: border-box; height: 34px; margin-top: 3px; padding: 0 6px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);" />
+                  </label>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin-top: 8px;">
+                  <span style="color: var(--color-ink-muted);">Esperado: {{ reconcileLoadingExpected(item) }} uds.</span>
+                  <strong :style="{ color: reconcileLoadingDiscrepancy(item) === 0 ? 'var(--color-success-text)' : 'var(--color-error-text)' }">
+                    Descuadre: {{ reconcileLoadingDiscrepancy(item) }}
+                  </strong>
+                </div>
+              </li>
+            </ul>
+
+            <label style="display: block; font-size: 11px; font-weight: 600; color: var(--color-slate); margin-top: 12px;">
+              Justificación del descuadre {{ reconcileLoadingHasDiscrepancy ? '(obligatoria, ≥ 20 caracteres)' : '(opcional)' }}
+            </label>
+            <textarea
+              v-model="reconcileLoadingForm.notes"
+              rows="3"
+              maxlength="500"
+              data-testid="reconcile-loading-notes"
+              style="width: 100%; box-sizing: border-box; margin-top: 4px; padding: 7px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: 12px;"
+            ></textarea>
+            <div style="font-size: 10px; color: var(--color-ink-muted); margin-top: 3px;">
+              {{ realLength(reconcileLoadingForm.notes) }} caracteres reales.
+            </div>
+
+            <div style="display: flex; gap: 8px; margin-top: 14px;">
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary"
+                style="flex: 1; height: 40px; border-radius: var(--radius-interactive);"
+                @click="closeReconcileLoadingModal"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                class="vg-btn vg-btn-primary"
+                data-testid="btn-submit-reconcile-loading"
+                style="flex: 1; height: 40px; border-radius: var(--radius-interactive);"
+                :disabled="isReconcilingLoading"
+                @click="submitLoadingReconciliation"
+              >
+                {{ isReconcilingLoading ? 'Liquidando…' : 'Liquidar cierre' }}
+              </button>
+            </div>
           </div>
         </div>
 
