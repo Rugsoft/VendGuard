@@ -54,7 +54,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `D1`, `D2`, `D4`, `QA 3`, `Art. III.1`, `Art. V.4`.
   - **Verificación:** `php tests/integration/PdoRestockerVanStockRepositoryTest.php`
 
-- [ ] **T-PLD-06 · Implementar `PdoProductLoadingOrderRepository` (órdenes, líneas con baja lógica `C1`, demanda de carriles excluyendo máquinas en cuarentena/fuera de servicio `QA 1` y `SELECT ... FOR UPDATE`)**
+- [x] **T-PLD-06 · Implementar `PdoProductLoadingOrderRepository` (órdenes, líneas con baja lógica `C1`, demanda de carriles excluyendo máquinas en cuarentena/fuera de servicio `QA 1` y `SELECT ... FOR UPDATE`)**
   - **Requisitos:** `RF-02.1`–`RF-02.3`, `RF-03.1`, `RF-04.1`, `RF-04.2`, `D1`–`D4`, `C1`, `QA 1`, `Art. III.1`.
   - **Verificación:** `php tests/integration/PdoProductLoadingOrderRepositoryTest.php`
 
