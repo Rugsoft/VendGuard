@@ -8,25 +8,25 @@
 **Rama:** `feat/product-loading-cold-picking` · HEAD `c79c6da`  
 **Alcance:** contraste requisito por requisito contra código y ejecución directa de suites; no se modificó código de producción.
 
-**Actualización 2026-11-13:** B-01 cerrada tras implementar la propuesta y emisión individual del reponedor ausente, la alerta C2 en consola y su regresión de servicio, repositorio, API y frontend. Las demás brechas siguen abiertas.
+**Actualización 2026-11-13:** B-01 cerrada tras implementar la propuesta y emisión individual del reponedor ausente, la alerta C2 en consola y su regresión de servicio, repositorio, API y frontend. B-02 cerrada al certificar las omisiones del lote por orden activa y demanda cero. Las demás brechas siguen abiertas.
 
 ---
 
 ## Resultado general
 
-La implementación está muy avanzada. La batería hermética **no observó ningún test en rojo**; el canal `new_engine` mantuvo en rojo únicamente la sonda de latencia remota, ajena a B-01:
+La implementación está muy avanzada. La batería hermética **no observó ningún test en rojo**; el canal `new_engine` mantuvo en rojo únicamente la sonda de latencia remota, ajena a B-01/B-02:
 
 - **23 suites ejecutadas directamente**, todas con `exit=0`.
-- Batería global: **427/427 suites · 16.047 aserciones · 0 fallos**.
-- Canal `new_engine`: **56 suites · 1.846 aserciones · 55/56 en verde**. La sonda `PoolerLatencyMeasurementTest` falla por latencia remota (265,8 ms frente al presupuesto de 250 ms en «crear»), un límite de red ajeno a B-01; el resto de suites del canal pasa.
+- Batería global: **427/427 suites · 16.048 aserciones · 0 fallos**.
+- Canal `new_engine`: **56 suites · 1.846 aserciones · 55/56 en verde**. La sonda `PoolerLatencyMeasurementTest` falla por latencia remota (265,8 ms frente al presupuesto de 250 ms en «crear»), un límite de red ajeno a B-01/B-02; el resto de suites del canal pasa.
 - Tareas del módulo: **13/13 completadas**, 0 pendientes.
 
-Con B-01 cerrada, **quedan siete brechas abiertas**: B-02 a B-07 son brechas de certificación y B-08 es una desviación de `RNF-03`. La Spec 33 sigue sin poder certificarse al 100 % hasta cerrarlas.
+Con B-01 y B-02 cerradas, **quedan seis brechas abiertas**: B-03 a B-07 son brechas de certificación y B-08 es una desviación de `RNF-03`. La Spec 33 sigue sin poder certificarse al 100 % hasta cerrarlas.
 
 | ID | Brecha | Tipo | Severidad | Requisito afectado | Estado |
 |---|---|---|---|---|---|
 | **B-01** | La consola no permite emitir la orden individual de un reponedor ausente | Funcional | **Alta** | `C2`, `RF-02.3`, `RF-05.1` | ✅ **Cerrada** (2026-11-13) |
-| **B-02** | Los omitidos del lote por orden activa o demanda cero no están probados | Cobertura | Media | `RF-02.3`, `C2` | Abierta |
+| **B-02** | Los omitidos del lote por orden activa o demanda cero no están probados | Cobertura | Media | `RF-02.3`, `C2` | ✅ **Cerrada** (2026-11-13) |
 | **B-03** | No se prueba la recepción/liquidación con producto desactivado en tránsito | Cobertura | Media | `C3`, `RF-04.1`, `RF-04.2` | Abierta |
 | **B-04** | No se prueba la cancelación desde `DISPATCHED` | Cobertura | Media | `RF-03.4` | Abierta |
 | **B-05** | La ruta HTTP de liquidación de Coordinación no se ejerce | Cobertura | Media | `RF-04.2`, `RF-05.1` | Abierta |
@@ -61,19 +61,19 @@ Con B-01 cerrada, **quedan siete brechas abiertas**: B-02 a B-07 son brechas de 
 
 ---
 
-## B-02 · Los omitidos del lote por orden activa o demanda cero no están probados
+## B-02 · Los omitidos del lote por orden activa o demanda cero no están probados · ✅ CERRADA
 
 **Requisito.** `RF-02.3` exige que la emisión masiva omita a los reponedores ausentes, a los que ya tienen una orden activa y a los que tienen cero líneas sugeridas, devolviendo la causa exacta de cada omisión.
 
-**Evidencia.**
+**Resolución implementada.**
 
-- `ProductLoadingOrderService::createBatchOrders()` distingue `SKIP_ABSENT`, `SKIP_ACTIVE_ORDER` y la omisión por falta de demanda.
-- `ProductLoadingOrderServiceTest` **2.6** solo comprueba un reponedor creado y un ausente omitido con `SKIP_ABSENT`.
-- No hay aserciones para `SKIP_ACTIVE_ORDER` ni para el omitido por demanda cero.
+- Se añadió al doble de pruebas un reponedor sin demanda y otro con una orden activa, sin tocar el servicio ni el repositorio de producción.
+- `ProductLoadingOrderServiceTest` **2.7** ejecuta un lote con los cuatro casos simultáneos: crea la orden del reponedor disponible (7), omite al ausente (8) con `SKIP_ABSENT`, omite al reponedor sin demanda (10) con `SKIP_NO_DEMAND` y omite al que ya tiene orden (11) con `SKIP_ACTIVE_ORDER`.
+- La aserción verifica el `created` y el `skipped` con la causa exacta, además del `order_id` activo que explica la omisión de 11.
 
-**Impacto.** El caso feliz y la ausencia están cubiertos; las otras dos causas exigidas por el contrato pueden romperse sin que la batería lo detecte.
+**Verificación.** `ProductLoadingOrderServiceTest` **46/46**, `exit=0`. El caso 2.6 conserva la cobertura previa del alta y la ausencia; el caso 2.7 cubre las dos ramas que faltaban.
 
-**Cierre propuesto.** Añadir escenarios de lote con un reponedor que ya tiene orden activa y otro sin líneas sugeridas, verificando `created`, `skipped` y la causa exacta.
+**Estado.** ✅ **CERRADA** el 2026-11-13. Las tres causas de omisión del lote quedan certificadas con sus códigos exactos y sin modificar el comportamiento productivo.
 
 ---
 
@@ -182,22 +182,23 @@ Con B-01 cerrada, **quedan siete brechas abiertas**: B-02 a B-07 son brechas de 
 **La Spec 33 no está 100 % cumplida.** El módulo tiene las 13 tareas cerradas y todas las suites ejecutadas en verde, pero:
 
 - **B-01 está cerrada**: `C2` ya permite propuesta y emisión individual del ausente, muestra la alerta en consola y mantiene la exclusión del lote.
-- **B-02 a B-07 son brechas de certificación** sobre ramas exigidas por el contrato.
+- **B-02 está cerrada**: el lote certifica `SKIP_ACTIVE_ORDER`, `SKIP_NO_DEMAND` y `SKIP_ABSENT` con sus causas exactas.
+- **B-03 a B-07 son brechas de certificación** sobre ramas exigidas por el contrato.
 - **B-08 es una desviación de diseño** respecto a `docs/design.md`.
 
-La matriz de trazabilidad se actualizó para `C2`, `RF-02.3` y `RF-05.1` con las pruebas nuevas. Las brechas B-02 a B-08 siguen requiriendo corrección o certificación antes de declarar la Spec 33 completa.
+La matriz de trazabilidad se actualizó para `C2`, `RF-02.3` y `RF-05.1` con las pruebas nuevas. Las brechas B-03 a B-08 siguen requiriendo corrección o certificación antes de declarar la Spec 33 completa.
 
 ---
 
 ## Referencias de evidencia
 
 - [`specs/33-product-loading-cold-picking/tasks.md`](../specs/33-product-loading-cold-picking/tasks.md) · 13/13 tareas.
-- [`specs/33-product-loading-cold-picking/traceability-matrix.md`](../specs/33-product-loading-cold-picking/traceability-matrix.md) · matriz actualizada para `C2`, `RF-02.3` y `RF-05.1`; B-02 a B-08 siguen documentadas como brechas.
+- [`specs/33-product-loading-cold-picking/traceability-matrix.md`](../specs/33-product-loading-cold-picking/traceability-matrix.md) · matriz actualizada para `C2`, `RF-02.3` y `RF-05.1`; B-03 a B-08 siguen documentadas como brechas.
 - `src/Application/Service/ProductLoadingOrderService.php` · propuesta, emisión individual/lote, confirmación y liquidación.
 - `src/Infrastructure/Repository/PdoProductLoadingOrderRepository.php` · `FOR UPDATE` y consultas de propuesta.
 - `public/assets/js/components/CoordinatorProductLoadingTab.js` · consola de Coordinación.
 - `public/assets/js/components/RestockerRouteView.js` · móvil del reponedor.
-- `tests/unit/ProductLoadingOrderServiceTest.php` · casos 1.5, 1.5b, 2.5, 2.6, 5.3, 6.4, 7.x, 9.3–9.5.
+- `tests/unit/ProductLoadingOrderServiceTest.php` · casos 1.5, 1.5b, 2.5, 2.6, 2.7, 5.3, 6.4, 7.x, 9.3–9.5.
 - `tests/integration/PdoProductLoadingOrderRepositoryTest.php` · caso 6.8 (ausencia con zonas y demanda conservadas).
 - `tests/integration/ProductLoadingColdPickingApiTest.php` · flujo HTTP de propuesta y emisión individual del ausente (3.1b/3.1c) y flujo móvil.
 - `tests/frontend/coordinator_product_loading_tab.test.mjs` · alerta C2 y emisión desde la propuesta del ausente (2.5b/2.5c).

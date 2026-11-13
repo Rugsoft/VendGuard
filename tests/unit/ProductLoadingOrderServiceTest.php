@@ -266,6 +266,27 @@ final class FakeProductLoadingOrderRepositoryForServiceTest implements ProductLo
             ];
         }
 
+        if ($restockerId === 10 || $restockerId === 11) {
+            $active = $this->findActiveByRestocker($restockerId);
+            $names = [10 => 'Reponedor Sin Demanda', 11 => 'Reponedor Con Orden'];
+            $codes = [10 => 'REP-10', 11 => 'REP-11'];
+
+            return [
+                'restocker' => [
+                    'id' => $restockerId,
+                    'name' => $names[$restockerId],
+                    'operator_code' => $codes[$restockerId],
+                    'is_active' => true,
+                    'is_currently_absent' => false,
+                    'open_order_id' => $active?->getId(),
+                    'open_order_status' => $active?->getStatus()->value,
+                ],
+                'zones' => [],
+                'slot_demand' => [],
+                'excluded_unavailable_machines_count' => 0,
+            ];
+        }
+
         $active = $this->findActiveByRestocker($restockerId);
         $absent = $restockerId === 8;
         $restocker = [
@@ -770,7 +791,7 @@ final class FakeAuditLogRepositoryForLoadingServiceTest implements AuditLogRepos
  *   actor: array{id: int, role: string, name: string}
  * }
  */
-function makeProductLoadingWorld(): array
+function makeProductLoadingWorld(array $extraUsers = []): array
 {
     $today = new DateTimeImmutable('today', new DateTimeZone('Europe/Madrid'));
     $date = static fn (int $offset): string => $today->modify(($offset >= 0 ? '+' : '') . $offset . ' days')->format('Y-m-d');
@@ -820,6 +841,7 @@ function makeProductLoadingWorld(): array
         9 => new User(9, 'Reponedor Inactivo', 'rep9@vendguard.test', 'hash', UserRole::RESTOCKER, null, false, null, null, null, false, null, 'REP-09'),
         3 => new User(3, 'Coordinación', 'coord@vendguard.test', 'hash', UserRole::COORDINATOR, null, true, null, null, null, false, null, 'COORD-03'),
     ];
+    $users += $extraUsers;
 
     $orders = new FakeProductLoadingOrderRepositoryForServiceTest($products);
     $stocks = new FakeRestockerVanStockRepositoryForLoadingServiceTest($products, $users);
@@ -1035,6 +1057,30 @@ $assert(
     && count($batch['skipped']) === 1
     && $batch['skipped'][0]['reason'] === ProductLoadingOrderService::SKIP_ABSENT,
     json_encode($batch)
+);
+
+$skipWorld = makeProductLoadingWorld([
+    10 => new User(10, 'Reponedor Sin Demanda', 'rep10@vendguard.test', 'hash', UserRole::RESTOCKER, null, true, null, null, null, false, null, 'REP-10'),
+    11 => new User(11, 'Reponedor Con Orden', 'rep11@vendguard.test', 'hash', UserRole::RESTOCKER, null, true, null, null, null, false, null, 'REP-11'),
+]);
+$activeOrder = $skipWorld['service']->createOrder(11, ['items' => $activeProducts($skipWorld)], $skipWorld['actor']);
+$skipBatch = $skipWorld['service']->createBatchOrders([
+    'demand_mode' => 'ALERTS_ONLY',
+    'safety_buffer_pct' => 10,
+], $skipWorld['actor']);
+$skippedById = [];
+foreach ($skipBatch['skipped'] as $skip) {
+    $skippedById[(int)$skip['restocker_id']] = $skip;
+}
+$assert(
+    '2.7 El lote distingue orden activa, demanda cero y ausencia por su causa',
+    count($skipBatch['created']) === 1
+    && $skipBatch['created'][0]['restocker_id'] === 7
+    && ($skippedById[8]['reason'] ?? '') === ProductLoadingOrderService::SKIP_ABSENT
+    && ($skippedById[10]['reason'] ?? '') === ProductLoadingOrderService::SKIP_NO_DEMAND
+    && ($skippedById[11]['reason'] ?? '') === ProductLoadingOrderService::SKIP_ACTIVE_ORDER
+    && (int)($skippedById[11]['order_id'] ?? 0) === (int)$activeOrder['order']['id'],
+    json_encode($skipBatch)
 );
 
 // =====================================================================
