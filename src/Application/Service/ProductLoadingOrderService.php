@@ -102,7 +102,12 @@ final class ProductLoadingOrderService
     }
 
     /**
-     * Propuesta matutina individual (RF-02.1, D1, QA 1).
+     * Propuesta matutina individual (RF-02.1, D1, QA 1, C2).
+     *
+     * La ausencia vigente no impide calcular la propuesta individual: C2 deja
+     * la decisión en manos de Coordinación y publica la marca de ausencia para
+     * que la consola muestre la alerta antes de emitir. La emisión masiva sigue
+     * omitiendo a los ausentes antes de calcular su demanda.
      *
      * @return array<string, mixed>
      */
@@ -832,13 +837,6 @@ final class ProductLoadingOrderService
             throw ProductLoadingValidationException::invalidRestockerRecipient(
                 (int)$restocker['id'],
                 'la cuenta está inactiva.'
-            );
-        }
-
-        if ((bool)($restocker['is_currently_absent'] ?? false)) {
-            throw ProductLoadingValidationException::invalidRestockerRecipient(
-                (int)$restocker['id'],
-                'tiene una ausencia vigente hoy.'
             );
         }
 

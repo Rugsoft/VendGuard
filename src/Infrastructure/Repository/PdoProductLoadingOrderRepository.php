@@ -950,8 +950,13 @@ final class PdoProductLoadingOrderRepository implements ProductLoadingOrderRepos
     }
 
     /**
-     * CTE de zonas cubiertas hoy: titular sin ausencia o suplente promovido
-     * cuando el titular está ausente o la zona no tiene titular vivo.
+     * CTE de zonas cubiertas hoy: titular o suplente promovido cuando el titular
+     * está ausente o la zona no tiene titular vivo.
+     *
+     * La ausencia del propio reponedor no vacía su cobertura: C2 permite emitirle
+     * una orden individual con aviso, mientras que el lote lo omite antes de
+     * consultar la demanda. La ausencia del titular sí se conserva para resolver
+     * las suplencias del resto de la plantilla.
      */
     private function coveredZonesCte(): string
     {
@@ -968,13 +973,6 @@ final class PdoProductLoadingOrderRepository implements ProductLoadingOrderRepos
                AND oz.is_active = TRUE
             WHERE a.restocker_id = :restocker_id
               AND a.removed_at IS NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM technician_absences ra
-                   WHERE ra.technician_id = :restocker_id
-                     AND ra.cancelled_at IS NULL
-                     AND ra.starts_at < :day_end
-                     AND ra.ends_at >= :day_start
-              )
               AND (
                   a.is_primary = TRUE
                   OR NOT EXISTS (

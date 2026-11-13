@@ -355,7 +355,7 @@ const vanStocks = [
 ];
 
 const proposal = {
-  restocker: restockers[0],
+  restocker: { ...restockers[0], is_currently_absent: false },
   zones: [{ zone_code: 'ZN-01', zone_name: 'Zona Norte' }],
   demand_mode: 'ALERTS_ONLY',
   demand_mode_label: 'Solo alertas',
@@ -398,6 +398,12 @@ const proposal = {
   ]
 };
 
+const absentProposal = {
+  ...proposal,
+  restocker: { ...restockers[1], is_currently_absent: true },
+  items: [proposal.items[0]]
+};
+
 const products = [
   { id: 1, sku: 'SAND-MIXTO-01', name: 'Sándwich mixto', category: 'PERISHABLE_FOOD', requires_cold_chain: true },
   { id: 2, sku: 'AGUA-50-01', name: 'Agua mineral 50 cl', category: 'COLD_DRINK', requires_cold_chain: false }
@@ -434,7 +440,7 @@ api.coordinator.getProductLoadingPickingSheet = async (orderId) => {
 };
 api.coordinator.getProductLoadingProposal = async (params) => {
   calls.push({ method: 'getProductLoadingProposal', params });
-  return { data: proposal };
+  return { data: Number(params.restocker_id) === 8 ? absentProposal : proposal };
 };
 api.coordinator.createProductLoadingOrder = async (payload) => {
   calls.push({ method: 'createProductLoadingOrder', payload });
@@ -590,6 +596,27 @@ async function runTests() {
       && createCall.payload.items[0].reason === 'STOCKOUT_ALERT'
   );
   assert('2.5 El alta cierra el diálogo y recarga el listado', component.showProposalModal === false && component.orderSuccess.includes('PLO-2026-0105'));
+
+  const absentComponent = buildInstance();
+  await absentComponent.loadRestockers();
+  absentComponent.proposalForm.restocker_id = 8;
+  await absentComponent.openProposalModal();
+  await absentComponent.loadProposal();
+  assert(
+    '2.5b La propuesta de un ausente muestra la alerta C2',
+    absentComponent.proposalRecipientWarning === '⚠️ Destinatario actualmente ausente'
+      && absentComponent.proposal?.restocker?.is_currently_absent === true
+      && CoordinatorProductLoadingTab.template.includes('product-loading-proposal-absent-warning')
+  );
+  await absentComponent.createOrderFromProposal();
+  const absentCreateCall = calls.filter((call) => call.method === 'createProductLoadingOrder').at(-1);
+  assert(
+    '2.5c La orden individual del ausente se emite desde su propuesta',
+    absentCreateCall?.payload?.restocker_id === 8
+      && absentCreateCall.payload.items.length === 1
+      && absentCreateCall.payload.items[0].requested_qty === 9
+      && absentComponent.showProposalModal === false
+  );
 
   component.openBatchModal();
   component.batchForm.demand_mode = 'ALL_GAPS';

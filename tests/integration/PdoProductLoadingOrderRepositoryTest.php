@@ -600,6 +600,42 @@ try {
         && !array_key_exists('unit_cost_eur', $proposal['restocker'])
     );
 
+    $absenceStart = (new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))
+        ->modify('-1 hour')
+        ->format(DateTimeImmutable::ATOM);
+    $absenceEnd = (new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))
+        ->modify('+1 day')
+        ->format(DateTimeImmutable::ATOM);
+    $absenceStmt = $pdo->prepare("
+        INSERT INTO technician_absences (technician_id, reason, starts_at, ends_at, notes, created_by)
+        VALUES (:technician_id, 'VACATION', :starts_at, :ends_at, 'Ausencia de la prueba C2', :created_by)
+        RETURNING id
+    ");
+    $absenceStmt->execute([
+        ':technician_id' => $restockerA,
+        ':starts_at' => $absenceStart,
+        ':ends_at' => $absenceEnd,
+        ':created_by' => $coordinatorId,
+    ]);
+    $absenceId = (int)$absenceStmt->fetchColumn();
+
+    $absentProposal = $repo->fetchProposalInputs($restockerA, $today);
+    $assert(
+        '6.8 La propuesta del ausente conserva zonas, demanda y alerta C2',
+        $absentProposal['restocker'] !== null
+        && $absentProposal['restocker']['is_currently_absent'] === true
+        && count($absentProposal['zones']) === count($proposal['zones'])
+        && count($absentProposal['slot_demand']) === count($proposal['slot_demand']),
+        json_encode([
+            'zones' => count($absentProposal['zones']),
+            'demand' => count($absentProposal['slot_demand']),
+        ])
+    );
+
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $absenceId): void {
+        $pdo->exec("DELETE FROM technician_absences WHERE id = {$absenceId}");
+    });
+
     // =================================================================
     // 7. Art. III.1 y limpieza
     // =================================================================

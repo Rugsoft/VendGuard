@@ -278,15 +278,6 @@ final class FakeProductLoadingOrderRepositoryForServiceTest implements ProductLo
             'open_order_status' => $active?->getStatus()->value,
         ];
 
-        if ($absent) {
-            return [
-                'restocker' => $restocker,
-                'zones' => [],
-                'slot_demand' => [],
-                'excluded_unavailable_machines_count' => 0,
-            ];
-        }
-
         return [
             'restocker' => $restocker,
             'zones' => [[
@@ -955,11 +946,23 @@ $assert(
     && $full['items'][1]['reason'] === 'ROUTE_GAP_FILL'
 );
 
-$assertValidation(
-    '1.5 Un reponedor ausente no recibe propuesta (C2)',
-    static fn () => $service->buildProposal(8),
-    ProductLoadingValidationException::INVALID_RESTOCKER_RECIPIENT,
-    422
+$absentProposal = $service->buildProposal(8);
+$assert(
+    '1.5 Un reponedor ausente recibe propuesta individual con su alerta (C2)',
+    $absentProposal['restocker']['is_currently_absent'] === true
+    && count($absentProposal['zones']) === 1
+    && count($absentProposal['items']) === 1
+    && $absentProposal['items'][0]['suggested_qty'] === 7,
+    json_encode($absentProposal)
+);
+$absentOrder = $service->createOrder(8, [], $world['actor']);
+$assert(
+    '1.5b La orden individual del ausente se emite sin líneas explícitas (C2)',
+    $absentOrder['order']['restocker_id'] === 8
+    && $absentOrder['order']['status'] === 'PENDING_PICKING'
+    && count($absentOrder['items']) === 1
+    && $absentOrder['items'][0]['requested_qty'] === 7,
+    json_encode($absentOrder)
 );
 $assertValidation(
     '1.6 Un usuario no reponedor no recibe propuesta (C2)',

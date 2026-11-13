@@ -291,6 +291,44 @@ try {
             && !in_array('unit_cost_eur', $collectKeys($proposalData), true)
     );
 
+    $absenceStmt = $pdo->prepare("
+        INSERT INTO technician_absences (technician_id, reason, starts_at, ends_at, notes, created_by)
+        VALUES (:technician_id, 'VACATION', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '1 day',
+                'Ausencia de la prueba C2', :created_by)
+        RETURNING id
+    ");
+    $absenceStmt->execute([':technician_id' => $otherId, ':created_by' => $coordinatorId]);
+    $absenceId = (int)$absenceStmt->fetchColumn();
+
+    $absentProposal = $call('GET', '/api/coordinator/product-loading-orders/proposal', [], $coordinatorToken, [
+        'restocker_id' => $otherId,
+    ]);
+    $absentProposalData = $data($absentProposal);
+    $assert(
+        '3.1b La propuesta del ausente responde 200 y publica la alerta C2',
+        $absenceId > 0
+            && $absentProposal->getStatusCode() === 200
+            && ($absentProposalData['restocker']['is_currently_absent'] ?? false) === true,
+        json_encode($absentProposalData['restocker'] ?? null)
+    );
+
+    $absentCreate = $call('POST', '/api/coordinator/product-loading-orders', [
+        'restocker_id' => $otherId,
+        'items' => [[
+            'product_id' => $ambientProductId,
+            'reason' => 'MANUAL_ADDITION',
+            'requested_qty' => 2,
+        ]],
+    ], $coordinatorToken);
+    $absentCreated = $data($absentCreate);
+    $assert(
+        '3.1c La emisión individual de un ausente responde 201 (C2)',
+        $absentCreate->getStatusCode() === 201
+            && (int)($absentCreated['order']['restocker_id'] ?? 0) === $otherId
+            && count($absentCreated['items'] ?? []) === 1,
+        $errorCode($absentCreate)
+    );
+
     $missingRestocker = $call('POST', '/api/coordinator/product-loading-orders', [
         'items' => [['product_id' => $coldProductId, 'reason' => 'MANUAL_ADDITION', 'requested_qty' => 4]],
     ], $coordinatorToken);

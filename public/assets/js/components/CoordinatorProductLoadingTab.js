@@ -167,6 +167,14 @@ export const CoordinatorProductLoadingTab = {
     proposalTotalSuggested() {
       return this.proposalItems.reduce((total, item) => total + Number(item.suggested_qty || 0), 0);
     },
+    /** Alerta C2 del destinatario de la propuesta individual. */
+    proposalRecipientWarning() {
+      const restocker = this.proposal?.restocker;
+      if (!restocker) return '';
+      if (restocker.is_active === false) return '⚠️ Destinatario inactivo';
+      if (restocker.is_currently_absent === true) return '⚠️ Destinatario actualmente ausente';
+      return '';
+    },
     dispatchHasColdLine() {
       return this.dispatchForm.items.some(
         (item) => item.requires_cold_chain && Number(item.dispatched_qty || 0) > 0
@@ -1043,6 +1051,10 @@ export const CoordinatorProductLoadingTab = {
               {{ isLoadingProposal ? 'Calculando…' : 'Calcular propuesta' }}
             </button>
           </div>
+        </div>
+
+        <div v-if="proposal && proposalRecipientWarning" class="vg-alert vg-alert-warning" role="status" data-testid="product-loading-proposal-absent-warning" style="margin-top: 14px;">
+          {{ proposalRecipientWarning }}
         </div>
 
         <div v-if="proposal" style="margin-top: 14px;">
