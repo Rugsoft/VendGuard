@@ -1832,6 +1832,163 @@ INNER JOIN vending_products p ON p.sku = v.sku
 ON CONFLICT (machine_id, slot_code) DO NOTHING;
 
 
+-- ============================================================================
+-- SECCIÓN 24 · restocker_van_product_stocks y product_loading_orders — lotes en
+--              furgoneta y órdenes de carga demo (Módulo 33)
+-- ============================================================================
+-- QUÉ SIEMBRA
+--   Seis saldos de producto por lote repartidos entre las furgonetas de los dos
+--   reponedores semilla (`REP-01` y `REP-02`) y dos órdenes de carga: una
+--   histórica liquidada al cierre y otra despachada con control de cámara
+--   frigorífica (3,5 °C ≤ 4,0 °C, Art. II).
+--
+-- POR QUÉ DOS LOTES DEL MISMO PRODUCTO EN LA MISMA FURGONETA
+--   El sándwich viaja en dos lotes con caducidad distinta: `L-SAND-2602` vence
+--   en dos días —`EXPIRING_SOON` en el semáforo FEFO— y `L-SAND-2606` en cuatro.
+--   Es exactamente el caso que el picking con trazabilidad de frío existe para
+--   resolver: mismo producto, dos fechas, y la hoja ordena por la más próxima.
+--   Los no perecederos usan el lote normalizado `'SIN-LOTE'`, que el cerrojo del
+--   motor prohíbe para cualquier referencia con `requires_cold_chain = TRUE`.
+--
+-- POR QUÉ LA ORDEN LIQUIDADA TIENE UNA LÍNEA SELLADA EN CERO
+--   La tercera línea de `PLO-2026-0001` (`AGUA-MIN-50`) se planificó y no se
+--   despachó: al liquidar, sus seis campos de cuadre quedan en 0 (QA 4). La
+--   semilla demuestra así la regla sin inventar un descuadre.
+--
+-- POR QUÉ SE INSERTA SOLO SI NO EXISTE
+--   `quantity_available` es existencia operativa y no catálogo: reafirmarla en
+--   cada arranque borraría el trabajo del reponedor. Las órdenes son hechos
+--   históricos: una resemilla no reescribe su estado, su temperatura de salida ni
+--   su cuadre. Las referencias se resuelven por `email_key`, `sku` y `order_code`,
+--   nunca por identificadores que la secuencia asigna distinto en cada base.
+-- ============================================================================
+
+INSERT INTO restocker_van_product_stocks (
+    restocker_id, product_id, batch_code, expiration_date, quantity_available
+)
+SELECT
+    u.id,
+    p.id,
+    v.batch_code,
+    v.expiration_date,
+    v.quantity_available
+FROM (VALUES
+    ('lucia.repostaje@vendguard.internal', 'SAND-MIXTO-01',  'L-SAND-2602', (CURRENT_DATE + 2),  12),
+    ('lucia.repostaje@vendguard.internal', 'SAND-MIXTO-01',  'L-SAND-2606', (CURRENT_DATE + 4),  18),
+    ('lucia.repostaje@vendguard.internal', 'COLA-LATA-33',   'SIN-LOTE',    NULL,                60),
+    ('lucia.repostaje@vendguard.internal', 'SNACK-PATAT-40', 'SIN-LOTE',    NULL,                40),
+    ('oscar.repostaje@vendguard.internal', 'YOGUR-NAT-125',  'L-YOG-2611',  (CURRENT_DATE + 12), 24),
+    ('oscar.repostaje@vendguard.internal', 'AGUA-MIN-50',    'SIN-LOTE',    NULL,                48)
+) AS v(email, sku, batch_code, expiration_date, quantity_available)
+INNER JOIN users u ON u.email_key = v.email
+INNER JOIN vending_products p ON p.sku = v.sku
+ON CONFLICT (restocker_id, product_id, batch_code) DO NOTHING;
+
+
+-- Orden histórica liquidada al cierre: pasó por despacho, recepción móvil y
+-- cuadre. La temperatura de salida de cámara es 3,0 °C, dentro del rango físico.
+INSERT INTO product_loading_orders (
+    order_code, restocker_id, status, demand_mode, safety_buffer_pct,
+    cold_chamber_exit_temp_celsius, notes, reconciliation_notes,
+    created_by, dispatched_by, reconciled_by,
+    created_at, dispatched_at, confirmed_at, reconciled_at
+)
+SELECT
+    'PLO-2026-0001',
+    (SELECT id FROM users WHERE email_key = 'lucia.repostaje@vendguard.internal'),
+    'RECONCILED_AT_CLOSE',
+    'ALERTS_ONLY',
+    10,
+    3.0,
+    'Orden matutina de la zona centro: dos lotes de sándwich y reposición de refrescos.',
+    'Cuadre sin descuadre: volvió una unidad de merma de sándwich retirada en ruta.',
+    (SELECT id FROM users WHERE email_key = 'coordinacion@vendguard.internal'),
+    (SELECT id FROM users WHERE email_key = 'coordinacion@vendguard.internal'),
+    (SELECT id FROM users WHERE email_key = 'coordinacion@vendguard.internal'),
+    CURRENT_TIMESTAMP - INTERVAL '1 day',
+    CURRENT_TIMESTAMP - INTERVAL '1 day',
+    CURRENT_TIMESTAMP - INTERVAL '1 day',
+    CURRENT_TIMESTAMP
+WHERE NOT EXISTS (
+    SELECT 1 FROM product_loading_orders WHERE order_code = 'PLO-2026-0001'
+);
+
+
+-- Orden despachada: espera la recepción en 1 toque del reponedor. Incluye un
+-- producto refrigerado con lote real y fecha, y un snack añadido a mano.
+INSERT INTO product_loading_orders (
+    order_code, restocker_id, status, demand_mode, safety_buffer_pct,
+    cold_chamber_exit_temp_celsius, notes, reconciliation_notes,
+    created_by, dispatched_by, reconciled_by,
+    created_at, dispatched_at, confirmed_at, reconciled_at
+)
+SELECT
+    'PLO-2026-0002',
+    (SELECT id FROM users WHERE email_key = 'oscar.repostaje@vendguard.internal'),
+    'DISPATCHED',
+    'ALL_GAPS',
+    15,
+    3.5,
+    'Reposición completa de la ruta norte con yogur de lote largo y frutos secos.',
+    NULL,
+    (SELECT id FROM users WHERE email_key = 'coordinacion@vendguard.internal'),
+    (SELECT id FROM users WHERE email_key = 'coordinacion@vendguard.internal'),
+    NULL,
+    CURRENT_TIMESTAMP - INTERVAL '2 hours',
+    CURRENT_TIMESTAMP - INTERVAL '1 hour',
+    NULL,
+    NULL
+WHERE NOT EXISTS (
+    SELECT 1 FROM product_loading_orders WHERE order_code = 'PLO-2026-0002'
+);
+
+
+-- Líneas de la orden liquidada (PLO-2026-0001): dos servidas y una sellada a 0.
+INSERT INTO product_loading_order_items (
+    order_id, product_id, reason, requested_qty, dispatched_qty, batch_code, expiration_date,
+    van_stock_before_reconcile, restocked_in_machines_qty, withdrawn_spoilage_qty,
+    expected_return_qty, counted_return_qty, discrepancy_qty, is_active
+)
+SELECT
+    o.id, p.id, v.reason::product_loading_item_reason, v.requested_qty, v.dispatched_qty,
+    v.batch_code, v.expiration_date,
+    v.van_stock_before_reconcile, v.restocked_in_machines_qty, v.withdrawn_spoilage_qty,
+    v.expected_return_qty, v.counted_return_qty, v.discrepancy_qty, TRUE
+FROM (VALUES
+    ('SAND-MIXTO-01',  'STOCKOUT_ALERT',  24, 24, 'L-SAND-2602', (CURRENT_DATE + 2),  24, 20, 2, 2, 2, 0),
+    ('COLA-LATA-33',   'LOW_STOCK_ALERT', 60, 60, 'SIN-LOTE',    NULL,                60, 60, 0, 0, 0, 0),
+    ('AGUA-MIN-50',    'ROUTE_GAP_FILL',  36,  0, NULL,          NULL,                 0,  0, 0, 0, 0, 0)
+) AS v(sku, reason, requested_qty, dispatched_qty, batch_code, expiration_date,
+       van_stock_before_reconcile, restocked_in_machines_qty, withdrawn_spoilage_qty,
+       expected_return_qty, counted_return_qty, discrepancy_qty)
+INNER JOIN product_loading_orders o ON o.order_code = 'PLO-2026-0001'
+INNER JOIN vending_products p ON p.sku = v.sku
+WHERE NOT EXISTS (
+    SELECT 1 FROM product_loading_order_items i
+     WHERE i.order_id = o.id AND i.product_id = p.id
+);
+
+
+-- Líneas de la orden despachada (PLO-2026-0002): sin cuadre todavía.
+INSERT INTO product_loading_order_items (
+    order_id, product_id, reason, requested_qty, dispatched_qty, batch_code, expiration_date,
+    is_active
+)
+SELECT
+    o.id, p.id, v.reason::product_loading_item_reason, v.requested_qty, v.dispatched_qty,
+    v.batch_code, v.expiration_date, TRUE
+FROM (VALUES
+    ('YOGUR-NAT-125',   'STOCKOUT_ALERT',  24, 24, 'L-YOG-2611', (CURRENT_DATE + 12)),
+    ('SNACK-FRUTSEC-50','MANUAL_ADDITION', 20, 20, 'SIN-LOTE',   NULL)
+) AS v(sku, reason, requested_qty, dispatched_qty, batch_code, expiration_date)
+INNER JOIN product_loading_orders o ON o.order_code = 'PLO-2026-0002'
+INNER JOIN vending_products p ON p.sku = v.sku
+WHERE NOT EXISTS (
+    SELECT 1 FROM product_loading_order_items i
+     WHERE i.order_id = o.id AND i.product_id = p.id
+);
+
+
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante técnico · 3 vinculaciones de cuadrante de carga (M31) ·
 --       5 saldos de stock de furgoneta · 1 configuración de ruta ·
@@ -1861,4 +2018,7 @@ ON CONFLICT (machine_id, slot_code) DO NOTHING;
 --       cinco categorías, y 55 carriles activos de planograma repartidos por las
 --       13 máquinas (con un carril agotado y otro bajo umbral para demostrar el
 --       semáforo determinista sin sembrar una avería).
+--       6 saldos de producto por lote en las furgonetas de reposición
+--       (Módulo 33) y 2 órdenes de carga —una liquidada al cierre y otra
+--       despachada con temperatura de cámara de 3,5 °C— con sus 5 líneas.
 -- =============================================================================

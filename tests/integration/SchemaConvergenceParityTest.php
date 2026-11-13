@@ -43,7 +43,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 43 tablas del contrato de correspondencia (§2.1, Módulos 14 a 32). */
+/** Las 46 tablas del contrato de correspondencia (§2.1, Módulos 14 a 33). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -71,6 +71,11 @@ const CONTRACT_TABLES = [
     // Módulo 32 · catálogo comercial y matriz de planograma por máquina.
     'vending_products',
     'machine_planogram_slots',
+    // Módulo 33 · stock de producto por lote en furgoneta, orden de carga y
+    // sus líneas con el cuadre de liquidación al cierre.
+    'restocker_van_product_stocks',
+    'product_loading_orders',
+    'product_loading_order_items',
 ];
 
 /** Adiciones declaradas del motor nuevo (§5). */
@@ -268,7 +273,7 @@ try {
 
     $baseOnlyTables = $readTables($pgPdo, $schema);
     $assert(
-        'El DDL base crea las 43 tablas del contrato y ninguna más',
+        'El DDL base crea las 46 tablas del contrato y ninguna más',
         $sameSet($baseOnlyTables, CONTRACT_TABLES),
         'tablas: ' . count($baseOnlyTables) . ' · ' . $listSample(array_merge(array_diff($baseOnlyTables, CONTRACT_TABLES), array_diff(CONTRACT_TABLES, $baseOnlyTables)))
     );
@@ -317,6 +322,7 @@ try {
             '026_tiered_sla_contracts.sql',
             '027_restocker_role_and_zone_assignments.sql',
             '028_product_catalog_and_planogram_slots.sql',
+            '029_product_loading_orders_and_cold_picking.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -324,73 +330,53 @@ try {
     $runner->assertConverged();
     $convergedTables = $readTables($pgPdo, $schema);
     $assert(
-        'Tras la migración, el inventario converge al del repositorio (43 tablas + libro A-5)',
+        'Tras la migración, el inventario converge al del repositorio (46 tablas + libro A-5)',
         $sameSet($convergedTables, array_merge(CONTRACT_TABLES, [ADDITION_LEDGER])),
         'tablas: ' . count($convergedTables)
     );
 
     $ledgerRows = $pgPdo->query('SELECT filename, checksum FROM ' . ADDITION_LEDGER . ' ORDER BY filename')->fetchAll();
+    $expectedLedgerFiles = [
+        '001_initial_baseline.sql',
+        '002_notification_center_outbox.sql',
+        '003_notification_webhook_url_check_repair.sql',
+        '004_telegram_technician_channel.sql',
+        '005_opportunistic_incident.sql',
+        '006_opportunistic_coherence_repair.sql',
+        '007_operational_zones.sql',
+        '008_zone_postal_code_release.sql',
+        '009_technician_van_stocks.sql',
+        '010_incident_service_sheets.sql',
+        '011_incident_satisfaction_surveys.sql',
+        '012_technician_absences_and_shifts.sql',
+        '013_shift_handover_notification.sql',
+        '014_technician_absence_exclusion.sql',
+        '015_technician_time_tracking.sql',
+        '016_van_restock_orders.sql',
+        '017_van_restock_reception_note.sql',
+        '018_spare_part_requests_pending_index.sql',
+        '019_van_restock_order_items_snapshots.sql',
+        '020_offline_pwa_sync.sql',
+        '021_root_cause_taxonomy.sql',
+        '022_incident_assignments_custody_chain.sql',
+        '023_workshop_repair_items.sql',
+        '024_machine_troubleshooting_guides.sql',
+        '025_sanitary_spoilage_records.sql',
+        '026_tiered_sla_contracts.sql',
+        '027_restocker_role_and_zone_assignments.sql',
+        '028_product_catalog_and_planogram_slots.sql',
+        '029_product_loading_orders_and_cold_picking.sql',
+    ];
+    $ledgerFiles = array_map(static fn (array $row): string => (string)$row['filename'], $ledgerRows);
+    $ledgerChecksumsOk = true;
+    foreach ($ledgerRows as $ledgerRow) {
+        $ledgerChecksumsOk = $ledgerChecksumsOk && strlen((string)$ledgerRow['checksum']) === 64;
+    }
     $assert(
-        'El libro registra las migraciones con su huella de 64 caracteres',
-        count($ledgerRows) === 28
-        && $ledgerRows[0]['filename'] === '001_initial_baseline.sql'
-        && strlen((string)$ledgerRows[0]['checksum']) === 64
-        && $ledgerRows[1]['filename'] === '002_notification_center_outbox.sql'
-        && strlen((string)$ledgerRows[1]['checksum']) === 64
-        && $ledgerRows[2]['filename'] === '003_notification_webhook_url_check_repair.sql'
-        && strlen((string)$ledgerRows[2]['checksum']) === 64
-        && $ledgerRows[3]['filename'] === '004_telegram_technician_channel.sql'
-        && strlen((string)$ledgerRows[3]['checksum']) === 64
-        && $ledgerRows[4]['filename'] === '005_opportunistic_incident.sql'
-        && strlen((string)$ledgerRows[4]['checksum']) === 64
-        && $ledgerRows[5]['filename'] === '006_opportunistic_coherence_repair.sql'
-        && strlen((string)$ledgerRows[5]['checksum']) === 64
-        && $ledgerRows[6]['filename'] === '007_operational_zones.sql'
-        && strlen((string)$ledgerRows[6]['checksum']) === 64
-        && $ledgerRows[7]['filename'] === '008_zone_postal_code_release.sql'
-        && strlen((string)$ledgerRows[7]['checksum']) === 64
-        && $ledgerRows[8]['filename'] === '009_technician_van_stocks.sql'
-        && strlen((string)$ledgerRows[8]['checksum']) === 64
-        && $ledgerRows[9]['filename'] === '010_incident_service_sheets.sql'
-        && strlen((string)$ledgerRows[9]['checksum']) === 64
-        && $ledgerRows[10]['filename'] === '011_incident_satisfaction_surveys.sql'
-        && strlen((string)$ledgerRows[10]['checksum']) === 64
-        && $ledgerRows[11]['filename'] === '012_technician_absences_and_shifts.sql'
-        && strlen((string)$ledgerRows[11]['checksum']) === 64
-        && $ledgerRows[12]['filename'] === '013_shift_handover_notification.sql'
-        && strlen((string)$ledgerRows[12]['checksum']) === 64
-        && $ledgerRows[13]['filename'] === '014_technician_absence_exclusion.sql'
-        && strlen((string)$ledgerRows[13]['checksum']) === 64
-        && $ledgerRows[14]['filename'] === '015_technician_time_tracking.sql'
-        && strlen((string)$ledgerRows[14]['checksum']) === 64
-        && $ledgerRows[15]['filename'] === '016_van_restock_orders.sql'
-        && strlen((string)$ledgerRows[15]['checksum']) === 64
-        && $ledgerRows[16]['filename'] === '017_van_restock_reception_note.sql'
-        && strlen((string)$ledgerRows[16]['checksum']) === 64
-        && $ledgerRows[17]['filename'] === '018_spare_part_requests_pending_index.sql'
-        && strlen((string)$ledgerRows[17]['checksum']) === 64
-        && $ledgerRows[18]['filename'] === '019_van_restock_order_items_snapshots.sql'
-        && strlen((string)$ledgerRows[18]['checksum']) === 64
-        && $ledgerRows[19]['filename'] === '020_offline_pwa_sync.sql'
-        && strlen((string)$ledgerRows[19]['checksum']) === 64
-        && $ledgerRows[20]['filename'] === '021_root_cause_taxonomy.sql'
-        && $ledgerRows[21]['filename'] === '022_incident_assignments_custody_chain.sql'
-        && strlen((string)$ledgerRows[21]['checksum']) === 64
-        && $ledgerRows[22]['filename'] === '023_workshop_repair_items.sql'
-        && strlen((string)$ledgerRows[22]['checksum']) === 64
-        && $ledgerRows[23]['filename'] === '024_machine_troubleshooting_guides.sql'
-        && strlen((string)$ledgerRows[23]['checksum']) === 64
-        && $ledgerRows[24]['filename'] === '025_sanitary_spoilage_records.sql'
-        && strlen((string)$ledgerRows[24]['checksum']) === 64
-        && $ledgerRows[25]['filename'] === '026_tiered_sla_contracts.sql'
-        && strlen((string)$ledgerRows[25]['checksum']) === 64
-        && $ledgerRows[26]['filename'] === '027_restocker_role_and_zone_assignments.sql'
-        && strlen((string)$ledgerRows[26]['checksum']) === 64
-        && $ledgerRows[27]['filename'] === '028_product_catalog_and_planogram_slots.sql'
-        && strlen((string)$ledgerRows[27]['checksum']) === 64
-        && strlen((string)$ledgerRows[20]['checksum']) === 64
+        'El libro registra las 29 migraciones, en orden, con su huella de 64 caracteres',
+        $ledgerFiles === $expectedLedgerFiles && $ledgerChecksumsOk,
+        'registradas: ' . count($ledgerRows)
     );
-
     $assert('Reejecutar el ejecutor no aplica nada (idempotente)', $runner->runAll() === []);
 
     // Prueba de mordida: sin DDL base, la guarda del baseline impide registrar convergencia.
@@ -412,15 +398,15 @@ try {
 
     $pgTables = $readTables($pgPdo, $schema);
     $assert(
-        'El motor único declara las 43 tablas canónicas del dominio',
+        'El motor único declara las 46 tablas canónicas del dominio',
         $sameSet(array_values(array_diff($pgTables, [ADDITION_LEDGER])), CONTRACT_TABLES),
         'tablas: ' . count($pgTables)
     );
 
     $pgColumns = $readColumnNames($pgPdo, $schema);
     $assert(
-        'Todas las 43 tablas tienen columnas declaradas en PostgreSQL',
-        count($pgColumns) >= 43
+        'Todas las 46 tablas tienen columnas declaradas en PostgreSQL',
+        count($pgColumns) >= 46
     );
     $assert(
         'incidents declara las 52 columnas del contrato (43 + 7 de taxonomía + 2 de SLA)',
@@ -504,8 +490,25 @@ try {
         && ($pgEnums['workshop_repair_items.restock_destination'] ?? []) === ['CENTRAL_WAREHOUSE', 'TECHNICIAN_VAN']
     );
     $assert(
-        'El esquema declara los 43 conjuntos ENUM nativos del dominio (37 tipos)',
-        count($pgEnums) === 43,
+        'El ciclo de carga de furgoneta declara sus cinco estados, sus dos modos de demanda y sus cuatro motivos de línea (Módulo 33)',
+        ($pgEnums['product_loading_orders.status'] ?? []) === [
+            'PENDING_PICKING',
+            'DISPATCHED',
+            'CONFIRMED_BY_RESTOCKER',
+            'RECONCILED_AT_CLOSE',
+            'CANCELLED',
+        ]
+        && ($pgEnums['product_loading_orders.demand_mode'] ?? []) === ['ALERTS_ONLY', 'ALL_GAPS']
+        && ($pgEnums['product_loading_order_items.reason'] ?? []) === [
+            'STOCKOUT_ALERT',
+            'LOW_STOCK_ALERT',
+            'ROUTE_GAP_FILL',
+            'MANUAL_ADDITION',
+        ]
+    );
+    $assert(
+        'El esquema declara los 46 conjuntos ENUM nativos del dominio (40 tipos)',
+        count($pgEnums) === 46,
         'conjuntos: ' . count($pgEnums)
     );
 
@@ -519,8 +522,8 @@ try {
     $enumTypesStmt->execute([':schema' => $schema]);
     $enumTypeCount = (int)$enumTypesStmt->fetchColumn();
     $assert(
-        'El esquema declara los 37 tipos ENUM nativos distintos del contrato',
-        $enumTypeCount === 37,
+        'El esquema declara los 40 tipos ENUM nativos distintos del contrato',
+        $enumTypeCount === 40,
         'tipos: ' . $enumTypeCount
     );
 
@@ -546,8 +549,8 @@ try {
     $triggerStmt->execute([':schema' => $schema]);
     $pgTriggerTables = array_map(static fn (array $row): string => (string)$row['table_name'], $triggerStmt->fetchAll());
     $assert(
-        'A-4: las 43 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
-        count(array_unique($pgTriggerTables)) === 43 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
+        'A-4: las 46 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
+        count(array_unique($pgTriggerTables)) === 46 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
         'tablas con disparador: ' . count(array_unique($pgTriggerTables))
     );
 

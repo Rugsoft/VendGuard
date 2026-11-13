@@ -34,7 +34,7 @@ flowchart LR
 
 ## Detalle de Tareas
 
-- [ ] **T-PLD-01 · Crear migración `029_product_loading_orders_and_cold_picking.sql`, converger `supabase_init.sql` y sembrar lotes y órdenes en `supabase_seeds.sql` y `SeedRunner`**
+- [x] **T-PLD-01 · Crear migración `029_product_loading_orders_and_cold_picking.sql`, converger `supabase_init.sql` y sembrar lotes y órdenes en `supabase_seeds.sql` y `SeedRunner`**
   - **Requisitos:** `RF-01.1`, `RF-03.1`, `RF-03.3`, `D2`, `D3`, `C1`, `QA 4`, `Art. II`, `Art. III.1`.
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
 
