@@ -42,7 +42,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-03.1`, `RNF-01`, `RNF-02`, `QA 4`, `Art. II`, `Art. III.1`.
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresProductLoadingSchemaTest.php`
 
-- [ ] **T-PLD-03 · Crear enums (`ProductLoadingOrderStatus`, `ProductLoadingDemandMode`, `ProductLoadingItemReason`, `BatchExpiryStatus`) y entidades (`RestockerVanProductStock`, `ProductLoadingOrder`, `ProductLoadingOrderItem`)**
+- [x] **T-PLD-03 · Crear enums (`ProductLoadingOrderStatus`, `ProductLoadingDemandMode`, `ProductLoadingItemReason`, `BatchExpiryStatus`) y entidades (`RestockerVanProductStock`, `ProductLoadingOrder`, `ProductLoadingOrderItem`)**
   - **Requisitos:** `RF-01.1`, `RF-01.2`, `RF-03.1`, `D2`, `D3`, `D4`, `C1`.
   - **Verificación:** `php tests/unit/ProductLoadingDomainModelsTest.php`
 
