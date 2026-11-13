@@ -707,12 +707,17 @@ final class ProductLoadingOrderService
                 $stocks[$item->getProductId()] = $stock;
             }
 
+            $notes = null;
+            if (isset($payload['reconciliation_notes']) && is_string($payload['reconciliation_notes'])) {
+                $notes = $payload['reconciliation_notes'];
+            } elseif (isset($payload['notes']) && is_string($payload['notes'])) {
+                $notes = $payload['notes'];
+            }
+
             $reconciliation = ProductLoadingValidator::assertReconciliation(
                 $order,
                 $entries,
-                isset($payload['reconciliation_notes']) && is_string($payload['reconciliation_notes'])
-                    ? $payload['reconciliation_notes']
-                    : null
+                $notes
             );
 
             $now = $this->now();

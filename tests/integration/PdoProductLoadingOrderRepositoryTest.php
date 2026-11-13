@@ -69,7 +69,12 @@ $restockers = $pdo->query("
              AND a.starts_at < CURRENT_DATE + 1
              AND a.ends_at >= CURRENT_DATE
       )
-    ORDER BY u.id ASC
+    ORDER BY (
+        SELECT COUNT(*)
+        FROM restocker_zone_assignments rza
+        INNER JOIN operational_zones oz ON oz.id = rza.zone_id
+        WHERE rza.restocker_id = u.id AND rza.removed_at IS NULL AND oz.is_active = TRUE
+    ) DESC, u.id ASC
     LIMIT 1
 ")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -470,7 +475,20 @@ try {
     ")->fetch(PDO::FETCH_ASSOC);
 
     if ($zone === false) {
-        throw new RuntimeException('El reponedor de certificación no tiene una zona viva.');
+        $fallbackZone = $pdo->query("SELECT id, code, name FROM operational_zones WHERE is_active = TRUE ORDER BY id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        if ($fallbackZone !== false) {
+            $pdo->prepare("
+                INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
+                VALUES (:restocker_id, :zone_id, 'PRIMARY', TRUE)
+                ON CONFLICT (restocker_id, zone_id) DO UPDATE SET removed_at = NULL, is_primary = TRUE, role_in_zone = 'PRIMARY'
+            ")->execute([
+                ':restocker_id' => $restockerA,
+                ':zone_id' => (int)$fallbackZone['id'],
+            ]);
+            $zone = $fallbackZone;
+        } else {
+            throw new RuntimeException('El reponedor de certificación no tiene una zona viva y no hay zonas operativas.');
+        }
     }
 
     $locationId = (int)$pdo->query("
