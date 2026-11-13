@@ -419,6 +419,156 @@ final class ProductLoadingOrder implements JsonSerializable
     }
 
     /**
+     * Reconfigura modo de demanda, colchón y notas durante la preparación.
+     */
+    public function withPlanning(
+        ProductLoadingDemandMode $demandMode,
+        int $safetyBufferPct,
+        ?string $notes,
+        ?string $updatedAt = null
+    ): self {
+        return new self(
+            $this->id,
+            $this->orderCode,
+            $this->restockerId,
+            $this->createdBy,
+            $this->status,
+            $demandMode,
+            $safetyBufferPct,
+            $this->coldChamberExitTempCelsius,
+            $notes,
+            $this->cancelReason,
+            $this->reconciliationNotes,
+            $this->dispatchedBy,
+            $this->reconciledBy,
+            $this->createdAt,
+            $this->dispatchedAt,
+            $this->confirmedAt,
+            $this->reconciledAt,
+            $this->cancelledAt,
+            $updatedAt ?? $this->updatedAt
+        );
+    }
+
+    /**
+     * Transición `PENDING_PICKING` → `DISPATCHED` (RF-03.3, D2).
+     */
+    public function withDispatchData(
+        ?float $coldChamberExitTempCelsius,
+        int $dispatchedBy,
+        string $dispatchedAt
+    ): self {
+        return new self(
+            $this->id,
+            $this->orderCode,
+            $this->restockerId,
+            $this->createdBy,
+            ProductLoadingOrderStatus::DISPATCHED,
+            $this->demandMode,
+            $this->safetyBufferPct,
+            $coldChamberExitTempCelsius,
+            $this->notes,
+            null,
+            null,
+            $dispatchedBy,
+            null,
+            $this->createdAt,
+            $dispatchedAt,
+            null,
+            null,
+            null,
+            $dispatchedAt
+        );
+    }
+
+    /**
+     * Transición `DISPATCHED` → `CONFIRMED_BY_RESTOCKER` (RF-04.1, D3).
+     */
+    public function withConfirmation(string $confirmedAt): self
+    {
+        return new self(
+            $this->id,
+            $this->orderCode,
+            $this->restockerId,
+            $this->createdBy,
+            ProductLoadingOrderStatus::CONFIRMED_BY_RESTOCKER,
+            $this->demandMode,
+            $this->safetyBufferPct,
+            $this->coldChamberExitTempCelsius,
+            $this->notes,
+            null,
+            null,
+            $this->dispatchedBy,
+            null,
+            $this->createdAt,
+            $this->dispatchedAt,
+            $confirmedAt,
+            null,
+            null,
+            $confirmedAt
+        );
+    }
+
+    /**
+     * Transición `CONFIRMED_BY_RESTOCKER` → `RECONCILED_AT_CLOSE` (RF-04.2, D3).
+     */
+    public function withReconciliationData(
+        int $reconciledBy,
+        string $reconciledAt,
+        ?string $reconciliationNotes
+    ): self {
+        return new self(
+            $this->id,
+            $this->orderCode,
+            $this->restockerId,
+            $this->createdBy,
+            ProductLoadingOrderStatus::RECONCILED_AT_CLOSE,
+            $this->demandMode,
+            $this->safetyBufferPct,
+            $this->coldChamberExitTempCelsius,
+            $this->notes,
+            null,
+            $reconciliationNotes,
+            $this->dispatchedBy,
+            $reconciledBy,
+            $this->createdAt,
+            $this->dispatchedAt,
+            $this->confirmedAt,
+            $reconciledAt,
+            null,
+            $reconciledAt
+        );
+    }
+
+    /**
+     * Transición a `CANCELLED` con motivo justificado (RF-03.4, Art. V.1).
+     */
+    public function withCancellation(string $cancelReason, string $cancelledAt): self
+    {
+        return new self(
+            $this->id,
+            $this->orderCode,
+            $this->restockerId,
+            $this->createdBy,
+            ProductLoadingOrderStatus::CANCELLED,
+            $this->demandMode,
+            $this->safetyBufferPct,
+            $this->coldChamberExitTempCelsius,
+            $this->notes,
+            $cancelReason,
+            null,
+            $this->dispatchedBy,
+            null,
+            $this->createdAt,
+            $this->dispatchedAt,
+            $this->confirmedAt,
+            null,
+            $cancelledAt,
+            $cancelledAt
+        );
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(): array

@@ -62,7 +62,7 @@ flowchart LR
   - **Requisitos:** `RF-01.2`, `RF-01.3`, `RF-05.2`, `D4`, `QA 2`, `QA 3`, `Art. III.3`, `Art. V.1`, `Art. V.4`.
   - **Verificación:** `php tests/unit/RestockerVanStockServiceTest.php`
 
-- [ ] **T-PLD-08 · Implementar `ProductLoadingOrderService` (propuesta `D1`/`QA 1`, emisión individual y lote `C2`, edición `C1`, despacho frío `D2`/`QA 2`/`QA 3`, recepción 1-Tap, liquidación `D3`/`QA 4`, cancelación y Hoja A4 `D4`)**
+- [x] **T-PLD-08 · Implementar `ProductLoadingOrderService` (propuesta `D1`/`QA 1`, emisión individual y lote `C2`, edición `C1`, despacho frío `D2`/`QA 2`/`QA 3`, recepción 1-Tap, liquidación `D3`/`QA 4`, cancelación y Hoja A4 `D4`)**
   - **Requisitos:** `RF-02` a `RF-04`, `D1`–`D4`, `C1`–`C4`, `QA 1`–`QA 4`, `Art. II`, `Art. III.3`, `Art. V.1`, `Art. V.4`.
   - **Verificación:** `php tests/unit/ProductLoadingOrderServiceTest.php`
 

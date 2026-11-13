@@ -32,10 +32,16 @@ final class ProductLoadingValidationException extends DomainException
     public const BATCH_EXPIRATION_MISMATCH = 'BATCH_EXPIRATION_MISMATCH';
     public const INVALID_ORDER_STATE_TRANSITION = 'INVALID_ORDER_STATE_TRANSITION';
     public const ORDER_CANCELLATION_NOT_ALLOWED = 'ORDER_CANCELLATION_NOT_ALLOWED';
+    public const ACTIVE_LOADING_ORDER_EXISTS = 'ACTIVE_LOADING_ORDER_EXISTS';
+
+    // ── 404 / 403 ──────────────────────────────────────────────────────────
+    public const LOADING_ORDER_NOT_FOUND = 'LOADING_ORDER_NOT_FOUND';
+    public const FORBIDDEN_LOADING_ORDER_ACCESS = 'FORBIDDEN_LOADING_ORDER_ACCESS';
 
     // ── 422 ────────────────────────────────────────────────────────────────
     public const EMPTY_LOADING_ORDER_ITEMS = 'EMPTY_LOADING_ORDER_ITEMS';
     public const INVALID_RESTOCKER_RECIPIENT = 'INVALID_RESTOCKER_RECIPIENT';
+    public const PRODUCT_INACTIVE = 'PRODUCT_INACTIVE';
     public const INVALID_LOADING_QUANTITY = 'INVALID_LOADING_QUANTITY';
     public const COLD_CHAMBER_TEMP_EXCEEDED = 'COLD_CHAMBER_TEMP_EXCEEDED';
     public const EXPIRED_OR_INVALID_BATCH = 'EXPIRED_OR_INVALID_BATCH';
@@ -130,6 +136,58 @@ final class ProductLoadingValidationException extends DomainException
             409,
             'status',
             ['current_status' => $currentStatus, 'action' => $action]
+        );
+    }
+
+    public static function activeLoadingOrderExists(int $restockerId, string $orderCode): self
+    {
+        return new self(
+            self::ACTIVE_LOADING_ORDER_EXISTS,
+            sprintf(
+                'El reponedor %d ya tiene la orden activa %s; debe cerrarla antes de emitir otra (D3).',
+                $restockerId,
+                $orderCode
+            ),
+            409,
+            'restocker_id',
+            ['restocker_id' => $restockerId, 'order_code' => $orderCode]
+        );
+    }
+
+    public static function loadingOrderNotFound(int $orderId): self
+    {
+        return new self(
+            self::LOADING_ORDER_NOT_FOUND,
+            sprintf('La orden de carga %d no existe.', $orderId),
+            404,
+            'id',
+            ['order_id' => $orderId]
+        );
+    }
+
+    public static function forbiddenLoadingOrderAccess(int $orderId, int $restockerId): self
+    {
+        return new self(
+            self::FORBIDDEN_LOADING_ORDER_ACCESS,
+            sprintf(
+                'La orden %d no pertenece al reponedor %d y no puede operarla (aislamiento horizontal).',
+                $orderId,
+                $restockerId
+            ),
+            403,
+            'restocker_id',
+            ['order_id' => $orderId, 'restocker_id' => $restockerId]
+        );
+    }
+
+    public static function productInactive(int $productId, string $sku): self
+    {
+        return new self(
+            self::PRODUCT_INACTIVE,
+            sprintf('El producto %s (%d) está inactivo y no puede cargarse (C3).', $sku, $productId),
+            422,
+            'product_id',
+            ['product_id' => $productId, 'sku' => $sku]
         );
     }
 
