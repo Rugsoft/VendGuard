@@ -8,20 +8,20 @@
 **Rama:** `feat/product-loading-cold-picking` · HEAD `c79c6da`  
 **Alcance:** contraste requisito por requisito contra código y ejecución directa de suites; no se modificó código de producción.
 
-**Actualización 2026-11-13:** B-01 cerrada tras implementar la propuesta y emisión individual del reponedor ausente, la alerta C2 en consola y su regresión de servicio, repositorio, API y frontend. B-02 cerrada al certificar las omisiones del lote por orden activa y demanda cero. B-03 cerrada al certificar la recepción y la liquidación con un producto desactivado en tránsito. B-04 cerrada al certificar la cancelación justificada desde `DISPATCHED`. Las demás brechas siguen abiertas.
+**Actualización 2026-11-13:** B-01 cerrada tras implementar la propuesta y emisión individual del reponedor ausente, la alerta C2 en consola y su regresión de servicio, repositorio, API y frontend. B-02 cerrada al certificar las omisiones del lote por orden activa y demanda cero. B-03 cerrada al certificar la recepción y la liquidación con un producto desactivado en tránsito. B-04 cerrada al certificar la cancelación justificada desde `DISPATCHED`. B-05 cerrada al ejercer la ruta HTTP de liquidación de Coordinación. Las demás brechas siguen abiertas.
 
 ---
 
 ## Resultado general
 
-La implementación está muy avanzada. La batería hermética **no observó ningún test en rojo** y el canal `new_engine` cerró completo en esta corrida:
+La implementación está muy avanzada. La batería hermética **no observó ningún test en rojo**; el canal `new_engine` mantuvo en rojo únicamente la sonda de latencia remota, ajena a B-05:
 
 - **23 suites ejecutadas directamente**, todas con `exit=0`.
 - Batería global: **427/427 suites · 16.051 aserciones · 0 fallos**.
-- Canal `new_engine`: **56 suites · 1.848 aserciones · 56/56 en verde · 0 fallos**.
+- Canal `new_engine`: **56 suites · 1.849 aserciones · 55/56 en verde**. La sonda `PoolerLatencyMeasurementTest` falla por latencia remota (251,4 ms frente al presupuesto de 250 ms en «crear»), un límite de red ajeno a B-05; el resto de suites del canal pasa.
 - Tareas del módulo: **13/13 completadas**, 0 pendientes.
 
-Con B-01, B-02, B-03 y B-04 cerradas, **quedan cuatro brechas abiertas**: B-05 a B-07 son brechas de certificación y B-08 es una desviación de `RNF-03`. La Spec 33 sigue sin poder certificarse al 100 % hasta cerrarlas.
+Con B-01, B-02, B-03, B-04 y B-05 cerradas, **quedan tres brechas abiertas**: B-06 y B-07 son brechas de certificación y B-08 es una desviación de `RNF-03`. La Spec 33 sigue sin poder certificarse al 100 % hasta cerrarlas.
 
 | ID | Brecha | Tipo | Severidad | Requisito afectado | Estado |
 |---|---|---|---|---|---|
@@ -29,7 +29,7 @@ Con B-01, B-02, B-03 y B-04 cerradas, **quedan cuatro brechas abiertas**: B-05 a
 | **B-02** | Los omitidos del lote por orden activa o demanda cero no están probados | Cobertura | Media | `RF-02.3`, `C2` | ✅ **Cerrada** (2026-11-13) |
 | **B-03** | No se prueba la recepción/liquidación con producto desactivado en tránsito | Cobertura | Media | `C3`, `RF-04.1`, `RF-04.2` | ✅ **Cerrada** (2026-11-13) |
 | **B-04** | No se prueba la cancelación desde `DISPATCHED` | Cobertura | Media | `RF-03.4` | ✅ **Cerrada** (2026-11-13) |
-| **B-05** | La ruta HTTP de liquidación de Coordinación no se ejerce | Cobertura | Media | `RF-04.2`, `RF-05.1` | Abierta |
+| **B-05** | La ruta HTTP de liquidación de Coordinación no se ejerce | Cobertura | Media | `RF-04.2`, `RF-05.1` | ✅ **Cerrada** (2026-11-13) |
 | **B-06** | No se prueba `BATCH_EXPIRATION_MISMATCH` al confirmar la recepción | Cobertura | Media | `QA 3`, `RF-04.1` | Abierta |
 | **B-07** | El doble clic no se prueba con concurrencia real | Cobertura | Media | §6.6, `D3`, `RF-04.1`, `RF-04.2` | Abierta |
 | **B-08** | Los botones móviles del Módulo 33 declaran geometría en línea y quedan fuera del guard de Coordinación | Diseño | Baja/Media | `RNF-03`, `docs/design.md` | Abierta |
@@ -110,20 +110,19 @@ Con B-01, B-02, B-03 y B-04 cerradas, **quedan cuatro brechas abiertas**: B-05 a
 
 ---
 
-## B-05 · La ruta HTTP de liquidación de Coordinación no se ejerce
+## B-05 · La ruta HTTP de liquidación de Coordinación no se ejerce · ✅ CERRADA
 
 **Requisito.** `RF-04.2` permite liquidar la orden tanto al reponedor desde el móvil como a Coordinación.
 
-**Evidencia.**
+**Resolución implementada.**
 
-- `CoordinatorProductLoadingController::reconcileOrder()` y la ruta `POST /api/coordinator/product-loading-orders/{id}/reconcile` existen.
-- `ProductLoadingOrderServiceTest` **7.x** llama al servicio con actor `COORDINATOR`.
-- `ProductLoadingColdPickingApiTest` **5.4** liquida por la ruta móvil `/api/restocker/product-loading-orders/{id}/reconcile`.
-- No hay llamada HTTP a la ruta de Coordinación en ninguna suite.
+- `ProductLoadingColdPickingApiTest` **7.1** crea una orden para el reponedor, la despacha, la confirma por la ruta móvil y la liquida por `POST /api/coordinator/product-loading-orders/{id}/reconcile`.
+- La aserción comprueba `200`, estado `RECONCILED_AT_CLOSE`, `reconciled_by` con el usuario de Coordinación, saldo del lote en el retorno contado y ausencia de `unit_cost_eur` en la respuesta.
+- No se tocó código de producción: la ruta ya estaba registrada con el middleware de Coordinación y delegaba en `reconcileOrder()`.
 
-**Impacto.** La lógica de servicio está cubierta con actor de Coordinación, pero el cableado HTTP, el RBAC y la respuesta de la ruta de Coordinación no se certifican de extremo a extremo.
+**Verificación.** `ProductLoadingColdPickingApiTest` **34/34**, `exit=0`; el caso 5.4 conserva la liquidación móvil y el 7.1 certifica la ruta de Coordinación.
 
-**Cierre propuesto.** Añadir una prueba API que cree, despache y confirme una orden y la liquide por el endpoint de Coordinación, comprobando estado, stock y ausencia de costes.
+**Estado.** ✅ **CERRADA** el 2026-11-13. La ruta HTTP de Coordinación queda certificada de extremo a extremo, con actor, estado, stock y opacidad de costes.
 
 ---
 
@@ -185,23 +184,24 @@ Con B-01, B-02, B-03 y B-04 cerradas, **quedan cuatro brechas abiertas**: B-05 a
 - **B-02 está cerrada**: el lote certifica `SKIP_ACTIVE_ORDER`, `SKIP_NO_DEMAND` y `SKIP_ABSENT` con sus causas exactas.
 - **B-03 está cerrada**: la recepción y la liquidación toleran un producto desactivado después del despacho, con estados y saldos verificados.
 - **B-04 está cerrada**: la cancelación desde `DISPATCHED` deja `CANCELLED`, audita el motivo y no altera el stock, tanto en servicio como en API.
-- **B-05 a B-07 son brechas de certificación** sobre ramas exigidas por el contrato.
+- **B-05 está cerrada**: la ruta de liquidación de Coordinación liquida de extremo a extremo, sella el actor y deja el stock contado sin costes.
+- **B-06 y B-07 son brechas de certificación** sobre ramas exigidas por el contrato.
 - **B-08 es una desviación de diseño** respecto a `docs/design.md`.
 
-La matriz de trazabilidad se actualizó para `C2`, `C3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1` con las pruebas nuevas. Las brechas B-05 a B-08 siguen requiriendo corrección o certificación antes de declarar la Spec 33 completa.
+La matriz de trazabilidad se actualizó para `C2`, `C3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1` con las pruebas nuevas. Las brechas B-06 a B-08 siguen requiriendo corrección o certificación antes de declarar la Spec 33 completa.
 
 ---
 
 ## Referencias de evidencia
 
 - [`specs/33-product-loading-cold-picking/tasks.md`](../specs/33-product-loading-cold-picking/tasks.md) · 13/13 tareas.
-- [`specs/33-product-loading-cold-picking/traceability-matrix.md`](../specs/33-product-loading-cold-picking/traceability-matrix.md) · matriz actualizada para `C2`, `C3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1`; B-05 a B-08 siguen documentadas como brechas.
+- [`specs/33-product-loading-cold-picking/traceability-matrix.md`](../specs/33-product-loading-cold-picking/traceability-matrix.md) · matriz actualizada para `C2`, `C3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1`; B-06 a B-08 siguen documentadas como brechas.
 - `src/Application/Service/ProductLoadingOrderService.php` · propuesta, emisión individual/lote, confirmación y liquidación.
 - `src/Infrastructure/Repository/PdoProductLoadingOrderRepository.php` · `FOR UPDATE` y consultas de propuesta.
 - `public/assets/js/components/CoordinatorProductLoadingTab.js` · consola de Coordinación.
 - `public/assets/js/components/RestockerRouteView.js` · móvil del reponedor.
 - `tests/unit/ProductLoadingOrderServiceTest.php` · casos 1.5, 1.5b, 2.5, 2.6, 2.7, 5.3, 6.4, 7.x, 9.3–9.5, 10.1–10.2 y 11.1.
 - `tests/integration/PdoProductLoadingOrderRepositoryTest.php` · caso 6.8 (ausencia con zonas y demanda conservadas).
-- `tests/integration/ProductLoadingColdPickingApiTest.php` · flujo HTTP de propuesta y emisión individual del ausente (3.1b/3.1c), flujo móvil y cancelación desde `DISPATCHED` (6.4–6.5).
+- `tests/integration/ProductLoadingColdPickingApiTest.php` · flujo HTTP de propuesta y emisión individual del ausente (3.1b/3.1c), flujo móvil, cancelación desde `DISPATCHED` (6.4–6.5) y liquidación de Coordinación (7.1).
 - `tests/frontend/coordinator_product_loading_tab.test.mjs` · alerta C2 y emisión desde la propuesta del ausente (2.5b/2.5c).
 - `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` · alcance real del guard de botones.

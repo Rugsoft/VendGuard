@@ -593,6 +593,63 @@ try {
             && $stockAfterDispatchedCancel === $stockBeforeDispatchedCancel,
         $errorCode($cancelDispatched)
     );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 7. Liquidación desde Coordinación
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 7. Liquidación desde Coordinación ---\n";
+
+    $coordinatorCreate = $call('POST', '/api/coordinator/product-loading-orders', [
+        'restocker_id' => $ownerId,
+        'items' => [[
+            'product_id' => $ambientProductId,
+            'reason' => 'ROUTE_GAP_FILL',
+            'requested_qty' => 2,
+        ]],
+    ], $coordinatorToken);
+    $coordinatorOrderId = (int)($data($coordinatorCreate)['order']['id'] ?? 0);
+    $coordinatorDispatch = $call(
+        'POST',
+        '/api/coordinator/product-loading-orders/' . $coordinatorOrderId . '/dispatch',
+        ['items' => [['product_id' => $ambientProductId, 'dispatched_qty' => 2]]],
+        $coordinatorToken
+    );
+    $coordinatorConfirm = $call(
+        'POST',
+        '/api/restocker/product-loading-orders/' . $coordinatorOrderId . '/confirm',
+        [],
+        $ownerToken
+    );
+    $coordinatorReconcile = $call(
+        'POST',
+        '/api/coordinator/product-loading-orders/' . $coordinatorOrderId . '/reconcile',
+        ['items' => [[
+            'product_id' => $ambientProductId,
+            'restocked_in_machines_qty' => 1,
+            'withdrawn_spoilage_qty' => 0,
+            'counted_return_qty' => 1,
+        ]]],
+        $coordinatorToken
+    );
+    $coordinatorReconciled = $data($coordinatorReconcile);
+    $coordinatorStockRows = $data($call('GET', '/api/restocker/van-stocks', [], $ownerToken))['stocks'] ?? [];
+    $coordinatorAmbientStock = array_values(array_filter(
+        $coordinatorStockRows,
+        static fn (array $row): bool => (int)($row['product_id'] ?? 0) === $ambientProductId
+    ))[0] ?? [];
+    $assert(
+        '7.1 La ruta de Coordinación liquida, sella el actor y deja el stock contado sin costes',
+        $coordinatorCreate->getStatusCode() === 201
+            && $coordinatorOrderId > 0
+            && $coordinatorDispatch->getStatusCode() === 200
+            && $coordinatorConfirm->getStatusCode() === 200
+            && $coordinatorReconcile->getStatusCode() === 200
+            && ($coordinatorReconciled['order']['status'] ?? '') === 'RECONCILED_AT_CLOSE'
+            && (int)($coordinatorReconciled['order']['reconciled_by'] ?? 0) === $coordinatorId
+            && (int)($coordinatorAmbientStock['quantity_available'] ?? -1) === 1
+            && !in_array('unit_cost_eur', $collectKeys($coordinatorReconciled), true),
+        $errorCode($coordinatorReconcile)
+    );
 } catch (Throwable $exception) {
     echo "\n[FALLO INESPERADO] " . get_class($exception) . ': ' . $exception->getMessage() . "\n";
     echo $exception->getTraceAsString() . "\n";
