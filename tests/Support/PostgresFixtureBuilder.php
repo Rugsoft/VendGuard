@@ -130,6 +130,29 @@ final class PostgresFixtureBuilder
             'evidence_photo_url', 'sanitary_notes', 'loss_adjustment_reason',
             'certificate_code', 'created_at',
         ],
+        // Orden de carga del Módulo 33: `status`, `demand_mode`, la temperatura de
+        // salida de cámara y los campos de cancelación y liquidación pertenecen a
+        // ramas de `CHECK` o al cerrojo sanitario. El `UPDATE` genérico certifica
+        // el CRUD sobre `notes`, que no participa en ninguna regla de estado.
+        'product_loading_orders' => [
+            'order_code', 'status', 'demand_mode', 'cold_chamber_exit_temp_celsius',
+            'cancel_reason', 'cancelled_at', 'reconciliation_notes', 'reconciled_at',
+            'reconciled_by', 'dispatched_at', 'dispatched_by', 'confirmed_at',
+        ],
+        // La línea del Módulo 33 declara el cuadre como identidad aritmética
+        // (`chk_product_loading_order_items_reconcile_bounds`): tocar una sola de
+        // sus columnas dejaría la fila en una rama imposible. La modificación se
+        // certifica sobre `requested_qty`, acotada a 1..99999.
+        'product_loading_order_items' => [
+            'reason', 'batch_code', 'expiration_date', 'dispatched_qty',
+            'van_stock_before_reconcile', 'restocked_in_machines_qty',
+            'withdrawn_spoilage_qty', 'expected_return_qty', 'counted_return_qty',
+            'discrepancy_qty', 'is_active',
+        ],
+        // Saldo por lote del Módulo 33: el lote y su caducidad los blinda el
+        // cerrojo sanitario (Art. II) y son la identidad del saldo. El `UPDATE`
+        // genérico certifica el CRUD sobre `quantity_available`.
+        'restocker_van_product_stocks' => ['batch_code', 'expiration_date'],
     ];
 
     // ─────────────────────────────────────────────────────────────────────
@@ -790,6 +813,11 @@ final class PostgresFixtureBuilder
             // tipología que admite todas las categorías del catálogo y permite
             // que el carril mínimo del Módulo 32 se siembre sin convertir la
             // matriz `MachineType × ProductCategory` en el objeto de la prueba.
+            // La orden de carga del Módulo 33 exige el formato `PLO-AAAA-NNNN`: el
+            // texto sintético genérico lo violaría y el alta mínima mediría un
+            // rechazo legítimo del motor en lugar del CRUD.
+            $table === 'product_loading_orders' && $column === 'order_code'
+                => $variant === 'update' ? 'PLO-2026-9002' : 'PLO-2026-9001',
             $table === 'machines' && $column === 'machine_type' => 'COMBO',
             $table === 'incidents' && $column === 'sla_target_minutes'
                 => $variant === 'update' ? 720 : 1440,

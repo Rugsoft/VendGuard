@@ -11,7 +11,7 @@ declare(strict_types=1);
  * certificación. Es la sustitución del nombre engañoso `PostgresParityTest`: aquí **no** se
  * compara con el motor local —eso es la correspondencia declarada de T-HYBRID-24, que exige los
  * dos motores a la vez— sino que se demuestra que el motor nuevo **hace** las cuatro operaciones
- * sobre las 43 tablas del contrato.
+ * sobre las 46 tablas del contrato.
  *
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
@@ -19,7 +19,7 @@ declare(strict_types=1);
  *      DDL base y la migración del motor aplicada por el ejecutor canónico. Si el DDL dejara de
  *      compilar o la migración dejara de aplicar, no habría dónde certificar nada.
  *
- *   2. **Alta mínima en las 43 tablas respetando el grafo de claves foráneas.** La fixture no se
+ *   2. **Alta mínima en las 46 tablas respetando el grafo de claves foráneas.** La fixture no se
  *      escribe a mano tabla por tabla: se deriva del catálogo vivo (`information_schema` y
  *      `pg_constraint`), de modo que una columna obligatoria nueva entra sola y una referencia
  *      nueva reordena el alta. Un ciclo en el grafo, o un tipo que el arnés no sepa sintetizar,
@@ -60,7 +60,7 @@ use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 43 tablas del contrato de correspondencia (§2.1, Módulos 14 a 32). */
+/** Las 46 tablas del contrato de correspondencia (§2.1, Módulos 14 a 33). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -87,6 +87,8 @@ const CONTRACT_TABLES = [
     'restocker_zone_assignments',
     // Módulo 32 · catálogo comercial y matriz de planograma por máquina.
     'vending_products', 'machine_planogram_slots',
+    // Módulo 33 · stock por lote en furgoneta, orden de carga y sus líneas.
+    'restocker_van_product_stocks', 'product_loading_orders', 'product_loading_order_items',
 ];
 
 /**

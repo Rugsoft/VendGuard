@@ -38,7 +38,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-03.1`, `RF-03.3`, `D2`, `D3`, `C1`, `QA 4`, `Art. II`, `Art. III.1`.
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
 
-- [ ] **T-PLD-02 · Actualizar contratos de esquema (46 tablas, 40 enums), `PostgresFixtureBuilder`, `TestDataCleaner` y crear `PostgresProductLoadingSchemaTest.php`**
+- [x] **T-PLD-02 · Actualizar contratos de esquema (46 tablas, 40 enums), `PostgresFixtureBuilder`, `TestDataCleaner` y crear `PostgresProductLoadingSchemaTest.php`**
   - **Requisitos:** `RF-01.1`, `RF-03.1`, `RNF-01`, `RNF-02`, `QA 4`, `Art. II`, `Art. III.1`.
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresProductLoadingSchemaTest.php`
 
