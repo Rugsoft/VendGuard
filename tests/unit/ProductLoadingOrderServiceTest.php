@@ -599,6 +599,13 @@ final class FakeVendingProductRepositoryForLoadingServiceTest implements Vending
         throw new RuntimeException('No usado.');
     }
 
+    public function deactivate(int $id): void
+    {
+        if (isset($this->products[$id])) {
+            $this->products[$id] = $this->products[$id]->withStatus(false);
+        }
+    }
+
     public function findById(int $id): ?VendingProduct
     {
         return $this->products[$id] ?? null;
@@ -849,6 +856,7 @@ function makeProductLoadingWorld(array $extraUsers = []): array
     $stocks->seed(7, 102, 'SIN-LOTE', null, 3);
     $stocks->seed(7, 101, 'LOTE-T8-OLD', $date(-1), 4);
 
+    $catalog = new FakeVendingProductRepositoryForLoadingServiceTest($products);
     $audit = new FakeAuditLogRepositoryForLoadingServiceTest();
     $codes = ['PLO-2026-9001', 'PLO-2026-9002', 'PLO-2026-9003', 'PLO-2026-9004', 'PLO-2026-9005'];
     $generator = static function () use (&$codes): string {
@@ -858,7 +866,7 @@ function makeProductLoadingWorld(array $extraUsers = []): array
     $service = new ProductLoadingOrderService(
         $orders,
         $stocks,
-        new FakeVendingProductRepositoryForLoadingServiceTest($products),
+        $catalog,
         new FakeUserRepositoryForLoadingServiceTest($users),
         new AuditLogger($audit),
         null,
@@ -869,6 +877,7 @@ function makeProductLoadingWorld(array $extraUsers = []): array
         'service' => $service,
         'orders' => $orders,
         'stocks' => $stocks,
+        'catalog' => $catalog,
         'audit' => $audit,
         'products' => $products,
         'actor' => ['id' => 3, 'role' => 'COORDINATOR', 'name' => 'Coordinación'],
@@ -1458,6 +1467,51 @@ $assertValidation(
     static fn () => $cancelService->cancelOrder($closedId, 'Intento de cancelar una orden ya recepcionada', $cancelWorld['actor']),
     ProductLoadingValidationException::ORDER_CANCELLATION_NOT_ALLOWED,
     409
+);
+
+// =====================================================================
+// 10. Producto desactivado en tránsito
+// =====================================================================
+echo "\n--- 10. Producto desactivado en tránsito ---\n";
+
+$inactiveWorld = makeProductLoadingWorld();
+$inactiveService = $inactiveWorld['service'];
+$inactiveDate = $inactiveWorld['date'];
+$transitOrder = $inactiveService->createOrder(7, ['items' => $activeProducts($inactiveWorld)], $inactiveWorld['actor']);
+$transitId = (int)$transitOrder['order']['id'];
+$inactiveService->dispatchOrder($transitId, [
+    'cold_chamber_exit_temp_celsius' => 3.0,
+    'items' => [
+        ['product_id' => 101, 'dispatched_qty' => 6, 'batch_code' => 'LOTE-T8-A', 'expiration_date' => $inactiveDate(2)],
+        ['product_id' => 102, 'dispatched_qty' => 4],
+    ],
+], $inactiveWorld['actor']);
+$inactiveWorld['catalog']->deactivate(101);
+$receivedWhileInactive = $inactiveService->confirmOrder(
+    $transitId,
+    7,
+    ['id' => 7, 'role' => 'RESTOCKER', 'name' => 'Reponedor Siete']
+);
+$assert(
+    '10.1 La recepción tolera un producto desactivado después del despacho (C3)',
+    $inactiveWorld['catalog']->findById(101)?->isActive() === false
+    && $receivedWhileInactive['order']['status'] === 'CONFIRMED_BY_RESTOCKER'
+    && $inactiveWorld['stocks']->findLot(7, 101, 'LOTE-T8-A')?->getQuantityAvailable() === 8
+    && $inactiveWorld['stocks']->findLot(7, 102, 'SIN-LOTE')?->getQuantityAvailable() === 7,
+    json_encode($receivedWhileInactive['order'])
+);
+$settledWhileInactive = $inactiveService->reconcileOrder($transitId, [
+    'items' => [
+        ['product_id' => 101, 'restocked_in_machines_qty' => 2, 'withdrawn_spoilage_qty' => 1, 'counted_return_qty' => 5],
+        ['product_id' => 102, 'restocked_in_machines_qty' => 4, 'withdrawn_spoilage_qty' => 0, 'counted_return_qty' => 3],
+    ],
+], $inactiveWorld['actor']);
+$assert(
+    '10.2 La liquidación tolera un producto desactivado en tránsito (C3)',
+    $settledWhileInactive['order']['status'] === 'RECONCILED_AT_CLOSE'
+    && $inactiveWorld['stocks']->findLot(7, 101, 'LOTE-T8-A')?->getQuantityAvailable() === 5
+    && $inactiveWorld['stocks']->findLot(7, 102, 'SIN-LOTE')?->getQuantityAvailable() === 3,
+    json_encode($settledWhileInactive['order'])
 );
 
 echo "\n======================================================================\n";
