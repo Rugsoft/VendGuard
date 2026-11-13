@@ -1288,6 +1288,41 @@ $assertValidation(
     409
 );
 
+$mismatchWorld = makeProductLoadingWorld();
+$mismatchService = $mismatchWorld['service'];
+$mismatchDate = $mismatchWorld['date'];
+$mismatchOrder = $mismatchService->createOrder(
+    7,
+    ['items' => $activeProducts($mismatchWorld)],
+    $mismatchWorld['actor']
+);
+$mismatchId = (int)$mismatchOrder['order']['id'];
+$mismatchService->dispatchOrder($mismatchId, [
+    'cold_chamber_exit_temp_celsius' => 3.0,
+    'items' => [
+        ['product_id' => 101, 'dispatched_qty' => 6, 'batch_code' => 'LOTE-T8-B', 'expiration_date' => $mismatchDate(2)],
+        ['product_id' => 102, 'dispatched_qty' => 4],
+    ],
+], $mismatchWorld['actor']);
+$mismatchWorld['stocks']->seed(7, 101, 'LOTE-T8-B', $mismatchDate(4), 1);
+
+$assertValidation(
+    '6.5 La confirmación con un lote preexistente de otra fecha responde 409 (QA 3)',
+    static fn () => $mismatchService->confirmOrder(
+        $mismatchId,
+        7,
+        ['id' => 7, 'role' => 'RESTOCKER', 'name' => 'Reponedor Siete']
+    ),
+    ProductLoadingValidationException::BATCH_EXPIRATION_MISMATCH,
+    409
+);
+$assert(
+    '6.6 El rechazo por colisión de fecha no incrementa el stock ni confirma la orden',
+    $mismatchWorld['stocks']->findLot(7, 101, 'LOTE-T8-B')?->getQuantityAvailable() === 1
+    && $mismatchWorld['orders']->findById($mismatchId)['order']->getStatus()->value === 'DISPATCHED',
+    json_encode($mismatchWorld['stocks']->findLot(7, 101, 'LOTE-T8-B')?->toArray())
+);
+
 // =====================================================================
 // 7. Liquidación de cierre
 // =====================================================================
