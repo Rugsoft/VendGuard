@@ -61,6 +61,11 @@ final class PostgresFixtureBuilder
         // (`chk_spoilage_records_loss_non_negative`): el alta mínima debe
         // declararlo o mediría un rechazo legítimo del motor.
         'sanitary_spoilage_records' => ['estimated_merchandise_loss_eur'],
+        // El catálogo comercial (Módulo 32) declara `sale_price_eur` con defecto
+        // 0,00 €, válido solo para ingredientes y consumibles: una categoría de
+        // venta directa con precio cero violaría `chk_vending_products_sale_price`
+        // y el alta mínima mediría un rechazo legítimo del motor.
+        'vending_products' => ['sale_price_eur'],
     ];
 
     /**
@@ -98,6 +103,10 @@ final class PostgresFixtureBuilder
         // Guías del Módulo 28: el modelo y la categoría son la identidad inmutable
         // de la guía (C1) y su disparador rechaza la reescritura; el `UPDATE`
         // genérico certifica el CRUD sobre el título, que sí es editable.
+        // El SKU del Módulo 32 es inmutable por disparador (C1): el UPDATE
+        // genérico no puede elegirlo o certificaría un rechazo legítimo del
+        // motor en lugar del CRUD. La modificación se mide sobre `name`.
+        'vending_products' => ['sku'],
         'machine_troubleshooting_guides' => ['machine_model', 'machine_model_key', 'breakdown_type'],
         // Tramos de custodia (Módulo 26): los campos de cierre forman una rama
         // todo-o-nada de `chk_incident_assignments_closure_coherence`, de modo
@@ -770,6 +779,18 @@ final class PostgresFixtureBuilder
             // la matriz RF-01: el entero genérico (7/9) violaría
             // `chk_incidents_sla_target_minutes` y el alta mínima de incidents
             // dejaría de certificarse.
+            // El catálogo del Módulo 32 declara formatos cerrados: el SKU y el
+            // código de carril solo admiten mayúsculas, dígitos, guion bajo y
+            // guion (el SKU); el texto sintético genérico los rechazaría.
+            $table === 'vending_products' && $column === 'sku'
+                => $variant === 'update' ? 'PROD_FIXTURE_UPDATE' : 'PROD_FIXTURE_INSERT',
+            $table === 'machine_planogram_slots' && $column === 'slot_code'
+                => $variant === 'update' ? 'SLOT_FIXTURE_UPDATE' : 'SLOT_FIXTURE_INSERT',
+            // El alta mínima de una máquina nace en `COMBO`: es la única
+            // tipología que admite todas las categorías del catálogo y permite
+            // que el carril mínimo del Módulo 32 se siembre sin convertir la
+            // matriz `MachineType × ProductCategory` en el objeto de la prueba.
+            $table === 'machines' && $column === 'machine_type' => 'COMBO',
             $table === 'incidents' && $column === 'sla_target_minutes'
                 => $variant === 'update' ? 720 : 1440,
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,

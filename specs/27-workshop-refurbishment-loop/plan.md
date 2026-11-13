@@ -73,7 +73,7 @@ flowchart TD
 | `database/supabase_seeds.sql` | **Modificar** | Sembrar unidades de taller representativas en los 5 estados (`PENDING_DELIVERY`, `RECEIVED_IN_WORKSHOP`, `IN_BENCH_TEST`, `REFURBISHED_RESTORED` con `TECHNICIAN_VAN` y `CENTRAL_WAREHOUSE`, y `SCRAPPED_IRREPARABLE` en banco y por no entrega) para certificación analítica. |
 | `src/Infrastructure/Database/SeedRunner.php` | **Modificar** | Sincronizar el sembrado programático de entorno de pruebas con las unidades de taller en los 5 estados y el backfill idempotente. |
 | `specs/technical/database_schema.md` | **Modificar** | Documentar la Tabla 38 `workshop_repair_items` (pasando de 37 a 38 tablas de dominio). |
-| `specs/technical/schema_correspondence_contract.md` | **Modificar** | Actualizar el inventario canónico de tablas (38 tablas y 34 enumerados) verificado por `SchemaCorrespondenceTest`. |
+| `specs/technical/schema_correspondence_contract.md` | **Modificar** | Actualizar el inventario canónico de tablas (38 tablas y 34 enumerados) verificado por `SchemaConvergenceParityTest`. |
 
 ### 1.2. Capa de Dominio (`src/Core/`)
 | Fichero | Acción | Responsabilidad |
@@ -481,7 +481,7 @@ END ALGORITHM
    * `tests/Integration/WorkshopRefurbishmentIntegrationTest.php`: Flujo extremo a extremo desde resolución correctiva y preventiva con `quantity = 2` y `old_part_destination = 'TALLER'` $\rightarrow$ consulta móvil del técnico sin importes (Art. V.4) $\rightarrow$ recepción $\rightarrow$ banco $\rightarrow$ dictamen con `+1` en `technician_van_stocks` $\rightarrow$ reapertura en garantía `< 48h` sin duplicar unidades previas (`C4`) $\rightarrow$ inmutabilidad terminal `409` (`C5`) $\rightarrow$ blindaje `403` ante `TECHNICIAN` y `LOCATION_RESPONSIBLE` $\rightarrow$ auditoría `previous_state`/`new_state` $\rightarrow$ exportación CSV de 2 secciones.
 3. **Pruebas de Frontend y Guardas Globales (Node ESM + PHP):**
    * `tests/Frontend/WorkshopRefurbishmentFrontendTest.mjs`: Contratos de `CoordinatorWorkshopTrayTab.js`, `CoordinatorSparePartsView.js`, `TechnicianVanStockModal.js`, `api.js` y `sw.js`.
-   * Guardas globales existentes: `SchemaCorrespondenceTest`, `SingleEngineDialectContractTest`, `AuditActionCatalogTest`, `OfflinePwaAppShellContractTest` y `DesignTokenDebtRatchetTest`.
+   * Guardas globales existentes: `SchemaConvergenceParityTest`, `PostgresSchemaTest`, `SingleEngineDialectContractTest`, `AuditActionCatalogTest`, `OfflinePwaAppShellContractTest` y `DesignTokenDebtRatchetTest`.
 
 ---
 

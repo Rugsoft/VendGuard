@@ -106,7 +106,9 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 -- el ordinal, que en el motor local sí importa para las comparaciones.
 --
 -- -----------------------------------------------------------------------------
--- TABLA DE CORRESPONDENCIA DE LOS 25 CONJUNTOS (27 columnas locales)
+-- TABLA DE CORRESPONDENCIA DE LOS CONJUNTOS `ENUM` DEL DOMINIO
+-- (las 25 del baseline y los 2 tipos del Módulo 32: #26 `vending_product_category`
+--  y #27 `vending_product_unit_type`, declarados al final de esta sección)
 -- -----------------------------------------------------------------------------
 -- | # | Tipo nativo en PostgreSQL         | Conjunto local (mismo orden)                                  | Columna(s) local(es)                                                             | Declarado en  |
 -- |--:|:----------------------------------|:--------------------------------------------------------------|:---------------------------------------------------------------------------------|:--------------|
@@ -161,6 +163,31 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 -- que el fichero sea reejecutable sin `DROP TYPE` (borrar el tipo obligaría a
 -- borrar antes las tablas que lo usan). El resto de errores se propaga: un
 -- bloque que se lo tragara todo escondería una definición mal escrita.
+
+-- Módulo 32 · tipos nativos #26 y #27 del catálogo comercial (RF-01.1, QA 1).
+-- `vending_product_category` clasifica la referencia y `vending_product_unit_type`
+-- fija cómo se carga y se cuenta (unidad, gramos de tolva o tira de consumible).
+DO $do$
+BEGIN
+    CREATE TYPE vending_product_category AS ENUM (
+        'COLD_DRINK',
+        'SNACK',
+        'PERISHABLE_FOOD',
+        'HOT_BEVERAGE_INGREDIENT',
+        'CUP_STIRRER_CONSUMABLE'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE vending_product_unit_type AS ENUM (
+        'UNIT',
+        'GRAMS',
+        'SLEEVE'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
 
 DO $do$
 BEGIN
@@ -266,7 +293,11 @@ BEGIN
         -- no contra la avería que se clasifica con ella.
         -- Cuadrante de carga del Módulo 31 (QA 1): la vinculación reponedor ↔ zona
         -- se audita con entidad propia, no como edición de la zona ni del usuario.
-        'ROOT_CAUSE_TAXONOMY', 'RESTOCKER_ZONE'
+        'ROOT_CAUSE_TAXONOMY', 'RESTOCKER_ZONE',
+        -- Catálogo comercial y planograma del Módulo 32 (C3): el alta, la baja
+        -- lógica y la edición del producto se auditan contra su propia entidad,
+        -- y el guardado de carriles contra la suya, no contra la máquina.
+        'VENDING_PRODUCT', 'MACHINE_PLANOGRAM'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -3488,28 +3519,315 @@ CREATE TRIGGER trg_immutable_sanitary_spoilage_records
     BEFORE UPDATE ON sanitary_spoilage_records
     FOR EACH ROW EXECUTE FUNCTION enforce_sanitary_spoilage_records_immutability();
 
+-- =============================================================================
+-- SECCIÓN 15 · Tablas 42 y 43 · Catálogo de productos y planograma por máquina
+--              (Módulo 32 · 32-product-catalog-planogram)
+-- =============================================================================
+-- El catálogo comercial y el mapa de carriles no pertenecen al catálogo técnico
+-- de repuestos (Módulo 06): aquí viven los alimentos, bebidas, ingredientes de
+-- tolva y consumibles de ruta, con su caducidad, su exigencia de frío y su PVP.
+-- Las dos tablas se protegen con `prevent_hard_delete()` (Art. III.1) y el
+-- cerrojo sanitario se declara también en el motor (Art. II, D3, RNF-02),
+-- porque una salvaguarda que solo vive en la aplicación no cubre una consola
+-- SQL ni un importador futuro.
+
+-- -----------------------------------------------------------------------------
+-- Tabla 42 · vending_products — catálogo maestro comercial y de consumibles
+-- -----------------------------------------------------------------------------
+-- `sku` es único e inmutable (C1; la inmutabilidad la muerde el disparador de
+-- 4.2). `max_shelf_life_days` es obligatorio con cadena de frío y opcional en
+-- consumibles no perecederos (QA 1). El PVP admite 0,00 € solo en ingredientes
+-- y consumibles: un refresco a 0,00 € sería un error de explotación (C2).
+CREATE TABLE IF NOT EXISTS vending_products (
+    id                    BIGINT GENERATED ALWAYS AS IDENTITY,
+    sku                   VARCHAR(32) NOT NULL,
+    name                  VARCHAR(120) NOT NULL,
+    category              vending_product_category NOT NULL,
+    unit_type             vending_product_unit_type NOT NULL DEFAULT 'UNIT',
+    requires_cold_chain   BOOLEAN NOT NULL DEFAULT FALSE,
+    max_shelf_life_days   INTEGER,
+    unit_cost_eur         NUMERIC(10, 2) NOT NULL,
+    sale_price_eur        NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    is_active             BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_vending_products PRIMARY KEY (id),
+    CONSTRAINT uq_vending_products_sku UNIQUE (sku),
+    CONSTRAINT chk_vending_products_sku_format CHECK (sku ~ '^[A-Z0-9_-]{3,32}$'),
+    CONSTRAINT chk_vending_products_name_not_blank CHECK (char_length(btrim(name)) >= 2),
+    CONSTRAINT chk_vending_products_unit_cost CHECK (unit_cost_eur > 0.00 AND unit_cost_eur <= 9999.99),
+    CONSTRAINT chk_vending_products_sale_price CHECK (
+        sale_price_eur >= 0.00 AND sale_price_eur <= 9999.99
+        AND (
+            category IN ('HOT_BEVERAGE_INGREDIENT', 'CUP_STIRRER_CONSUMABLE')
+            OR sale_price_eur > 0.00
+        )
+    ),
+    CONSTRAINT chk_vending_products_unit_type_coherence CHECK (
+        (category IN ('COLD_DRINK', 'SNACK', 'PERISHABLE_FOOD') AND unit_type = 'UNIT')
+        OR (category = 'HOT_BEVERAGE_INGREDIENT' AND unit_type IN ('GRAMS', 'UNIT'))
+        OR (category = 'CUP_STIRRER_CONSUMABLE' AND unit_type IN ('SLEEVE', 'UNIT'))
+    ),
+    CONSTRAINT chk_vending_products_perishable_cold_chain CHECK (
+        category <> 'PERISHABLE_FOOD' OR requires_cold_chain = TRUE
+    ),
+    CONSTRAINT chk_vending_products_cold_chain_allowed_categories CHECK (
+        requires_cold_chain = FALSE
+        OR category IN ('PERISHABLE_FOOD', 'COLD_DRINK', 'SNACK')
+    ),
+    CONSTRAINT chk_vending_products_shelf_life CHECK (
+        (requires_cold_chain = TRUE AND max_shelf_life_days IS NOT NULL AND max_shelf_life_days BETWEEN 1 AND 3650)
+        OR (requires_cold_chain = FALSE AND (max_shelf_life_days IS NULL OR max_shelf_life_days BETWEEN 1 AND 3650))
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_vending_products_category_active
+    ON vending_products (category, is_active);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_vending_products
+    BEFORE DELETE ON vending_products
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_vending_products
+    BEFORE UPDATE ON vending_products
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 43 · machine_planogram_slots — matriz de carriles por máquina
+-- -----------------------------------------------------------------------------
+-- El par `(machine_id, slot_code)` identifica el carril: guardar es `UPSERT` y
+-- retirar es `is_active = FALSE`, nunca un `DELETE` (C1, Art. III.1).
+CREATE TABLE IF NOT EXISTS machine_planogram_slots (
+    id                    BIGINT GENERATED ALWAYS AS IDENTITY,
+    machine_id            BIGINT NOT NULL,
+    slot_code             VARCHAR(24) NOT NULL,
+    product_id            BIGINT NOT NULL,
+    max_capacity          INTEGER NOT NULL,
+    current_estimated_qty INTEGER NOT NULL DEFAULT 0,
+    min_threshold         INTEGER NOT NULL DEFAULT 2,
+    is_active             BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_machine_planogram_slots PRIMARY KEY (id),
+    CONSTRAINT uq_machine_planogram_slot UNIQUE (machine_id, slot_code),
+    CONSTRAINT fk_machine_planogram_slots_machine FOREIGN KEY (machine_id)
+        REFERENCES machines (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_planogram_slots_product FOREIGN KEY (product_id)
+        REFERENCES vending_products (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_machine_planogram_slot_code_format CHECK (slot_code ~ '^[A-Z0-9_]{1,24}$'),
+    CONSTRAINT chk_machine_planogram_max_capacity CHECK (max_capacity BETWEEN 1 AND 10000),
+    CONSTRAINT chk_machine_planogram_min_threshold CHECK (min_threshold >= 0 AND min_threshold < max_capacity),
+    CONSTRAINT chk_machine_planogram_estimated_qty CHECK (
+        current_estimated_qty >= 0 AND current_estimated_qty <= max_capacity
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_machine_planogram_slots_machine_active
+    ON machine_planogram_slots (machine_id, is_active);
+
+CREATE INDEX IF NOT EXISTS idx_machine_planogram_slots_product_active
+    ON machine_planogram_slots (product_id, is_active);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_machine_planogram_slots
+    BEFORE DELETE ON machine_planogram_slots
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_machine_planogram_slots
+    BEFORE UPDATE ON machine_planogram_slots
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- 15.1 · Cerrojo sanitario bidireccional (Art. II, D3, RF-03.1 y RF-03.2)
+-- -----------------------------------------------------------------------------
+-- Una sola matriz, tres puertas: asignar un carril, editar el producto y
+-- cambiar la tipología de la máquina. Una regla con tres copias sería una
+-- regla con tres verdades.
+CREATE OR REPLACE FUNCTION is_planogram_product_compatible_with_machine(
+    p_machine_type TEXT,
+    p_product_category TEXT,
+    p_requires_cold_chain BOOLEAN
+) RETURNS BOOLEAN
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+    -- Art. II: producto de cadena de frío exige máquina PERISHABLE_FOOD o COMBO.
+    IF p_requires_cold_chain IS TRUE AND p_machine_type NOT IN ('PERISHABLE_FOOD', 'COMBO') THEN
+        RETURN FALSE;
+    END IF;
+
+    -- Matriz `MachineType × ProductCategory` (D3).
+    RETURN CASE p_machine_type
+        WHEN 'HOT_DRINKS' THEN p_product_category IN ('HOT_BEVERAGE_INGREDIENT', 'CUP_STIRRER_CONSUMABLE')
+        WHEN 'COLD_DRINKS' THEN p_product_category IN ('COLD_DRINK')
+        WHEN 'SNACKS' THEN p_product_category IN ('SNACK', 'COLD_DRINK')
+        WHEN 'PERISHABLE_FOOD' THEN p_product_category IN ('PERISHABLE_FOOD', 'COLD_DRINK', 'SNACK')
+        WHEN 'COMBO' THEN p_product_category IN (
+            'PERISHABLE_FOOD', 'COLD_DRINK', 'SNACK',
+            'HOT_BEVERAGE_INGREDIENT', 'CUP_STIRRER_CONSUMABLE'
+        )
+        ELSE FALSE
+    END;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION enforce_planogram_slot_compatibility()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_machine_type TEXT;
+    v_category TEXT;
+    v_requires_cold_chain BOOLEAN;
+BEGIN
+    -- Desactivar un carril es siempre legítimo: la baja lógica no planifica
+    -- producto, lo retira (C1).
+    IF NEW.is_active IS FALSE THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT m.machine_type::text INTO v_machine_type
+    FROM machines m
+    WHERE m.id = NEW.machine_id;
+
+    SELECT vp.category::text, vp.requires_cold_chain
+    INTO v_category, v_requires_cold_chain
+    FROM vending_products vp
+    WHERE vp.id = NEW.product_id;
+
+    IF v_requires_cold_chain IS TRUE AND v_machine_type NOT IN ('PERISHABLE_FOOD', 'COMBO') THEN
+        RAISE EXCEPTION 'Violación Constitucional Art. II (COLD_CHAIN_MACHINE_INCOMPATIBLE): El producto (ID %) requiere cadena de frío y no puede asignarse a una máquina de tipo %.',
+            NEW.product_id, v_machine_type
+            USING ERRCODE = '45000';
+    END IF;
+
+    IF NOT is_planogram_product_compatible_with_machine(v_machine_type, v_category, v_requires_cold_chain) THEN
+        RAISE EXCEPTION 'Incompatibilidad de planograma (PRODUCT_CATEGORY_MACHINE_INCOMPATIBLE): La categoría % no es apta para una máquina de tipo %.',
+            v_category, v_machine_type
+            USING ERRCODE = '45000';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_enforce_planogram_cold_chain_and_category
+    BEFORE INSERT OR UPDATE ON machine_planogram_slots
+    FOR EACH ROW EXECUTE FUNCTION enforce_planogram_slot_compatibility();
+
+-- Cerrojo inverso sobre el producto (RF-03.2) e inmutabilidad del SKU (C1).
+CREATE OR REPLACE FUNCTION validate_product_update_against_planograms()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_conflict_machine_code TEXT;
+    v_conflict_machine_type TEXT;
+BEGIN
+    IF NEW.requires_cold_chain IS DISTINCT FROM OLD.requires_cold_chain
+       OR NEW.category IS DISTINCT FROM OLD.category THEN
+
+        SELECT m.code, m.machine_type::text
+        INTO v_conflict_machine_code, v_conflict_machine_type
+        FROM machine_planogram_slots s
+        INNER JOIN machines m ON m.id = s.machine_id
+        WHERE s.product_id = NEW.id
+          AND s.is_active = TRUE
+          AND NOT is_planogram_product_compatible_with_machine(
+              m.machine_type::text,
+              NEW.category::text,
+              NEW.requires_cold_chain
+          )
+        LIMIT 1;
+
+        IF v_conflict_machine_code IS NOT NULL THEN
+            RAISE EXCEPTION 'Violación Constitucional Art. II (COLD_CHAIN_MACHINE_INCOMPATIBLE): El producto % ya está asignado en carriles activos de la máquina % (%) incompatible con el cambio.',
+                NEW.sku, v_conflict_machine_code, v_conflict_machine_type
+                USING ERRCODE = '45000';
+        END IF;
+    END IF;
+
+    IF NEW.sku IS DISTINCT FROM OLD.sku THEN
+        RAISE EXCEPTION 'SKU_CHANGE_FORBIDDEN: El SKU de un producto comercial es inmutable tras su creación.'
+            USING ERRCODE = '45000';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_validate_product_update_against_planograms
+    BEFORE UPDATE ON vending_products
+    FOR EACH ROW EXECUTE FUNCTION validate_product_update_against_planograms();
+
+-- Cerrojo inverso sobre la máquina (RF-03.2, QA 4).
+CREATE OR REPLACE FUNCTION validate_machine_type_against_planogram()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_conflict_slot VARCHAR(24);
+    v_conflict_sku VARCHAR(32);
+BEGIN
+    IF NEW.machine_type IS DISTINCT FROM OLD.machine_type THEN
+        SELECT s.slot_code, vp.sku
+        INTO v_conflict_slot, v_conflict_sku
+        FROM machine_planogram_slots s
+        INNER JOIN vending_products vp ON vp.id = s.product_id
+        WHERE s.machine_id = NEW.id
+          AND s.is_active = TRUE
+          AND NOT is_planogram_product_compatible_with_machine(
+              NEW.machine_type::text,
+              vp.category::text,
+              vp.requires_cold_chain
+          )
+        LIMIT 1;
+
+        IF v_conflict_slot IS NOT NULL THEN
+            RAISE EXCEPTION 'Violación Constitucional Art. II (PLANOGRAM_INCOMPATIBLE_WITH_MACHINE_TYPE): El carril activo % (producto %) es incompatible con la nueva tipología %.',
+                v_conflict_slot, v_conflict_sku, NEW.machine_type::text
+                USING ERRCODE = '45000';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_validate_machine_type_against_planogram
+    BEFORE UPDATE OF machine_type ON machines
+    FOR EACH ROW EXECUTE FUNCTION validate_machine_type_against_planogram();
+
+
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 41 tablas (las 41 del contrato de correspondencia) · 34 tipos del dominio en sus
--- 39 columnas `ENUM` · 8 funciones de blindaje: `prevent_hard_delete()`,
+-- 43 tablas (las 43 del contrato de correspondencia) · 43 columnas `ENUM` · 12
+-- funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
 -- `prevent_satisfaction_survey_rewrite()`, `prevent_service_sheet_update()`
 -- (las tres últimas de bloqueo de `UPDATE` comparten forma) y
 -- `enforce_incident_assignments_immutability()` (Módulo 26) y
 -- `enforce_troubleshooting_guides_immutability()` (Módulo 28) y
--- `enforce_sanitary_spoilage_records_immutability()` (Módulo 29)
--- 73 disparadores: 41 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 23
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 9 `BEFORE UPDATE` de
+-- `enforce_sanitary_spoilage_records_immutability()` (Módulo 29) y las cuatro del
+-- cerrojo sanitario del Módulo 32 (`is_planogram_product_compatible_with_machine()`,
+-- `enforce_planogram_slot_compatibility()`, `validate_product_update_against_planograms()`
+-- y `validate_machine_type_against_planogram()`)
+-- 79 disparadores: 43 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 25
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 11 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
 -- `trg_no_update_technician_shift_logs`, `trg_immutable_root_causes`,
 -- `trg_immutable_standard_solutions`, `trg_immutable_incident_assignments` y
 -- `trg_immutable_machine_troubleshooting_guides`,
 -- `trg_immutable_sanitary_spoilage_records` y
--- `trg_incidents_protect_sla_tier_snapshot`)
--- 67 restricciones nombradas: 41 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 26 únicas
--- 82 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- `trg_incidents_protect_sla_tier_snapshot`,
+-- `trg_validate_product_update_against_planograms` y
+-- `trg_validate_machine_type_against_planogram` del Módulo 32)
+-- 71 restricciones nombradas: 43 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 28 únicas
+-- 94 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
 -- en la bitácora), las 12 del Módulo 23 (5 en órdenes y 7 en líneas) y las 4 del
 -- Módulo 24 (formato del identificador, tipo de parada, operación y resultado) y
@@ -3522,13 +3840,14 @@ CREATE TRIGGER trg_immutable_sanitary_spoilage_records
 -- rango térmico, fotografía no vacía, longitud de observaciones y coherencia
 -- contable del coste y su ajuste) y las 4 del Módulo 31 (valores y coherencia de
 -- `role_in_zone` con `is_primary`, orden de la baja lógica y prohibición de que un
--- reponedor quede de guardia técnica)
--- · 97 claves foráneas con las reglas declaradas en el contrato §2.4
--- 108 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- reponedor quede de guardia técnica) y las 12 del Módulo 32 (8 del producto y 4
+-- del carril)
+-- · 99 claves foráneas con las reglas declaradas en el contrato §2.4
+-- 111 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
 -- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2), el Módulo 23 (5) y el
 -- Módulo 24 (2), el Módulo 26 (3), el Módulo 27 (6), el Módulo 28 (3) y el
--- Módulo 29 (4) y el Módulo 31 (2)— y once índices únicos parciales:
+-- Módulo 29 (4), el Módulo 31 (2) y el Módulo 32 (3)— y once índices únicos parciales:
 -- `uq_incident_assignments_active_custody` (M26, Art. V.3), `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
 -- `uq_users_telegram_chat_id` (M16), `uq_zone_postal_codes_live` (M17),

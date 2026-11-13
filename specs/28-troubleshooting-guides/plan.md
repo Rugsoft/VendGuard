@@ -67,7 +67,7 @@ flowchart TD
 | `database/supabase_seeds.sql` | **Modificar** | Sembrar en la Sección 20 las guías reales del parque (*Sanden Vendo G-Drink*, *Bianchi Gaia Espresso*, *Necta Samba Combo*, *Fas Fast 900*, *Azkoyen Palma+*, *Necta Korinto*, *Jofemar Vision*, *Saeco Cristallo*) con códigos de error reales, pasos de $\ge 20$ caracteres reales, repuestos recomendados del catálogo y causas raíz vinculadas (`RF-05.2`). |
 | `src/Infrastructure/Database/SeedRunner.php` | **Modificar** | Sincronizar el sembrado programático de entorno de pruebas con las guías de diagnóstico del Módulo 28. |
 | `specs/technical/database_schema.md` | **Modificar** | Documentar la Tabla 39 `machine_troubleshooting_guides` y `enforce_troubleshooting_guides_immutability()`. |
-| `specs/technical/schema_correspondence_contract.md` | **Modificar** | Actualizar el inventario canónico de tablas (pasando de 38 a 39 tablas de dominio) verificado por `SchemaCorrespondenceTest`. |
+| `specs/technical/schema_correspondence_contract.md` | **Modificar** | Actualizar el inventario canónico de tablas (pasando de 38 a 39 tablas de dominio) verificado por `SchemaConvergenceParityTest`. |
 
 ### 1.2. Capa de Dominio (`src/Core/`)
 | Fichero | Acción | Responsabilidad |

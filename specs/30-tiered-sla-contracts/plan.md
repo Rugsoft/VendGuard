@@ -81,7 +81,7 @@ flowchart TD
 | `database/supabase_seeds.sql` | **Modificar** | Enriquecer las sedes de demostración con los tres perfiles (`CRITICAL_INFRASTRUCTURE_24_7` para sede hospitalaria/24x7, `PRIORITY_CORPORATE` para sede corporativa y `STANDARD` para sedes generales) y sellar `sla_tier_snapshot` y `sla_target_minutes` coherentes en las incidencias semilla. |
 | `src/Infrastructure/Database/SeedRunner.php` | **Modificar** | Sincronizar el sembrado programático de entorno de pruebas con `sla_tier`, `sla_tier_snapshot` y `sla_target_minutes`. |
 | `specs/technical/database_schema.md` | **Modificar** | Documentar el enumerado `sla_tier`, las nuevas columnas de `locations` e `incidents` y el disparador `trg_incidents_protect_sla_tier_snapshot`. |
-| `specs/technical/schema_correspondence_contract.md` | **Modificar** | Actualizar el inventario de tipos `ENUM` nativos (pasando de 24 a 25 con `sla_tier`) y las columnas auditadas por `SchemaCorrespondenceTest`. |
+| `specs/technical/schema_correspondence_contract.md` | **Modificar** | Actualizar el inventario de tipos `ENUM` nativos (pasando de 24 a 25 con `sla_tier`) y las columnas auditadas por `SchemaConvergenceParityTest`. |
 
 ### 1.2. Capa de Dominio (`src/Core/`)
 | Fichero | Acción | Responsabilidad |

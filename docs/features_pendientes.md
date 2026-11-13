@@ -1,7 +1,7 @@
 # VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro**Documento:** `docs/features_pendientes.md`  
 **Fecha de Actualización:** Noviembre 2026
   
-**Estado del Proyecto:** batería global: 412 suites · 15.398 aserciones, al 100 % en verde. Documento versionado (ya está en el índice pese a la regla de `.gitignore`), así que su cifra se audita junto con la del README por `DocMetricsGuard`. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
+**Estado del Proyecto:** batería global: 420 suites · 15.681 aserciones, al 100 % en verde. Documento versionado (ya está en el índice pese a la regla de `.gitignore`), así que su cifra se audita junto con la del README por `DocMetricsGuard`. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---
@@ -276,6 +276,7 @@ Segunda pata operativa de **VendGuard** para cubrir el ciclo integral de explota
 * **Complejidad:** Media (2 días).
 
 #### 22. 🍫 Catálogo Maestro de Productos, Consumibles y Planograma por Máquina (*Machine Planogram & Slot Matrix*)
+* **Estado:** ✅ **100% IMPLEMENTADO (Módulo 32: `32-product-catalog-planogram`)** — Tablas 42 `vending_products` y 43 `machine_planogram_slots` con tipos nativos, baja lógica y `prevent_hard_delete()`; CRUD auditado con `sku` inmutable, cotas por categoría y `affected_active_slots_count`; planograma por `UPSERT` sin `DELETE`, ordenación física de bandejas, semáforo de stock, presets por modelo y clonación con preservación de existencias; cerrojo sanitario bidireccional `MachineType × ProductCategory` en dominio y PostgreSQL; consola de Coordinación con catálogo y matriz de carriles; y consulta móvil del `RESTOCKER` limitada a sus zonas vivas, en solo lectura y sin `unit_cost_eur`. Certificado por `specs/32-product-catalog-planogram/traceability-matrix.md` y la batería global al 100 % en verde. Se conserva a continuación el diseño original de la propuesta para trazabilidad SDD.
 * **Propósito:** Modelar el surtido comercial y de consumibles que aloja cada máquina (refrescos, snacks, sándwiches/lácteos frescos, café en grano, leche en polvo, chocolate, azúcar, vasos y paletinas) y el mapa de carriles/selecciones (`slot_code`) con sus capacidades máximas y umbrales de rotura de stock (*stockout*).
 * **Componentes Técnicos:**
   * Tabla `vending_products` (`id`, `sku`, `name`, `category` [`COLD_DRINK`, `SNACK`, `PERISHABLE_FOOD`, `HOT_BEVERAGE_INGREDIENT`, `CUP_STIRRER_CONSUMABLE`], `unit_type` [`UNIT`, `GRAMS`, `SLEEVE`], `requires_cold_chain`, `max_shelf_life_days`, `unit_cost_eur`, `sale_price_eur`, `is_active`, `created_at`, `updated_at`) con baja lógica obligatoria (Art. III.1 y III.2) y ocultación de `unit_cost_eur` frente a Sede/QR (Art. V.4).
@@ -403,7 +404,7 @@ FASE DE TRAZABILIDAD AVANZADA, TALLER Y EFICIENCIA OPERATIVA (CONCLUIDA AL 100%)
 ------------------------------------------------------------------------------------
 FASE DE OPERATIVA DE CARGA, REPOSICIÓN Y GESTIÓN DE REPONEDORES (PRIORIDAD ACTIVA):
  21. Rol de Cargador/Reponedor de Ruta (RESTOCKER), Zonificación de Carga y Control de Jornada [✅ IMPLEMENTADO - Módulo 31]
- 22. Catálogo Maestro de Productos, Consumibles y Planograma por Máquina (Slot Matrix + Art. II)
+ 22. Catálogo Maestro de Productos, Consumibles y Planograma por Máquina (Slot Matrix + Art. II) [✅ IMPLEMENTADO - Módulo 32]
  23. Órdenes de Carga de Furgoneta de Reposición y Picking con Trazabilidad de Frío
  24. Visita de Reposición In Situ, Control FEFO de Caducidades y Limpieza Diaria (Art. II + Offline)
  25. Recaudación de Efectivo, Carga de Tubos de Cambio y Arqueo de Caja con Bolsa Precintada (Art. V.4)

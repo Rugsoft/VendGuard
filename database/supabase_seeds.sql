@@ -68,6 +68,9 @@
 --   | van_restock_orders         | `(technician_id, created_at)` de la semilla | ninguno: se inserta solo si no existe (Módulo 23)                                    |
 --   | van_restock_order_items    | `(order_id, spare_part_id)`         | ninguno: se inserta solo si no existe (Módulo 23; la retirada es lógica, QA 1)              |
 --
+--   | vending_products           | `sku`                              | `name`, `category`, `unit_type`, `requires_cold_chain`, `max_shelf_life_days`, `unit_cost_eur`, `sale_price_eur` (ni el `sku` ni `is_active`: C1) |
+--   | machine_planogram_slots    | `(machine_id, slot_code)`           | ninguno: se inserta solo si no existe (Módulo 32; conserva existencias y bajas lógicas, C1)    |
+--
 --   Dos consecuencias buscadas de esa regla:
 --     1. Reejecutarlo no duplica nada y deja el catálogo igual: el arranque del
 --        contenedor puede invocarlo en cada pasada.
@@ -1674,6 +1677,161 @@ FROM (VALUES
 )
 ON CONFLICT (record_code) DO NOTHING;
 
+-- ============================================================================
+-- SECCIÓN 22 · vending_products — el catálogo maestro comercial y de consumibles
+-- ============================================================================
+-- QUÉ SIEMBRA
+--   Quince referencias que cubren las cinco categorías del Módulo 32: refrescos
+--   y zumos refrigerados de venta directa (`COLD_DRINK`), snacks (`SNACK`),
+--   perecederos con cadena de frío obligatoria (`PERISHABLE_FOOD`), ingredientes
+--   de tolva medidos en gramos (`HOT_BEVERAGE_INGREDIENT`) y consumibles de
+--   tira (`CUP_STIRRER_CONSUMABLE`).
+--
+-- POR QUÉ EL CATÁLOGO ES PEQUEÑO Y REAL
+--   No es un catálogo de demostración exhaustivo: es el surtido mínimo que hace
+--   operativo el planograma de las trece máquinas sembradas y que permite ver
+--   las tres reglas duras del módulo en datos reales. Cada referencia tiene su
+--   coste de compra (`unit_cost_eur`, confidencial, Art. V.4), su PVP y, cuando
+--   exige frío, su vida útil máxima en días (QA 1). Los consumibles sin PVP
+--   llevan `sale_price_eur = 0.00` porque no se venden por selección (C2).
+--
+-- POR QUÉ NO SE REESCRIBE `is_active` AL REENCONTRAR LA FILA
+--   El `sku` es inmutable (C1) y la baja es lógica: si Coordinación dio de baja
+--   una referencia, una resemilla no debe resucitarla. El resto de la ficha sí
+--   se reafirma, para que el catálogo del repositorio sea el que arranque.
+--
+-- POR QUÉ NO SE ESCRIBE EL ID
+--   La secuencia de identidad es de cada base; las referencias se resuelven por
+--   `sku` y las máquinas por `code` en la sección siguiente.
+
+INSERT INTO vending_products (
+    sku, name, category, unit_type, requires_cold_chain, max_shelf_life_days, unit_cost_eur, sale_price_eur
+) VALUES
+    ('COLA-LATA-33',      'Lata de Cola 33cl',                        'COLD_DRINK',               'UNIT',   FALSE, NULL, 0.35, 1.20),
+    ('AGUA-MIN-50',       'Agua Mineral Natural 50cl',                'COLD_DRINK',               'UNIT',   FALSE, NULL, 0.18, 0.90),
+    ('ZUMO-NAR-33',       'Zumo de Naranja 33cl',                     'COLD_DRINK',               'UNIT',   FALSE, NULL, 0.32, 1.30),
+    ('SNACK-PATAT-40',    'Patatas Fritas Clásicas 40g',              'SNACK',                    'UNIT',   FALSE, NULL, 0.42, 1.10),
+    ('SNACK-FRUTSEC-50',  'Frutos Secos Tostados 50g',               'SNACK',                    'UNIT',   FALSE, NULL, 0.55, 1.40),
+    ('BARRA-ENERG-45',    'Barrita Energética de Cereales 45g',       'SNACK',                    'UNIT',   FALSE, NULL, 0.48, 1.30),
+    ('SAND-MIXTO-01',     'Sándwich Mixto Jamón y Queso Fresco',      'PERISHABLE_FOOD',          'UNIT',   TRUE,     5, 1.15, 2.40),
+    ('ENSALADA-CESAR',    'Ensalada César Preparada 220g',            'PERISHABLE_FOOD',          'UNIT',   TRUE,     4, 1.95, 3.60),
+    ('YOGUR-NAT-125',     'Yogur Natural Azucarado 125g',             'PERISHABLE_FOOD',          'UNIT',   TRUE,    20, 0.38, 1.10),
+    ('CAFE-GRANO-1K',     'Café en Grano Natural 1kg',                'HOT_BEVERAGE_INGREDIENT',  'GRAMS',  FALSE, NULL, 9.80, 0.00),
+    ('LECHE-POLVO-1K',    'Leche en Polvo Espumante 1kg',             'HOT_BEVERAGE_INGREDIENT',  'GRAMS',  FALSE, NULL, 6.40, 0.00),
+    ('CHOCO-SOLUBLE-1K',  'Chocolate en Polvo Soluble 1kg',           'HOT_BEVERAGE_INGREDIENT',  'GRAMS',  FALSE, NULL, 5.10, 0.00),
+    ('AZUCAR-BLANCO-1K',  'Azúcar Blanco 1kg',                        'HOT_BEVERAGE_INGREDIENT',  'GRAMS',  FALSE, NULL, 1.20, 0.00),
+    ('VASOS-7OZ-TIRA',    'Tira de Vasos de Cartón 7oz',              'CUP_STIRRER_CONSUMABLE',   'SLEEVE', FALSE, NULL, 1.80, 0.00),
+    ('PALETINAS-MAD',     'Paletinas Removedoras de Madera',           'CUP_STIRRER_CONSUMABLE',   'SLEEVE', FALSE, NULL, 0.75, 0.00)
+ON CONFLICT (sku) DO UPDATE SET
+    name                 = EXCLUDED.name,
+    category             = EXCLUDED.category,
+    unit_type            = EXCLUDED.unit_type,
+    requires_cold_chain  = EXCLUDED.requires_cold_chain,
+    max_shelf_life_days  = EXCLUDED.max_shelf_life_days,
+    unit_cost_eur        = EXCLUDED.unit_cost_eur,
+    sale_price_eur       = EXCLUDED.sale_price_eur;
+
+
+-- ============================================================================
+-- SECCIÓN 23 · machine_planogram_slots — el planograma de las 13 máquinas
+-- ============================================================================
+-- QUÉ SIEMBRA
+--   55 carriles activos repartidos por las trece máquinas del parque: carriles
+--   numerados en las expendedoras de producto envasado y tolvas/tubos en las de
+--   bebida caliente. Cada fila respeta la matriz `MachineType × ProductCategory`
+--   (D3): ningún producto de frío cae en una máquina que no sea `PERISHABLE_FOOD`
+--   o `COMBO`, y un `SNACKS` no carga ingredientes de tolva.
+--
+-- POR QUÉ SE INSERTA SOLO SI NO EXISTE
+--   `current_estimated_qty` es existencia operativa, no catálogo: reponerla a un
+--   valor semilla en cada arranque borraría el trabajo del reponedor y falsearía
+--   el semáforo `STOCKOUT` / `LOW_STOCK` / `OK`. Por la misma razón tampoco se
+--   reactiva un carril que Coordinación retiró con `is_active = FALSE` (C1):
+--   reejecutar las semillas deja el planograma vivo intacto.
+--
+-- POR QUÉ HAY CARRILES AGOTADOS Y BAJO UMBRAL
+--   Los tres estados del semáforo tienen que ser demostrables sin sembrar una
+--   avería: `VEND-0401.11` nace en `STOCKOUT`, `VEND-0501.13` en `LOW_STOCK` y
+--   el resto reparte `OK`. Es el mismo criterio con el que el arnés comprueba
+--   luego el cálculo determinista (RF-02.3).
+
+INSERT INTO machine_planogram_slots (
+    machine_id, slot_code, product_id, max_capacity, current_estimated_qty, min_threshold
+)
+SELECT
+    m.id,
+    v.slot_code,
+    p.id,
+    v.max_capacity,
+    v.current_estimated_qty,
+    v.min_threshold
+FROM (VALUES
+    -- Perecederos (PERISHABLE_FOOD): carriles numerados con producto refrigerado
+    ('VEND-0101', '11',              'SAND-MIXTO-01',     10,   4,  3),
+    ('VEND-0101', '12',              'ENSALADA-CESAR',     8,   0,  2),
+    ('VEND-0101', '13',              'YOGUR-NAT-125',     12,   5,  4),
+    ('VEND-0101', '21',              'AGUA-MIN-50',       12,   8,  3),
+    ('VEND-0301', '11',              'SAND-MIXTO-01',     10,   3,  3),
+    ('VEND-0301', '12',              'ENSALADA-CESAR',     8,   2,  2),
+    ('VEND-0301', '13',              'YOGUR-NAT-125',     12,   9,  4),
+    ('VEND-0301', '21',              'AGUA-MIN-50',       12,   6,  3),
+    ('VEND-0701', '11',              'SAND-MIXTO-01',     10,   7,  3),
+    ('VEND-0701', '12',              'ENSALADA-CESAR',     8,   0,  2),
+    ('VEND-0701', '13',              'YOGUR-NAT-125',     12,   4,  4),
+    ('VEND-0701', '21',              'AGUA-MIN-50',       12,  10,  3),
+    -- Bebida caliente (HOT_DRINKS): tolvas en gramos y tubos de consumible
+    ('VEND-0102', 'HOPPER_COFFEE',   'CAFE-GRANO-1K',   2000, 1400, 400),
+    ('VEND-0102', 'HOPPER_MILK',     'LECHE-POLVO-1K',  1500,  900, 300),
+    ('VEND-0102', 'HOPPER_SUGAR',    'AZUCAR-BLANCO-1K', 1000,  700, 200),
+    ('VEND-0102', 'TUBE_CUPS',       'VASOS-7OZ-TIRA',    600,  420, 150),
+    ('VEND-0302', 'HOPPER_COFFEE',   'CAFE-GRANO-1K',   2000, 1800, 400),
+    ('VEND-0302', 'HOPPER_MILK',     'LECHE-POLVO-1K',  1500,  200, 300),
+    ('VEND-0302', 'HOPPER_SUGAR',    'AZUCAR-BLANCO-1K', 1000,  500, 200),
+    ('VEND-0302', 'TUBE_CUPS',       'VASOS-7OZ-TIRA',    600,    0, 150),
+    ('VEND-0302', 'TUBE_STIRRERS',   'PALETINAS-MAD',     400,  260, 100),
+    ('VEND-0502', 'HOPPER_COFFEE',   'CAFE-GRANO-1K',   2000, 1500, 400),
+    ('VEND-0502', 'HOPPER_CHOCOLATE','CHOCO-SOLUBLE-1K', 1200,  800, 250),
+    ('VEND-0502', 'HOPPER_SUGAR',    'AZUCAR-BLANCO-1K', 1000,  600, 200),
+    ('VEND-0502', 'TUBE_CUPS',       'VASOS-7OZ-TIRA',    600,  380, 150),
+    ('VEND-0502', 'TUBE_STIRRERS',   'PALETINAS-MAD',     400,  300, 100),
+    ('VEND-1001', 'HOPPER_COFFEE',   'CAFE-GRANO-1K',   2500, 2100, 500),
+    ('VEND-1001', 'HOPPER_MILK',     'LECHE-POLVO-1K',  1800, 1200, 400),
+    ('VEND-1001', 'HOPPER_SUGAR',    'AZUCAR-BLANCO-1K', 1200,  850, 250),
+    ('VEND-1001', 'TUBE_CUPS',       'VASOS-7OZ-TIRA',    800,  640, 200),
+    -- Combo (COMBO): admite las cinco categorías
+    ('VEND-0201', '11',              'SAND-MIXTO-01',     10,   5,  3),
+    ('VEND-0201', '21',              'SNACK-PATAT-40',    14,   9,  4),
+    ('VEND-0201', '31',              'COLA-LATA-33',      14,  11,  4),
+    ('VEND-0201', 'HOPPER_COFFEE',   'CAFE-GRANO-1K',   2000, 1600, 400),
+    ('VEND-0201', 'TUBE_CUPS',       'VASOS-7OZ-TIRA',    600,  450, 150),
+    ('VEND-0401', '11',              'SAND-MIXTO-01',     10,   0,  3),
+    ('VEND-0401', '21',              'SNACK-PATAT-40',    14,   6,  4),
+    ('VEND-0401', '31',              'COLA-LATA-33',      14,  12,  4),
+    ('VEND-0401', 'HOPPER_COFFEE',   'CAFE-GRANO-1K',   2000, 1300, 400),
+    ('VEND-0401', 'TUBE_CUPS',       'VASOS-7OZ-TIRA',    600,  300, 150),
+    ('VEND-0801', '11',              'SAND-MIXTO-01',     10,   4,  3),
+    ('VEND-0801', '21',              'SNACK-PATAT-40',    14,  10,  4),
+    ('VEND-0801', '31',              'COLA-LATA-33',      14,   8,  4),
+    ('VEND-0801', 'HOPPER_COFFEE',   'CAFE-GRANO-1K',   2000, 1750, 400),
+    ('VEND-0801', 'TUBE_CUPS',       'VASOS-7OZ-TIRA',    600,  520, 150),
+    -- Snacks (SNACKS): aperitivos y bebidas frías, sin producto perecedero
+    ('VEND-0501', '11',              'SNACK-PATAT-40',    16,  12,  5),
+    ('VEND-0501', '12',              'BARRA-ENERG-45',    16,   7,  5),
+    ('VEND-0501', '13',              'SNACK-FRUTSEC-50',  14,   4,  5),
+    ('VEND-0501', '21',              'COLA-LATA-33',      14,   9,  4),
+    -- Bebidas frías (COLD_DRINKS): solo COLD_DRINK
+    ('VEND-0601', '11',              'AGUA-MIN-50',       18,  14,  5),
+    ('VEND-0601', '12',              'COLA-LATA-33',      18,  10,  5),
+    ('VEND-0601', '13',              'ZUMO-NAR-33',       16,   3,  5),
+    ('VEND-0901', '11',              'AGUA-MIN-50',       18,  16,  5),
+    ('VEND-0901', '12',              'COLA-LATA-33',      18,  12,  5),
+    ('VEND-0901', '13',              'ZUMO-NAR-33',       16,   8,  5)
+) AS v(machine_code, slot_code, sku, max_capacity, current_estimated_qty, min_threshold)
+INNER JOIN machines m ON m.code = v.machine_code
+INNER JOIN vending_products p ON p.sku = v.sku
+ON CONFLICT (machine_id, slot_code) DO NOTHING;
+
+
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante técnico · 3 vinculaciones de cuadrante de carga (M31) ·
 --       5 saldos de stock de furgoneta · 1 configuración de ruta ·
@@ -1699,4 +1857,8 @@ ON CONFLICT (record_code) DO NOTHING;
 --       3 actas de merma APPCC (Módulo 29): dos con unidades y lotes destruidos
 --       —una de ellas con ajuste económico auditado por Coordinación— y una de
 --       cabina verificada vacía, con coste 0,00 € y fotografía del interior.
+--       15 productos comerciales y de consumibles (Módulo 32) que cubren las
+--       cinco categorías, y 55 carriles activos de planograma repartidos por las
+--       13 máquinas (con un carril agotado y otro bajo umbral para demostrar el
+--       semáforo determinista sin sembrar una avería).
 -- =============================================================================

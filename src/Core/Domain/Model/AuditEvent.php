@@ -136,6 +136,26 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_SANITARY_SPOILAGE_RECORD = 'SANITARY_SPOILAGE_RECORD';
 
     /**
+     * Referencia del catálogo maestro comercial y de consumibles (Módulo 32).
+     *
+     * El producto tiene espacio de identificadores propio en `vending_products`:
+     * auditarlo como `MACHINE` o `TICKET` apuntaría a otra entidad y rompería la
+     * trazabilidad del catálogo (C3, Art. III.3). El valor existe en el enum
+     * `audit_entity_type` desde la migración 028.
+     */
+    public const ENTITY_VENDING_PRODUCT = 'VENDING_PRODUCT';
+
+    /**
+     * Matriz de carriles y planograma por máquina (Módulo 32).
+     *
+     * El guardado, la clonación y la aplicación de plantilla se auditan contra el
+     * planograma y no contra la máquina: el evento dice qué cambió en la matriz de
+     * carriles (C3, Art. III.3). El valor existe en el enum `audit_entity_type`
+     * desde la migración 028.
+     */
+    public const ENTITY_MACHINE_PLANOGRAM = 'MACHINE_PLANOGRAM';
+
+    /**
      * Whitelist completa de tipos de entidad admitidos por el dominio.
      *
      * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
@@ -164,6 +184,8 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_WORKSHOP_REPAIR_ITEM,
         self::ENTITY_MACHINE_TROUBLESHOOTING_GUIDE,
         self::ENTITY_SANITARY_SPOILAGE_RECORD,
+        self::ENTITY_VENDING_PRODUCT,
+        self::ENTITY_MACHINE_PLANOGRAM,
     ];
 
     /**

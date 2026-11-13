@@ -85,7 +85,7 @@ flowchart TD
 | `database/supabase_seeds.sql` | **Modificar** | Añadir el catálogo inicial de 16 Causas Raíz (`RC-MEC-*`, `RC-ELE-*`, `RC-PAY-*`, `RC-REF-*`, `RC-DSP-*`, `RC-COM-*`, `RC-EXT-*`) y 34 Soluciones Estandarizadas (`SOL-*`), más datos semilla de resoluciones clasificadas para certificación analítica. |
 | `src/Infrastructure/Database/SeedRunner.php` | **Modificar** | Sincronizar el sembrado programático de entorno de pruebas con las 16 causas raíz y 34 soluciones estandarizadas. |
 | `specs/technical/database_schema.md` | **Modificar** | Documentar las Tablas 35 y 36 y las 7 nuevas columnas de `incidents` (pasando de 34 a 36 tablas de dominio). |
-| `specs/technical/schema_correspondence_contract.md` | **Modificar** | Actualizar el inventario canónico de tablas (36 tablas) y columnas de `incidents` (50 columnas) verificado por `SchemaCorrespondenceTest`. |
+| `specs/technical/schema_correspondence_contract.md` | **Modificar** | Actualizar el inventario canónico de tablas (36 tablas) y columnas de `incidents` (50 columnas) verificado por `SchemaConvergenceParityTest`. |
 
 ### 1.2. Capa de Dominio (`src/Core/`)
 | Fichero | Acción | Responsabilidad |
@@ -648,7 +648,7 @@ La batería de pruebas cubrirá los 3 niveles exigidos por `AGENTS.md` y `consti
    - Cierre desde Coordinación (`POST /api/coordinator/incidents/{id}/resolve`, `QA 3`) exigiendo taxonomía, y cierre automático por reemplazo en 3.ª reincidencia crónica exento (`NULL`).
    - Blindaje de privacidad Art. V.4 y `QA 5`: verificación de que `LOCATION_RESPONSIBLE`, seguimiento QR y albarán A4 no reciben campos de taxonomía y que `TECHNICIAN` / `LOCATION_RESPONSIBLE` reciben `403 FORBIDDEN` en los endpoints de Pareto, exportación CSV y CRUD del catálogo.
 2. **Paridad Estructural y Contratos Arquitectónicos Existentes:**
-   - Actualización de `TestDataCleaner.php`, `PostgresFixtureBuilder.php`, `PostgresSchemaTest.php`, `SchemaCorrespondenceTest.php` y `SchemaConvergenceParityTest.php` para reflejar las 36 tablas y las 50 columnas de `incidents`.
+   - Actualización de `TestDataCleaner.php`, `PostgresFixtureBuilder.php`, `PostgresSchemaTest.php` y `SchemaConvergenceParityTest.php` para reflejar las 36 tablas y las 50 columnas de `incidents`.
    - Ejecución de `SingleEngineDialectContractTest`, `OfflinePwaAppShellContractTest` y `DesignTokenDebtRatchetTest` (cero deuda de tokens CSS).
 
 ---
@@ -662,7 +662,7 @@ La batería de pruebas cubrirá los 3 niveles exigidos por `AGENTS.md` y `consti
 | **`RF-03` / `C5`** (Soporte Offline PWA en `IndexedDB`, tolerancia a desactivación sobrevenida y preservación en volcado de conflictos) | `OfflineBootstrapSnapshotDto.php`, `TechnicianOfflineSyncController.php`, `OfflineSyncService.php`, `OfflineStorageService.js`, `public/sw.js` | `RootCauseTaxonomyIntegrationTest`, `OfflinePwaAppShellContractTest` |
 | **`RF-04` / `D4` / `QA 5` / Art. V.4** (Visibilidad en Coordinación y Técnico; opacidad total ante Sede, QR y Albarán A4; bloqueo `403` por rol) | `CoordinatorIncidentDetailDto.php`, `CoordinatorRootCauseController.php`, `CoordinatorMetricsController.php`, `CoordinatorIncidentDetailModal.js` | `RootCauseTaxonomyIntegrationTest` |
 | **`RF-05` / `D5` / `D6` / `C1` / `C3` / `C6` / `QA 2` / `QA 4`** (Motor Pareto 80/20, normalización determinista de Fabricante, MTTR y coste de repuestos, Chart.js local y exportación CSV UTF-8 BOM en 2 secciones) | `ManufacturerNormalizer.php`, `RootCauseParetoService.php`, `PdoRootCauseParetoAnalyticsRepository.php`, `CoordinatorMetricsController.php`, `CoordinatorRootCauseParetoTab.js`, `/public/assets/js/vendor/chart.umd.min.js` | `ManufacturerNormalizerTest`, `RootCauseParetoServiceTest`, `RootCauseTaxonomyIntegrationTest`, `DesignTokenDebtRatchetTest` |
-| **`RNF-01` a `RNF-03`** (Rendimiento SQL indexado $< 300\text{ ms}$, integridad relacional `ON DELETE RESTRICT` + snapshots inmutables y ergonomía táctil $\ge 44\text{px}$) | `021_root_cause_taxonomy.sql`, `PdoRootCauseParetoAnalyticsRepository.php`, `public/assets/css/styles.css` | `PostgresSchemaTest`, `SchemaCorrespondenceTest`, `DesignTokenDebtRatchetTest` |
+| **`RNF-01` a `RNF-03`** (Rendimiento SQL indexado $< 300\text{ ms}$, integridad relacional `ON DELETE RESTRICT` + snapshots inmutables y ergonomía táctil $\ge 44\text{px}$) | `021_root_cause_taxonomy.sql`, `PdoRootCauseParetoAnalyticsRepository.php`, `public/assets/css/styles.css` | `PostgresSchemaTest`, `SchemaConvergenceParityTest`, `DesignTokenDebtRatchetTest` |
 
 ---
 

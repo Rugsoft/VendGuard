@@ -72,7 +72,7 @@ flowchart TD
 | `database/supabase_seeds.sql` | **Modificar** | Sembrar en la Sección 21 actas de merma reales representativas (un episodio con unidades destruidas y lotes reales originado por reloj biológico de 4 h, un episodio con ajuste económico auditado por Coordinación y un episodio con máquina verificada vacía `0 unidades` y foto de cabina vacía). |
 | `src/Infrastructure/Database/SeedRunner.php` | **Modificar** | Sincronizar el sembrado programático de entorno de pruebas con las actas de merma del Módulo 29 (`ON CONFLICT (record_code) DO NOTHING`). |
 | `specs/technical/database_schema.md` | **Modificar** | Documentar la Tabla 40 `sanitary_spoilage_records` y `enforce_sanitary_spoilage_records_immutability()`. |
-| `specs/technical/schema_correspondence_contract.md` | **Modificar** | Actualizar el inventario canónico de tablas (pasando de 39 a 40 tablas de dominio) verificado por `SchemaCorrespondenceTest`. |
+| `specs/technical/schema_correspondence_contract.md` | **Modificar** | Actualizar el inventario canónico de tablas (pasando de 39 a 40 tablas de dominio) verificado por `SchemaConvergenceParityTest`. |
 
 ### 1.2. Capa de Dominio (`src/Core/`)
 | Fichero | Acción | Responsabilidad |

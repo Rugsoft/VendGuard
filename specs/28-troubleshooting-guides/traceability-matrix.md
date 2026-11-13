@@ -164,10 +164,8 @@
 
 | Nombre solicitado en la auditoría | Artefacto real en este repositorio |
 | :--- | :--- |
-| `SchemaCorrespondenceTest.php` | `SchemaConvergenceParityTest.php` + `PostgresSchemaTest.php` + `OpportunisticSchemaCorrespondenceTest.php` |
 | `OfflinePwaAppShellContractTest.php` | `tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs` |
 | `OfflinePwaSyncIntegrationTest.php` | `tests/integration/OfflinePwaSyncApiTest.php` |
-| `LegacyButtonPaletteRetirementTest.php` | `tests/unit/LegacyButtonPaletteRetirementTest.mjs` |
 | `DesignTokenDebtRatchetTest.php` | `tests/unit/DesignTokenDebtRatchetTest.mjs` |
 | `composer test` | `php tests/run_all.php` (no existe `composer.json`) |
 | `IncidentDetailModal.js` | `public/assets/js/components/CoordinatorIncidentDetailModal.js` |

@@ -20,6 +20,7 @@ use VendGuard\Core\Domain\Exception\LocationNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineTransferBlockedException;
 use VendGuard\Core\Domain\Exception\MachineTypeChangeBlockedException;
+use VendGuard\Core\Domain\Exception\PlanogramValidationException;
 use VendGuard\Core\Domain\Exception\MinimumActiveStaffException;
 use VendGuard\Core\Domain\Exception\OnCallOnlyForTechniciansException;
 use VendGuard\Core\Domain\Exception\PendingIncidentsBlockedException;
@@ -661,6 +662,15 @@ class CoordinatorAdminController
                     'ticket_code' => $e->getTicketCode(),
                     'status'      => $e->getTicketStatus(),
                 ]
+            );
+        } catch (PlanogramValidationException $e) {
+            // Cerrojo QA 4 y futuras reglas del planograma: el contrato ya
+            // declara estado, código y contexto; presentación no los reinterpreta.
+            return $this->errorResponse(
+                $e->getHttpStatusCode(),
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getContext()
             );
         } catch (CannotDeactivateSelfException $e) {
             return $this->errorResponse($e->getHttpStatusCode(), $e->getErrorCode(), $e->getMessage());

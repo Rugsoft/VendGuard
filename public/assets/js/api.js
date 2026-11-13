@@ -1580,6 +1580,57 @@ export class ApiClient {
       return this.get(`/coordinator/locations/${locationId}/machines`);
     },
 
+    // Catálogo maestro y planograma por máquina (Módulo 32: RF-01–RF-05).
+    getProducts: (filters = {}) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(filters)) {
+        if (value !== undefined && value !== null && value !== '') {
+          params.append(key, String(value));
+        }
+      }
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return this.get(`/coordinator/products${qs}`);
+    },
+    createProduct: (payload) => {
+      return this.post('/coordinator/products', payload);
+    },
+    updateProduct: (productId, payload) => {
+      return this.put(`/coordinator/products/${encodeURIComponent(productId)}`, payload);
+    },
+    changeProductStatus: (productId, isActive) => {
+      return this.patch(`/coordinator/products/${encodeURIComponent(productId)}/status`, {
+        is_active: Boolean(isActive)
+      });
+    },
+    getMachinePlanogram: (machineId) => {
+      return this.get(`/coordinator/machines/${encodeURIComponent(machineId)}/planogram`);
+    },
+    saveMachinePlanogram: (machineId, slots) => {
+      return this.put(`/coordinator/machines/${encodeURIComponent(machineId)}/planogram`, { slots });
+    },
+    savePlanogramSlot: (machineId, slotCode, payload) => {
+      return this.put(
+        `/coordinator/machines/${encodeURIComponent(machineId)}/planogram/slots/${encodeURIComponent(slotCode)}`,
+        payload
+      );
+    },
+    deactivatePlanogramSlot: (machineId, slotCode) => {
+      return this.delete(
+        `/coordinator/machines/${encodeURIComponent(machineId)}/planogram/slots/${encodeURIComponent(slotCode)}`
+      );
+    },
+    applyPlanogramPreset: (machineId, initialStockMode = 'ZERO') => {
+      return this.post(`/coordinator/machines/${encodeURIComponent(machineId)}/planogram/apply-preset`, {
+        initial_stock_mode: initialStockMode
+      });
+    },
+    clonePlanogram: (machineId, sourceMachineId, initialStockMode = 'ZERO') => {
+      return this.post(`/coordinator/machines/${encodeURIComponent(machineId)}/planogram/clone`, {
+        source_machine_id: Number(sourceMachineId),
+        initial_stock_mode: initialStockMode
+      });
+    },
+
     // Mantenimiento Preventivo (Módulo 05: RF-PREV-01, RF-PREV-02, RF-PREV-06)
     getPreventiveDashboard: () => {
       return this.get('/coordinator/preventive/dashboard');
@@ -1974,6 +2025,23 @@ export class ApiClient {
      */
     getShiftLogs: (shiftId) => {
       return this.get(`/coordinator/shifts/${encodeURIComponent(shiftId)}/logs`);
+    }
+  };
+
+  /**
+   * 4b. Restocker Operations (Módulo 32: lectura territorial del planograma)
+   *
+   * El backend resuelve el `user_id` del token y devuelve 403 fuera de las
+   * zonas vivas del reponedor. La proyección omite coste y margen (Art. V.4).
+   */
+  restocker = {
+    /**
+     * Read-only planogram of a machine inside the restocker's live zones.
+     * @param {number|string} machineId
+     * @returns {Promise<Object>}
+     */
+    getMachinePlanogram: (machineId) => {
+      return this.get(`/restocker/machines/${encodeURIComponent(machineId)}/planogram`);
     }
   };
 

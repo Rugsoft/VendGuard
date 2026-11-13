@@ -237,9 +237,11 @@ $assert(
 // que una mutación de una suite no ocupe el hueco de idempotencia de la siguiente. Las actas de
 // merma del Módulo 29 son un libro sanitario que cualquier suite puede escribir sobre máquinas,
 // averías o preventivos ya protegidos: entran como raíz propia y su purga no arrastra maestras.
+// La matriz de planograma del Módulo 32 cuelga de máquinas y productos —ambas maestras
+// protegidas— y entra también como raíz propia; el sembrador restituye sus 55 carriles.
 $assert(
-    '2.7 El plan cubre las 31 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio + 1 de encuestas CSAT + 3 de ausencias/turnos/bitácora M21-M22 + 2 de órdenes de carga M23 + 1 del libro de sincronización M24 + 1 de la cadena de custodia M26 + 1 del bucle de taller M27 + 1 de actas de merma M29 + 1 del cuadrante de carga M31)',
-    count($order) === 31,
+    '2.7 El plan cubre las 32 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio + 1 de encuestas CSAT + 3 de ausencias/turnos/bitácora M21-M22 + 2 de órdenes de carga M23 + 1 del libro de sincronización M24 + 1 de la cadena de custodia M26 + 1 del bucle de taller M27 + 1 de actas de merma M29 + 1 del cuadrante de carga M31 + 1 de planograma M32)',
+    count($order) === 32,
     'obtenidas: ' . count($order)
 );
 
