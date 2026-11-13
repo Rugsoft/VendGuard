@@ -46,7 +46,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-01.2`, `RF-03.1`, `D2`, `D3`, `D4`, `C1`.
   - **Verificación:** `php tests/unit/ProductLoadingDomainModelsTest.php`
 
-- [ ] **T-PLD-04 · Crear `ProductLoadingValidator` y `ProductLoadingValidationException` (cerrojo cámara $\le 4,0\,^\circ\text{C}$, `max_shelf_life_days` `QA 2`, lote `QA 3`, cuadre de liquidación y justificación $\ge 20$ chars)**
+- [x] **T-PLD-04 · Crear `ProductLoadingValidator` y `ProductLoadingValidationException` (cerrojo cámara $\le 4,0\,^\circ\text{C}$, `max_shelf_life_days` `QA 2`, lote `QA 3`, cuadre de liquidación y justificación $\ge 20$ chars)**
   - **Requisitos:** `RF-01.3`, `RF-03.3`, `RF-03.4`, `RF-04.2`, `D2`, `D3`, `C1`, `QA 2`, `QA 3`, `QA 4`, `Art. II`, `Art. V.1`.
   - **Verificación:** `php tests/unit/ProductLoadingValidatorTest.php`
 
