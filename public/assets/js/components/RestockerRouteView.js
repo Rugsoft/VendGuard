@@ -785,9 +785,8 @@ export const RestockerRouteView = {
 
         <button
           type="button"
-          class="vg-btn vg-btn-primary"
+          class="vg-btn vg-btn-lg vg-btn-primary w-100"
           data-testid="btn-restocker-login"
-          style="width: 100%; height: 38px; border-radius: var(--radius-interactive);"
           :disabled="isLoggingIn"
           @click="handleLogin"
         >
@@ -814,7 +813,6 @@ export const RestockerRouteView = {
             <button
               type="button"
               class="vg-btn vg-btn-ghost vg-btn-sm"
-              style="border-radius: var(--radius-interactive);"
               @click="handleLogout"
             >
               Salir
@@ -870,9 +868,8 @@ export const RestockerRouteView = {
               <button
                 v-if="shiftStatus === 'OFF_SHIFT'"
                 type="button"
-                class="vg-btn vg-btn-primary"
+                class="vg-btn vg-btn-sm vg-btn-primary"
                 data-testid="btn-start-shift"
-                style="height: 34px; font-size: 12px; padding: 0 12px; border-radius: var(--radius-interactive);"
                 :disabled="isShiftLoading"
                 @click="startShift"
               >
@@ -882,9 +879,8 @@ export const RestockerRouteView = {
               <template v-else-if="shiftStatus === 'ON_SHIFT'">
                 <button
                   type="button"
-                  class="vg-btn vg-btn-secondary"
+                  class="vg-btn vg-btn-sm vg-btn-secondary"
                   data-testid="btn-pause-meal"
-                  style="height: 34px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive);"
                   :disabled="isShiftLoading"
                   @click="pauseMealShift"
                 >
@@ -892,9 +888,8 @@ export const RestockerRouteView = {
                 </button>
                 <button
                   type="button"
-                  class="vg-btn vg-btn-secondary"
+                  class="vg-btn vg-btn-sm vg-btn-danger-soft"
                   data-testid="btn-close-shift"
-                  style="height: 34px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive); color: var(--color-urgency-critical);"
                   :disabled="isShiftLoading"
                   @click="closeShift"
                 >
@@ -905,9 +900,8 @@ export const RestockerRouteView = {
               <template v-else-if="shiftStatus === 'MEAL_BREAK'">
                 <button
                   type="button"
-                  class="vg-btn vg-btn-primary"
+                  class="vg-btn vg-btn-sm vg-btn-primary"
                   data-testid="btn-resume-shift"
-                  style="height: 34px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive);"
                   :disabled="isShiftLoading"
                   @click="resumeMealShift"
                 >
@@ -915,9 +909,8 @@ export const RestockerRouteView = {
                 </button>
                 <button
                   type="button"
-                  class="vg-btn vg-btn-secondary"
+                  class="vg-btn vg-btn-sm vg-btn-danger-soft"
                   data-testid="btn-close-shift"
-                  style="height: 34px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive); color: var(--color-urgency-critical);"
                   :disabled="isShiftLoading"
                   @click="closeShift"
                 >
@@ -943,7 +936,6 @@ export const RestockerRouteView = {
               type="button"
               class="vg-btn vg-btn-ghost vg-btn-sm"
               data-testid="btn-open-my-hours"
-              style="border-radius: var(--radius-interactive);"
               @click="openMyHours"
             >
               ⏱️ Mis Horas
@@ -1014,9 +1006,8 @@ export const RestockerRouteView = {
             </p>
             <button
               type="button"
-              class="vg-btn vg-btn-primary"
+              class="vg-btn vg-btn-lg vg-btn-primary w-100 mt-2"
               data-testid="btn-confirm-loading-order"
-              style="width: 100%; height: 42px; margin-top: 10px; border-radius: var(--radius-interactive);"
               :disabled="isConfirmingLoading"
               @click="confirmActiveLoadingOrder"
             >
@@ -1035,9 +1026,8 @@ export const RestockerRouteView = {
             </p>
             <button
               type="button"
-              class="vg-btn vg-btn-primary"
+              class="vg-btn vg-btn-lg vg-btn-primary w-100 mt-2"
               data-testid="btn-open-reconcile-loading"
-              style="width: 100%; height: 42px; margin-top: 10px; border-radius: var(--radius-interactive);"
               @click="openReconcileLoadingModal"
             >
               📋 Liquidar Cierre de Furgoneta
@@ -1275,10 +1265,9 @@ export const RestockerRouteView = {
 
               <button
                 type="button"
-                class="vg-btn vg-btn-secondary vg-btn-sm"
+                class="vg-btn vg-btn-secondary vg-btn-sm mt-2"
                 data-testid="btn-open-planogram"
                 :data-machine-id="machine.id"
-                style="margin-top: 8px;"
                 @click="openPlanogram(machine)"
               >
                 Ver planograma
@@ -1498,17 +1487,15 @@ export const RestockerRouteView = {
             <div style="display: flex; gap: 8px; margin-top: 14px;">
               <button
                 type="button"
-                class="vg-btn vg-btn-secondary"
-                style="flex: 1; height: 40px; border-radius: var(--radius-interactive);"
+                class="vg-btn vg-btn-lg vg-btn-secondary flex-grow-1"
                 @click="closeReconcileLoadingModal"
               >
                 Cancelar
               </button>
               <button
                 type="button"
-                class="vg-btn vg-btn-primary"
+                class="vg-btn vg-btn-lg vg-btn-primary flex-grow-1"
                 data-testid="btn-submit-reconcile-loading"
-                style="flex: 1; height: 40px; border-radius: var(--radius-interactive);"
                 :disabled="isReconcilingLoading"
                 @click="submitLoadingReconciliation"
               >
@@ -1537,7 +1524,6 @@ export const RestockerRouteView = {
                 type="button"
                 class="vg-btn vg-btn-ghost vg-btn-sm"
                 data-testid="btn-close-my-hours"
-                style="border-radius: var(--radius-interactive);"
                 @click="closeMyHours"
               >
                 Cerrar

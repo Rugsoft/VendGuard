@@ -6,7 +6,7 @@
 
 **Corrida de certificación:** 2026-11-13 (PostgreSQL 16+ local, batería global y canal `new_engine`).
 
-**Actualización B-01/B-02/B-03/B-04/B-05/B-06/B-07:** 2026-11-13 · cierre de la brecha funcional de `C2` (propuesta y emisión individual para un reponedor ausente, alerta en consola y exclusión mantenida en el lote), de las omisiones del lote (`SKIP_ACTIVE_ORDER`, `SKIP_NO_DEMAND`), de la tolerancia a un producto desactivado en tránsito, de la cancelación justificada desde `DISPATCHED`, de la ruta HTTP de liquidación de Coordinación, de la colisión de caducidad al confirmar la recepción y del doble clic concurrente de recepción y liquidación. Filas `02.3`, `C2`, `C3`, `03.4`, `04.1` y `04.2` actualizadas con las pruebas nuevas.
+**Actualización B-01/B-02/B-03/B-04/B-05/B-06/B-07/B-08:** 2026-11-13 · cierre de la brecha funcional de `C2` (propuesta y emisión individual para un reponedor ausente, alerta en consola y exclusión mantenida en el lote), de las omisiones del lote (`SKIP_ACTIVE_ORDER`, `SKIP_NO_DEMAND`), de la tolerancia a un producto desactivado en tránsito, de la cancelación justificada desde `DISPATCHED`, de la ruta HTTP de liquidación de Coordinación, de la colisión de caducidad al confirmar la recepción, del doble clic concurrente de recepción y liquidación y de la geometría inline de los botones móviles. Filas `02.3`, `C2`, `C3`, `03.4`, `04.1`, `04.2` y `RNF-03` actualizadas con las pruebas nuevas.
 
 **Estado:** ✅ Módulo 33 cerrado · 13/13 tareas · batería global al 100 % · `DocMetricsGuard` coherente.
 
@@ -61,7 +61,7 @@
 |---|---|---|---|
 | **RNF-01** prohibición de borrado físico en Tablas 44, 45 y 46 (`Art. III.1`) | `prevent_hard_delete()`, `trg_no_delete_restocker_van_product_stocks`, `trg_no_delete_product_loading_orders`, `trg_no_delete_product_loading_order_items`, baja lógica de líneas | `PostgresProductLoadingSchemaTest` · `PostgresConstitutionalTest` · `ProductLoadingConstitutionalTest` · `TestDataCleanerIsolationTest` | ✅ 39/39 · 83/83 · 30/30 · 50/50 — `DELETE` rechazado con `SQLSTATE 45000` y `ART_III_1_VIOLATION`; las 35 raíces transitorias quedan cubiertas |
 | **RNF-02** defensa en profundidad del cerrojo de frío y caducidad (`Art. II`) | `ProductLoadingValidator` + `trg_enforce_van_stock_cold_chain_batch` + `trg_enforce_loading_order_cold_chain_dispatch` | `ProductLoadingValidatorTest` · `PostgresProductLoadingSchemaTest` · `ProductLoadingConstitutionalTest` | ✅ 57/57 · 39/39 · 30/30 — dominio y PostgreSQL rechazan la misma combinación |
-| **RNF-03** Sistema de Diseño, A4 limpia y Dogma Vanilla (`Art. IV`) | `CoordinatorProductLoadingTab.js`, `RestockerRouteView.js`, `public/sw.js`, tokens `vg-*` | `coordinator_product_loading_tab.test.mjs` · `restocker_route_view.test.mjs` · `FrontendTemplateCompileTest.mjs` · `DesignTokenDebtRatchetTest.mjs` · `OfflinePwaAssetsAndUiGuardTest.mjs` | ✅ 50/50 · 108/108 · 15/15 · 3/3 · 45/45 — plantillas compiladas, bordes 4/8 px y sin `unit_cost_eur` |
+| **RNF-03** Sistema de Diseño, A4 limpia y Dogma Vanilla (`Art. IV`) | `CoordinatorProductLoadingTab.js`, `RestockerRouteView.js`, `public/sw.js`, tokens `vg-*` | `coordinator_product_loading_tab.test.mjs` · `restocker_route_view.test.mjs` · `CoordinatorButtonVariantsGuardTest.mjs` · `FrontendTemplateCompileTest.mjs` · `DesignTokenDebtRatchetTest.mjs` · `OfflinePwaAssetsAndUiGuardTest.mjs` | ✅ 50/50 · 108/108 · 23/23 · 15/15 · 3/3 · 45/45 — 25 plantillas y 361 botones sin geometría inline, plantillas compiladas, bordes 4/8 px y sin `unit_cost_eur` |
 
 ---
 
@@ -92,7 +92,7 @@
 | **2.** Propuesta, emisión individual/lote, edición con baja lógica, despacho térmico y cancelación | `ProductLoadingOrderServiceTest` 51/51 · `ProductLoadingValidatorTest` 57/57 · `PdoProductLoadingOrderRepositoryTest` 30/30 · `ProductLoadingDomainModelsTest` 97/97 |
 | **3.** Recepción 1-Tap, liquidación al cierre con descuadre, doble clic concurrente y stock al retorno contado | `ProductLoadingOrderServiceTest` 51/51 · `ProductLoadingColdPickingApiTest` 34/34 · `ProductLoadingConcurrencyTest` 12/12 · `ProductLoadingConstitutionalTest` 30/30 · `RestockerVanStockServiceTest` 31/31 |
 | **4.** Consola de Coordinación, Hoja A4 y móvil del reponedor sin costes | `coordinator_product_loading_tab.test.mjs` 50/50 · `restocker_route_view.test.mjs` 108/108 · `PdoRestockerVanStockRepositoryTest` 28/28 |
-| **5.** Batería global y canal `new_engine` | `php tests/run_all.php` — 427 suites / 16.053 aserciones / 0 fallos, `DocMetricsGuard` coherente · `php tests/run_new_engine.php` — 57 suites / 1.861 aserciones / 57/57 en verde, sin fallos |
+| **5.** Batería global y canal `new_engine` | `php tests/run_all.php` — 427 suites / 16.054 aserciones / 0 fallos, `DocMetricsGuard` coherente · `php tests/run_new_engine.php` — 57 suites / 1.861 aserciones / 57/57 en verde, sin fallos |
 
 ---
 

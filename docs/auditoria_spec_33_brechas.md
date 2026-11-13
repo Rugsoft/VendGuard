@@ -5,10 +5,11 @@
 **Contratos:** [`specs/technical/product_loading_cold_picking_contracts.md`](../specs/technical/product_loading_cold_picking_contracts.md)  
 **Sistema de Diseño:** [`docs/design.md`](design.md)  
 **Fecha de auditoría:** 2026-11-13  
-**Rama:** `feat/product-loading-cold-picking` · HEAD `ee4512d`  
-**Alcance:** contraste requisito por requisito contra código y ejecución directa de suites; no se modificó código de producción.
+**Rama:** `feat/product-loading-cold-picking` · HEAD `8d83f6b`
 
-**Actualización 2026-11-13:** B-01 cerrada tras implementar la propuesta y emisión individual del reponedor ausente, la alerta C2 en consola y su regresión de servicio, repositorio, API y frontend. B-02 cerrada al certificar las omisiones del lote por orden activa y demanda cero. B-03 cerrada al certificar la recepción y la liquidación con un producto desactivado en tránsito. B-04 cerrada al certificar la cancelación justificada desde `DISPATCHED`. B-05 cerrada al ejercer la ruta HTTP de liquidación de Coordinación. B-06 cerrada al certificar la colisión de caducidad al confirmar la recepción. B-07 cerrada al certificar el doble clic de confirmación y liquidación con conexiones reales. Solo queda B-08.
+**Alcance:** contraste requisito por requisito contra código y ejecución directa de suites; la única modificación de producción es la migración de los botones móviles de B-08 a la escalera del sistema de diseño.
+
+**Actualización 2026-11-13:** B-01 cerrada tras implementar la propuesta y emisión individual del reponedor ausente, la alerta C2 en consola y su regresión de servicio, repositorio, API y frontend. B-02 cerrada al certificar las omisiones del lote por orden activa y demanda cero. B-03 cerrada al certificar la recepción y la liquidación con un producto desactivado en tránsito. B-04 cerrada al certificar la cancelación justificada desde `DISPATCHED`. B-05 cerrada al ejercer la ruta HTTP de liquidación de Coordinación. B-06 cerrada al certificar la colisión de caducidad al confirmar la recepción. B-07 cerrada al certificar el doble clic de confirmación y liquidación con conexiones reales. B-08 cerrada al migrar los 16 botones móviles a la escalera y ampliar el guard a esa superficie.
 
 ---
 
@@ -17,11 +18,11 @@
 La implementación está muy avanzada. La batería hermética y el canal `new_engine` **quedaron al 100 % en verde** en esta corrida:
 
 - **24 suites ejecutadas directamente**, todas con `exit=0`.
-- Batería global: **427/427 suites · 16.053 aserciones · 0 fallos**.
+- Batería global: **427/427 suites · 16.054 aserciones · 0 fallos**.
 - Canal `new_engine`: **57 suites · 1.861 aserciones · 57/57 en verde**. La sonda `PoolerLatencyMeasurementTest` también quedó dentro de su presupuesto en esta corrida.
 - Tareas del módulo: **13/13 completadas**, 0 pendientes.
 
-Con B-01 a B-07 cerradas, **queda una brecha abierta**: B-08, una desviación de `RNF-03`. La Spec 33 sigue sin poder certificarse al 100 % hasta cerrarla.
+Con B-01 a B-08 cerradas, **la Spec 33 queda certificada al 100 %**: no quedan brechas funcionales, de cobertura ni de diseño.
 
 | ID | Brecha | Tipo | Severidad | Requisito afectado | Estado |
 |---|---|---|---|---|---|
@@ -32,7 +33,7 @@ Con B-01 a B-07 cerradas, **queda una brecha abierta**: B-08, una desviación de
 | **B-05** | La ruta HTTP de liquidación de Coordinación no se ejerce | Cobertura | Media | `RF-04.2`, `RF-05.1` | ✅ **Cerrada** (2026-11-13) |
 | **B-06** | No se prueba `BATCH_EXPIRATION_MISMATCH` al confirmar la recepción | Cobertura | Media | `QA 3`, `RF-04.1` | ✅ **Cerrada** (2026-11-13) |
 | **B-07** | El doble clic no se prueba con concurrencia real | Cobertura | Media | §6.6, `D3`, `RF-04.1`, `RF-04.2` | ✅ **Cerrada** (2026-11-13) |
-| **B-08** | Los botones móviles del Módulo 33 declaran geometría en línea y quedan fuera del guard de Coordinación | Diseño | Baja/Media | `RNF-03`, `docs/design.md` | Abierta |
+| **B-08** | Los botones móviles del Módulo 33 declaran geometría en línea y quedan fuera del guard de Coordinación | Diseño | Baja/Media | `RNF-03`, `docs/design.md` | ✅ **Cerrada** (2026-11-13) |
 
 ---
 
@@ -155,17 +156,17 @@ Con B-01 a B-07 cerradas, **queda una brecha abierta**: B-08, una desviación de
 - La misma carrera se repite sobre la liquidación: un solo `RECONCILED_AT_CLOSE`, saldo final **3** y una sola liquidación de orden y de stock.
 - No se tocó código de producción: el `FOR UPDATE` y la comprobación de estado ya existían.
 
-**Verificación.** `ProductLoadingConcurrencyTest` **12/12**, `exit=0`; canal `new_engine` **57 suites · 1.861 aserciones · 57/57 en verde**. La batería global conserva **427 suites · 16.053 aserciones · 0 fallos**.
+**Verificación.** `ProductLoadingConcurrencyTest` **12/12**, `exit=0`; canal `new_engine` **57 suites · 1.861 aserciones · 57/57 en verde**. La batería global conserva **427 suites · 16.054 aserciones · 0 fallos**.
 
 **Estado.** ✅ **CERRADA** el 2026-11-13. El doble clic queda certificado con conexiones reales, una sola transición, un solo incremento y una sola liquidación.
 
 ---
 
-## B-08 · Los botones móviles del Módulo 33 declaran geometría en línea y quedan fuera del guard de Coordinación
+## B-08 · Los botones móviles del Módulo 33 declaran geometría en línea y quedan fuera del guard de Coordinación · ✅ CERRADA
 
 **Requisito.** `RNF-03` exige fidelidad a [`docs/design.md`](design.md), incluida la escalera única de botones (`vg-btn`, `vg-btn-sm`, `vg-btn-lg`) y la regla de que ningún botón declare su propia caja.
 
-**Evidencia.**
+**Evidencia (antes).**
 
 - `CoordinatorButtonVariantsGuardTest.mjs` solo barre `public/assets/js/views` y `components` con prefijo `Coordinator*.js`; no incluye `RestockerRouteView.js`.
 - `restocker_route_view.test.mjs` comprueba ausencia de hex, tipografía dual, radios 4/8 px y mobile-first, pero no la geometría de los botones.
@@ -174,13 +175,22 @@ Con B-01 a B-07 cerradas, **queda una brecha abierta**: B-08, una desviación de
 
 **Impacto.** La paleta, los radios y la impresión sí cumplen; la geometría de los botones móviles del módulo contradice la regla de `docs/design.md` y no hay guard que la detecte. Es una deuda de diseño, no un fallo funcional.
 
-**Cierre propuesto.** Migrar los botones de `RestockerRouteView.js` a los peldaños `vg-btn-sm`/`vg-btn`/`vg-btn-lg` y ampliar el guard de variantes para incluir la vista móvil o una lista explícita de superficies del Módulo 33.
+**Resolución implementada.**
+
+- Los 16 botones de `RestockerRouteView.js` visten ahora la escalera canónica: login, recepción 1-Tap y apertura de liquidación usan `vg-btn-lg`; las acciones de jornada y los cierres de modal usan `vg-btn-sm`; los botones de los diálogos de liquidación usan `vg-btn-lg`.
+- El ancho completo, el reparto de los botones del diálogo y la separación vertical se resuelven con las utilidades `w-100`, `flex-grow-1` y `mt-2`; ningún `<button>` conserva `height`, `width`, `padding`, `font-size`, `border-radius`, `margin`, `flex` ni `color` en línea.
+- «Cerrar Turno» deja el color crítico inline y pasa al tono semántico `vg-btn-danger-soft`; el resto de tonos ya existían en la hoja.
+- `CoordinatorButtonVariantsGuardTest.mjs` barre las 24 plantillas `Coordinator*.js` y la superficie móvil explícita `RestockerRouteView.js`: 25 plantillas y 361 botones. La aserción 2.8 certifica que la vista del Módulo 33 entra en el barrido con sus 16 botones y sin geometría, color ni clase base fuera del sistema.
+
+**Verificación.** `CoordinatorButtonVariantsGuardTest.mjs` **23/23**, `exit=0`; `restocker_route_view.test.mjs` **108/108**, `exit=0`. La batería global queda en **427 suites · 16.054 aserciones · 0 fallos**, y el canal `new_engine` conserva **57 suites · 1.861 aserciones · 57/57 en verde**.
+
+**Estado.** ✅ **CERRADA** el 2026-11-13. Los botones móviles del Módulo 33 y las plantillas de Coordinación comparten una sola escalera, y el guard impide que la geometría inline vuelva a la superficie móvil.
 
 ---
 
 ## Conclusión
 
-**La Spec 33 no está 100 % cumplida.** El módulo tiene las 13 tareas cerradas y todas las suites ejecutadas en verde, pero:
+**La Spec 33 está 100 % cumplida.** El módulo tiene las 13 tareas cerradas y todas las suites ejecutadas en verde:
 
 - **B-01 está cerrada**: `C2` ya permite propuesta y emisión individual del ausente, muestra la alerta en consola y mantiene la exclusión del lote.
 - **B-02 está cerrada**: el lote certifica `SKIP_ACTIVE_ORDER`, `SKIP_NO_DEMAND` y `SKIP_ABSENT` con sus causas exactas.
@@ -189,16 +199,16 @@ Con B-01 a B-07 cerradas, **queda una brecha abierta**: B-08, una desviación de
 - **B-05 está cerrada**: la ruta de liquidación de Coordinación liquida de extremo a extremo, sella el actor y deja el stock contado sin costes.
 - **B-06 está cerrada**: la confirmación de recepción rechaza un lote preexistente con otra caducidad mediante `409 BATCH_EXPIRATION_MISMATCH`, sin tocar stock ni estado.
 - **B-07 está cerrada**: dos conexiones reales compiten por la cabecera; una gana y la otra recibe 409, sin duplicar stock ni auditoría en confirmación y liquidación.
-- **B-08 es una desviación de diseño** respecto a `docs/design.md`.
+- **B-08 está cerrada**: los 16 botones móviles usan la escalera `vg-btn-sm`/`vg-btn-lg`, ya no declaran su caja en línea y el guard de variantes cubre la superficie móvil del Módulo 33.
 
-La matriz de trazabilidad se actualizó para `C2`, `C3`, `QA 3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1` con las pruebas nuevas. Solo B-08 sigue requiriendo corrección antes de declarar la Spec 33 completa.
+La matriz de trazabilidad se actualizó para `C2`, `C3`, `QA 3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2`, `RF-05.1` y `RNF-03` con las pruebas nuevas. No quedan brechas abiertas.
 
 ---
 
 ## Referencias de evidencia
 
 - [`specs/33-product-loading-cold-picking/tasks.md`](../specs/33-product-loading-cold-picking/tasks.md) · 13/13 tareas.
-- [`specs/33-product-loading-cold-picking/traceability-matrix.md`](../specs/33-product-loading-cold-picking/traceability-matrix.md) · matriz actualizada para `C2`, `C3`, `QA 3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2` y `RF-05.1`; B-08 sigue documentada como brecha.
+- [`specs/33-product-loading-cold-picking/traceability-matrix.md`](../specs/33-product-loading-cold-picking/traceability-matrix.md) · matriz actualizada para `C2`, `C3`, `QA 3`, `RF-02.3`, `RF-03.4`, `RF-04.1`, `RF-04.2`, `RF-05.1` y `RNF-03`; B-08 cerrada.
 - `src/Application/Service/ProductLoadingOrderService.php` · propuesta, emisión individual/lote, confirmación y liquidación.
 - `src/Infrastructure/Repository/PdoProductLoadingOrderRepository.php` · `FOR UPDATE` y consultas de propuesta.
 - `public/assets/js/components/CoordinatorProductLoadingTab.js` · consola de Coordinación.
@@ -209,4 +219,5 @@ La matriz de trazabilidad se actualizó para `C2`, `C3`, `QA 3`, `RF-02.3`, `RF-
 - `tests/integration/ProductLoadingConcurrencyTest.php` · doble clic concurrente de confirmación y liquidación con dos procesos actores, stock y auditoría únicos (B-07).
 - `tests/Support/ProductLoadingConcurrencyActor.php` · actor externo con conexión propia y barrera común para la carrera de la cabecera.
 - `tests/frontend/coordinator_product_loading_tab.test.mjs` · alerta C2 y emisión desde la propuesta del ausente (2.5b/2.5c).
-- `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` · alcance real del guard de botones.
+- `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` · guard de botones del panel y de la vista móvil del Módulo 33 (23/23).
+- `tests/frontend/restocker_route_view.test.mjs` · contrato móvil del reponedor, incluida la recepción y la liquidación (108/108).
