@@ -9,9 +9,13 @@ use PDO;
 use Throwable;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\MachinePlanogramService;
+use VendGuard\Application\Service\ProductLoadingOrderService;
+use VendGuard\Application\Service\RestockerVanStockService;
 use VendGuard\Application\Service\ShiftLifecycleService;
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineOutsideRestockerZonesException;
+use VendGuard\Core\Domain\Exception\ProductLoadingValidationException;
+use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
@@ -20,6 +24,8 @@ use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoMachinePlanogramRepository;
 use VendGuard\Infrastructure\Repository\PdoOperationalZoneRepository;
+use VendGuard\Infrastructure\Repository\PdoProductLoadingOrderRepository;
+use VendGuard\Infrastructure\Repository\PdoRestockerVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
@@ -54,12 +60,18 @@ final class RestockerRouteController
 
     private MachinePlanogramService $planogramService;
 
+    private ProductLoadingOrderService $loadingOrderService;
+
+    private RestockerVanStockService $vanStockService;
+
     public function __construct(
         ?PDO $pdo = null,
         ?UserRepositoryInterface $userRepo = null,
         ?OperationalZoneRepositoryInterface $zoneRepo = null,
         ?ShiftLifecycleService $lifecycleService = null,
-        ?MachinePlanogramService $planogramService = null
+        ?MachinePlanogramService $planogramService = null,
+        ?ProductLoadingOrderService $loadingOrderService = null,
+        ?RestockerVanStockService $vanStockService = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $this->userRepo = $userRepo ?? new PdoUserRepository($pdo);
@@ -83,6 +95,27 @@ final class RestockerRouteController
             new PdoMachinePlanogramRepository($pdo),
             new PdoVendingProductRepository($pdo),
             new AuditLogger()
+        );
+
+        $orderRepository = new PdoProductLoadingOrderRepository($pdo);
+        $stockRepository = new PdoRestockerVanStockRepository($pdo);
+        $productRepository = new PdoVendingProductRepository($pdo);
+
+        $this->loadingOrderService = $loadingOrderService ?? new ProductLoadingOrderService(
+            $orderRepository,
+            $stockRepository,
+            $productRepository,
+            $this->userRepo,
+            new AuditLogger(),
+            $pdo
+        );
+
+        $this->vanStockService = $vanStockService ?? new RestockerVanStockService(
+            $stockRepository,
+            $productRepository,
+            $this->userRepo,
+            new AuditLogger(),
+            $pdo
         );
     }
 
@@ -120,6 +153,8 @@ final class RestockerRouteController
 
             $shift = $this->lifecycleService->getCurrentShift($restockerId);
             $machines = $this->planogramService->listRestockerMachines($restockerId);
+            $loadingContext = $this->loadingOrderService->getRestockerLoadingContext($restockerId);
+            $vanStock = $this->vanStockService->getOwnVanStock($restockerId);
 
             return Response::json([
                 'restocker' => [
@@ -141,6 +176,11 @@ final class RestockerRouteController
                 ],
                 'machines' => $machines,
                 'route_stops' => [],
+                'active_loading_order' => $loadingContext['active_loading_order'],
+                'last_reconciled_order' => $loadingContext['last_reconciled_order'],
+                'van_product_stocks' => $vanStock['stocks'],
+                'van_stock_kpis' => $vanStock['kpis'],
+                'has_expired_van_lots' => $vanStock['has_expired_lots'],
             ], 200);
         } catch (Throwable $exception) {
             error_log('[vendguard] Fallo al construir la ruta de carga del reponedor: ' . $exception);
@@ -218,6 +258,133 @@ final class RestockerRouteController
 
             return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo cargar el planograma de la máquina.', 500);
         }
+    }
+
+    /**
+     * GET /api/restocker/van-stocks
+     *
+     * Stock FEFO del propio reponedor autenticado, con semáforo de caducidad y
+     * sin `unit_cost_eur` ni precios (Art. V.4).
+     */
+    public function vanStocks(Request $request): Response
+    {
+        $restockerId = (int)($request->getAttribute('user_id') ?? 0);
+        if ($restockerId <= 0) {
+            return Response::error('UNAUTHORIZED', 'La sesión no identifica a un reponedor activo.', 401);
+        }
+
+        try {
+            return Response::json($this->vanStockService->getOwnVanStock($restockerId), 200);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo al leer el stock de la furgoneta: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo cargar el stock de la furgoneta.', 500);
+        }
+    }
+
+    /**
+     * POST /api/restocker/product-loading-orders/{id}/confirm
+     *
+     * Recepción en un toque de la orden propia. El reponedor sale del token y
+     * el servicio aplica el aislamiento horizontal (`403` si no es su orden).
+     */
+    public function confirmLoadingOrder(Request $request): Response
+    {
+        return $this->executeLoadingOrder(function () use ($request): Response {
+            $restockerId = $this->authenticatedRestockerId($request);
+
+            return Response::json(
+                $this->loadingOrderService->confirmOrder(
+                    $this->loadingRouteId($request),
+                    $restockerId,
+                    $this->actor($request)
+                ),
+                200,
+                'Recepción de la orden confirmada en la furgoneta.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/product-loading-orders/{id}/reconcile
+     *
+     * Liquidación al cierre de la orden propia con las mismas reglas de cuadre
+     * y justificación que la superficie de Coordinación (D3, QA 4, Art. V.1).
+     */
+    public function reconcileLoadingOrder(Request $request): Response
+    {
+        return $this->executeLoadingOrder(function () use ($request): Response {
+            $restockerId = $this->authenticatedRestockerId($request);
+
+            return Response::json(
+                $this->loadingOrderService->reconcileOrder(
+                    $this->loadingRouteId($request),
+                    $request->getParsedBody(),
+                    $this->actor($request),
+                    $restockerId
+                ),
+                200,
+                'Orden de carga liquidada al cierre.'
+            );
+        });
+    }
+
+    private function executeLoadingOrder(callable $operation): Response
+    {
+        try {
+            return $operation();
+        } catch (ProductLoadingValidationException $exception) {
+            $details = $exception->getField() === null
+                ? null
+                : array_merge(['field' => $exception->getField()], $exception->getContext());
+
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $details
+            );
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('VALIDATION_ERROR', $exception->getMessage(), 400);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo en la orden de carga del reponedor: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo completar la operación de carga.', 500);
+        }
+    }
+
+    private function authenticatedRestockerId(Request $request): int
+    {
+        $restockerId = (int)($request->getAttribute('user_id') ?? 0);
+        if ($restockerId <= 0) {
+            throw new InvalidArgumentException('La sesión no identifica a un reponedor activo.');
+        }
+
+        return $restockerId;
+    }
+
+    /**
+     * @return array{id: int, role: string, name: string}
+     */
+    private function actor(Request $request): array
+    {
+        $user = $request->getAttribute('authenticated_user');
+
+        return [
+            'id' => $this->authenticatedRestockerId($request),
+            'role' => (string)($request->getAttribute('user_role') ?? 'RESTOCKER'),
+            'name' => $user instanceof User ? $user->getName() : 'Reposición',
+        ];
+    }
+
+    private function loadingRouteId(Request $request): int
+    {
+        $raw = (string)($request->getRouteParam('id') ?? '');
+        if ($raw === '' || !ctype_digit($raw) || (int)$raw <= 0) {
+            throw new InvalidArgumentException('El identificador de la orden de carga debe ser un número entero positivo.');
+        }
+
+        return (int)$raw;
     }
 
     private function positiveRouteId(Request $request): int

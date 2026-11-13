@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Presentation\Routing;
 
 use VendGuard\Presentation\Controller\CoordinatorPlanogramController;
+use VendGuard\Presentation\Controller\CoordinatorProductLoadingController;
 use VendGuard\Presentation\Controller\CoordinatorRefundController;
 use VendGuard\Presentation\Controller\CoordinatorRootCauseController;
 use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
@@ -378,6 +379,24 @@ class AppRouter
         $router->post('/api/coordinator/van-restock-orders/{id}/dispatch', [CoordinatorVanRestockOrderController::class, 'dispatchOrder'], [$coordinatorAuth]);
         $router->post('/api/coordinator/van-restock-orders/{id}/cancel', [CoordinatorVanRestockOrderController::class, 'cancelOrder'], [$coordinatorAuth]);
 
+        // Órdenes de carga de producto y stock por lote de las furgonetas
+        // (Módulo 33: T-PLD-09, RF-01 a RF-05, D2–D4, Art. II, Art. V.1 y
+        // Art. V.4). Las rutas estáticas se registran antes de `{id}` para que
+        // `proposal` no se interprete como un identificador. Ninguna respuesta
+        // de esta superficie publica coste unitario, precio o margen.
+        $router->get('/api/coordinator/restocker-van-stocks', [CoordinatorProductLoadingController::class, 'listVanStocks'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/restocker-van-stocks/{restockerId}', [CoordinatorProductLoadingController::class, 'upsertVanStock'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/product-loading-orders/proposal', [CoordinatorProductLoadingController::class, 'getProposal'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/product-loading-orders', [CoordinatorProductLoadingController::class, 'listOrders'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/product-loading-orders/batch', [CoordinatorProductLoadingController::class, 'createBatchOrders'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/product-loading-orders', [CoordinatorProductLoadingController::class, 'createOrder'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/product-loading-orders/{id}/picking-sheet', [CoordinatorProductLoadingController::class, 'getPickingSheet'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/product-loading-orders/{id}', [CoordinatorProductLoadingController::class, 'getOrder'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/product-loading-orders/{id}', [CoordinatorProductLoadingController::class, 'updateOrder'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/product-loading-orders/{id}/dispatch', [CoordinatorProductLoadingController::class, 'dispatchOrder'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/product-loading-orders/{id}/reconcile', [CoordinatorProductLoadingController::class, 'reconcileOrder'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/product-loading-orders/{id}/cancel', [CoordinatorProductLoadingController::class, 'cancelOrder'], [$coordinatorAuth]);
+
         // Actas de Merma APPCC (Módulo 29: T-SPOILAGE-10).
         // Los endpoints compartidos por Técnico y Coordinación se autentican como
         // personal interno y el controlador decide el rol permitido. Los tres
@@ -522,6 +541,13 @@ class AppRouter
         // selecciona unit_cost_eur ni margen; fuera de ellas responde 403.
         $router->get('/api/restocker/machines', [RestockerRouteController::class, 'listMachines'], [$restockerAuth]);
         $router->get('/api/restocker/machines/{id}/planogram', [RestockerRouteController::class, 'getPlanogram'], [$restockerAuth]);
+        // Stock FEFO propio, recepción en un toque y liquidación al cierre
+        // (Módulo 33: T-PLD-09, RF-04, RF-05.2, C4, Art. V.4). El reponedor
+        // siempre sale del token; la confirmación y la liquidación verifican
+        // la pertenencia de la orden antes de tocar el stock.
+        $router->get('/api/restocker/van-stocks', [RestockerRouteController::class, 'vanStocks'], [$restockerAuth]);
+        $router->post('/api/restocker/product-loading-orders/{id}/confirm', [RestockerRouteController::class, 'confirmLoadingOrder'], [$restockerAuth]);
+        $router->post('/api/restocker/product-loading-orders/{id}/reconcile', [RestockerRouteController::class, 'reconcileLoadingOrder'], [$restockerAuth]);
 
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)

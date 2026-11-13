@@ -66,7 +66,7 @@ flowchart LR
   - **Requisitos:** `RF-02` a `RF-04`, `D1`–`D4`, `C1`–`C4`, `QA 1`–`QA 4`, `Art. II`, `Art. III.3`, `Art. V.1`, `Art. V.4`.
   - **Verificación:** `php tests/unit/ProductLoadingOrderServiceTest.php`
 
-- [ ] **T-PLD-09 · Crear `CoordinatorProductLoadingController`, extender `RestockerRouteController` y registrar rutas + guardas RBAC en `AppRouter`**
+- [x] **T-PLD-09 · Crear `CoordinatorProductLoadingController`, extender `RestockerRouteController` y registrar rutas + guardas RBAC en `AppRouter`**
   - **Requisitos:** `RF-01` a `RF-05`, `Art. V.4`.
   - **Verificación:** `php tests/integration/ProductLoadingColdPickingApiTest.php`
 

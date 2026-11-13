@@ -309,6 +309,47 @@ final class ProductLoadingOrderService
     }
 
     /**
+     * Contexto de carga del bootstrap móvil del reponedor (RF-04, C4).
+     *
+     * Devuelve la orden activa con sus líneas y el comprobante de la última
+     * orden liquidada. Ambas lecturas pasan por `getOrder()` con el reponedor
+     * autenticado, de modo que el aislamiento horizontal se aplica también a
+     * esta proyección y ninguna respuesta transporta `unit_cost_eur`.
+     *
+     * @return array{
+     *   active_loading_order: array<string, mixed>|null,
+     *   last_reconciled_order: array<string, mixed>|null
+     * }
+     */
+    public function getRestockerLoadingContext(int $restockerId): array
+    {
+        if ($restockerId <= 0) {
+            throw new InvalidArgumentException('El reponedor autenticado debe ser un usuario existente.');
+        }
+
+        $active = $this->orderRepository->findActiveByRestocker($restockerId);
+        $activeDetail = null;
+        if ($active !== null && $active->getId() !== null) {
+            $activeDetail = $this->getOrder($active->getId(), $restockerId);
+        }
+
+        $lastReconciled = null;
+        foreach ($this->orderRepository->findForCoordinator(null, $restockerId, 50, 0) as $row) {
+            if (($row['status'] ?? '') !== ProductLoadingOrderStatus::RECONCILED_AT_CLOSE->value) {
+                continue;
+            }
+
+            $lastReconciled = $this->getOrder((int)$row['id'], $restockerId);
+            break;
+        }
+
+        return [
+            'active_loading_order' => $activeDetail,
+            'last_reconciled_order' => $lastReconciled,
+        ];
+    }
+
+    /**
      * Detalle completo con Hoja A4 (EARS 03.2).
      *
      * @return array<string, mixed>
