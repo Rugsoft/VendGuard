@@ -2090,6 +2090,48 @@ export class ApiClient {
    */
   restocker = {
     /**
+     * Visitas de reposición in situ del propio reponedor (Módulo 34, RF-05.1).
+     * La respuesta omite costes y márgenes (Art. V.4).
+     * @param {{machine_id?: number|string, status?: string, limit?: number|string}} [params={}]
+     * @returns {Promise<Object>}
+     */
+    getVisits: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/restocker/visits${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * Registro idempotente de una visita in situ (Módulo 34, RF-02/RF-03/D4).
+     * @param {number|string} machineId
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    createRestockVisit: (machineId, payload) => {
+      return this.post(`/restocker/machines/${encodeURIComponent(machineId)}/visits`, payload);
+    },
+
+    /**
+     * Sube la evidencia fotográfica de una visita (Art. V.5).
+     * @param {(Blob|File)} photo
+     * @param {string|null} [photoName=null]
+     * @returns {Promise<Object>}
+     */
+    uploadVisitPhoto: (photo, photoName = null) => {
+      const formData = new FormData();
+      formData.append('photo', photo, photoName || photo?.name || 'visit-evidence');
+      return this.upload('/restocker/visits/photo', formData);
+    },
+
+    /**
+     * Archiva en auditoría un conflicto offline irresoluble (Módulo 34, C3).
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    dumpVisitConflict: (payload) => {
+      return this.post('/restocker/visits/conflict-dump', payload);
+    },
+
+    /**
      * Read-only planogram of a machine inside the restocker's live zones.
      * @param {number|string} machineId
      * @returns {Promise<Object>}

@@ -935,7 +935,7 @@ async function runTests() {
   assert(
     '6.8 El Service Worker precachea el componente nuevo',
     swSource.includes('/assets/js/components/CoordinatorProductLoadingTab.js')
-      && swSource.includes('vendguard-app-shell-v19')
+      && swSource.includes('vendguard-app-shell-v20')
   );
 
   const apiMethods = [

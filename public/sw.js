@@ -22,7 +22,7 @@
 'use strict';
 
 /** Nombre de caché versionado (contratos §2.2). Subirlo es lo que invalida el shell. */
-const CACHE_NAME = 'vendguard-app-shell-v19';
+const CACHE_NAME = 'vendguard-app-shell-v20';
 
 /** Prefijo de la superficie HTTP que jamás entra en caché (Art. V.4). */
 const API_PATH_PREFIX = '/api/';
@@ -67,6 +67,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/utils/OfflineSyncManager.js',
   '/assets/js/utils/OpportunisticContext.js',
   '/assets/js/utils/PreventiveLabels.js',
+  '/assets/js/utils/RestockVisitOfflineQueue.js',
   '/assets/js/utils/SuggestionFormat.js',
   // Vistas
   '/assets/js/views/CoordinatorDashboardView.js?v=26',

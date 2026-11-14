@@ -78,7 +78,7 @@ flowchart LR
   - **Requisitos:** `RF-05.2`, `RNF-03`, `D4`, `QA 3`, `Art. V.4`.
   - **Verificación:** `node tests/frontend/coordinator_product_loading_tab.test.mjs`
 
-- [ ] **T-RVF-12 · Extender `RestockerRouteView.js` con el asistente de visita in situ (control térmico con aborto automático, retirada/carga FEFO, checklist diario adaptativo y foto), cola Offline en `IndexedDB` (`D4`, `C3`) y pre-rellenado de liquidación (`C4`) sin costes (`Art. V.4`)**
+- [x] **T-RVF-12 · Extender `RestockerRouteView.js` con el asistente de visita in situ (control térmico con aborto automático, retirada/carga FEFO, checklist diario adaptativo y foto), cola Offline en `IndexedDB` (`D4`, `C3`) y pre-rellenado de liquidación (`C4`) sin costes (`Art. V.4`)**
   - **Requisitos:** `RF-02` a `RF-05.1`, `RNF-03`, `D1`–`D4`, `C3`, `C4`, `QA 1`, `QA 3`, `Art. II`, `Art. V.4`.
   - **Verificación:** `node tests/frontend/restocker_route_view.test.mjs`
 
