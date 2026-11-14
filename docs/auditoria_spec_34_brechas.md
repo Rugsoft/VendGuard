@@ -29,7 +29,7 @@ El resto de `RF-01`, `RF-02.1`, `RF-02.3`, `RF-03`, `RF-04`, `RF-05`, los `RNF-0
 
 ### Cierre de la entrega (2026-11-14)
 
-`FIX-34-01`, `FIX-34-02` y `FIX-34-03` quedan implementados y cubiertos por regresión. El ticket térmico nuevo se asigna al primer candidato utilizable del recomendador —o permanece `REGISTERED` sin candidato— mediante `PdoIncidentRepository::assign()`, con un único tramo de custodia y la fuente existente `COORDINATOR_ASSIGN`; la alerta de frío se encola en `notification_outbox` tanto en el alta como en la escalada, después de rehidratar el expediente asignado. La suite constitucional pasa a **42/42** y las suites focales quedan en verde. `FIX-34-04` se cierra con `T-RVF-14`: la matriz publica filas explícitas de asignación y outbox, `tasks.md` y ODD registran la corrección y la Feature 24 ya no declara el 100 % sin esas cláusulas. `FIX-34-05` deja alineada la nomenclatura térmica: `THERMAL_BREAKDOWN` es la etiqueta funcional y `TEMPERATURE_COLD` el valor persistido en `incidents.category`. La certificación global completa sigue pendiente de reejecución (`FIX-34-07`).
+`FIX-34-01`, `FIX-34-02` y `FIX-34-03` quedan implementados y cubiertos por regresión. El ticket térmico nuevo se asigna al primer candidato utilizable del recomendador —o permanece `REGISTERED` sin candidato— mediante `PdoIncidentRepository::assign()`, con un único tramo de custodia y la fuente existente `COORDINATOR_ASSIGN`; la alerta de frío se encola en `notification_outbox` tanto en el alta como en la escalada, después de rehidratar el expediente asignado. La suite constitucional pasa a **42/42** y las suites focales quedan en verde. `FIX-34-04` se cierra con `T-RVF-14`: la matriz publica filas explícitas de asignación y outbox, `tasks.md` y ODD registran la corrección y la Feature 24 ya no declara el 100 % sin esas cláusulas. `FIX-34-05` deja alineada la nomenclatura térmica: `THERMAL_BREAKDOWN` es la etiqueta funcional y `TEMPERATURE_COLD` el valor persistido en `incidents.category`. `FIX-34-06` cierra la deuda de disponibilidad: `OUT_OF_SERVICE` queda como estado funcional y se persiste con `machines.is_blocked_no_access = TRUE` en `COLD_DRINKS`; `SANITARY_QUARANTINE` se persiste con `sanitary_status = 'QUARANTINE'`; no se añade columna ni migración. La suite constitucional verifica el flag en el caso `COLD_DRINKS` y el frontend deja de consultar un `sanitary_status` inexistente. La certificación global completa sigue pendiente de reejecución (`FIX-34-07`).
 
 ---
 
@@ -42,8 +42,8 @@ El resto de `RF-01`, `RF-02.1`, `RF-02.3`, `RF-03`, `RF-04`, `RF-05`, los `RNF-0
 | **3** | **FIX-34-03** | **P0 · Certificación** | No hay ninguna aserción sobre asignación ni sobre `notification_outbox`; el test constitucional solo comprueba `REGISTERED` | `RF-02.2`, `QA 2`, DoD 5 | La regresión es invisible: la batería puede seguir en verde con las dos cláusulas rotas | **Cerrada (2026-11-14)** |
 | **4** | **FIX-34-04** | **P1 · Documental** | `traceability-matrix.md`, `tasks.md`, ODD y `features_pendientes.md` certifican el 100 % sin estas dos cláusulas | §8, DoD, trazabilidad | La certificación formal no refleja el estado real del requisito | **Cerrada (2026-11-14, `T-RVF-14`)** |
 | **5** | **FIX-34-05** | **P2 · Contractual** | La spec usa `THERMAL_BREAKDOWN`; el motor usa `incident_category = 'TEMPERATURE_COLD'` | `RF-02.2` | Ambigüedad de nomenclatura entre especificación, esquema y tests; hoy se resuelve por convención oral/documental | **Cerrada (2026-11-14)** |
-| **6** | **FIX-34-06** | **P2 · Contractual** | La spec usa `machines.status = 'OUT_OF_SERVICE'`; el esquema no tiene ese estado y el código usa `is_blocked_no_access = TRUE` para bebidas frías | `RF-02.2`, §6.2 | Mapeo correcto en la práctica, pero no explícito en el contrato; dificulta la verificación literal | **Abierta** |
-| **7** | **FIX-34-07** | **P3 · Verificación** | La certificación global no se repetirá hasta cerrar los fixes anteriores | DoD 5 | Necesario para actualizar métricas y `DocMetricsGuard` sin arrastrar cifras obsoletas | **Pendiente de FIX-34-06** |
+| **6** | **FIX-34-06** | **P2 · Contractual** | La spec usa `machines.status = 'OUT_OF_SERVICE'`; el esquema no tiene ese estado y el código usa `is_blocked_no_access = TRUE` para bebidas frías | `RF-02.2`, §6.2 | Mapeo correcto en la práctica, pero no explícito en el contrato; dificulta la verificación literal | **Cerrada (2026-11-14)** |
+| **7** | **FIX-34-07** | **P3 · Verificación** | La certificación global no se repetirá hasta cerrar los fixes anteriores | DoD 5 | Necesario para actualizar métricas y `DocMetricsGuard` sin arrastrar cifras obsoletas | **Pendiente de ejecución** |
 
 ### Lectura de prioridades
 
@@ -258,8 +258,10 @@ El comportamiento de bloqueo es el correcto para el modelo real, pero la denomin
 
 ### Criterio de aceptación
 
-- [ ] El contrato explica el mapeo y la suite lo verifica en el campo real.
-- [ ] No se introducen dos representaciones distintas del mismo estado.
+- [x] El contrato explica el mapeo y la suite lo verifica en el campo real.
+- [x] No se introducen dos representaciones distintas del mismo estado.
+
+**Cierre (2026-11-14):** se adopta la opción documental A. La spec canónica y su espejo declaran que `OUT_OF_SERVICE` es un estado funcional sin columna ni valor de enum propios; en `COLD_DRINKS` se persiste con `machines.is_blocked_no_access = TRUE`, mientras que `SANITARY_QUARANTINE` se persiste con `machines.sanitary_status = 'QUARANTINE'`. Los contratos incluyen la sección 2.0.1, el esquema y el DDL documentan el mapeo, el frontend usa `is_blocked_no_access` y la suite constitucional comprueba el flag real tras el aborto de `COLD_DRINKS`. No se añadió columna, enum ni migración.
 
 ---
 

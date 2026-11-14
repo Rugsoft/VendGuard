@@ -244,6 +244,7 @@ final class PdoInSituRestockVisitGateway implements InSituRestockVisitGatewayInt
     public function lockMachineSanitarily(int $machineId, MachineType $machineType, string $reason): void
     {
         if ($machineType === MachineType::COLD_DRINKS) {
+            // Functional OUT_OF_SERVICE: the schema has no machines.status column.
             $stmt = $this->pdo->prepare("
                 UPDATE machines
                 SET is_blocked_no_access = TRUE,
@@ -251,6 +252,7 @@ final class PdoInSituRestockVisitGateway implements InSituRestockVisitGatewayInt
                 WHERE id = :machine_id
             ");
         } else {
+            // Functional SANITARY_QUARANTINE: persisted as the QUARANTINE enum.
             $stmt = $this->pdo->prepare("
                 UPDATE machines
                 SET sanitary_status = 'QUARANTINE',

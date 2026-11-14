@@ -738,13 +738,18 @@ try {
     $noTechOutboxCount = (int)$pdo->query(
         'SELECT COUNT(*) FROM notification_outbox WHERE incident_id = ' . $noTechIncidentId
     )->fetchColumn();
+    $coldMachineAfter = $pdo->query(
+        'SELECT sanitary_status, is_blocked_no_access FROM machines WHERE id = ' . $coldMachineId
+    )->fetch(PDO::FETCH_ASSOC);
     $assert(
-        '3.11 Sin técnico disponible el ticket queda REGISTERED, pero la alerta se encola igualmente',
+        '3.11 Sin técnico disponible el ticket queda REGISTERED, la alerta se encola y COLD_DRINKS se bloquea con is_blocked_no_access',
         $noTechAbort->getStatusCode() === 201
             && $noTechIncidentId > 0
             && ($noTechIncident['status'] ?? '') === 'REGISTERED'
             && ($noTechIncident['assigned_technician_id'] ?? null) === null
-            && $noTechOutboxCount > 0,
+            && $noTechOutboxCount > 0
+            && (bool)($coldMachineAfter['is_blocked_no_access'] ?? false) === true
+            && ($coldMachineAfter['sanitary_status'] ?? '') !== 'QUARANTINE',
         $errorCode($noTechAbort)
     );
 

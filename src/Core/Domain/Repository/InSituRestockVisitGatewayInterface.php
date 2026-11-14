@@ -56,8 +56,10 @@ interface InSituRestockVisitGatewayInterface
     /**
      * Deja la máquina fuera de servicio por rotura de cadena de frío.
      *
-     * En `PERISHABLE_FOOD` y `COMBO` pasa `sanitary_status` a `QUARANTINE`; en
-     * `COLD_DRINKS` materializa `OUT_OF_SERVICE` con `is_blocked_no_access`.
+     * En `PERISHABLE_FOOD` y `COMBO` materializa `SANITARY_QUARANTINE` con
+     * `sanitary_status = 'QUARANTINE'`; en `COLD_DRINKS` materializa el estado
+     * funcional `OUT_OF_SERVICE` con `is_blocked_no_access = TRUE`. No existe una
+     * columna `machines.status` ni un valor de enum `OUT_OF_SERVICE`.
      */
     public function lockMachineSanitarily(int $machineId, MachineType $machineType, string $reason): void;
 

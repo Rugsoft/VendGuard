@@ -84,7 +84,8 @@ final class MachineRestockVisitValidator
      *
      * @param string|null $sanitaryStatus Valor de `machines.sanitary_status` o el
      *                                    estado funcional `SANITARY_QUARANTINE`.
-     * @param bool $isOutOfService Máquina fuera de servicio (`OUT_OF_SERVICE`).
+     * @param bool $isOutOfService Functional `OUT_OF_SERVICE`, derived from
+     *                             `machines.is_blocked_no_access`.
      * @param bool $hasOpenThermalBreakdown Open thermal incident (functional label
      *                                      `THERMAL_BREAKDOWN`; persisted category
      *                                      `TEMPERATURE_COLD`).

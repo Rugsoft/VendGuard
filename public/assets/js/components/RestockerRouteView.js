@@ -705,7 +705,8 @@ export const RestockerRouteView = {
     machineCanRestock(machine) {
       if (!machine) return false;
       if (machine.can_restock === false) return false;
-      return !['QUARANTINE', 'OUT_OF_SERVICE'].includes(String(machine.sanitary_status || ''));
+      if (machine.is_blocked_no_access === true) return false;
+      return String(machine.sanitary_status || '') !== 'QUARANTINE';
     },
 
     machineRestockBlockReason(machine) {
@@ -713,11 +714,8 @@ export const RestockerRouteView = {
       if (sanitaryStatus === 'QUARANTINE') {
         return 'Máquina en cuarentena sanitaria: no se puede iniciar una visita de reposición.';
       }
-      if (sanitaryStatus === 'OUT_OF_SERVICE') {
-        return 'Máquina fuera de servicio: no se puede iniciar una visita de reposición.';
-      }
       if (machine?.is_blocked_no_access === true) {
-        return 'Acceso bloqueado: no se puede iniciar una visita de reposición.';
+        return 'Máquina fuera de servicio (acceso bloqueado): no se puede iniciar una visita de reposición.';
       }
       if (machine?.is_seasonal_pause === true) {
         return 'Máquina en pausa estacional: no admite visitas de reposición.';

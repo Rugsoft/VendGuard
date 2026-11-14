@@ -868,8 +868,16 @@ const visitVm = buildVm({
 });
 
 assert('machineCanRestock() permite una máquina operativa', visitVm.machineCanRestock(visitVm.machines[0]) === true);
-assert('machineCanRestock() bloquea cuarentena y fuera de servicio', visitVm.machineCanRestock(visitVm.machines[1]) === false);
-assert('machineRestockBlockReason() explica el bloqueo sanitario', visitVm.machineRestockBlockReason(visitVm.machines[1]).includes('cuarentena'));
+assert(
+  'machineCanRestock() bloquea cuarentena y fuera de servicio',
+  visitVm.machineCanRestock({ ...visitMachine, sanitary_status: 'QUARANTINE', can_restock: true }) === false
+    && visitVm.machineCanRestock({ ...visitMachine, is_blocked_no_access: true }) === false
+);
+assert(
+  'machineRestockBlockReason() explica el bloqueo sanitario',
+  visitVm.machineRestockBlockReason(visitVm.machines[1]).includes('cuarentena')
+    && visitVm.machineRestockBlockReason({ ...visitMachine, is_blocked_no_access: true }).includes('fuera de servicio')
+);
 assert('machineStockStatus() resume el estado de la tarjeta', visitVm.machineStockStatus(visitVm.machines[0]) === 'STOCKOUT' && visitVm.machineStockStatus({ stockout_slots_count: 0, low_stock_slots_count: 0 }) === 'OK');
 assert('La vista pinta las insignias FEFO de la tarjeta', viewSource.includes('data-testid="restocker-machine-expired-slots"') && viewSource.includes('data-testid="restocker-machine-expiring-slots"'));
 assert('El botón de visita se deshabilita con aviso explícito', viewSource.includes('data-testid="btn-start-visit"') && viewSource.includes(':disabled="!machineCanRestock(machine)"') && viewSource.includes('data-testid="restocker-machine-block-reason"'));

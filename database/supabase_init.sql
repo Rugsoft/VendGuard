@@ -707,7 +707,9 @@ CREATE TABLE IF NOT EXISTS machines (
     floor_wing               VARCHAR(100) NOT NULL,
     notes                    TEXT,
     is_active                BOOLEAN NOT NULL DEFAULT TRUE,
+    -- Functional OUT_OF_SERVICE: no machines.status column; COLD_DRINKS uses this flag.
     is_blocked_no_access     BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Functional SANITARY_QUARANTINE persists as the QUARANTINE enum value.
     sanitary_status          sanitary_status NOT NULL DEFAULT 'OK',
     sanitary_frequency_days  BIGINT,
     last_sanitary_inspection_at TIMESTAMPTZ,

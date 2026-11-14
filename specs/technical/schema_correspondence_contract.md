@@ -24,7 +24,7 @@ Queda completamente retirado el camino dual de persistencia (MariaDB/MySQL).
 Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_delete_*` vinculado a `prevent_hard_delete()` (Art. III.1). `incident_service_sheets` e `incident_satisfaction_surveys` son además **de solo inserción**: `trg_no_update_incident_service_sheets` (`prevent_service_sheet_rewrite()`) e `trg_no_update_incident_satisfaction_surveys` (`prevent_satisfaction_survey_rewrite()`) rechazan cualquier `UPDATE` con `45000`, porque la hoja firmada es prueba documental y la valoración de la sede no se rectifica (RD-01 y RD-06 del Módulo 20). Las dos tablas de la visita in situ —`machine_restock_visits` y `machine_restock_visit_items`, Módulo 34— son también de solo inserción: sus disparadores `trg_immutable_*` rechazan cualquier `UPDATE` con `45000` (Art. III.3). La clave primaria es `id BIGINT GENERATED ALWAYS AS IDENTITY` salvo en `operational_zone_postal_codes`, donde la identidad de la fila es el propio código postal: es la forma de garantizar que un CP pertenezca a una sola zona en todo su ciclo de vida (RF-01.2, Resolución QA 7).
 
 1. `locations` (23 columnas)
-2. `machines` (19 columnas)
+2. `machines` (19 columnas; `is_blocked_no_access` materializa el estado funcional `OUT_OF_SERVICE` y `sanitary_status = 'QUARANTINE'` la cuarentena sanitaria; no existe `machines.status`)
 3. `users` (13 columnas)
 4. `incidents` (52 columnas)
 5. `incident_history` (7 columnas)
