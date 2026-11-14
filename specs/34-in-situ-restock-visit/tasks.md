@@ -66,7 +66,7 @@ flowchart LR
   - **Requisitos:** `RF-03.4`, `RF-05.1`, `C4`, `QA 1`, `Art. V.4`.
   - **Verificación:** `php tests/unit/ProductLoadingOrderServiceTest.php && php tests/unit/MachinePlanogramServiceTest.php`
 
-- [ ] **T-RVF-09 · Extender `RestockerRouteController`, `CoordinatorProductLoadingController` y registrar las nuevas rutas + guardas RBAC en `AppRouter`**
+- [x] **T-RVF-09 · Extender `RestockerRouteController`, `CoordinatorProductLoadingController` y registrar las nuevas rutas + guardas RBAC en `AppRouter`**
   - **Requisitos:** `RF-01` a `RF-05`, `Art. V.4`, `Art. V.5`.
   - **Verificación:** `php tests/integration/InSituRestockVisitApiTest.php`
 

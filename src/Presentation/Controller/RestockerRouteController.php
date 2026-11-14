@@ -9,20 +9,26 @@ use PDO;
 use Throwable;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\MachinePlanogramService;
+use VendGuard\Application\Service\MachineRestockVisitService;
 use VendGuard\Application\Service\ProductLoadingOrderService;
 use VendGuard\Application\Service\RestockerVanStockService;
 use VendGuard\Application\Service\ShiftLifecycleService;
+use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineOutsideRestockerZonesException;
+use VendGuard\Core\Domain\Exception\MachineRestockVisitValidationException;
 use VendGuard\Core\Domain\Exception\ProductLoadingValidationException;
 use VendGuard\Core\Domain\Model\User;
+use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoInSituRestockVisitGateway;
 use VendGuard\Infrastructure\Repository\PdoMachinePlanogramRepository;
+use VendGuard\Infrastructure\Repository\PdoMachineRestockVisitRepository;
 use VendGuard\Infrastructure\Repository\PdoOperationalZoneRepository;
 use VendGuard\Infrastructure\Repository\PdoProductLoadingOrderRepository;
 use VendGuard\Infrastructure\Repository\PdoRestockerVanStockRepository;
@@ -31,21 +37,24 @@ use VendGuard\Infrastructure\Repository\PdoTechnicianShiftLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Infrastructure\Repository\PdoVendingProductRepository;
+use VendGuard\Infrastructure\Storage\LocalFileUploader;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
 /**
  * RestockerRouteController
  *
- * Bootstrap operativo de la vista móvil `RestockerRouteView.js` (Módulo 31,
- * `D1`, `RF-04.1`). Publica el perfil del reponedor autenticado, sus zonas vivas
- * (`PRIMARY` y `BACKUP`), el estado de su turno y el resumen del día; los
- * parques de carga llegarán con las Features 24/26/27 y hoy viajan vacíos.
+ * Bootstrap y superficie operativa de la vista móvil `RestockerRouteView.js`
+ * (Módulos 31 y 34; `D1`, `RF-04.1`, `RF-01` a `RF-04`). Publica el perfil del
+ * reponedor autenticado, sus zonas vivas (`PRIMARY` y `BACKUP`), el estado de su
+ * turno, el resumen del día y sus visitas recientes, además de registrar visitas
+ * in situ, evidencia fotográfica y conflictos offline.
  *
  * El reponedor sale siempre del `user_id` que inyecta el middleware tras
  * validar el token: no se acepta ningún identificador de la query ni del
  * cuerpo (Art. V.4). La ruta es exclusiva de `RESTOCKER`; Coordinación y los
- * técnicos SAT reciben `403`.
+ * técnicos SAT reciben `403`. Las respuestas de esta superficie nunca incluyen
+ * `unit_cost_snapshot_eur` ni `commercial_spoilage_loss_eur` (Art. V.4).
  *
  * Dogma Vanilla: PHP 8.2+ puro, PDO detrás de los puertos, cero dependencias.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -64,6 +73,10 @@ final class RestockerRouteController
 
     private RestockerVanStockService $vanStockService;
 
+    private MachineRestockVisitService $visitService;
+
+    private MachineRestockVisitRepositoryInterface $visitRepository;
+
     public function __construct(
         ?PDO $pdo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -71,7 +84,9 @@ final class RestockerRouteController
         ?ShiftLifecycleService $lifecycleService = null,
         ?MachinePlanogramService $planogramService = null,
         ?ProductLoadingOrderService $loadingOrderService = null,
-        ?RestockerVanStockService $vanStockService = null
+        ?RestockerVanStockService $vanStockService = null,
+        ?MachineRestockVisitService $visitService = null,
+        ?MachineRestockVisitRepositoryInterface $visitRepository = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $this->userRepo = $userRepo ?? new PdoUserRepository($pdo);
@@ -91,15 +106,18 @@ final class RestockerRouteController
             new PdoTechnicianShiftLogRepository($pdo)
         );
 
-        $this->planogramService = $planogramService ?? new MachinePlanogramService(
-            new PdoMachinePlanogramRepository($pdo),
-            new PdoVendingProductRepository($pdo),
-            new AuditLogger()
-        );
-
         $orderRepository = new PdoProductLoadingOrderRepository($pdo);
         $stockRepository = new PdoRestockerVanStockRepository($pdo);
         $productRepository = new PdoVendingProductRepository($pdo);
+
+        $this->visitRepository = $visitRepository ?? new PdoMachineRestockVisitRepository($pdo);
+
+        $this->planogramService = $planogramService ?? new MachinePlanogramService(
+            new PdoMachinePlanogramRepository($pdo),
+            $productRepository,
+            new AuditLogger(),
+            $stockRepository
+        );
 
         $this->loadingOrderService = $loadingOrderService ?? new ProductLoadingOrderService(
             $orderRepository,
@@ -107,7 +125,9 @@ final class RestockerRouteController
             $productRepository,
             $this->userRepo,
             new AuditLogger(),
-            $pdo
+            $pdo,
+            null,
+            $this->visitRepository
         );
 
         $this->vanStockService = $vanStockService ?? new RestockerVanStockService(
@@ -116,6 +136,15 @@ final class RestockerRouteController
             $this->userRepo,
             new AuditLogger(),
             $pdo
+        );
+
+        $this->visitService = $visitService ?? new MachineRestockVisitService(
+            $this->visitRepository,
+            new PdoMachinePlanogramRepository($pdo),
+            $stockRepository,
+            new PdoInSituRestockVisitGateway($pdo),
+            new PdoTransactionManager($pdo),
+            new AuditLogger()
         );
     }
 
@@ -181,6 +210,7 @@ final class RestockerRouteController
                 'van_product_stocks' => $vanStock['stocks'],
                 'van_stock_kpis' => $vanStock['kpis'],
                 'has_expired_van_lots' => $vanStock['has_expired_lots'],
+                'recent_visits' => $this->visitRepository->listForRestocker($restockerId, ['limit' => 5]),
             ], 200);
         } catch (Throwable $exception) {
             error_log('[vendguard] Fallo al construir la ruta de carga del reponedor: ' . $exception);
@@ -327,6 +357,194 @@ final class RestockerRouteController
                 'Orden de carga liquidada al cierre.'
             );
         });
+    }
+
+    /**
+     * GET /api/restocker/visits
+     *
+     * Historial del propio reponedor, con filtros `machine_id`, `status`,
+     * `date_from`, `date_to`, `limit` y `offset`. El repositorio no selecciona
+     * columnas de coste: la opacidad es estructural (`Art. V.4`).
+     */
+    public function listVisits(Request $request): Response
+    {
+        return $this->executeVisit(function () use ($request): Response {
+            $restockerId = $this->authenticatedRestockerId($request);
+
+            return Response::json([
+                'visits' => $this->visitRepository->listForRestocker($restockerId, $request->getQueryParams()),
+            ], 200);
+        });
+    }
+
+    /**
+     * POST /api/restocker/machines/{machineId}/visits
+     *
+     * Registro atómico e idempotente de una visita in situ. El reponedor sale
+     * del token y el servicio aplica el Triple Cerrojo Sanitario; el controlador
+     * solo traduce el desenlace a la envolvente HTTP canónica.
+     */
+    public function registerVisit(Request $request): Response
+    {
+        return $this->executeVisit(function () use ($request): Response {
+            $machineId = $this->positiveMachineId($request);
+
+            return Response::json(
+                $this->visitService->registerVisit(
+                    $machineId,
+                    $request->getParsedBody(),
+                    $this->actor($request)
+                ),
+                201,
+                'Visita de reposición in situ registrada.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/visits/photo
+     *
+     * Evidencia fotográfica por `multipart/form-data` o base64 seguro. El
+     * uploader valida el tope de 5 MB y los magic bytes reales (`Art. V.5`).
+     */
+    public function uploadVisitPhoto(Request $request): Response
+    {
+        $temporaryPath = null;
+
+        try {
+            $file = $request->getFile('photo')
+                ?? $request->getFile('image')
+                ?? $request->getFile('file');
+
+            if ($file === null) {
+                $encoded = $request->getBodyParam('photo_base64');
+                if (!is_string($encoded) || trim($encoded) === '') {
+                    throw new InvalidUploadException(
+                        'NO_FILE_PROVIDED',
+                        'No se ha recibido ninguna fotografía de evidencia.',
+                        400
+                    );
+                }
+
+                $payload = preg_replace('/^data:[^;]*;base64,/', '', trim($encoded));
+                if (!is_string($payload)
+                    || strlen($payload) > (int)ceil(LocalFileUploader::MAX_SIZE_BYTES * 4 / 3) + 8) {
+                    throw new InvalidUploadException(
+                        'FILE_TOO_LARGE',
+                        'La fotografía adjunta supera el tamaño máximo permitido de 5 MB (RNF-05).',
+                        422
+                    );
+                }
+
+                $binary = base64_decode($payload, true);
+                if ($binary === false || $binary === '') {
+                    throw new InvalidUploadException(
+                        'INVALID_FILE_TYPE',
+                        'La fotografía base64 no es una imagen válida.',
+                        422
+                    );
+                }
+                if (strlen($binary) > LocalFileUploader::MAX_SIZE_BYTES) {
+                    throw new InvalidUploadException(
+                        'FILE_TOO_LARGE',
+                        'La fotografía adjunta supera el tamaño máximo permitido de 5 MB (RNF-05).',
+                        422
+                    );
+                }
+
+                $temporaryPath = tempnam(sys_get_temp_dir(), 'vg_visit_photo_');
+                if ($temporaryPath === false || file_put_contents($temporaryPath, $binary) === false) {
+                    throw new InvalidUploadException(
+                        'STORAGE_WRITE_ERROR',
+                        'No se pudo preparar temporalmente la fotografía de evidencia.',
+                        500
+                    );
+                }
+
+                $file = [
+                    'name' => 'visit-evidence',
+                    'tmp_name' => $temporaryPath,
+                    'size' => strlen($binary),
+                    'error' => UPLOAD_ERR_OK,
+                ];
+            }
+
+            return Response::json(
+                ['photo_evidence_url' => $this->visitService->uploadPhoto($file)],
+                201,
+                'Fotografía de evidencia almacenada.'
+            );
+        } catch (InvalidUploadException $exception) {
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode()
+            );
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo al subir la evidencia de la visita in situ: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo almacenar la fotografía de evidencia.', 500);
+        } finally {
+            if ($temporaryPath !== null && is_file($temporaryPath)) {
+                @unlink($temporaryPath);
+            }
+        }
+    }
+
+    /**
+     * POST /api/restocker/visits/conflict-dump
+     *
+     * Archiva en auditoría una mutación offline rechazada (`C3`, `Art. III.3`).
+     */
+    public function dumpVisitConflict(Request $request): Response
+    {
+        return $this->executeVisit(function () use ($request): Response {
+            return Response::json(
+                $this->visitService->dumpOfflineConflict($request->getParsedBody(), $this->actor($request)),
+                200,
+                'Conflicto offline archivado en auditoría.'
+            );
+        });
+    }
+
+    private function executeVisit(callable $operation): Response
+    {
+        try {
+            return $operation();
+        } catch (MachineRestockVisitValidationException $exception) {
+            $details = $exception->getField() === null
+                ? null
+                : array_merge(['field' => $exception->getField()], $exception->getContext());
+
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $details
+            );
+        } catch (InvalidUploadException $exception) {
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode()
+            );
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('VALIDATION_ERROR', $exception->getMessage(), 400);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo en la visita de reposición in situ: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo completar la visita de reposición in situ.', 500);
+        }
+    }
+
+    private function positiveMachineId(Request $request): int
+    {
+        $raw = $request->getRouteParam('machineId');
+        if ($raw === null || !ctype_digit((string)$raw) || (int)$raw <= 0) {
+            throw new InvalidArgumentException('El identificador de máquina debe ser un número entero positivo.');
+        }
+
+        return (int)$raw;
     }
 
     private function executeLoadingOrder(callable $operation): Response

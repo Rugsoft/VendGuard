@@ -12,7 +12,9 @@ use VendGuard\Application\Service\ProductLoadingOrderService;
 use VendGuard\Application\Service\RestockerVanStockService;
 use VendGuard\Core\Domain\Exception\ProductLoadingValidationException;
 use VendGuard\Core\Domain\Model\User;
+use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Repository\PdoMachineRestockVisitRepository;
 use VendGuard\Infrastructure\Repository\PdoProductLoadingOrderRepository;
 use VendGuard\Infrastructure\Repository\PdoRestockerVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
@@ -47,6 +49,8 @@ use VendGuard\Presentation\Http\Response;
  * | POST   | `/api/coordinator/product-loading-orders/{id}/dispatch`            |
  * | POST   | `/api/coordinator/product-loading-orders/{id}/reconcile`           |
  * | POST   | `/api/coordinator/product-loading-orders/{id}/cancel`              |
+ * | GET    | `/api/coordinator/restock-visits`                                  |
+ * | GET    | `/api/coordinator/restock-visits/{id}`                             |
  *
  * Dogma Vanilla: PHP 8.2+ puro, PDO detrás de los puertos, cero dependencias.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -57,10 +61,13 @@ final class CoordinatorProductLoadingController
 
     private RestockerVanStockService $stockService;
 
+    private MachineRestockVisitRepositoryInterface $visitRepository;
+
     public function __construct(
         ?ProductLoadingOrderService $orderService = null,
         ?RestockerVanStockService $stockService = null,
-        ?PDO $pdo = null
+        ?PDO $pdo = null,
+        ?MachineRestockVisitRepositoryInterface $visitRepository = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $orderRepository = new PdoProductLoadingOrderRepository($pdo);
@@ -68,13 +75,17 @@ final class CoordinatorProductLoadingController
         $productRepository = new PdoVendingProductRepository($pdo);
         $userRepository = new PdoUserRepository($pdo);
 
+        $this->visitRepository = $visitRepository ?? new PdoMachineRestockVisitRepository($pdo);
+
         $this->orderService = $orderService ?? new ProductLoadingOrderService(
             $orderRepository,
             $stockRepository,
             $productRepository,
             $userRepository,
             new AuditLogger(),
-            $pdo
+            $pdo,
+            null,
+            $this->visitRepository
         );
 
         $this->stockService = $stockService ?? new RestockerVanStockService(
@@ -267,6 +278,44 @@ final class CoordinatorProductLoadingController
                 200,
                 'Orden de carga cancelada con justificación.'
             );
+        });
+    }
+
+    /**
+     * GET /api/coordinator/restock-visits
+     *
+     * Libro histórico con los cinco KPIs y los filtros del contrato. Esta
+     * superficie sí publica la merma comercial agregada: es exclusiva de
+     * Coordinación (`Art. V.4`, `QA 3`).
+     */
+    public function listRestockVisits(Request $request): Response
+    {
+        return $this->execute(function () use ($request): Response {
+            return Response::json(
+                $this->visitRepository->listForCoordinator($request->getQueryParams()),
+                200
+            );
+        });
+    }
+
+    /** GET /api/coordinator/restock-visits/{id} */
+    public function getRestockVisit(Request $request): Response
+    {
+        return $this->execute(function () use ($request): Response {
+            $visit = $this->visitRepository->findById(
+                $this->positiveRouteId($request, 'id', 'visita'),
+                true
+            );
+
+            if ($visit === null) {
+                return Response::error(
+                    'RESTOCK_VISIT_NOT_FOUND',
+                    'No existe la visita de reposición solicitada.',
+                    404
+                );
+            }
+
+            return Response::json($visit, 200);
         });
     }
 
