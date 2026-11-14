@@ -54,7 +54,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-02.3`, `RF-03.3`, `D1`, `QA 1`, `Art. III.1`, `Art. V.4`.
   - **Verificación:** `php tests/integration/PdoMachinePlanogramRepositoryTest.php`
 
-- [ ] **T-RVF-06 · Implementar `PdoMachineRestockVisitRepository` (alta inmutable en Tablas 47 y 48, idempotencia `client_mutation_id`, listado con 5 KPIs en Coordinación, historial del reponedor sin costes y agregación de pre-cálculo `C4`)**
+- [x] **T-RVF-06 · Implementar `PdoMachineRestockVisitRepository` (alta inmutable en Tablas 47 y 48, idempotencia `client_mutation_id`, listado con 5 KPIs en Coordinación, historial del reponedor sin costes y agregación de pre-cálculo `C4`)**
   - **Requisitos:** `RF-01.2`, `RF-03.3`, `RF-03.4`, `RF-05.2`, `D4`, `C1`, `C4`, `QA 3`, `Art. III.1`, `Art. III.3`, `Art. V.4`.
   - **Verificación:** `php tests/integration/PdoMachineRestockVisitRepositoryTest.php`
 
