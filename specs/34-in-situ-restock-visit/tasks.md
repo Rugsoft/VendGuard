@@ -38,7 +38,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-01.2`, `RNF-01`, `RNF-02`, `D1`, `D2`, `D4`, `C1`, `QA 3`, `Art. II`, `Art. III.1`, `Art. III.3`.
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
 
-- [ ] **T-RVF-02 · Actualizar contratos de esquema (48 tablas, 41 enums), `PostgresFixtureBuilder`, `TestDataCleaner` y crear `PostgresInSituRestockVisitSchemaTest.php`**
+- [x] **T-RVF-02 · Actualizar contratos de esquema (48 tablas, 41 enums), `PostgresFixtureBuilder`, `TestDataCleaner` y crear `PostgresInSituRestockVisitSchemaTest.php`**
   - **Requisitos:** `RF-01.1`, `RF-01.2`, `RNF-01`, `RNF-02`, `C1`, `Art. II`, `Art. III.1`, `Art. III.3`.
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresInSituRestockVisitSchemaTest.php`
 

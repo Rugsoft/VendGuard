@@ -66,6 +66,11 @@ final class PostgresFixtureBuilder
         // venta directa con precio cero violaría `chk_vending_products_sale_price`
         // y el alta mínima mediría un rechazo legítimo del motor.
         'vending_products' => ['sale_price_eur'],
+        // La visita in situ (Módulo 34) exige lectura térmica en toda máquina
+        // refrigerada (`enforce_restock_visit_sanitary_guard`): el alta mínima
+        // nace sobre una máquina `COMBO`, así que sin declararla el alta se
+        // convertiría en un rechazo legítimo del Art. II y no en el CRUD.
+        'machine_restock_visits' => ['cabin_temp_celsius'],
     ];
 
     /**
@@ -819,6 +824,18 @@ final class PostgresFixtureBuilder
             $table === 'product_loading_orders' && $column === 'order_code'
                 => $variant === 'update' ? 'PLO-2026-9002' : 'PLO-2026-9001',
             $table === 'machines' && $column === 'machine_type' => 'COMBO',
+            // La visita in situ del Módulo 34 declara dos formatos cerrados: el
+            // código legible (`MRV-AAAA-NNNN`) y un identificador de mutación de
+            // seis caracteres como mínimo. El texto sintético genérico violaría
+            // ambos `CHECK` y el alta mínima mediría un rechazo del motor.
+            $table === 'machine_restock_visits' && $column === 'visit_code'
+                => $variant === 'update' ? 'MRV-2026-9002' : 'MRV-2026-9001',
+            $table === 'machine_restock_visits' && $column === 'client_mutation_id'
+                => $variant === 'update' ? 'fixture.update.m34.0001' : 'fixture.insert.m34.0001',
+            // El carril de la línea repite el formato del planograma (mayúsculas,
+            // dígitos, guion y guion bajo) y es parte de su identidad única.
+            $table === 'machine_restock_visit_items' && $column === 'slot_code'
+                => $variant === 'update' ? 'SLOT_FIXTURE_UPDATE' : 'SLOT_FIXTURE_INSERT',
             $table === 'incidents' && $column === 'sla_target_minutes'
                 => $variant === 'update' ? 720 : 1440,
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,
