@@ -270,6 +270,19 @@ final class GuardPlanogramRepository implements MachinePlanogramRepositoryInterf
         return [];
     }
 
+    public function applyVisitSlotMovement(
+        int $machineId,
+        string $slotCode,
+        int $qtyWithdrawnExpired,
+        int $qtyWithdrawnDamaged,
+        int $qtyAdded,
+        ?string $loadedBatchCode = null,
+        ?\DateTimeImmutable $loadedExpirationDate = null,
+        ?\DateTimeImmutable $today = null
+    ): array {
+        throw new RuntimeException('No usado en esta suite.');
+    }
+
     public function findMachineForRestocker(int $machineId, int $restockerId): ?array
     {
         return null;

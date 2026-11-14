@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Core\Domain\Repository;
 
+use DateTimeImmutable;
 use VendGuard\Core\Domain\Model\MachinePlanogramSlot;
 use VendGuard\Core\Domain\Model\MachineType;
 
@@ -11,13 +12,18 @@ use VendGuard\Core\Domain\Model\MachineType;
  * MachinePlanogramRepositoryInterface
  *
  * Contrato de persistencia de los carriles del planograma (Módulo 32, Tabla 43,
- * RF-02.1–RF-02.3, RF-05.2, C1, C2, QA 2, QA 3, Art. III.1).
+ * Módulo 34, `D1`; RF-02.1–RF-02.3, RF-05.2, C1, C2, QA 1, QA 2, QA 3,
+ * Art. III.1, Art. V.4).
  *
  * El contrato no expone `DELETE`: guardar un carril es un `UPSERT` por
  * `(machine_id, slot_code)` y retirar un carril es `is_active = FALSE`. Las
  * lecturas devuelven los carriles en orden físico de bandeja (`QA 3`) y sin
  * `unit_cost_eur`, de modo que ninguna superficie de reposición pueda filtrar el
  * coste interno por descuido (Art. V.4).
+ *
+ * Desde el Módulo 34 el carril conoce su lote y caducidad vigentes y se actualiza
+ * al cerrar una visita in situ: `applyVisitSlotMovement()` aplica la regla `D1`
+ * dentro de una transacción, bloquea el carril con `FOR UPDATE` y nunca borra.
  */
 interface MachinePlanogramRepositoryInterface
 {
@@ -29,7 +35,8 @@ interface MachinePlanogramRepositoryInterface
     public function findMachineById(int $machineId): ?array;
 
     /**
-     * Carriles de una máquina en orden físico, con producto y semáforo.
+     * Carriles de una máquina en orden físico, con producto, semáforo de
+     * existencias y semáforo FEFO de lote (`QA 1`).
      *
      * @return list<array<string, mixed>>
      */
@@ -83,7 +90,13 @@ interface MachinePlanogramRepositoryInterface
 
     /**
      * Máquinas activas de las zonas operativas vivas del reponedor, con el
-     * resumen de su planograma (QA 2).
+     * resumen de su planograma y los contadores FEFO de carril (`QA 1`, `QA 2`).
+     *
+     * Cada tarjeta declara `expired_slots_count`, `expiring_soon_slots_count` y
+     * `can_restock`, de modo que el móvil pueda alertar sin pedir el planograma
+     * completo. `can_restock` replica la regla de disponibilidad del Módulo 33:
+     * cuarentena sanitaria, certificado vencido, pausa estacional, sin acceso o
+     * pausa explícita desactivan la reposición (Art. II).
      *
      * @return list<array<string, mixed>>
      */
@@ -96,4 +109,39 @@ interface MachinePlanogramRepositoryInterface
      * @return array<string, mixed>|null
      */
     public function findMachineForRestocker(int $machineId, int $restockerId): ?array;
+
+    /**
+     * Aplica al carril el movimiento de una visita in situ y resuelve el lote
+     * vigente conforme a `D1` (RF-01.1, RF-03.3, QA 1, Art. V.4).
+     *
+     * Calcula `qty_after = qty_before - retiradas + cargadas`, exige que el carril
+     * esté activo y que el resultado quepa en su capacidad, y actualiza
+     * `current_estimated_qty`, `current_batch_code` y `current_expiration_date`:
+     *
+     *   - `qty_after = 0` deja el carril sin lote ni caducidad.
+     *   - Si se retiró todo el remanente y se cargó producto, adopta el lote
+     *     cargado.
+     *   - Si quedan unidades sanas y se añade producto, conserva la caducidad más
+     *     próxima (`LEAST`) con su código de lote asociado.
+     *
+     * Se ejecuta en la transacción del llamador cuando ya hay una abierta —la
+     * visita completa es atómica— y abre la suya propia cuando se invoca suelto.
+     * La fila se bloquea con `FOR UPDATE` y nunca se borra (Art. III.1).
+     *
+     * @return array<string, mixed> Carril resultante con su semáforo FEFO
+     *
+     * @throws \VendGuard\Core\Domain\Exception\PlanogramValidationException
+     *         `422 INVALID_PLANOGRAM_SLOT_BOUNDS` si el carril no está activo o
+     *         las cotas del movimiento no se sostienen.
+     */
+    public function applyVisitSlotMovement(
+        int $machineId,
+        string $slotCode,
+        int $qtyWithdrawnExpired,
+        int $qtyWithdrawnDamaged,
+        int $qtyAdded,
+        ?string $loadedBatchCode = null,
+        ?DateTimeImmutable $loadedExpirationDate = null,
+        ?DateTimeImmutable $today = null
+    ): array;
 }

@@ -50,7 +50,7 @@ flowchart LR
   - **Requisitos:** `RF-02.1`–`RF-02.3`, `RF-03.1`, `RF-03.2`, `D1`–`D3`, `C1`, `QA 1`, `QA 4`, `Art. II`, `Art. V.1`, `Art. V.5`.
   - **Verificación:** `php tests/unit/MachineRestockVisitValidatorTest.php`
 
-- [ ] **T-RVF-05 · Evolucionar `PdoMachinePlanogramRepository` con `current_batch_code`, `current_expiration_date`, semáforo FEFO de carril y actualización transaccional post-visita (`D1`)**
+- [x] **T-RVF-05 · Evolucionar `PdoMachinePlanogramRepository` con `current_batch_code`, `current_expiration_date`, semáforo FEFO de carril y actualización transaccional post-visita (`D1`)**
   - **Requisitos:** `RF-01.1`, `RF-02.3`, `RF-03.3`, `D1`, `QA 1`, `Art. III.1`, `Art. V.4`.
   - **Verificación:** `php tests/integration/PdoMachinePlanogramRepositoryTest.php`
 

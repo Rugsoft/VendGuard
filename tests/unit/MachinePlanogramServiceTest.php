@@ -367,6 +367,19 @@ final class InMemoryMachinePlanogramRepository implements MachinePlanogramReposi
         return $this->findMachinesForRestocker($restockerId)[array_search($machineId, $this->restockerMachines[$restockerId], true)] ?? null;
     }
 
+    public function applyVisitSlotMovement(
+        int $machineId,
+        string $slotCode,
+        int $qtyWithdrawnExpired,
+        int $qtyWithdrawnDamaged,
+        int $qtyAdded,
+        ?string $loadedBatchCode = null,
+        ?\DateTimeImmutable $loadedExpirationDate = null,
+        ?\DateTimeImmutable $today = null
+    ): array {
+        throw new RuntimeException('No usado en esta suite.');
+    }
+
     private function rowFromEntity(MachinePlanogramSlot $slot): array
     {
         $product = $this->products->findById($slot->getProductId());
