@@ -1,5 +1,5 @@
 /**
- * VendGuard - Guarda de variantes de botón del panel del coordinador
+ * VendGuard - Guarda de variantes de botón del panel y de la vista móvil del Módulo 33
  * (CoordinatorButtonVariantsGuardTest.mjs)
  *
  * Cierra por congelación un defecto de mantenimiento, no de aspecto: cada botón del
@@ -15,14 +15,15 @@
  *   - Las mismas dos acciones tenían cuerpos distintos según la plantilla que las
  *     pintara, así que el panel se veía como dos paneles.
  *
- * La regla que congela esta guarda: **un botón del panel se viste con una variante del
- * sistema, nunca con su propia geometría en línea.** La escalera vive en
+ * La regla que congela esta guarda: **un botón del panel o de la vista móvil del Módulo
+ * 33 se viste con una variante del sistema, nunca con su propia geometría en línea.** La escalera vive en
  * `public/assets/css/design-tokens.css` y se lee de los tokens de control
  * (`--control-height-*`, `--control-padding-*`, `--control-font-*`, `--control-gap-*`).
  *
  * Cómo decide (deliberadamente simple y auditable):
  *   - Barrido: `public/assets/js/views` y `public/assets/js/components`, ficheros
- *     `Coordinator*.js` (el panel del coordinador).
+ *     `Coordinator*.js` (el panel del coordinador) y la superficie móvil explícita
+ *     `RestockerRouteView.js` (Módulo 33).
  *   - Se extraen las etiquetas `<button …>` respetando comillas (para no tropezar con
  *     manejadores del tipo `@click="() => f(a > b)"`).
  *   - Es riesgo una declaración **de presentación** en el `style` estático: altura,
@@ -37,8 +38,8 @@
  *   - Es riesgo un literal hex en línea, en cualquiera de las dos formas: el color entra
  *     por token o por variante de tono, nunca escrito a mano en la plantilla.
  *   - Es riesgo un botón sin la clase base `vg-btn`.
- *   - Y cada variante declarada en la hoja debe estar **en uso** en alguna plantilla del
- *     panel: una variante muerta es sistema de diseño de mentira.
+ *   - Y cada variante declarada en la hoja debe estar **en uso** en alguna plantilla
+ *     auditada: una variante muerta es sistema de diseño de mentira.
  *   - Es riesgo, además, que un botón se pinte el **tono de aviso** a mano (un token
  *     `--color-warning*` o un objeto de tokens ámbar): el ámbar entra por
  *     `vg-btn-warning-soft` o `vg-btn-warning`, y así el chip de estado ámbar de al lado
@@ -57,6 +58,7 @@ import { join } from 'node:path';
 const PROJECT_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SCAN_DIRS = ['public/assets/js/views', 'public/assets/js/components'];
 const FILE_PREFIX = 'Coordinator';
+const EXTRA_TEMPLATES = ['public/assets/js/components/RestockerRouteView.js'];
 const CSS_PATH = join(PROJECT_ROOT, 'public/assets/css/design-tokens.css');
 
 /**
@@ -93,7 +95,7 @@ const DYNAMIC_PAINT_ALLOWED = new Set(['color', 'backgroundcolor']);
  */
 const WARNING_TONE_PATTERN = /--color-warning|pausedTokens|amberTokens/;
 
-/** Variantes que el sistema declara y que el panel consume. */
+/** Variantes que el sistema declara y que las superficies auditadas consumen. */
 const DECLARED_VARIANTS = [
   'vg-btn-primary',
   'vg-btn-secondary',
@@ -143,15 +145,15 @@ function assert(description, condition, details = '') {
 }
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - Variantes de botón del panel (coordinador)');
+console.log(' VendGuard: Frontend Test Suite - Variantes de botón (panel y móvil del Módulo 33)');
 console.log('======================================================================\n');
 
 /**
- * Recorre las plantillas del panel.
+ * Recorre las plantillas del panel y la superficie móvil explícita del Módulo 33.
  *
  * @returns {Array<{file:string,source:string}>}
  */
-function panelTemplates() {
+function auditedTemplates() {
   const templates = [];
 
   for (const relative of SCAN_DIRS) {
@@ -166,6 +168,16 @@ function panelTemplates() {
         source: readFileSync(join(absolute, entry.name), 'utf8')
       });
     }
+  }
+
+  for (const relative of EXTRA_TEMPLATES) {
+    if (templates.some((entry) => entry.file === relative)) {
+      continue;
+    }
+    templates.push({
+      file: relative,
+      source: readFileSync(join(PROJECT_ROOT, relative), 'utf8')
+    });
   }
 
   return templates;
@@ -306,7 +318,7 @@ function ruleBody(css, selector) {
 }
 
 const css = readFileSync(CSS_PATH, 'utf8');
-const templates = panelTemplates();
+const templates = auditedTemplates();
 
 // ─── 1. La escalera vive en los tokens ────────────────────────────────────────
 
@@ -355,13 +367,13 @@ assert('1.8 El mando con icono y el chip leen su caja de los tokens de control',
 
 const declaredSources = templates.map((entry) => entry.source).join('\n');
 const unusedVariants = DECLARED_VARIANTS.filter((variant) => !declaredSources.includes(variant));
-assert('1.9 Ninguna variante declarada está muerta: todas las consume el panel',
+assert('1.9 Ninguna variante declarada está muerta: todas la consumen las superficies auditadas',
   unusedVariants.length === 0,
   `sin uso: ${unusedVariants.join(', ') || 'ninguna'}`);
 
-// ─── 2. Ningún botón del panel se dibuja solo ─────────────────────────────────
+// ─── 2. Ningún botón auditado se dibuja solo ──────────────────────────────────
 
-console.log('\n--- 2. Ningún botón del panel lleva su geometría en línea ---\n');
+console.log('\n--- 2. Ningún botón auditado lleva su geometría en línea ---\n');
 
 const audited = templates.map((entry) => audit(entry.source, entry.file));
 const totalButtons = audited.reduce((total, entry) => total + entry.buttons, 0);
@@ -371,23 +383,23 @@ const dynamicGeometry = audited.flatMap((entry) => entry.dynamicGeometry);
 const hexLiterals = audited.flatMap((entry) => entry.hexLiterals);
 const placements = new Set(audited.flatMap((entry) => [...entry.placements]));
 
-assert('2.1 El barrido cubre el panel entero (al menos 12 plantillas y 140 botones)',
-  templates.length >= 12 && totalButtons >= 140,
+assert('2.1 El barrido cubre el panel y la vista móvil (al menos 25 plantillas y 361 botones)',
+  templates.length >= 25 && totalButtons >= 361,
   `plantillas: ${templates.length} | botones: ${totalButtons}`);
 
-assert('2.2 Todo botón del panel declara la clase base `vg-btn`',
+assert('2.2 Todo botón auditado declara la clase base `vg-btn`',
   missingBase.length === 0,
   missingBase.slice(0, 6).join(' · '));
 
-assert('2.3 Ningún botón del panel declara su geometría en un `style` estático',
+assert('2.3 Ningún botón auditado declara su geometría en un `style` estático',
   staticGeometry.length === 0,
   staticGeometry.slice(0, 6).join(' · '));
 
-assert('2.4 Ningún botón del panel declara geometría en un `:style` dinámico (el color sí puede ser estado)',
+assert('2.4 Ningún botón auditado declara geometría en un `:style` dinámico (el color sí puede ser estado)',
   dynamicGeometry.length === 0,
   dynamicGeometry.slice(0, 6).join(' · '));
 
-assert('2.5 Ningún botón del panel escribe un color en línea',
+assert('2.5 Ningún botón auditado escribe un color en línea',
   hexLiterals.length === 0,
   hexLiterals.slice(0, 6).join(' · '));
 
@@ -397,9 +409,19 @@ assert('2.6 Lo único que sigue en línea es la colocación de un mando flotante
   `propiedades fuera del contrato: ${strayPlacement.join(', ') || 'ninguna'}`);
 
 const warningPaint = audited.flatMap((entry) => entry.warningPaint);
-assert('2.7 Ningún botón del panel se pinta el tono de aviso a mano (entra por variante)',
+assert('2.7 Ningún botón auditado se pinta el tono de aviso a mano (entra por variante)',
   warningPaint.length === 0,
   warningPaint.slice(0, 6).join(' · '));
+
+const mobileTemplate = templates.find((entry) => entry.file.endsWith('/RestockerRouteView.js'));
+const mobileAudit = mobileTemplate ? audit(mobileTemplate.source, mobileTemplate.file) : null;
+assert('2.8 La vista móvil del Módulo 33 entra en el barrido y sus botones visten la escalera',
+  Boolean(mobileTemplate) && Boolean(mobileAudit) && mobileAudit.buttons >= 16
+    && mobileAudit.missingBase.length === 0
+    && mobileAudit.staticGeometry.length === 0
+    && mobileAudit.dynamicGeometry.length === 0
+    && mobileAudit.hexLiterals.length === 0,
+  `plantilla: ${mobileTemplate ? mobileTemplate.file : 'ausente'} | botones: ${mobileAudit?.buttons ?? 0}`);
 
 // ─── 3. La guarda se prueba a sí misma ────────────────────────────────────────
 
@@ -452,7 +474,7 @@ console.log(` Aserciones: ${assertions} | Fallos: ${failures} | Plantillas: ${te
 console.log(` Variantes en uso: ${DECLARED_VARIANTS.length} | Tokens de control: ${CONTROL_TOKENS.length}`);
 
 if (failures === 0) {
-  console.log(' RESULTADO: 100% EN VERDE. Los botones del panel visten la escalera del sistema.');
+  console.log(' RESULTADO: 100% EN VERDE. Los botones del panel y de la vista móvil visten la escalera del sistema.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {

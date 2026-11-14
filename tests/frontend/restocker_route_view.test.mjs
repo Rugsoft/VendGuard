@@ -466,6 +466,232 @@ assert('El modal se declara de solo lectura', planogramModalSource.includes('Sol
 assert('La vista no declara campos económicos internos', !viewSource.includes('unit_cost_eur') && !viewSource.includes('unit_margin_eur') && !viewSource.includes('margin_eur'));
 assert('La vista usa el endpoint segregado del reponedor', viewSource.includes('api.restocker.getMachinePlanogram'));
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. Recepción 1-Tap, liquidación, stock FEFO y comprobante C4 (T-PLD-12)
+// ─────────────────────────────────────────────────────────────────────────────
+const dispatchedLoadingDetail = {
+  order: {
+    id: 501,
+    order_code: 'PLO-2026-0501',
+    status: 'DISPATCHED',
+    status_label: 'Despachada',
+    demand_mode_label: 'Solo alertas',
+    safety_buffer_pct: 10,
+    cold_chamber_exit_temp_celsius: 3.5,
+    restocker_name: 'Lucía Gómez',
+    reconciled_at: null,
+    reconciliation_notes: null
+  },
+  items: [
+    {
+      product_id: 1,
+      product_sku: 'SAND-MIXTO-01',
+      product_name: 'Sándwich mixto',
+      requires_cold_chain: true,
+      reason_label: 'Rotura de stock',
+      requested_qty: 5,
+      dispatched_qty: 5,
+      batch_code: 'LOTE-SW-01',
+      expiration_date: '2026-11-16',
+      is_active: true
+    },
+    {
+      product_id: 2,
+      product_sku: 'AGUA-50-01',
+      product_name: 'Agua mineral 50 cl',
+      requires_cold_chain: false,
+      reason_label: 'Bajo umbral',
+      requested_qty: 3,
+      dispatched_qty: 3,
+      batch_code: 'SIN-LOTE',
+      expiration_date: null,
+      is_active: true
+    },
+    {
+      product_id: 99,
+      product_sku: 'RETIRADO-01',
+      product_name: 'Línea retirada',
+      requires_cold_chain: false,
+      reason_label: 'Manual',
+      requested_qty: 1,
+      dispatched_qty: 0,
+      batch_code: null,
+      expiration_date: null,
+      is_active: false
+    }
+  ]
+};
+
+const confirmedLoadingDetail = {
+  order: {
+    ...dispatchedLoadingDetail.order,
+    status: 'CONFIRMED_BY_RESTOCKER',
+    status_label: 'Recibida en Furgoneta',
+    confirmed_at: '2026-11-13T08:10:00+00:00'
+  },
+  items: [dispatchedLoadingDetail.items[0]]
+};
+
+const reconciledLoadingDetail = {
+  order: {
+    ...confirmedLoadingDetail.order,
+    status: 'RECONCILED_AT_CLOSE',
+    status_label: 'Liquidada al Cierre',
+    reconciled_at: '2026-11-13T18:20:00+00:00',
+    reconciliation_notes: 'Diferencia detectada en el recuento físico del cierre.'
+  },
+  items: [
+    {
+      ...confirmedLoadingDetail.items[0],
+      van_stock_before_reconcile: 5,
+      restocked_in_machines_qty: 3,
+      withdrawn_spoilage_qty: 1,
+      expected_return_qty: 1,
+      counted_return_qty: 0,
+      discrepancy_qty: -1,
+      has_reconcile_data: true,
+      has_discrepancy: true
+    }
+  ]
+};
+
+const vanStockPayload = {
+  data: {
+    kpis: {
+      total_lots: 2,
+      total_units: 7,
+      usable_units: 5,
+      expired_lots: 1,
+      expiring_soon_lots: 1,
+      affected_restockers_count: 1
+    },
+    has_expired_lots: true,
+    stocks: [
+      {
+        id: 91,
+        restocker_id: 12,
+        product_id: 1,
+        product_sku: 'SAND-MIXTO-01',
+        product_name: 'Sándwich mixto',
+        product_category: 'PERISHABLE_FOOD',
+        product_unit_type: 'UNIT',
+        requires_cold_chain: true,
+        batch_code: 'LOTE-SW-01',
+        expiration_date: '2026-11-16',
+        quantity_available: 5,
+        usable_quantity: 5,
+        expiry_status: 'EXPIRING_SOON',
+        expiry_status_label: 'Caducidad próxima ≤ 48 h',
+        expiry_status_icon: '🟡',
+        is_expired: false
+      },
+      {
+        id: 92,
+        restocker_id: 12,
+        product_id: 3,
+        product_sku: 'YOGUR-01',
+        product_name: 'Yogur natural',
+        product_category: 'PERISHABLE_FOOD',
+        product_unit_type: 'UNIT',
+        requires_cold_chain: true,
+        batch_code: 'LOTE-VIEJO',
+        expiration_date: '2026-11-10',
+        quantity_available: 2,
+        usable_quantity: 0,
+        expiry_status: 'EXPIRED',
+        expiry_status_label: 'Caducado',
+        expiry_status_icon: '🔴',
+        is_expired: true
+      }
+    ]
+  }
+};
+
+const originalBootstrapGet = api.get;
+api.get = async (url) => {
+  if (url !== '/restocker/my-route') throw new Error('URL inesperada: ' + url);
+  return {
+    data: {
+      ...bootstrapPayload.data,
+      active_loading_order: dispatchedLoadingDetail,
+      last_reconciled_order: reconciledLoadingDetail,
+      van_product_stocks: vanStockPayload.data.stocks,
+      van_stock_kpis: vanStockPayload.data.kpis,
+      has_expired_van_lots: true
+    }
+  };
+};
+const loadingVm = buildVm();
+await loadingVm.loadMyRoute();
+api.get = originalBootstrapGet;
+
+assert('El bootstrap móvil publica la orden de carga activa', loadingVm.activeLoadingOrderData.id === 501 && loadingVm.activeLoadingOrderStatus === 'DISPATCHED');
+assert('El bootstrap móvil publica el stock FEFO y sus KPIs', loadingVm.vanProductStocks.length === 2 && loadingVm.vanStockKpis.total_lots === 2);
+assert('El bootstrap móvil publica la última orden liquidada (C4)', loadingVm.lastReconciledOrderData.order_code === 'PLO-2026-0501' && loadingVm.lastReconciledOrderItems.length === 1);
+assert('El bootstrap móvil alerta de lotes caducados', loadingVm.hasExpiredVanLots === true);
+assert('activeLoadingOrderVisibleItems() omite las líneas retiradas', loadingVm.activeLoadingOrderVisibleItems.length === 2);
+assert('vanStockLots() ordena FEFO con el lote caducado primero', loadingVm.vanStockLots[0].batch_code === 'LOTE-VIEJO' && loadingVm.vanStockLots[1].batch_code === 'LOTE-SW-01');
+assert(
+  'El semáforo FEFO usa tokens y etiquetas canónicas',
+  loadingVm.expiryStatusLabel('EXPIRED') === 'Lote caducado'
+    && loadingVm.expiryStatusIcon('EXPIRING_SOON') === '🟡'
+    && loadingVm.expiryStatusStyle('EXPIRED').backgroundColor === 'var(--color-error-bg)'
+);
+
+const loadingConfirmCalls = [];
+const originalConfirmLoadingOrder = api.restocker.confirmLoadingOrder;
+const originalRestockerVanStocks = api.restocker.getVanStocks;
+api.restocker.confirmLoadingOrder = async (orderId) => {
+  loadingConfirmCalls.push({ method: 'confirmLoadingOrder', orderId });
+  return { data: confirmedLoadingDetail };
+};
+api.restocker.getVanStocks = async () => {
+  loadingConfirmCalls.push({ method: 'getVanStocks' });
+  return vanStockPayload;
+};
+
+await loadingVm.confirmActiveLoadingOrder();
+assert('La recepción 1-Tap confirma la orden propia', loadingConfirmCalls.some((call) => call.method === 'confirmLoadingOrder' && call.orderId === 501));
+assert('Tras confirmar, la orden pasa a recibida en furgoneta', loadingVm.activeLoadingOrderStatus === 'CONFIRMED_BY_RESTOCKER' && loadingVm.loadingActionMessage.includes('Recepción confirmada'));
+assert('La confirmación refresca el stock por lote', loadingConfirmCalls.some((call) => call.method === 'getVanStocks') && loadingVm.vanProductStocks.length === 2);
+
+loadingVm.activeLoadingOrder = confirmedLoadingDetail;
+await loadingVm.openReconcileLoadingModal();
+assert('Abrir la liquidación carga el saldo real por lote', loadingVm.showReconcileLoadingModal === true && loadingVm.reconcileLoadingForm.items.length === 1);
+const reconciliationLine = loadingVm.reconcileLoadingForm.items[0];
+assert('El saldo del lote coincide con el stock de la furgoneta', reconciliationLine.van_stock_before_reconcile === 5);
+reconciliationLine.restocked_in_machines_qty = 3;
+reconciliationLine.withdrawn_spoilage_qty = 1;
+reconciliationLine.counted_return_qty = 0;
+assert('El cálculo en vivo marca el descuadre −1', loadingVm.reconcileLoadingExpected(reconciliationLine) === 1 && loadingVm.reconcileLoadingDiscrepancy(reconciliationLine) === -1);
+assert('Un descuadre sin justificación no se liquida', loadingVm.validateLoadingReconciliation() === false && loadingVm.reconcileLoadingError.includes('20'));
+loadingVm.reconcileLoadingForm.notes = 'Diferencia detectada en el recuento físico del cierre.';
+assert('Una justificación de 20+ caracteres desbloquea el cuadre', loadingVm.validateLoadingReconciliation() === true);
+
+const reconcileLoadingCalls = [];
+const originalReconcileLoadingOrder = api.restocker.reconcileLoadingOrder;
+api.restocker.reconcileLoadingOrder = async (orderId, payload) => {
+  reconcileLoadingCalls.push({ orderId, payload });
+  return { data: reconciledLoadingDetail };
+};
+await loadingVm.submitLoadingReconciliation();
+assert('La liquidación envía el cuadre y la justificación', reconcileLoadingCalls.length === 1 && reconcileLoadingCalls[0].orderId === 501 && reconcileLoadingCalls[0].payload.items[0].counted_return_qty === 0 && reconcileLoadingCalls[0].payload.reconciliation_notes.length >= 20);
+assert('Tras liquidar, la orden activa desaparece y queda el comprobante C4', loadingVm.activeLoadingOrder === null && loadingVm.lastReconciledOrderData.status === 'RECONCILED_AT_CLOSE');
+assert('La liquidación refresca el stock de la furgoneta', loadingVm.loadingActionMessage.includes('Cierre liquidado') && loadingVm.vanProductStocks.length === 2);
+
+api.restocker.confirmLoadingOrder = originalConfirmLoadingOrder;
+api.restocker.getVanStocks = originalRestockerVanStocks;
+api.restocker.reconcileLoadingOrder = originalReconcileLoadingOrder;
+
+assert('El API móvil expone stock, confirmación y liquidación', typeof api.restocker.getVanStocks === 'function' && typeof api.restocker.confirmLoadingOrder === 'function' && typeof api.restocker.reconcileLoadingOrder === 'function');
+assert('Los endpoints móviles son los del contrato', apiSource.includes('/restocker/van-stocks') && apiSource.includes('/restocker/product-loading-orders/${encodeURIComponent(orderId)}/confirm') && apiSource.includes('/restocker/product-loading-orders/${encodeURIComponent(orderId)}/reconcile'));
+assert('La vista publica el banner, la tarjeta de liquidación y el stock FEFO', viewSource.includes('data-testid="restocker-loading-confirm-banner"') && viewSource.includes('data-testid="restocker-loading-reconcile-card"') && viewSource.includes('data-testid="restocker-van-stock"'));
+assert('El botón de recepción usa el copy canónico 1-Tap', viewSource.includes('Confirmar Recepción en Furgoneta (1 Toque)'));
+assert('El botón de liquidación usa el copy canónico de cierre', viewSource.includes('Liquidar Cierre de Furgoneta'));
+assert('El comprobante C4 es de solo lectura', viewSource.includes('data-testid="restocker-last-reconciled-order"') && viewSource.includes('Solo lectura'));
+assert('La vista declara las tres entradas del cuadre por línea', viewSource.includes('data-testid="reconcile-restocked"') && viewSource.includes('data-testid="reconcile-spoilage"') && viewSource.includes('data-testid="reconcile-counted"'));
+assert('La vista móvil no declara campos económicos internos', !viewSource.includes('unit_cost_eur') && !viewSource.includes('unit_margin_eur'));
+
 api.get = originalGet;
 api.post = originalPost;
 

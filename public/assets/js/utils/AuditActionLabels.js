@@ -91,7 +91,12 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   // auditan con tipo propio; sin etiqueta, el filtro del visor perdería esas
   // filas del historial de planogramas y productos.
   VENDING_PRODUCT: 'Producto Comercial',
-  MACHINE_PLANOGRAM: 'Planograma por Máquina'
+  MACHINE_PLANOGRAM: 'Planograma por Máquina',
+  // Entidades del Módulo 33: el stock por lote de la furgoneta y el ciclo de
+  // órdenes de carga se auditan con tipo propio; el filtro del visor debe
+  // cubrir el enumerado completo para no perder esas filas.
+  RESTOCKER_VAN_STOCK: 'Stock de Producto en Furgoneta',
+  PRODUCT_LOADING_ORDER: 'Orden de Carga de Producto'
 });
 
 /**

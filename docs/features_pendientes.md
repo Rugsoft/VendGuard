@@ -1,7 +1,7 @@
 # VendGuard · Catálogo de Funcionalidades Pendientes y Roadmap Futuro**Documento:** `docs/features_pendientes.md`  
 **Fecha de Actualización:** Noviembre 2026
   
-**Estado del Proyecto:** batería global: 420 suites · 15.681 aserciones, al 100 % en verde. Documento versionado (ya está en el índice pese a la regla de `.gitignore`), así que su cifra se audita junto con la del README por `DocMetricsGuard`. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
+**Estado del Proyecto:** batería global: 427 suites · 16.054 aserciones, al 100 % en verde. Documento versionado (ya está en el índice pese a la regla de `.gitignore`), así que su cifra se audita junto con la del README por `DocMetricsGuard`. Módulo 33 cerrado con las 13 tareas de órdenes de carga, picking con trazabilidad de frío, recepción móvil y liquidación al cierre. PR #11 consolidada (rama `reassignment-custody`) con cerrojo idiomático de custodia real y el resumen de custodia (`custody_summary`) y línea temporal interactiva en el modal de detalle; dos pruebas críticas preservadas con `DocMetricsGuard`.
 **Conformidad Arquitectural:** [Constitución de VendGuard](../constitution.md) (Artículos I al VII), [AGENTS.md](../AGENTS.md), Dogma Vanilla (PHP 8.2+ OOP nativo, Vue 3 ES Modules sin bundlers en runtime).
 
 ---
@@ -287,6 +287,7 @@ Segunda pata operativa de **VendGuard** para cubrir el ciclo integral de explota
 * **Complejidad:** Media (2–2.5 días).
 
 #### 23. 🚚 Órdenes de Carga de Furgoneta de Reposición y Picking con Trazabilidad de Frío (*Route Product Loading & Cold Chamber Picking*)
+* **Estado:** ✅ **100% IMPLEMENTADO (Módulo 33: `33-product-loading-cold-picking`)** — Tablas 44, 45 y 46 con cerrojo de frío/lote y anti-borrado; propuesta `ALERTS_ONLY`/`ALL_GAPS`; emisión individual y en lote; Hoja de Picking A4 en dos secciones sin costes; despacho `DISPATCHED` con temperatura y vida útil; recepción móvil en 1 toque; liquidación `RECONCILED_AT_CLOSE` con descuadre auditado; stock FEFO y comprobante `C4` en `RestockerRouteView.js`. Certificado por `specs/33-product-loading-cold-picking/traceability-matrix.md` y la batería global al 100 % en verde. Se conserva a continuación el diseño original de la propuesta para trazabilidad SDD.
 * **Propósito:** Gestionar el abastecimiento matutino de cajas de producto, consumibles y lotes perecederos desde el Almacén Central y la Cámara Frigorífica hacia la furgoneta de cada reponedor, y cuadrar las existencias sobrantes o mermas al cierre del turno.
 * **Componentes Técnicos:**
   * Tablas `restocker_van_product_stocks` (`id`, `restocker_id`, `product_id`, `batch_code`, `expiration_date`, `quantity_available`, `updated_at`) y `product_loading_orders` (`id`, `restocker_id`, `status` [`PENDING_PICKING`, `DISPATCHED`, `CONFIRMED_BY_RESTOCKER`, `RECONCILED_AT_CLOSE`, `CANCELLED`], `cold_chamber_exit_temp_celsius`, `created_by`, `created_at`, `confirmed_at`, `reconciled_at`) junto con `product_loading_order_items`.
@@ -405,7 +406,7 @@ FASE DE TRAZABILIDAD AVANZADA, TALLER Y EFICIENCIA OPERATIVA (CONCLUIDA AL 100%)
 FASE DE OPERATIVA DE CARGA, REPOSICIÓN Y GESTIÓN DE REPONEDORES (PRIORIDAD ACTIVA):
  21. Rol de Cargador/Reponedor de Ruta (RESTOCKER), Zonificación de Carga y Control de Jornada [✅ IMPLEMENTADO - Módulo 31]
  22. Catálogo Maestro de Productos, Consumibles y Planograma por Máquina (Slot Matrix + Art. II) [✅ IMPLEMENTADO - Módulo 32]
- 23. Órdenes de Carga de Furgoneta de Reposición y Picking con Trazabilidad de Frío
+ 23. Órdenes de Carga de Furgoneta de Reposición y Picking con Trazabilidad de Frío [✅ IMPLEMENTADO - Módulo 33]
  24. Visita de Reposición In Situ, Control FEFO de Caducidades y Limpieza Diaria (Art. II + Offline)
  25. Recaudación de Efectivo, Carga de Tubos de Cambio y Arqueo de Caja con Bolsa Precintada (Art. V.4)
  26. Sinergia Operativa Reponedor <-> Técnico SAT (Resolución de Nivel 1 y Escalado Técnico In Situ)

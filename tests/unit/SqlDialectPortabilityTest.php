@@ -560,8 +560,8 @@ preg_match_all(
 );
 
 $assert(
-    '4.2 Las semillas declaran trece cláusulas: seis refrescos y siete de sólo-existencia',
-    count($declaredClauses) === 13,
+    '4.2 Las semillas declaran catorce cláusulas: seis refrescos y ocho de sólo-existencia',
+    count($declaredClauses) === 14,
     'encontradas: ' . count($declaredClauses)
 );
 
@@ -662,8 +662,8 @@ foreach ($declaredClauses as $declared) {
 }
 
 $assert(
-    sprintf('4.%d Las semillas declaran siete excepciones de existencia y seis refrescos', ++$caseNumber),
-    $doNothingRules === 7 && $refreshRules === 6,
+    sprintf('4.%d Las semillas declaran ocho excepciones de existencia y seis refrescos', ++$caseNumber),
+    $doNothingRules === 8 && $refreshRules === 6,
     sprintf('DO NOTHING: %d · refrescos: %d', $doNothingRules, $refreshRules)
 );
 // =====================================================================

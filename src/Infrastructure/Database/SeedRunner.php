@@ -3042,6 +3042,370 @@ class SeedRunner
     }
 
     /**
+     * Stock de producto por lote en las furgonetas de reposición (Módulo 33 · D2, D4).
+     *
+     * El saldo se identifica por `(restocker_id, product_id, batch_code)`: dos lotes
+     * del mismo sándwich conviven en la furgoneta porque caducan distinto y el FEFO
+     * los ordena por fecha. Se inserta **solo si no existe**: la existencia es
+     * operativa y una resemilla no debe borrar el trabajo del reponedor —el ajuste
+     * manual se audita, no se siembra—. Las referencias se resuelven por la clave
+     * canónica del reponedor y por `sku`, nunca por identificadores de secuencia.
+     *
+     * @return int Saldos por lote canónicos vivos tras sembrar.
+     */
+    public function seedRestockerVanProductStocks(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+
+        $insert = $this->pdo->prepare(sprintf(
+            'INSERT INTO restocker_van_product_stocks (
+                restocker_id, product_id, batch_code, expiration_date, quantity_available
+            ) VALUES (
+                (SELECT id FROM users WHERE %1$s = :restocker_email LIMIT 1),
+                (SELECT id FROM vending_products WHERE sku = :sku LIMIT 1),
+                :batch_code, :expiration_date, :quantity_available
+            ) %2$s',
+            $identityColumn,
+            $this->dialect->upsertDoNothing(['restocker_id', 'product_id', 'batch_code'])
+        ));
+
+        foreach (self::canonicalRestockerVanProductStockRows() as $row) {
+            $insert->bindValue(':restocker_email', $row['email'], PDO::PARAM_STR);
+            $insert->bindValue(':sku', $row['sku'], PDO::PARAM_STR);
+            $insert->bindValue(':batch_code', $row['batch_code'], PDO::PARAM_STR);
+            $insert->bindValue(
+                ':expiration_date',
+                $row['expiration_days'] === null ? null : date('Y-m-d', strtotime(sprintf('+%d days', $row['expiration_days']))),
+                $row['expiration_days'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(':quantity_available', $row['quantity_available'], PDO::PARAM_INT);
+            $insert->execute();
+        }
+
+        // Se informa del saldo canónico vivo, no de las filas insertadas: igual que
+        // el cuadrante territorial, resembrar no altera las cifras del resumen.
+        $verify = $this->pdo->prepare(sprintf(
+            'SELECT COUNT(*)
+               FROM restocker_van_product_stocks s
+               INNER JOIN users u ON u.id = s.restocker_id
+               INNER JOIN vending_products p ON p.id = s.product_id
+              WHERE u.%s = :restocker_email
+                AND p.sku = :sku
+                AND s.batch_code = :batch_code',
+            $identityColumn
+        ));
+
+        $count = 0;
+        foreach (self::canonicalRestockerVanProductStockRows() as $row) {
+            $verify->execute([
+                ':restocker_email' => $row['email'],
+                ':sku' => $row['sku'],
+                ':batch_code' => $row['batch_code'],
+            ]);
+            $count += (int)$verify->fetchColumn();
+        }
+
+        return $count;
+    }
+
+    /**
+     * Órdenes de carga demo: una liquidada al cierre y otra despachada (Módulo 33).
+     *
+     * La orden no nace de una avería: nace de la demanda logística de la ruta. La
+     * liquidada demuestra el cuadre completo —incluida una línea planificada y no
+     * despachada, sellada en 0 (QA 4)— y la despachada espera la recepción en un
+     * toque del reponedor, con temperatura de salida de cámara de 3,5 °C (Art. II).
+     * Las órdenes son hechos históricos: se insertan **solo si no existen** y una
+     * resemilla no reescribe su estado, su temperatura ni su cuadre.
+     *
+     * @return int Órdenes canónicas vivas tras sembrar.
+     */
+    public function seedProductLoadingOrders(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+
+        $orderInsert = $this->pdo->prepare(sprintf(
+            'INSERT INTO product_loading_orders (
+                order_code, restocker_id, status, demand_mode, safety_buffer_pct,
+                cold_chamber_exit_temp_celsius, notes, reconciliation_notes,
+                created_by, dispatched_by, reconciled_by,
+                created_at, dispatched_at, confirmed_at, reconciled_at
+            ) VALUES (
+                :order_code,
+                (SELECT id FROM users WHERE %1$s = :restocker_email LIMIT 1),
+                :status, :demand_mode, :safety_buffer_pct, :cold_temp, :notes, :reconciliation_notes,
+                (SELECT id FROM users WHERE %1$s = :created_by_email LIMIT 1),
+                (SELECT id FROM users WHERE %1$s = :dispatched_by_email LIMIT 1),
+                (SELECT id FROM users WHERE %1$s = :reconciled_by_email LIMIT 1),
+                :created_at, :dispatched_at, :confirmed_at, :reconciled_at
+            ) %2$s',
+            $identityColumn,
+            $this->dialect->upsertDoNothing(['order_code'])
+        ));
+
+        $timestamp = static fn (?int $offsetHours): ?string => $offsetHours === null
+            ? null
+            : date('Y-m-d H:i:s', time() + $offsetHours * 3600);
+
+        foreach (self::canonicalProductLoadingOrderRows() as $order) {
+            $orderInsert->bindValue(':order_code', $order['order_code'], PDO::PARAM_STR);
+            $orderInsert->bindValue(':restocker_email', $order['restocker_email'], PDO::PARAM_STR);
+            $orderInsert->bindValue(':status', $order['status'], PDO::PARAM_STR);
+            $orderInsert->bindValue(':demand_mode', $order['demand_mode'], PDO::PARAM_STR);
+            $orderInsert->bindValue(':safety_buffer_pct', $order['safety_buffer_pct'], PDO::PARAM_INT);
+            $orderInsert->bindValue(
+                ':cold_temp',
+                $order['cold_chamber_exit_temp_celsius'],
+                $order['cold_chamber_exit_temp_celsius'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $orderInsert->bindValue(':notes', $order['notes'], PDO::PARAM_STR);
+            $orderInsert->bindValue(
+                ':reconciliation_notes',
+                $order['reconciliation_notes'],
+                $order['reconciliation_notes'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $orderInsert->bindValue(':created_by_email', $order['created_by_email'], PDO::PARAM_STR);
+            $orderInsert->bindValue(
+                ':dispatched_by_email',
+                $order['dispatched_by_email'],
+                $order['dispatched_by_email'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $orderInsert->bindValue(
+                ':reconciled_by_email',
+                $order['reconciled_by_email'],
+                $order['reconciled_by_email'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+
+            $timestamps = [
+                ':created_at' => $timestamp($order['created_at_offset_hours']),
+                ':dispatched_at' => $timestamp($order['dispatched_at_offset_hours']),
+                ':confirmed_at' => $timestamp($order['confirmed_at_offset_hours']),
+                ':reconciled_at' => $timestamp($order['reconciled_at_offset_hours']),
+            ];
+            foreach ($timestamps as $placeholder => $value) {
+                $orderInsert->bindValue($placeholder, $value, $value === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            }
+
+            $orderInsert->execute();
+        }
+
+        $itemInsert = $this->pdo->prepare(sprintf(
+            'INSERT INTO product_loading_order_items (
+                order_id, product_id, reason, requested_qty, dispatched_qty,
+                batch_code, expiration_date,
+                van_stock_before_reconcile, restocked_in_machines_qty, withdrawn_spoilage_qty,
+                expected_return_qty, counted_return_qty, discrepancy_qty, is_active
+            ) VALUES (
+                (SELECT id FROM product_loading_orders WHERE order_code = :order_code LIMIT 1),
+                (SELECT id FROM vending_products WHERE sku = :sku LIMIT 1),
+                :reason, :requested_qty, :dispatched_qty, :batch_code, :expiration_date,
+                :van_stock_before_reconcile, :restocked_in_machines_qty, :withdrawn_spoilage_qty,
+                :expected_return_qty, :counted_return_qty, :discrepancy_qty, %1$s
+            ) %2$s',
+            $this->dialect->booleanLiteral(true),
+            $this->dialect->upsertDoNothing(['order_id', 'product_id'])
+        ));
+
+        foreach (self::canonicalProductLoadingOrderItemRows() as $item) {
+            $itemInsert->bindValue(':order_code', $item['order_code'], PDO::PARAM_STR);
+            $itemInsert->bindValue(':sku', $item['sku'], PDO::PARAM_STR);
+            $itemInsert->bindValue(':reason', $item['reason'], PDO::PARAM_STR);
+            $itemInsert->bindValue(':requested_qty', $item['requested_qty'], PDO::PARAM_INT);
+            $itemInsert->bindValue(
+                ':dispatched_qty',
+                $item['dispatched_qty'],
+                $item['dispatched_qty'] === null ? PDO::PARAM_NULL : PDO::PARAM_INT
+            );
+            $itemInsert->bindValue(
+                ':batch_code',
+                $item['batch_code'],
+                $item['batch_code'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $itemInsert->bindValue(
+                ':expiration_date',
+                $item['expiration_days'] === null ? null : date('Y-m-d', strtotime(sprintf('+%d days', $item['expiration_days']))),
+                $item['expiration_days'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+
+            foreach (['van_stock_before_reconcile', 'restocked_in_machines_qty', 'withdrawn_spoilage_qty', 'expected_return_qty', 'counted_return_qty', 'discrepancy_qty'] as $column) {
+                $itemInsert->bindValue(
+                    ':' . $column,
+                    $item[$column],
+                    $item[$column] === null ? PDO::PARAM_NULL : PDO::PARAM_INT
+                );
+            }
+
+            $itemInsert->execute();
+        }
+
+        $verify = $this->pdo->prepare('SELECT COUNT(*) FROM product_loading_orders WHERE order_code = :order_code');
+        $count = 0;
+        foreach (self::canonicalProductLoadingOrderRows() as $order) {
+            $verify->execute([':order_code' => $order['order_code']]);
+            $count += (int)$verify->fetchColumn();
+        }
+
+        return $count;
+    }
+
+    /**
+     * Los seis saldos por lote de las furgonetas sembradas (Módulo 33 · D2, D4).
+     *
+     * `expiration_days` se declara relativo al día de la siembra —el semáforo FEFO
+     * se demuestra vivo, no congelado en una fecha del pasado— y es `NULL` para los
+     * no perecederos, que viajan con el lote normalizado `'SIN-LOTE'`.
+     *
+     * @return list<array{email: string, sku: string, batch_code: string, expiration_days: ?int, quantity_available: int}>
+     */
+    private static function canonicalRestockerVanProductStockRows(): array
+    {
+        return [
+            ['email' => 'lucia.repostaje@vendguard.internal', 'sku' => 'SAND-MIXTO-01', 'batch_code' => 'L-SAND-2602', 'expiration_days' => 2, 'quantity_available' => 12],
+            ['email' => 'lucia.repostaje@vendguard.internal', 'sku' => 'SAND-MIXTO-01', 'batch_code' => 'L-SAND-2606', 'expiration_days' => 4, 'quantity_available' => 18],
+            ['email' => 'lucia.repostaje@vendguard.internal', 'sku' => 'COLA-LATA-33', 'batch_code' => 'SIN-LOTE', 'expiration_days' => null, 'quantity_available' => 60],
+            ['email' => 'lucia.repostaje@vendguard.internal', 'sku' => 'SNACK-PATAT-40', 'batch_code' => 'SIN-LOTE', 'expiration_days' => null, 'quantity_available' => 40],
+            ['email' => 'oscar.repostaje@vendguard.internal', 'sku' => 'YOGUR-NAT-125', 'batch_code' => 'L-YOG-2611', 'expiration_days' => 12, 'quantity_available' => 24],
+            ['email' => 'oscar.repostaje@vendguard.internal', 'sku' => 'AGUA-MIN-50', 'batch_code' => 'SIN-LOTE', 'expiration_days' => null, 'quantity_available' => 48],
+        ];
+    }
+
+    /**
+     * Las dos órdenes de carga demo, una por estado demostrable (Módulo 33 · D3, QA 4).
+     *
+     * Los instantes se declaran como desplazamiento en horas respecto de la siembra:
+     * la liquidada es el cierre del día anterior y la despachada salió hace una hora.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalProductLoadingOrderRows(): array
+    {
+        return [
+            [
+                'order_code' => 'PLO-2026-0001',
+                'restocker_email' => 'lucia.repostaje@vendguard.internal',
+                'status' => 'RECONCILED_AT_CLOSE',
+                'demand_mode' => 'ALERTS_ONLY',
+                'safety_buffer_pct' => 10,
+                'cold_chamber_exit_temp_celsius' => '3.0',
+                'notes' => 'Orden matutina de la zona centro: dos lotes de sándwich y reposición de refrescos.',
+                'reconciliation_notes' => 'Cuadre sin descuadre: volvió una unidad de merma de sándwich retirada en ruta.',
+                'created_by_email' => 'coordinacion@vendguard.internal',
+                'dispatched_by_email' => 'coordinacion@vendguard.internal',
+                'reconciled_by_email' => 'coordinacion@vendguard.internal',
+                'created_at_offset_hours' => -24,
+                'dispatched_at_offset_hours' => -24,
+                'confirmed_at_offset_hours' => -23,
+                'reconciled_at_offset_hours' => 0,
+            ],
+            [
+                'order_code' => 'PLO-2026-0002',
+                'restocker_email' => 'oscar.repostaje@vendguard.internal',
+                'status' => 'DISPATCHED',
+                'demand_mode' => 'ALL_GAPS',
+                'safety_buffer_pct' => 15,
+                'cold_chamber_exit_temp_celsius' => '3.5',
+                'notes' => 'Reposición completa de la ruta norte con yogur de lote largo y frutos secos.',
+                'reconciliation_notes' => null,
+                'created_by_email' => 'coordinacion@vendguard.internal',
+                'dispatched_by_email' => 'coordinacion@vendguard.internal',
+                'reconciled_by_email' => null,
+                'created_at_offset_hours' => -2,
+                'dispatched_at_offset_hours' => -1,
+                'confirmed_at_offset_hours' => null,
+                'reconciled_at_offset_hours' => null,
+            ],
+        ];
+    }
+
+    /**
+     * Las cinco líneas de las dos órdenes demo (Módulo 33 · C1, D3, QA 4).
+     *
+     * La tercera línea de la orden liquidada se planificó y no se despachó: sus seis
+     * campos de cuadre quedan en 0, que es la forma que exige el Art. V.1/QA 4.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalProductLoadingOrderItemRows(): array
+    {
+        return [
+            [
+                'order_code' => 'PLO-2026-0001',
+                'sku' => 'SAND-MIXTO-01',
+                'reason' => 'STOCKOUT_ALERT',
+                'requested_qty' => 24,
+                'dispatched_qty' => 24,
+                'batch_code' => 'L-SAND-2602',
+                'expiration_days' => 2,
+                'van_stock_before_reconcile' => 24,
+                'restocked_in_machines_qty' => 20,
+                'withdrawn_spoilage_qty' => 2,
+                'expected_return_qty' => 2,
+                'counted_return_qty' => 2,
+                'discrepancy_qty' => 0,
+            ],
+            [
+                'order_code' => 'PLO-2026-0001',
+                'sku' => 'COLA-LATA-33',
+                'reason' => 'LOW_STOCK_ALERT',
+                'requested_qty' => 60,
+                'dispatched_qty' => 60,
+                'batch_code' => 'SIN-LOTE',
+                'expiration_days' => null,
+                'van_stock_before_reconcile' => 60,
+                'restocked_in_machines_qty' => 60,
+                'withdrawn_spoilage_qty' => 0,
+                'expected_return_qty' => 0,
+                'counted_return_qty' => 0,
+                'discrepancy_qty' => 0,
+            ],
+            [
+                'order_code' => 'PLO-2026-0001',
+                'sku' => 'AGUA-MIN-50',
+                'reason' => 'ROUTE_GAP_FILL',
+                'requested_qty' => 36,
+                'dispatched_qty' => 0,
+                'batch_code' => null,
+                'expiration_days' => null,
+                'van_stock_before_reconcile' => 0,
+                'restocked_in_machines_qty' => 0,
+                'withdrawn_spoilage_qty' => 0,
+                'expected_return_qty' => 0,
+                'counted_return_qty' => 0,
+                'discrepancy_qty' => 0,
+            ],
+            [
+                'order_code' => 'PLO-2026-0002',
+                'sku' => 'YOGUR-NAT-125',
+                'reason' => 'STOCKOUT_ALERT',
+                'requested_qty' => 24,
+                'dispatched_qty' => 24,
+                'batch_code' => 'L-YOG-2611',
+                'expiration_days' => 12,
+                'van_stock_before_reconcile' => null,
+                'restocked_in_machines_qty' => null,
+                'withdrawn_spoilage_qty' => null,
+                'expected_return_qty' => null,
+                'counted_return_qty' => null,
+                'discrepancy_qty' => null,
+            ],
+            [
+                'order_code' => 'PLO-2026-0002',
+                'sku' => 'SNACK-FRUTSEC-50',
+                'reason' => 'MANUAL_ADDITION',
+                'requested_qty' => 20,
+                'dispatched_qty' => 20,
+                'batch_code' => 'SIN-LOTE',
+                'expiration_days' => null,
+                'van_stock_before_reconcile' => null,
+                'restocked_in_machines_qty' => null,
+                'withdrawn_spoilage_qty' => null,
+                'expected_return_qty' => null,
+                'counted_return_qty' => null,
+                'discrepancy_qty' => null,
+            ],
+        ];
+    }
+    /**
      * Catálogo canónico de productos comerciales y consumibles (Módulo 32 · C3).
      *
      * Los importes cruzan como cadena decimal para que el redondeo binario del
@@ -3175,6 +3539,13 @@ class SeedRunner
             // planograma se inserta solo si no existe, para no pisar existencias.
             $vendingProductCount = $this->seedVendingProducts();
             $planogramSlotCount = $this->seedMachinePlanograms();
+            // El stock por lote de las furgonetas (Módulo 33) se siembra después
+            // del catálogo: resuelve reponedor por `email_key` y producto por `sku`,
+            // y no reafirma existencias operativas al resembrar.
+            $restockerVanStockCount = $this->seedRestockerVanProductStocks();
+            // Las órdenes de carga demo cuelgan del reponedor y de sus lotes: son
+            // hechos históricos que una resemilla no reescribe.
+            $productLoadingOrderCount = $this->seedProductLoadingOrders();
             // Las guías de diagnóstico (Módulo 28) resuelven repuesto y causa por sus
             // códigos: entran cuando ambas maestras ya están sembradas. `Fas Perla`
             // queda sin guía a propósito para el indicador de cobertura (QA 1).
@@ -3221,6 +3592,8 @@ class SeedRunner
                 'spare_part_compatibilities' => $partsRes['compatibilities'],
                 'vending_products' => $vendingProductCount,
                 'machine_planogram_slots' => $planogramSlotCount,
+                'restocker_van_product_stocks' => $restockerVanStockCount,
+                'product_loading_orders' => $productLoadingOrderCount,
                 'troubleshooting_guides' => $troubleshootingGuideCount,
                 'technician_van_stocks' => $vanStockCount,
                 'van_restock_orders' => $vanRestockOrderCount,

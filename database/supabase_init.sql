@@ -107,8 +107,10 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 --
 -- -----------------------------------------------------------------------------
 -- TABLA DE CORRESPONDENCIA DE LOS CONJUNTOS `ENUM` DEL DOMINIO
--- (las 25 del baseline y los 2 tipos del Módulo 32: #26 `vending_product_category`
---  y #27 `vending_product_unit_type`, declarados al final de esta sección)
+-- (las 25 del baseline, los 2 tipos del Módulo 32 —#26 `vending_product_category`
+--  y #27 `vending_product_unit_type`— y los 3 del Módulo 33 —#28
+--  `product_loading_order_status`, #29 `product_loading_demand_mode` y #30
+--  `product_loading_item_reason`—, declarados al final de esta sección)
 -- -----------------------------------------------------------------------------
 -- | # | Tipo nativo en PostgreSQL         | Conjunto local (mismo orden)                                  | Columna(s) local(es)                                                             | Declarado en  |
 -- |--:|:----------------------------------|:--------------------------------------------------------------|:---------------------------------------------------------------------------------|:--------------|
@@ -185,6 +187,43 @@ BEGIN
         'UNIT',
         'GRAMS',
         'SLEEVE'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+-- Módulo 33 · tipos nativos #28, #29 y #30 de la carga de furgoneta (QA 4).
+-- `product_loading_order_status` fija el ciclo de vida de la orden,
+-- `product_loading_demand_mode` el criterio con el que se calcula la demanda
+-- matutina y `product_loading_item_reason` por qué una referencia entró en la
+-- Hoja de Picking. Los tres se declaran aquí y los consumen las Tablas 44 a 46.
+DO $do$
+BEGIN
+    CREATE TYPE product_loading_order_status AS ENUM (
+        'PENDING_PICKING',
+        'DISPATCHED',
+        'CONFIRMED_BY_RESTOCKER',
+        'RECONCILED_AT_CLOSE',
+        'CANCELLED'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE product_loading_demand_mode AS ENUM (
+        'ALERTS_ONLY',
+        'ALL_GAPS'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE product_loading_item_reason AS ENUM (
+        'STOCKOUT_ALERT',
+        'LOW_STOCK_ALERT',
+        'ROUTE_GAP_FILL',
+        'MANUAL_ADDITION'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -297,7 +336,11 @@ BEGIN
         -- Catálogo comercial y planograma del Módulo 32 (C3): el alta, la baja
         -- lógica y la edición del producto se auditan contra su propia entidad,
         -- y el guardado de carriles contra la suya, no contra la máquina.
-        'VENDING_PRODUCT', 'MACHINE_PLANOGRAM'
+        'VENDING_PRODUCT', 'MACHINE_PLANOGRAM',
+        -- Stock por lote del vehículo y orden de carga del Módulo 33 (Art. III.3):
+        -- el ajuste del saldo del reponedor y el ciclo de vida de la orden se
+        -- auditan con entidad propia, no como edición del producto ni del usuario.
+        'RESTOCKER_VAN_STOCK', 'PRODUCT_LOADING_ORDER'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -3801,9 +3844,310 @@ CREATE OR REPLACE TRIGGER trg_validate_machine_type_against_planogram
     FOR EACH ROW EXECUTE FUNCTION validate_machine_type_against_planogram();
 
 
+-- =============================================================================
+-- SECCIÓN 16 · Tablas 44, 45 y 46 · Órdenes de carga de furgoneta y picking con
+--              trazabilidad de frío (Módulo 33 · 33-product-loading-cold-picking)
+-- =============================================================================
+-- El reponedor salía a ruta con lo que cabía en la furgoneta, sin una orden
+-- formal que dijera QUÉ cargar, con qué LOTE y a qué TEMPERATURA salió de la
+-- cámara frigorífica. Estas tres tablas cierran esa cadena: el inventario por
+-- lote del vehículo (Tabla 44), la orden de carga con su ciclo de vida (Tabla 45)
+-- y sus líneas con el cuadre de la liquidación al cierre (Tabla 46). Las tres se
+-- protegen con `prevent_hard_delete()` (Art. III.1) y el cerrojo sanitario de
+-- frío y lote se declara también en el motor (Art. II, D2, QA 2), porque una
+-- salvaguarda que solo vive en la aplicación no cubre una consola SQL.
+
+-- -----------------------------------------------------------------------------
+-- Tabla 44 · restocker_van_product_stocks — stock de producto por lote
+-- -----------------------------------------------------------------------------
+-- La identidad del saldo es `(restocker_id, product_id, batch_code)`: dos lotes
+-- del mismo producto conviven en la furgoneta porque caducan distinto y el FEFO
+-- los ordena por fecha. `'SIN-LOTE'` es el lote normalizado de los no
+-- perecederos; el cerrojo de 16.3 impide usarlo con producto refrigerado.
+CREATE TABLE IF NOT EXISTS restocker_van_product_stocks (
+    id                    BIGINT GENERATED ALWAYS AS IDENTITY,
+    restocker_id          BIGINT NOT NULL,
+    product_id            BIGINT NOT NULL,
+    batch_code            VARCHAR(40) NOT NULL DEFAULT 'SIN-LOTE',
+    expiration_date       DATE,
+    quantity_available    INTEGER NOT NULL DEFAULT 0,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_restocker_van_product_stocks PRIMARY KEY (id),
+    CONSTRAINT uq_restocker_van_product_batch UNIQUE (restocker_id, product_id, batch_code),
+    CONSTRAINT fk_restocker_van_product_stocks_restocker
+        FOREIGN KEY (restocker_id) REFERENCES users (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_restocker_van_product_stocks_product
+        FOREIGN KEY (product_id) REFERENCES vending_products (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_restocker_van_product_stocks_batch_format
+        CHECK (batch_code ~ '^[A-Z0-9_-]{2,40}$'),
+    CONSTRAINT chk_restocker_van_product_stocks_qty_range
+        CHECK (quantity_available >= 0 AND quantity_available <= 99999)
+);
+
+CREATE INDEX IF NOT EXISTS idx_restocker_van_product_stocks_restocker_fefo
+    ON restocker_van_product_stocks (restocker_id, expiration_date ASC NULLS LAST, product_id ASC);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_restocker_van_product_stocks
+    BEFORE DELETE ON restocker_van_product_stocks
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_restocker_van_product_stocks
+    BEFORE UPDATE ON restocker_van_product_stocks
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 45 · product_loading_orders — órdenes de carga de furgoneta
+-- -----------------------------------------------------------------------------
+-- `order_code` es la identidad legible e inmutable de la orden
+-- (`PLO-AAAA-NNNN`). La coherencia de los estados terminales se defiende con
+-- `CHECK`: una orden cancelada sin fecha ni motivo, o liquidada sin responsable y
+-- fecha, no es un estado admisible. La temperatura de salida de cámara solo
+-- admite el rango físico del Art. II: nula mientras no se despacha y, cuando
+-- existe, entre -5,0 °C y 4,0 °C.
+CREATE TABLE IF NOT EXISTS product_loading_orders (
+    id                              BIGINT GENERATED ALWAYS AS IDENTITY,
+    order_code                      VARCHAR(32) NOT NULL,
+    restocker_id                    BIGINT NOT NULL,
+    status                          product_loading_order_status NOT NULL DEFAULT 'PENDING_PICKING',
+    demand_mode                     product_loading_demand_mode NOT NULL DEFAULT 'ALERTS_ONLY',
+    safety_buffer_pct               INTEGER NOT NULL DEFAULT 10,
+    cold_chamber_exit_temp_celsius  NUMERIC(4, 1),
+    notes                           VARCHAR(500),
+    cancel_reason                   VARCHAR(500),
+    reconciliation_notes            VARCHAR(500),
+    created_by                      BIGINT NOT NULL,
+    dispatched_by                   BIGINT,
+    reconciled_by                   BIGINT,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    dispatched_at                   TIMESTAMPTZ,
+    confirmed_at                    TIMESTAMPTZ,
+    reconciled_at                   TIMESTAMPTZ,
+    cancelled_at                    TIMESTAMPTZ,
+    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_product_loading_orders PRIMARY KEY (id),
+    CONSTRAINT uq_product_loading_orders_code UNIQUE (order_code),
+    CONSTRAINT fk_product_loading_orders_restocker
+        FOREIGN KEY (restocker_id) REFERENCES users (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_product_loading_orders_created_by
+        FOREIGN KEY (created_by) REFERENCES users (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_product_loading_orders_dispatched_by
+        FOREIGN KEY (dispatched_by) REFERENCES users (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_product_loading_orders_reconciled_by
+        FOREIGN KEY (reconciled_by) REFERENCES users (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_product_loading_orders_code_format
+        CHECK (order_code ~ '^PLO-[0-9]{4}-[0-9]{4,}$'),
+    CONSTRAINT chk_product_loading_orders_buffer_range
+        CHECK (safety_buffer_pct >= 0 AND safety_buffer_pct <= 50),
+    CONSTRAINT chk_product_loading_orders_cold_temp_range
+        CHECK (cold_chamber_exit_temp_celsius IS NULL
+            OR (cold_chamber_exit_temp_celsius >= -5.0 AND cold_chamber_exit_temp_celsius <= 4.0)),
+    CONSTRAINT chk_product_loading_orders_cancel_coherence
+        CHECK (
+            (status = 'CANCELLED' AND cancelled_at IS NOT NULL AND cancel_reason IS NOT NULL
+                AND char_length(btrim(cancel_reason)) >= 20)
+            OR (status <> 'CANCELLED' AND cancelled_at IS NULL AND cancel_reason IS NULL)
+        ),
+    CONSTRAINT chk_product_loading_orders_reconcile_coherence
+        CHECK (
+            (status = 'RECONCILED_AT_CLOSE' AND reconciled_at IS NOT NULL AND reconciled_by IS NOT NULL)
+            OR (status <> 'RECONCILED_AT_CLOSE' AND reconciled_at IS NULL AND reconciled_by IS NULL)
+        )
+);
+
+-- Unicidad de orden activa por reponedor (D3, RF-02.3): el índice es parcial
+-- porque las órdenes cerradas o canceladas son histórico y no ocupan la plaza.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_product_loading_orders_active_restocker
+    ON product_loading_orders (restocker_id)
+    WHERE status IN ('PENDING_PICKING', 'DISPATCHED', 'CONFIRMED_BY_RESTOCKER');
+
+CREATE INDEX IF NOT EXISTS idx_product_loading_orders_status_created
+    ON product_loading_orders (status, created_at DESC);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_product_loading_orders
+    BEFORE DELETE ON product_loading_orders
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_product_loading_orders
+    BEFORE UPDATE ON product_loading_orders
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 46 · product_loading_order_items — líneas de la orden de carga
+-- -----------------------------------------------------------------------------
+-- El par `(order_id, product_id)` es la identidad de la línea: editar una orden
+-- es `UPSERT` y retirar una línea es `is_active = FALSE`, nunca `DELETE` (C1).
+-- El cuadre de la liquidación es una identidad aritmética, no una convención: o
+-- los seis campos están vacíos (orden no liquidada) o
+-- `expected_return_qty = van_stock_before_reconcile - restocked_in_machines_qty
+-- - withdrawn_spoilage_qty` y `discrepancy_qty = counted_return_qty -
+-- expected_return_qty`, con no negatividad y `restocked + withdrawn <= before`.
+CREATE TABLE IF NOT EXISTS product_loading_order_items (
+    id                            BIGINT GENERATED ALWAYS AS IDENTITY,
+    order_id                      BIGINT NOT NULL,
+    product_id                    BIGINT NOT NULL,
+    reason                        product_loading_item_reason NOT NULL DEFAULT 'STOCKOUT_ALERT',
+    requested_qty                 INTEGER NOT NULL,
+    dispatched_qty                INTEGER,
+    batch_code                    VARCHAR(40),
+    expiration_date               DATE,
+    van_stock_before_reconcile    INTEGER,
+    restocked_in_machines_qty     INTEGER,
+    withdrawn_spoilage_qty        INTEGER,
+    expected_return_qty           INTEGER,
+    counted_return_qty            INTEGER,
+    discrepancy_qty               INTEGER,
+    is_active                     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at                    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_product_loading_order_items PRIMARY KEY (id),
+    CONSTRAINT uq_product_loading_order_item_product UNIQUE (order_id, product_id),
+    CONSTRAINT fk_product_loading_order_items_order
+        FOREIGN KEY (order_id) REFERENCES product_loading_orders (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_product_loading_order_items_product
+        FOREIGN KEY (product_id) REFERENCES vending_products (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_product_loading_order_items_requested_qty
+        CHECK (requested_qty >= 1 AND requested_qty <= 99999),
+    CONSTRAINT chk_product_loading_order_items_dispatched_qty
+        CHECK (dispatched_qty IS NULL OR (dispatched_qty >= 0 AND dispatched_qty <= 99999)),
+    CONSTRAINT chk_product_loading_order_items_batch_format
+        CHECK (batch_code IS NULL OR batch_code ~ '^[A-Z0-9_-]{2,40}$'),
+    CONSTRAINT chk_product_loading_order_items_reconcile_bounds
+        CHECK (
+            (van_stock_before_reconcile IS NULL AND restocked_in_machines_qty IS NULL
+                AND withdrawn_spoilage_qty IS NULL AND expected_return_qty IS NULL
+                AND counted_return_qty IS NULL AND discrepancy_qty IS NULL)
+            OR (
+                van_stock_before_reconcile >= 0
+                AND restocked_in_machines_qty >= 0
+                AND withdrawn_spoilage_qty >= 0
+                AND restocked_in_machines_qty + withdrawn_spoilage_qty <= van_stock_before_reconcile
+                AND expected_return_qty = van_stock_before_reconcile - restocked_in_machines_qty - withdrawn_spoilage_qty
+                AND counted_return_qty >= 0 AND counted_return_qty <= 99999
+                AND discrepancy_qty = counted_return_qty - expected_return_qty
+            )
+        )
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_loading_order_items_order_active
+    ON product_loading_order_items (order_id, is_active);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_product_loading_order_items
+    BEFORE DELETE ON product_loading_order_items
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_product_loading_order_items
+    BEFORE UPDATE ON product_loading_order_items
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- 16.3 · Cerrojo sanitario de frío y lote (Art. II, D2, QA 2)
+-- -----------------------------------------------------------------------------
+-- 16.3.1 · Stock de furgoneta: el producto refrigerado exige lote real y
+-- caducidad. El lote `'SIN-LOTE'` es legítimo para un refresco sin frío y jamás
+-- para un sándwich: sin fecha no hay FEFO y sin lote no hay trazabilidad.
+CREATE OR REPLACE FUNCTION enforce_van_stock_cold_chain_batch()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_requires_cold_chain BOOLEAN;
+    v_sku VARCHAR(32);
+BEGIN
+    SELECT vp.requires_cold_chain, vp.sku
+      INTO v_requires_cold_chain, v_sku
+      FROM vending_products vp
+     WHERE vp.id = NEW.product_id;
+
+    IF COALESCE(v_requires_cold_chain, FALSE) IS TRUE
+       AND (NEW.batch_code IS NULL OR NEW.batch_code = 'SIN-LOTE' OR NEW.expiration_date IS NULL) THEN
+        RAISE EXCEPTION 'ART_II_COLD_CHAIN_BATCH_REQUIRED: El producto refrigerado % exige lote real (distinto de SIN-LOTE) y fecha de caducidad en el stock de furgoneta.', v_sku
+            USING ERRCODE = '45000';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_enforce_van_stock_cold_chain_batch
+    BEFORE INSERT OR UPDATE ON restocker_van_product_stocks
+    FOR EACH ROW EXECUTE FUNCTION enforce_van_stock_cold_chain_batch();
+
+-- 16.3.2 · Despacho: la orden no sale de cámara sin temperatura registrada y sin
+-- lote real en cada línea refrigerada servida. El disparador se evalúa también en
+-- la confirmación y en la liquidación: si una orden llegó a `DISPATCHED` con
+-- datos válidos, siguen siendo válidos al cerrarse; si alguien intenta fabricar
+-- ese estado por SQL, el motor lo rechaza.
+CREATE OR REPLACE FUNCTION enforce_loading_order_cold_chain_dispatch()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_cold_lines INTEGER;
+    v_invalid_line_sku VARCHAR(32);
+BEGIN
+    IF NEW.status NOT IN ('DISPATCHED', 'CONFIRMED_BY_RESTOCKER', 'RECONCILED_AT_CLOSE') THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT COUNT(*)
+      INTO v_cold_lines
+      FROM product_loading_order_items i
+      INNER JOIN vending_products vp ON vp.id = i.product_id
+     WHERE i.order_id = NEW.id
+       AND i.is_active = TRUE
+       AND COALESCE(i.dispatched_qty, 0) > 0
+       AND vp.requires_cold_chain = TRUE;
+
+    IF v_cold_lines = 0 THEN
+        RETURN NEW;
+    END IF;
+
+    IF NEW.cold_chamber_exit_temp_celsius IS NULL
+       OR NEW.cold_chamber_exit_temp_celsius < -5.0
+       OR NEW.cold_chamber_exit_temp_celsius > 4.0 THEN
+        RAISE EXCEPTION 'ART_II_COLD_CHAMBER_DISPATCH_VIOLATION: La orden % transporta producto refrigerado y exige temperatura de salida de cámara entre -5,0 °C y 4,0 °C.', NEW.order_code
+            USING ERRCODE = '45000';
+    END IF;
+
+    SELECT vp.sku
+      INTO v_invalid_line_sku
+      FROM product_loading_order_items i
+      INNER JOIN vending_products vp ON vp.id = i.product_id
+     WHERE i.order_id = NEW.id
+       AND i.is_active = TRUE
+       AND COALESCE(i.dispatched_qty, 0) > 0
+       AND vp.requires_cold_chain = TRUE
+       AND (i.batch_code IS NULL OR i.batch_code = 'SIN-LOTE' OR i.expiration_date IS NULL)
+     LIMIT 1;
+
+    IF v_invalid_line_sku IS NOT NULL THEN
+        RAISE EXCEPTION 'ART_II_COLD_CHAIN_BATCH_REQUIRED: La línea del producto refrigerado % no declara lote real y fecha de caducidad.', v_invalid_line_sku
+            USING ERRCODE = '45000';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_enforce_loading_order_cold_chain_dispatch
+    BEFORE UPDATE ON product_loading_orders
+    FOR EACH ROW EXECUTE FUNCTION enforce_loading_order_cold_chain_dispatch();
+
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 43 tablas (las 43 del contrato de correspondencia) · 43 columnas `ENUM` · 12
+-- 46 tablas (las 46 del contrato de correspondencia) · 46 columnas `ENUM` · 14
 -- funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
 -- `prevent_satisfaction_survey_rewrite()`, `prevent_service_sheet_update()`
@@ -3813,9 +4157,11 @@ CREATE OR REPLACE TRIGGER trg_validate_machine_type_against_planogram
 -- `enforce_sanitary_spoilage_records_immutability()` (Módulo 29) y las cuatro del
 -- cerrojo sanitario del Módulo 32 (`is_planogram_product_compatible_with_machine()`,
 -- `enforce_planogram_slot_compatibility()`, `validate_product_update_against_planograms()`
--- y `validate_machine_type_against_planogram()`)
--- 79 disparadores: 43 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 25
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 11 `BEFORE UPDATE` de
+-- y `validate_machine_type_against_planogram()`) y las dos del cerrojo sanitario
+-- del Módulo 33 (`enforce_van_stock_cold_chain_batch()` y
+-- `enforce_loading_order_cold_chain_dispatch()`)
+-- 87 disparadores: 46 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 28
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2), 11 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
 -- `trg_no_update_technician_shift_logs`, `trg_immutable_root_causes`,
@@ -3824,10 +4170,12 @@ CREATE OR REPLACE TRIGGER trg_validate_machine_type_against_planogram
 -- `trg_immutable_sanitary_spoilage_records` y
 -- `trg_incidents_protect_sla_tier_snapshot`,
 -- `trg_validate_product_update_against_planograms` y
--- `trg_validate_machine_type_against_planogram` del Módulo 32)
--- 71 restricciones nombradas: 43 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 28 únicas
--- 94 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- `trg_validate_machine_type_against_planogram` del Módulo 32) y 2 del cerrojo
+-- sanitario de frío y lote del Módulo 33 (`trg_enforce_van_stock_cold_chain_batch`,
+-- `BEFORE INSERT OR UPDATE`, y `trg_enforce_loading_order_cold_chain_dispatch`)
+-- 74 restricciones nombradas: 46 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 31 únicas
+-- 107 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
 -- en la bitácora), las 12 del Módulo 23 (5 en órdenes y 7 en líneas) y las 4 del
 -- Módulo 24 (formato del identificador, tipo de parada, operación y resultado) y
@@ -3840,20 +4188,23 @@ CREATE OR REPLACE TRIGGER trg_validate_machine_type_against_planogram
 -- rango térmico, fotografía no vacía, longitud de observaciones y coherencia
 -- contable del coste y su ajuste) y las 4 del Módulo 31 (valores y coherencia de
 -- `role_in_zone` con `is_primary`, orden de la baja lógica y prohibición de que un
--- reponedor quede de guardia técnica) y las 12 del Módulo 32 (8 del producto y 4
--- del carril)
--- · 99 claves foráneas con las reglas declaradas en el contrato §2.4
--- 111 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- reponedor quede de guardia técnica), las 12 del Módulo 32 (8 del producto y 4
+-- del carril) y las 13 del Módulo 33 (3 del stock por lote, 5 de la orden y 5 de
+-- la línea)
+-- · 107 claves foráneas con las reglas declaradas en el contrato §2.4
+-- 114 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
 -- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2), el Módulo 23 (5) y el
 -- Módulo 24 (2), el Módulo 26 (3), el Módulo 27 (6), el Módulo 28 (3) y el
--- Módulo 29 (4), el Módulo 31 (2) y el Módulo 32 (3)— y once índices únicos parciales:
+-- Módulo 29 (4), el Módulo 31 (2) y el Módulo 32 (3) y el Módulo 33 (3)— y doce
+-- índices únicos parciales:
 -- `uq_incident_assignments_active_custody` (M26, Art. V.3), `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
 -- `uq_users_telegram_chat_id` (M16), `uq_zone_postal_codes_live` (M17),
 -- `uq_tech_shifts_single_active` (M21, Resolución R3),
 -- `uq_van_restock_open_per_tech` (M23, Decisión D3), `uq_restocker_zone_live` y
--- `uq_restocker_primary_zone` (M31, RF-02.1 y QA 1)
+-- `uq_restocker_primary_zone` (M31, RF-02.1 y QA 1) y
+-- `uq_product_loading_orders_active_restocker` (M33, D3, RF-02.3)
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)
 -- 1 columna derivada (`incident_replaced_parts.total_cost_snapshot`, D-7)
 -- 8 columnas `JSONB`: 3 en `audit_log` (D-4), 2 en `technician_shift_logs` (M22),

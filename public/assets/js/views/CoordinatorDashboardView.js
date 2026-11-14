@@ -40,6 +40,7 @@ import { QrLabelModal } from '../components/QrLabelModal.js';
 import { QrBatchPrintView } from './QrBatchPrintView.js';
 import { CoordinatorFleetTab } from '../components/CoordinatorFleetTab.js';
 import { CoordinatorPlanogramTab } from '../components/CoordinatorPlanogramTab.js';
+import { CoordinatorProductLoadingTab } from '../components/CoordinatorProductLoadingTab.js';
 import { CoordinatorMetricsView } from './CoordinatorMetricsView.js';
 import { AdminLocationsTab } from '../components/AdminLocationsTab.js';
 import { AdminMachinesTab } from '../components/AdminMachinesTab.js';
@@ -80,6 +81,7 @@ export const CoordinatorDashboardView = {
     QrBatchPrintView,
     CoordinatorFleetTab,
     CoordinatorPlanogramTab,
+    CoordinatorProductLoadingTab,
     CoordinatorMetricsView,
     AdminLocationsTab,
     AdminMachinesTab,
@@ -108,7 +110,7 @@ export const CoordinatorDashboardView = {
   data() {
     return {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
-      activeTab: 'incidents', // 'incidents' | 'fleet' | 'planogram' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'pareto-causas' | 'stock-furgonetas' | 'refunds' | 'admin' | 'metrics'
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'planogram' | 'product-loading' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'pareto-causas' | 'stock-furgonetas' | 'refunds' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'zones' | 'machines' | 'users'
       sparePartsSubTab: 'catalog', // 'catalog' | 'workshop' | 'guides'
       workshopActiveUnits: null, // badge de la sub-pestaña de taller (QA 2)
@@ -1916,6 +1918,16 @@ export const CoordinatorDashboardView = {
           <button
             type="button"
             class="vg-btn"
+            :class="activeTab === 'product-loading' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            @click="activeTab = 'product-loading'"
+            data-testid="tab-product-loading"
+          >
+            🚚 Órdenes de Carga y Picking de Frío
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
             :class="activeTab === 'mapa-territorial' ? 'vg-btn-primary' : 'vg-btn-secondary'"
             @click="activeTab = 'mapa-territorial'"
             data-testid="tab-mapa-territorial"
@@ -2505,6 +2517,9 @@ export const CoordinatorDashboardView = {
 
       <!-- CONTENIDO PESTAÑA: CATÁLOGO MAESTRO Y PLANOGRAMA (Módulo 32, RF-05.1, D1, D2) -->
       <CoordinatorPlanogramTab v-else-if="activeTab === 'planogram'" />
+
+      <!-- CONTENIDO PESTAÑA: ÓRDENES DE CARGA DE PRODUCTO Y STOCK POR LOTE (Módulo 33, RF-03.2, RF-05.1) -->
+      <CoordinatorProductLoadingTab v-else-if="activeTab === 'product-loading'" />
 
       <!-- CONTENIDO PESTAÑA: MANTENIMIENTO PREVENTIVO Y SANITARIO (RF-PREV-02, RF-PREV-06) -->
       <div v-else-if="activeTab === 'preventive'" class="vg-preventive-management-container" data-testid="preventive-panel-container">

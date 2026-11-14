@@ -95,6 +95,18 @@ final class TestDataCleaner
         // `incidents` no la alcanza. Entra como raíz propia; el sembrador
         // restituye los 55 carriles canónicos del parque.
         'machine_planogram_slots',
+        // Órdenes de carga de producto (Módulo 33): cuelgan de `users` y del
+        // catálogo comercial, ambas maestras protegidas, así que el grafo desde
+        // `incidents` no las alcanza. La cabecera entra como raíz propia y sus
+        // líneas caen antes por la FK RESTRICT; sin esta raíz, la orden abierta de
+        // una suite sobreviviría y bloquearía a la siguiente con el índice de
+        // orden activa por reponedor (D3).
+        'product_loading_order_items',
+        'product_loading_orders',
+        // El stock por lote de la furgoneta cuelga de `users` y de
+        // `vending_products`, de modo que tampoco lo alcanza el grafo: entra como
+        // raíz y el sembrador restituye los seis saldos canónicos.
+        'restocker_van_product_stocks',
     ];
 
     /**
@@ -163,6 +175,9 @@ final class TestDataCleaner
         'van_restock_order_items',
         'van_restock_orders',
         'offline_sync_mutations',
+        'product_loading_order_items',
+        'product_loading_orders',
+        'restocker_van_product_stocks',
     ];
 
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */

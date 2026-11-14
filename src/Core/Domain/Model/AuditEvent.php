@@ -156,6 +156,24 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_MACHINE_PLANOGRAM = 'MACHINE_PLANOGRAM';
 
     /**
+     * Stock de producto por lote en la furgoneta del reponedor (Módulo 33).
+     *
+     * El ajuste manual referencia una fila de `restocker_van_product_stocks`, no
+     * la máquina ni el usuario: auditarlo como `MACHINE` o `USER` apuntaría a
+     * otra entidad y rompería la trazabilidad del saldo por lote (Art. III.3).
+     * El valor existe en el enum `audit_entity_type` desde la migración 029.
+     */
+    public const ENTITY_RESTOCKER_VAN_STOCK = 'RESTOCKER_VAN_STOCK';
+
+    /**
+     * Orden de carga de producto (Módulo 33, migración 029).
+     *
+     * El enum `audit_entity_type` ya lo admite; el dominio lo declara para que la
+     * auditoría de la orden (T-PLD-08) no diverja del esquema (Art. III.3).
+     */
+    public const ENTITY_PRODUCT_LOADING_ORDER = 'PRODUCT_LOADING_ORDER';
+
+    /**
      * Whitelist completa de tipos de entidad admitidos por el dominio.
      *
      * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
@@ -186,6 +204,8 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_SANITARY_SPOILAGE_RECORD,
         self::ENTITY_VENDING_PRODUCT,
         self::ENTITY_MACHINE_PLANOGRAM,
+        self::ENTITY_RESTOCKER_VAN_STOCK,
+        self::ENTITY_PRODUCT_LOADING_ORDER,
     ];
 
     /**
