@@ -58,7 +58,7 @@ flowchart LR
   - **Requisitos:** `RF-01.2`, `RF-03.3`, `RF-03.4`, `RF-05.2`, `D4`, `C1`, `C4`, `QA 3`, `Art. III.1`, `Art. III.3`, `Art. V.4`.
   - **Verificación:** `php tests/integration/PdoMachineRestockVisitRepositoryTest.php`
 
-- [ ] **T-RVF-07 · Implementar `MachineRestockVisitService` (ejecución `COMPLETED` con descuento FEFO `D1` y snapshot `QA 3`, protocolo `ABORTED_THERMAL_BREACH` con cuarentena y ticket SAT idempotente `D2`/`QA 2`, subida de foto `Art. V.5` y volcado de conflicto offline `C3`)**
+- [x] **T-RVF-07 · Implementar `MachineRestockVisitService` (ejecución `COMPLETED` con descuento FEFO `D1` y snapshot `QA 3`, protocolo `ABORTED_THERMAL_BREACH` con cuarentena y ticket SAT idempotente `D2`/`QA 2`, subida de foto `Art. V.5` y volcado de conflicto offline `C3`)**
   - **Requisitos:** `RF-02.1`–`RF-02.3`, `RF-03.1`–`RF-03.3`, `RF-04.2`, `D1`–`D4`, `C1`–`C3`, `QA 1`–`QA 4`, `Art. II`, `Art. III.3`, `Art. V.1`, `Art. V.2`, `Art. V.4`, `Art. V.5`.
   - **Verificación:** `php tests/unit/MachineRestockVisitServiceTest.php`
 

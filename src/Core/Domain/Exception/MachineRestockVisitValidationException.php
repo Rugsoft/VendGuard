@@ -29,8 +29,14 @@ use DomainException;
  */
 final class MachineRestockVisitValidationException extends DomainException
 {
+    // ── 403 / 404 · autorización y existencia ──────────────────────────────
+    public const MACHINE_OUTSIDE_RESTOCKER_ZONES = 'MACHINE_OUTSIDE_RESTOCKER_ZONES';
+    public const MACHINE_NOT_FOUND = 'MACHINE_NOT_FOUND';
+    public const RESTOCKER_ROLE_REQUIRED = 'RESTOCKER_ROLE_REQUIRED';
+
     // ── 409 · cerrojo 1 ────────────────────────────────────────────────────
     public const SANITARY_RESTOCK_BLOCKED = 'SANITARY_RESTOCK_BLOCKED';
+    public const OFFLINE_VISIT_CONFLICT = 'OFFLINE_VISIT_CONFLICT';
 
     // ── 422 · cerrojo 2, cerrojo 3 y evidencia ─────────────────────────────
     public const INVALID_CABIN_TEMPERATURE = 'INVALID_CABIN_TEMPERATURE';
@@ -93,6 +99,43 @@ final class MachineRestockVisitValidationException extends DomainException
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // 403 / 404 · autorización y existencia
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function restockerRoleRequired(string $role): self
+    {
+        return new self(
+            self::RESTOCKER_ROLE_REQUIRED,
+            sprintf('Solo un usuario RESTOCKER puede registrar una visita de reposición in situ; se recibió «%s» (C2).', $role),
+            403,
+            'role',
+            ['role' => $role]
+        );
+    }
+
+    public static function machineNotFound(int $machineId): self
+    {
+        return new self(
+            self::MACHINE_NOT_FOUND,
+            sprintf('La máquina %d no existe o está dada de baja (RF-02.1).', $machineId),
+            404,
+            'machine_id',
+            ['machine_id' => $machineId]
+        );
+    }
+
+    public static function machineOutsideRestockerZones(int $machineId, int $restockerId): self
+    {
+        return new self(
+            self::MACHINE_OUTSIDE_RESTOCKER_ZONES,
+            sprintf('La máquina %d no pertenece a ninguna zona operativa cubierta hoy por el reponedor %d (C2, Art. V.4).', $machineId, $restockerId),
+            403,
+            'machine_id',
+            ['machine_id' => $machineId, 'restocker_id' => $restockerId]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // 409 · cerrojo 1
     // ─────────────────────────────────────────────────────────────────────
 
@@ -112,6 +155,22 @@ final class MachineRestockVisitValidationException extends DomainException
             409,
             'machine_id',
             ['machine_id' => $machineId, 'reasons' => $reasons]
+        );
+    }
+
+    /**
+     * Conflicto de una visita diferida: el estado real dejó de admitirla (C3).
+     *
+     * @param array<string, mixed> $context
+     */
+    public static function offlineVisitConflict(string $reason, array $context = []): self
+    {
+        return new self(
+            self::OFFLINE_VISIT_CONFLICT,
+            'La visita offline no puede aplicarse: ' . $reason . ' (C3, RF-04.2).',
+            409,
+            'client_mutation_id',
+            $context
         );
     }
 

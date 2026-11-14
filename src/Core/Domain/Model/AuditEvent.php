@@ -114,6 +114,15 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_VAN_RESTOCK_ORDER = 'VAN_RESTOCK_ORDER';
 
     /**
+     * Visita de reposición in situ (Módulo 34, Tabla 47).
+     *
+     * El valor existe en el ENUM `audit_entity_type` desde la migración 030;
+     * auditarla como `MACHINE` o `PRODUCT_LOADING_ORDER` apuntaría a otro
+     * expediente y rompería la trazabilidad del Triple Cerrojo (Art. III.3).
+     */
+    public const ENTITY_MACHINE_RESTOCK_VISIT = 'MACHINE_RESTOCK_VISIT';
+
+    /**
      * Guía rápida de diagnóstico por modelo y categoría (Módulo 28, Tabla 39).
      *
      * La migración 024 añadió el valor al enum `audit_entity_type`, pero la
@@ -198,6 +207,7 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_RESTOCKER_ZONE,
         self::ENTITY_TECHNICIAN_VAN_STOCK,
         self::ENTITY_VAN_RESTOCK_ORDER,
+        self::ENTITY_MACHINE_RESTOCK_VISIT,
         self::ENTITY_ROOT_CAUSE_TAXONOMY,
         self::ENTITY_WORKSHOP_REPAIR_ITEM,
         self::ENTITY_MACHINE_TROUBLESHOOTING_GUIDE,

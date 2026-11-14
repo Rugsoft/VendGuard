@@ -96,7 +96,10 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   // órdenes de carga se auditan con tipo propio; el filtro del visor debe
   // cubrir el enumerado completo para no perder esas filas.
   RESTOCKER_VAN_STOCK: 'Stock de Producto en Furgoneta',
-  PRODUCT_LOADING_ORDER: 'Orden de Carga de Producto'
+  PRODUCT_LOADING_ORDER: 'Orden de Carga de Producto',
+  // Entidad del Módulo 34: la visita in situ se audita con tipo propio y el
+  // filtro del visor debe cubrir el enumerado completo (`Art. III.3`).
+  MACHINE_RESTOCK_VISIT: 'Visita de Reposición In Situ'
 });
 
 /**
@@ -233,6 +236,9 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'DISPATCH_VAN_RESTOCK_ORDER', label: 'Expedición de Orden de Carga', tone: 'info', group: 'restock' },
   { code: 'CONFIRM_VAN_RESTOCK_ORDER', label: 'Recepción de Carga Confirmada', tone: 'success', group: 'restock' },
   { code: 'CANCEL_VAN_RESTOCK_ORDER', label: 'Cancelación de Orden de Carga', tone: 'danger', group: 'restock' },
+  { code: 'RESTOCK_VISIT_COMPLETED', label: 'Visita de Reposición Completada', tone: 'success', group: 'restock' },
+  { code: 'RESTOCK_VISIT_ABORTED_THERMAL_BREACH', label: 'Visita Abortada por Rotura de Cadena de Frío', tone: 'danger', group: 'sanitary' },
+  { code: 'OFFLINE_RESTOCK_VISIT_CONFLICT_DUMP', label: 'Conflicto Offline Archivado en Auditoría', tone: 'warning', group: 'restock' },
   { code: 'NOTIFICATION_MANUAL_RETRY', label: 'Reintento Manual de Notificación', tone: 'warning', group: 'notification' },
   { code: 'NOTIFICATION_MANUAL_CANCEL', label: 'Cancelación Manual de Notificación', tone: 'danger', group: 'notification' },
   { code: 'NOTIFICATION_PERMANENT_FAILURE', label: 'Fallo Definitivo de Notificación', tone: 'danger', group: 'notification' },

@@ -67,6 +67,10 @@ const KNOWN_DYNAMIC_ACTION_SITES = [
     // `buildTicketEvent(action: $action)` y lo persiste. La acción real la
     // enumeran los llamadores del servicio, no esta capa.
     'src/Application/Service/AuditLogger.php::buildTicketEvent',
+    // Módulo 34: el desenlace de la visita elige entre dos acciones del catálogo
+    // con un ternario. Las dos ramas son literales y la guarda las enumera; el
+    // sitio se declara porque la expresión no es un literal plano.
+    'src/Application/Service/MachineRestockVisitService.php::logMachineRestockVisitEvent',
 ];
 
 /** AuditLogger writers whose second argument (or `action:` named argument) is the action. */
@@ -84,6 +88,9 @@ const AUDIT_WRITER_METHODS = [
     'logUnclaimedCashEvent',
     'logNotificationOutboxEvent',
     'logNotificationChannelSettingEvent',
+    // Módulo 34: la visita in situ tiene entidad propia y un único escritor de
+    // auditoría; sin esta firma sus tres acciones serían invisibles para el visor.
+    'logMachineRestockVisitEvent',
     // Módulo 16: firma de los seis hechos de la avería oportunista in situ.
     'logOpportunisticEvent',
     // Módulo 25: el catálogo maestro construye su `AuditEvent` en un único punto
