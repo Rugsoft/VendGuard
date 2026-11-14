@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace VendGuard\Core\Domain\Model;
 
+use DateTimeImmutable;
 use JsonSerializable;
+use VendGuard\Core\Domain\Enum\BatchExpiryStatus;
 use VendGuard\Core\Domain\Exception\PlanogramValidationException;
 
 /**
@@ -19,6 +21,10 @@ use VendGuard\Core\Domain\Exception\PlanogramValidationException;
  *      existencia estimada en `0..capacidad`.
  *   3. El semáforo de existencias y el déficit de reposición se derivan de esas
  *      cifras con la regla determinista de `SlotStockStatus` (RF-02.3).
+ *   4. El lote vigente del carril (Módulo 34, `D1`) es opcional, se normaliza en
+ *      mayúsculas y cumple `^[A-Z0-9_-]{2,40}$`; su semáforo sanitario
+ *      `slot_expiry_status` solo alerta cuando quedan unidades en el carril
+ *      (EARS 01.1.2).
  *
  * La baja es lógica (`is_active = FALSE`) y el guardado por `(machine_id,
  * slot_code)` es un `UPSERT`: la entidad nunca representa un borrado físico (C1).
@@ -30,6 +36,9 @@ final class MachinePlanogramSlot implements JsonSerializable
 {
     /** Forma canónica del código de carril (RF-02.1). */
     public const SLOT_CODE_PATTERN = '/^[A-Z0-9_]{1,24}$/';
+
+    /** Forma canónica del lote vigente del carril (Módulo 34, `D1`). */
+    public const CURRENT_BATCH_PATTERN = '/^[A-Z0-9_-]{2,40}$/';
 
     public const MIN_CAPACITY = 1;
     public const MAX_CAPACITY = 10000;
@@ -54,6 +63,10 @@ final class MachinePlanogramSlot implements JsonSerializable
 
     private ?string $updatedAt;
 
+    private ?string $currentBatchCode;
+
+    private ?DateTimeImmutable $currentExpirationDate;
+
     public function __construct(
         ?int $id,
         int $machineId,
@@ -64,7 +77,9 @@ final class MachinePlanogramSlot implements JsonSerializable
         int $minThreshold = 2,
         bool $isActive = true,
         ?string $createdAt = null,
-        ?string $updatedAt = null
+        ?string $updatedAt = null,
+        ?string $currentBatchCode = null,
+        ?DateTimeImmutable $currentExpirationDate = null
     ) {
         if ($machineId <= 0) {
             throw PlanogramValidationException::invalidSlotBounds('machine_id', 'la máquina debe ser un identificador positivo.');
@@ -103,6 +118,18 @@ final class MachinePlanogramSlot implements JsonSerializable
             );
         }
 
+        $cleanCurrentBatch = $currentBatchCode === null ? null : strtoupper(trim($currentBatchCode));
+        if ($cleanCurrentBatch === '') {
+            $cleanCurrentBatch = null;
+        }
+
+        if ($cleanCurrentBatch !== null && preg_match(self::CURRENT_BATCH_PATTERN, $cleanCurrentBatch) !== 1) {
+            throw PlanogramValidationException::invalidSlotBounds(
+                'current_batch_code',
+                sprintf('el lote «%s» debe cumplir ^[A-Z0-9_-]{2,40}$ y se normaliza en mayúsculas.', $currentBatchCode)
+            );
+        }
+
         $this->id = $id;
         $this->machineId = $machineId;
         $this->slotCode = $cleanSlotCode;
@@ -113,6 +140,8 @@ final class MachinePlanogramSlot implements JsonSerializable
         $this->isActive = $isActive;
         $this->createdAt = $createdAt;
         $this->updatedAt = $updatedAt;
+        $this->currentBatchCode = $cleanCurrentBatch;
+        $this->currentExpirationDate = $currentExpirationDate;
     }
 
     public function getId(): ?int
@@ -189,6 +218,42 @@ final class MachinePlanogramSlot implements JsonSerializable
         return $this->updatedAt;
     }
 
+    /**
+     * Lote vigente del carril tras la última visita (`D1`); `null` en un carril
+     * vacío o sin trazabilidad de lote.
+     */
+    public function getCurrentBatchCode(): ?string
+    {
+        return $this->currentBatchCode;
+    }
+
+    /**
+     * Caducidad del lote vigente del carril (`D1`); `null` cuando no hay lote.
+     */
+    public function getCurrentExpirationDate(): ?DateTimeImmutable
+    {
+        return $this->currentExpirationDate;
+    }
+
+    /**
+     * Semáforo sanitario de caducidad del carril (EARS 01.1.2, QA 1).
+     *
+     * La regla del carril es más estrecha que la del lote suelto: un carril vacío
+     * (`current_estimated_qty = 0`) o sin fecha nunca alerta, porque no hay
+     * producto que retirar. Con unidades, delega en `BatchExpiryStatus` —la misma
+     * ventana de 48 h que usa la furgoneta, para que no haya dos umbrales—, de modo
+     * que `EXPIRED` cubre la caducidad de hoy y `EXPIRING_SOON` los dos días
+     * siguientes.
+     */
+    public function slotExpiryStatus(?DateTimeImmutable $today = null): BatchExpiryStatus
+    {
+        if ($this->currentEstimatedQty === 0 || $this->currentExpirationDate === null) {
+            return BatchExpiryStatus::OK;
+        }
+
+        return BatchExpiryStatus::fromExpirationDate($this->currentExpirationDate, $today);
+    }
+
     public function withId(int $id): self
     {
         $clone = clone $this;
@@ -214,6 +279,7 @@ final class MachinePlanogramSlot implements JsonSerializable
     public function toArray(): array
     {
         $status = $this->stockStatus();
+        $slotExpiry = $this->slotExpiryStatus();
 
         return [
             'id' => $this->id,
@@ -227,6 +293,11 @@ final class MachinePlanogramSlot implements JsonSerializable
             'stock_status' => $status->value,
             'stock_status_label' => $status->label(),
             'fill_rate_percent' => $this->fillRatePercent(),
+            'current_batch_code' => $this->currentBatchCode,
+            'current_expiration_date' => $this->currentExpirationDate?->format('Y-m-d'),
+            'slot_expiry_status' => $slotExpiry->value,
+            'slot_expiry_status_label' => $slotExpiry->label(),
+            'slot_expiry_status_icon' => $slotExpiry->icon(),
             'is_active' => $this->isActive,
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,

@@ -42,7 +42,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-01.2`, `RNF-01`, `RNF-02`, `C1`, `Art. II`, `Art. III.1`, `Art. III.3`.
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresInSituRestockVisitSchemaTest.php`
 
-- [ ] **T-RVF-03 · Crear `RestockVisitStatus`, `DailyHygieneChecklist`, `MachineRestockVisit`, `MachineRestockVisitItem` y evolucionar `MachinePlanogramSlot` con lote/caducidad vigente (`D1`)**
+- [x] **T-RVF-03 · Crear `RestockVisitStatus`, `DailyHygieneChecklist`, `MachineRestockVisit`, `MachineRestockVisitItem` y evolucionar `MachinePlanogramSlot` con lote/caducidad vigente (`D1`)**
   - **Requisitos:** `RF-01.1`, `RF-01.2`, `RF-03.1`, `D1`, `D3`, `C1`, `QA 3`.
   - **Verificación:** `php tests/unit/InSituRestockVisitDomainModelsTest.php`
 
