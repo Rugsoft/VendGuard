@@ -12,11 +12,11 @@
 
 ## Resultado general
 
-La implementación está muy avanzada: las 13 tareas del módulo están cerradas, la batería global pasa al 100 % y el canal `new_engine` también está en verde.
+La implementación está muy avanzada: las 13 tareas originales del módulo están cerradas, la batería global pasa al 100 % y el canal `new_engine` también está en verde.
 
 - Batería global: **432/432 suites · 16.381 aserciones · 0 fallos**.
 - Canal `new_engine`: **60/60 suites · 1.968 aserciones · 0 fallos · 0 no ejecutables**.
-- Tareas: **13/13** en [`tasks.md`](../specs/34-in-situ-restock-visit/tasks.md) y **13/13** en [`odd/tasks/in-situ-restock-visit.md`](../odd/tasks/in-situ-restock-visit.md).
+- Tareas: **13/13 originales** en [`tasks.md`](../specs/34-in-situ-restock-visit/tasks.md) y [`odd/tasks/in-situ-restock-visit.md`](../odd/tasks/in-situ-restock-visit.md), más `T-RVF-14` de reconciliación documental (**14/14** tras el cierre de `FIX-34-04`).
 
 Sin embargo, **la Spec 34 no está cumplida al 100 %**. La brecha está concentrada en dos cláusulas de `RF-02.2` que no se ejecutan en la ruta real y que ninguna suite comprueba:
 
@@ -29,7 +29,7 @@ El resto de `RF-01`, `RF-02.1`, `RF-02.3`, `RF-03`, `RF-04`, `RF-05`, los `RNF-0
 
 ### Cierre de la entrega (2026-11-14)
 
-`FIX-34-01`, `FIX-34-02` y `FIX-34-03` quedan implementados y cubiertos por regresión. El ticket térmico nuevo se asigna al primer candidato utilizable del recomendador —o permanece `REGISTERED` sin candidato— mediante `PdoIncidentRepository::assign()`, con un único tramo de custodia y la fuente existente `COORDINATOR_ASSIGN`; la alerta de frío se encola en `notification_outbox` tanto en el alta como en la escalada, después de rehidratar el expediente asignado. La suite constitucional pasa a **42/42** y las suites focales quedan en verde. La certificación global completa sigue pendiente de reejecución (`FIX-34-07`).
+`FIX-34-01`, `FIX-34-02` y `FIX-34-03` quedan implementados y cubiertos por regresión. El ticket térmico nuevo se asigna al primer candidato utilizable del recomendador —o permanece `REGISTERED` sin candidato— mediante `PdoIncidentRepository::assign()`, con un único tramo de custodia y la fuente existente `COORDINATOR_ASSIGN`; la alerta de frío se encola en `notification_outbox` tanto en el alta como en la escalada, después de rehidratar el expediente asignado. La suite constitucional pasa a **42/42** y las suites focales quedan en verde. `FIX-34-04` se cierra con `T-RVF-14`: la matriz publica filas explícitas de asignación y outbox, `tasks.md` y ODD registran la corrección y la Feature 24 ya no declara el 100 % sin esas cláusulas. La certificación global completa sigue pendiente de reejecución (`FIX-34-07`).
 
 ---
 
@@ -40,10 +40,10 @@ El resto de `RF-01`, `RF-02.1`, `RF-02.3`, `RF-03`, `RF-04`, `RF-05`, los `RNF-0
 | **1** | **FIX-34-01** | **P0 · Bloqueante** | El ticket térmico se crea siempre sin `assigned_technician_id`; no se invoca `TechnicianAssignmentSuggester` | `RF-02.2`, `QA 2`, §6.2 | Un ticket sanitario crítico queda sin dueño aunque exista un SAT elegible; se degrada el SLA y la respuesta ante pérdida de frío | **Cerrada (2026-11-14)** |
 | **2** | **FIX-34-02** | **P0 · Bloqueante** | El gateway se construye sin `NotificationOutboxEnqueuerService`; `enqueueIncidentOpened()` y `enqueueColdChainAlert()` son no-ops | `RF-02.2` | No se encola la alerta de frío ni la apertura/escalado para SAT/Coordinación; el ticket existe pero nadie recibe el aviso | **Cerrada (2026-11-14)** |
 | **3** | **FIX-34-03** | **P0 · Certificación** | No hay ninguna aserción sobre asignación ni sobre `notification_outbox`; el test constitucional solo comprueba `REGISTERED` | `RF-02.2`, `QA 2`, DoD 5 | La regresión es invisible: la batería puede seguir en verde con las dos cláusulas rotas | **Cerrada (2026-11-14)** |
-| **4** | **FIX-34-04** | **P1 · Documental** | `traceability-matrix.md`, `tasks.md`, ODD y `features_pendientes.md` certifican el 100 % sin estas dos cláusulas | §8, DoD, trazabilidad | La certificación formal no refleja el estado real del requisito | **Parcial: matriz y ODD actualizados; `tasks.md`/`features_pendientes.md` pendientes** |
+| **4** | **FIX-34-04** | **P1 · Documental** | `traceability-matrix.md`, `tasks.md`, ODD y `features_pendientes.md` certifican el 100 % sin estas dos cláusulas | §8, DoD, trazabilidad | La certificación formal no refleja el estado real del requisito | **Cerrada (2026-11-14, `T-RVF-14`)** |
 | **5** | **FIX-34-05** | **P2 · Contractual** | La spec usa `THERMAL_BREAKDOWN`; el motor usa `incident_category = 'TEMPERATURE_COLD'` | `RF-02.2` | Ambigüedad de nomenclatura entre especificación, esquema y tests; hoy se resuelve por convención oral/documental | **Abierta** |
 | **6** | **FIX-34-06** | **P2 · Contractual** | La spec usa `machines.status = 'OUT_OF_SERVICE'`; el esquema no tiene ese estado y el código usa `is_blocked_no_access = TRUE` para bebidas frías | `RF-02.2`, §6.2 | Mapeo correcto en la práctica, pero no explícito en el contrato; dificulta la verificación literal | **Abierta** |
-| **7** | **FIX-34-07** | **P3 · Verificación** | La certificación global no se repetirá hasta cerrar los fixes anteriores | DoD 5 | Necesario para actualizar métricas y `DocMetricsGuard` sin arrastrar cifras obsoletas | **Pendiente de FIX-34-04…06** |
+| **7** | **FIX-34-07** | **P3 · Verificación** | La certificación global no se repetirá hasta cerrar los fixes anteriores | DoD 5 | Necesario para actualizar métricas y `DocMetricsGuard` sin arrastrar cifras obsoletas | **Pendiente de FIX-34-05…06** |
 
 ### Lectura de prioridades
 
@@ -204,9 +204,11 @@ La documentación de cierre afirma que el módulo está al 100 % y que `RF-02.2`
 
 ### Criterio de aceptación
 
-- [ ] Ninguna matriz, tarea u ODD declara `RF-02.2` completo sin las pruebas de asignación y outbox.
-- [ ] La certificación final cita las suites concretas y sus recuentos reales.
-- [ ] Las cifras documentales coinciden con la última corrida.
+- [x] Ninguna matriz, tarea u ODD declara `RF-02.2` completo sin las pruebas de asignación y outbox.
+- [x] La certificación final cita las suites concretas y sus recuentos reales.
+- [x] Las cifras documentales coinciden con la última corrida focal; la corrida global queda pendiente (`FIX-34-07`).
+
+**Cierre (2026-11-14):** `T-RVF-14` añade las filas `02.2a` (asignación/custodia) y `02.2b` (`notification_outbox`) a la matriz, registra la tarea de corrección en `tasks.md` y ODD, actualiza la ficha de la Feature 24 y deja constancia de que las cifras globales no se refrescan hasta `FIX-34-07`.
 
 ---
 
@@ -358,12 +360,12 @@ Tras el cierre de `FIX-34-01/02/03` se reejecutaron las suites focales; la corri
 
 ## Estado de las tareas
 
-- `specs/34-in-situ-restock-visit/tasks.md`: **13/13** tareas `[x]`.
-- `odd/tasks/in-situ-restock-visit.md`: **13/13** filas `✅ hecho`.
+- `specs/34-in-situ-restock-visit/tasks.md`: **14/14** tareas `[x]` (13 originales + `T-RVF-14`).
+- `odd/tasks/in-situ-restock-visit.md`: **14/14** filas `✅ hecho` (13 originales + `T-RVF-14`).
 - `T-RVF-13` con hash `cacd436`; `89c03de` registra la evidencia ODD.
 - Matriz de trazabilidad publicada.
 
-**Matiz:** las tareas están cerradas con un alcance que no incluye las dos cláusulas de `RF-02.2`. `T-RVF-07` habla de «ticket SAT idempotente» y `T-RVF-10` de las suites HTTP/constitucionales; ninguna exige asignación automática ni `notification_outbox`. Por eso **13/13 tareas no equivalen a 13/13 requisitos**.
+**Matiz:** las 13 tareas originales están cerradas con un alcance que no incluía las dos cláusulas de `RF-02.2`. `T-RVF-07` habla de «ticket SAT idempotente» y `T-RVF-10` de las suites HTTP/constitucionales; ninguna exigía asignación automática ni `notification_outbox`. Por eso **13/13 tareas originales no equivalían a 13/13 requisitos**; `T-RVF-14` cierra la reconciliación documental tras `FIX-34-01/02/03`.
 
 ---
 
@@ -389,7 +391,7 @@ Tras el cierre de `FIX-34-01/02/03` se reejecutaron las suites focales; la corri
 - [`specs/functional/in_situ_restock_visit_spec.md`](../specs/functional/in_situ_restock_visit_spec.md) · espejo; solo difiere en la numeración de la sublista de `RF-02.2`.
 - [`specs/technical/in_situ_restock_visit_contracts.md`](../specs/technical/in_situ_restock_visit_contracts.md) · contratos de endpoints y esquema.
 - [`specs/34-in-situ-restock-visit/traceability-matrix.md`](../specs/34-in-situ-restock-visit/traceability-matrix.md) · matriz actual.
-- [`specs/34-in-situ-restock-visit/tasks.md`](../specs/34-in-situ-restock-visit/tasks.md) · 13 tareas.
+- [`specs/34-in-situ-restock-visit/tasks.md`](../specs/34-in-situ-restock-visit/tasks.md) · 14 tareas (13 originales + `T-RVF-14`).
 - [`odd/tasks/in-situ-restock-visit.md`](../odd/tasks/in-situ-restock-visit.md) · ODD y log.
 - `src/Presentation/Controller/RestockerRouteController.php` · composición real del gateway (línea 145).
 - `src/Infrastructure/Repository/PdoInSituRestockVisitGateway.php` · alta/escalada del ticket y llamadas opcionales al outbox.

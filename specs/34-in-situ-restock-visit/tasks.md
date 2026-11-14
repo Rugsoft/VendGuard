@@ -3,6 +3,7 @@
 **Módulo:** `34-in-situ-restock-visit`\
 **Versión:** 1.0 (Alineado con `spec.md` v2.0, `in_situ_restock_visit_contracts.md` v1.0 y `plan.md` v1.0)\
 **Estado:** Aprobado por el Product Owner el 2026-11-14 · Puerta SDD Fase 2 cerrada · Listo para iniciar en `T-RVF-01`\
+**Cierre post-auditoría:** `T-RVF-14` (2026-11-14) reconcilia la certificación documental de `RF-02.2` con las pruebas de asignación SAT y outbox ya implementadas en `FIX-34-01`/`FIX-34-02`/`FIX-34-03`.\
 **Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño\
 **Ley Suprema:** [`constitution.md`](../../constitution.md), [`AGENTS.md`](../../AGENTS.md) y [`docs/design.md`](../../docs/design.md)
 
@@ -18,6 +19,7 @@ flowchart LR
     P4 --> P5["Fase 5: API REST y Guardas\n(T-RVF-09 y 10)"]
     P5 --> P6["Fase 6: Frontend Vue 3 + Offline\n(T-RVF-11 y 12)"]
     P6 --> P7["Fase 7: Batería Global y Cierre\n(T-RVF-13)"]
+    P7 --> P8["Fase 8: Reconciliación documental RF-02.2\n(T-RVF-14)"]
 ```
 
 | Fase | Rango de Tareas | Descripción | Tiempo Estimado |
@@ -29,6 +31,7 @@ flowchart LR
 | **Fase 5** | `T-RVF-09` .. `T-RVF-10` | Extensión de `RestockerRouteController`, `CoordinatorProductLoadingController` y `AppRouter`, y suites de integración HTTP y blindaje constitucional (`InSituRestockVisitApiTest.php` e `InSituRestockVisitConstitutionalTest.php`) | ~55 min |
 | **Fase 6** | `T-RVF-11` .. `T-RVF-12` | Frontend Vue 3: sub-vista de supervisión en `CoordinatorProductLoadingTab.js` (`RF-05.2`, `QA 3`) y asistente de visita in situ + cola Offline `IndexedDB` + pre-cálculo de liquidación `C4` en `RestockerRouteView.js` (`RF-05.1`, sin costes `Art. V.4`) + tests `.mjs` | ~55 min |
 | **Fase 7** | `T-RVF-13` | Ejecución de batería global (`php tests/run_all.php`), sincronización `DocMetricsGuard`, matriz de trazabilidad `traceability-matrix.md` y actualización de `docs/features_pendientes.md` | ~25 min |
+| **Fase 8** | `T-RVF-14` | Reconciliación post-auditoría de `RF-02.2`: filas explícitas de asignación SAT y outbox, tarea/log ODD y estado de la Feature 24, sin cambios de código | ~15 min |
 
 ---
 
@@ -85,3 +88,7 @@ flowchart LR
 - [x] **T-RVF-13 · Ejecutar batería global (`php tests/run_all.php`), sincronizar `DocMetricsGuard`, generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
   - **Requisitos:** `DoD 1`–`DoD 5`.
   - **Verificación:** `php tests/run_all.php`
+
+- [x] **T-RVF-14 · Reconciliar la certificación documental de `RF-02.2` con las pruebas de asignación SAT y outbox (`FIX-34-04`)**
+  - **Requisitos:** `RF-02.2`, `QA 2`, `D2`, `DoD 2`, `Art. II`, `Art. III.3`.
+  - **Verificación:** `php tests/integration/InSituRestockVisitConstitutionalTest.php` (42/42) y revisión de `traceability-matrix.md`, `odd/tasks/in-situ-restock-visit.md` y `docs/features_pendientes.md`.
