@@ -1,0 +1,37 @@
+# Feature: Visita de Reposición In Situ, Control FEFO de Caducidades y Limpieza Diaria (Módulo 34)
+
+**Rama:** `feat/in-situ-restock-visit` · **Entrega:** 7 WU (13 tareas `T-RVF-01` a `T-RVF-13`) + 1 PR final · **Batería:** `php tests/run_all.php`.
+**Fuente de verdad:** [`specs/34-in-situ-restock-visit/spec.md`](../../specs/34-in-situ-restock-visit/spec.md) v2.0 (`D1`–`D4`, `C1`–`C4`, `QA 1`–`QA 4`), [`plan.md`](../../specs/34-in-situ-restock-visit/plan.md), [`tasks.md`](../../specs/34-in-situ-restock-visit/tasks.md), [`contratos`](../../specs/technical/in_situ_restock_visit_contracts.md).
+
+## Specs
+
+S1 — **Esquema PostgreSQL, Evolución de `machine_planogram_slots` (`D1`), Tipo Nativo #31 e Inmutabilidad de Tablas 47 y 48 (`RF-01.1`, `RF-01.2`, `RNF-01`, `RNF-02`, `C1`, `QA 3`, `Art. II`, `Art. III.1`, `Art. III.3`).** Creación del tipo `restock_visit_status` (`'COMPLETED'`, `'ABORTED_THERMAL_BREACH'`) y adición de `'MACHINE_RESTOCK_VISIT'` a `audit_entity_type`. Ampliación de Tabla 43 `machine_planogram_slots` con `current_batch_code` y `current_expiration_date` y semáforo `slot_expiry_status` (`'EXPIRED'`, `'EXPIRING_SOON'`, `'OK'`). Creación de Tabla 47 `machine_restock_visits` (`UNIQUE (visit_code)`, `UNIQUE (restocker_id, client_mutation_id)`) y Tabla 48 `machine_restock_visit_items` (`UNIQUE (visit_id, slot_code)`), protegidas contra borrado físico (`prevent_hard_delete()`, `Art. III.1`), contra `UPDATE` (`prevent_restock_visit_mutation()`, `Art. III.3`) y con disparadores del cerrojo térmico (`enforce_restock_visit_sanitary_guard()`, `enforce_restock_visit_item_guard()`, `Art. II`).
+
+S2 — **Triple Cerrojo Sanitario Innegociable: Bloqueo Previo, Protocolo `ABORTED_THERMAL_BREACH` con Ticket SAT Idempotente y Doble Regla FEFO (`RF-02.1`–`RF-02.3`, `D2`, `C2`, `QA 1`, `QA 2`, `QA 4`, `Art. II`, `Art. V.1`, `Art. V.2`, `Art. V.5`).** Verificación de rol `'RESTOCKER'` activo y pertenencia de la máquina activa a sus zonas cubiertas hoy (`403 MACHINE_OUTSIDE_RESTOCKER_ZONES`, `C2`). Cerrojo 1: rechazo con `409 SANITARY_RESTOCK_BLOCKED` si la máquina está en `'SANITARY_QUARANTINE'`, `'OUT_OF_SERVICE'` o tiene avería `'THERMAL_BREAKDOWN'` abierta. Cerrojo 2: `cabin_temp_celsius` obligatoria en `PERISHABLE_FOOD`, `COMBO` y `COLD_DRINKS` en rango `[-5.0, 35.0] °C` (`422 INVALID_CABIN_TEMPERATURE`); si supera `4.0 °C` en `PERISHABLE_FOOD`/`COMBO` o `8.0 °C` en `COLD_DRINKS`, rechaza `COMPLETED` o `qty_added > 0` con `422 CABIN_TEMP_EXCEEDS_SANITARY_LIMIT`, y en `ABORTED_THERMAL_BREACH` exige `precautionary_seal_applied = TRUE` (`422 PRECAUTIONARY_SEAL_REQUIRED`), `photo_evidence_url` ($\le 5\text{ MB}$ por magic bytes, `422 PHOTO_EVIDENCE_REQUIRED`), `internal_notes` $\ge 20$ caracteres reales (`422 INVALID_JUSTIFICATION_LENGTH`), pasa la máquina a `'SANITARY_QUARANTINE'` (o `'OUT_OF_SERVICE'` en `COLD_DRINKS`) y crea o escala idempotentemente (`QA 2`) un ticket `'CRITICAL'` `'THERMAL_BREAKDOWN'` para el SAT de la zona. Cerrojo 3 (`QA 1`): en carril con lote caducado (`<= CURRENT_DATE`) exige retirada total aunque `qty_added = 0`, y en carril con lote próximo (`<= CURRENT_DATE + 2`) exige retirada total antes de `qty_added > 0` (`422 FEFO_WITHDRAWAL_REQUIRED`); en furgoneta bloquea lotes caducados (`422 EXPIRED_VAN_BATCH_FORBIDDEN`), saldo insuficiente (`422 INSUFFICIENT_VAN_BATCH_STOCK`) y selección de un lote posterior cuando existe otro lote sano del mismo producto que vence antes (`422 FEFO_OLDER_VAN_BATCH_AVAILABLE`).
+
+S3 — **Checklist Diario Adaptativo, Descuento Atómico FEFO de Furgoneta, Snapshot Financiero Segregado y Pre-cálculo de Liquidación (`RF-03.1`–`RF-03.4`, `D1`, `D3`, `C1`, `C4`, `QA 3`, `Art. V.1`, `Art. V.4`, `Art. V.5`).** En visitas `'COMPLETED'`, exige en `HOT_DRINKS`/`COMBO` los 4 ítems (`coffee_grounds_emptied`, `liquid_waste_bucket_cleaned`, `mixers_and_ducts_rinsed`, `dispensing_tray_and_glass_cleaned`) y en `COLD_DRINKS`/`SNACKS`/`PERISHABLE_FOOD` los 2 ítems (`dispensing_tray_and_glass_cleaned`, `cabin_spills_checked`) (`422 INCOMPLETE_DAILY_HYGIENE_CHECKLIST`). Si hay unidades retiradas (`SUM(qty_withdrawn_expired + qty_withdrawn_damaged) > 0`), exige `photo_evidence_url` y `internal_notes` $\ge 20$ caracteres reales. Ejecuta en transacción con `SELECT ... FOR UPDATE` el descuento en `restocker_van_product_stocks`, la actualización de `machine_planogram_slots` (`current_estimated_qty = qty_after`, `current_batch_code`, `current_expiration_date` con `LEAST` si queda remanente sano, `D1`) y el congelado de `unit_cost_snapshot_eur` y `commercial_spoilage_loss_eur` (ocultos a `RESTOCKER`, `QA 3`, `Art. V.4`). Expone `suggested_restocked_in_machines_qty` y `suggested_withdrawn_spoilage_qty` en las órdenes en `'CONFIRMED_BY_RESTOCKER'` (`C4`).
+
+S4 — **Cola Offline PWA del Reponedor, Idempotencia `client_mutation_id` y Superficies en `RestockerRouteView.js` y `CoordinatorProductLoadingTab.js` (`RF-04.1`, `RF-04.2`, `RF-05.1`, `RF-05.2`, `RNF-03`, `D4`, `C3`, `C4`, `QA 3`, `Art. V.4`).** Idempotencia en `POST /api/restocker/machines/{machineId}/visits` por `(restocker_id, client_mutation_id)`. En `RestockerRouteView.js`, insignias FEFO por máquina, modal asistente de visita in situ (control térmico con paso automático a modo aborto, retirada/carga FEFO 1-Tap, checklist diario y foto), encolado en `IndexedDB` sin red con sincronización FIFO y volcado de conflictos (`POST /api/restocker/visits/conflict-dump`, `C3`), y pre-rellenado en el modal de liquidación (`C4`) sin costes (`Art. V.4`). En `CoordinatorProductLoadingTab.js`, sub-vista «📋 Visitas de Reposición In Situ y Control FEFO» con 5 KPIs (incluido `Coste merma comercial (€)`), filtros y modal de detalle.
+
+## Tasks
+
+| ID | Specs | Ruta | Commit | Estado |
+| :--- | :--- | :--- | :--- | :--- |
+| **WU-1 / T-RVF-01** | S1 | inline | — | 🔲 pendiente |
+| **WU-1 / T-RVF-02** | S1 | inline | — | 🔲 pendiente |
+| **WU-2 / T-RVF-03** | S1, S3 | inline | — | 🔲 pendiente |
+| **WU-2 / T-RVF-04** | S2, S3 | inline | — | 🔲 pendiente |
+| **WU-3 / T-RVF-05** | S1, S2, S3 | inline | — | 🔲 pendiente |
+| **WU-3 / T-RVF-06** | S1, S3, S4 | inline | — | 🔲 pendiente |
+| **WU-4 / T-RVF-07** | S2, S3, S4 | inline | — | 🔲 pendiente |
+| **WU-4 / T-RVF-08** | S2, S3 | inline | — | 🔲 pendiente |
+| **WU-5 / T-RVF-09** | S1–S4 | inline | — | 🔲 pendiente |
+| **WU-5 / T-RVF-10** | S1–S4 | inline | — | 🔲 pendiente |
+| **WU-6 / T-RVF-11** | S3, S4 | inline | — | 🔲 pendiente |
+| **WU-6 / T-RVF-12** | S2, S3, S4 | inline | — | 🔲 pendiente |
+| **WU-7 / T-RVF-13** | S1–S4 | inline | — | 🔲 pendiente |
+
+## Log
+
+* **L1 (2026-11-14):** Petición original del usuario: `"antes de empezar con el mecanismo sdd y escribir la spec, vamos a definir un poco esta feature de docs/features_pendientes-md: 24. 📋 Visita de Reposición In Situ, Control FEFO de Caducidades y Limpieza Diaria (In-Situ Restock Visit, FEFO Expiry Control & Daily Hygiene)"`.
+* **L2 (2026-11-14):** Consensuadas con el Product Owner las decisiones `D1`–`D4` (Opción A en las cuatro), los casos límite `C1`–`C4` y las resoluciones `QA 1`–`QA 4`. Aprobada la Especificación Funcional SDD v2.0 (`specs/34-in-situ-restock-visit/spec.md` y `specs/functional/in_situ_restock_visit_spec.md`) y aprobados los Contratos Técnicos (`specs/technical/in_situ_restock_visit_contracts.md`), el Plan Técnico (`specs/34-in-situ-restock-visit/plan.md`) y el Desglose de Tareas (`specs/34-in-situ-restock-visit/tasks.md`) el 2026-11-14 (Puertas SDD Fase 1 y Fase 2 cerradas).
