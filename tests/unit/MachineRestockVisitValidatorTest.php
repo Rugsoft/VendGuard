@@ -13,7 +13,8 @@ declare(strict_types=1);
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
  *   1. **Cerrojo 1 (RF-02.1, Art. II).** Cuarentena sanitaria, fuera de servicio
- *      o avería `THERMAL_BREAKDOWN` abierta bloquean con `409
+ *      o avería térmica (`TEMPERATURE_COLD`, etiqueta funcional `THERMAL_BREAKDOWN`)
+ *      abierta bloquean con `409
  *      SANITARY_RESTOCK_BLOCKED`; una máquina sana pasa.
  *
  *   2. **Cerrojo 2 (RF-02.2, QA 4).** Toda máquina refrigerada exige lectura; el
@@ -165,7 +166,7 @@ try {
         static fn () => MachineRestockVisitValidator::assertMachineAvailable('OK', false, true, 7),
         'SANITARY_RESTOCK_BLOCKED',
         409,
-        'An open THERMAL_BREAKDOWN blocks the visit (D2)'
+        'An open TEMPERATURE_COLD incident (functional label THERMAL_BREAKDOWN) blocks the visit (D2)'
     );
     $allBlocked = assertVisitRejects(
         static fn () => MachineRestockVisitValidator::assertMachineAvailable('QUARANTINE', true, true, 7),

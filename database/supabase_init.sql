@@ -279,6 +279,9 @@ END $do$;
 
 DO $do$
 BEGIN
+    -- THERMAL_BREAKDOWN is the functional label for the thermal incident;
+    -- incidents.category persists the canonical enum value TEMPERATURE_COLD.
+    -- There is no breakdown_type column in incidents.
     CREATE TYPE incident_category AS ENUM ('TEMPERATURE_COLD', 'PAYMENT_SYSTEM', 'PRODUCT_JAM', 'ELECTRICAL_OFF', 'OTHER');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;

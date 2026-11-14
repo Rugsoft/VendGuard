@@ -23,7 +23,8 @@ use VendGuard\Core\Domain\Model\MachineType;
  * El contexto devuelto usa estas claves:
  *   - `id`, `machine_code`, `machine_type` (MachineType), `location_id`,
  *     `sanitary_status`, `is_out_of_service`, `is_covered`,
- *     `has_open_thermal_breakdown`, `active_incident_id`, `loading_order_id`.
+ *     `has_open_thermal_breakdown` (functional label `THERMAL_BREAKDOWN`; persisted
+ *     category `TEMPERATURE_COLD`), `active_incident_id`, `loading_order_id`.
  */
 interface InSituRestockVisitGatewayInterface
 {

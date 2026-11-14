@@ -113,6 +113,8 @@ final class PdoInSituRestockVisitGateway implements InSituRestockVisitGatewayInt
                     ORDER BY i.id DESC
                     LIMIT 1
                 ) AS active_incident_id,
+                -- Functional label THERMAL_BREAKDOWN: the thermal incident is
+                -- persisted in incidents.category as TEMPERATURE_COLD.
                 EXISTS (
                     SELECT 1
                     FROM incidents i

@@ -29,7 +29,7 @@ El resto de `RF-01`, `RF-02.1`, `RF-02.3`, `RF-03`, `RF-04`, `RF-05`, los `RNF-0
 
 ### Cierre de la entrega (2026-11-14)
 
-`FIX-34-01`, `FIX-34-02` y `FIX-34-03` quedan implementados y cubiertos por regresión. El ticket térmico nuevo se asigna al primer candidato utilizable del recomendador —o permanece `REGISTERED` sin candidato— mediante `PdoIncidentRepository::assign()`, con un único tramo de custodia y la fuente existente `COORDINATOR_ASSIGN`; la alerta de frío se encola en `notification_outbox` tanto en el alta como en la escalada, después de rehidratar el expediente asignado. La suite constitucional pasa a **42/42** y las suites focales quedan en verde. `FIX-34-04` se cierra con `T-RVF-14`: la matriz publica filas explícitas de asignación y outbox, `tasks.md` y ODD registran la corrección y la Feature 24 ya no declara el 100 % sin esas cláusulas. La certificación global completa sigue pendiente de reejecución (`FIX-34-07`).
+`FIX-34-01`, `FIX-34-02` y `FIX-34-03` quedan implementados y cubiertos por regresión. El ticket térmico nuevo se asigna al primer candidato utilizable del recomendador —o permanece `REGISTERED` sin candidato— mediante `PdoIncidentRepository::assign()`, con un único tramo de custodia y la fuente existente `COORDINATOR_ASSIGN`; la alerta de frío se encola en `notification_outbox` tanto en el alta como en la escalada, después de rehidratar el expediente asignado. La suite constitucional pasa a **42/42** y las suites focales quedan en verde. `FIX-34-04` se cierra con `T-RVF-14`: la matriz publica filas explícitas de asignación y outbox, `tasks.md` y ODD registran la corrección y la Feature 24 ya no declara el 100 % sin esas cláusulas. `FIX-34-05` deja alineada la nomenclatura térmica: `THERMAL_BREAKDOWN` es la etiqueta funcional y `TEMPERATURE_COLD` el valor persistido en `incidents.category`. La certificación global completa sigue pendiente de reejecución (`FIX-34-07`).
 
 ---
 
@@ -41,9 +41,9 @@ El resto de `RF-01`, `RF-02.1`, `RF-02.3`, `RF-03`, `RF-04`, `RF-05`, los `RNF-0
 | **2** | **FIX-34-02** | **P0 · Bloqueante** | El gateway se construye sin `NotificationOutboxEnqueuerService`; `enqueueIncidentOpened()` y `enqueueColdChainAlert()` son no-ops | `RF-02.2` | No se encola la alerta de frío ni la apertura/escalado para SAT/Coordinación; el ticket existe pero nadie recibe el aviso | **Cerrada (2026-11-14)** |
 | **3** | **FIX-34-03** | **P0 · Certificación** | No hay ninguna aserción sobre asignación ni sobre `notification_outbox`; el test constitucional solo comprueba `REGISTERED` | `RF-02.2`, `QA 2`, DoD 5 | La regresión es invisible: la batería puede seguir en verde con las dos cláusulas rotas | **Cerrada (2026-11-14)** |
 | **4** | **FIX-34-04** | **P1 · Documental** | `traceability-matrix.md`, `tasks.md`, ODD y `features_pendientes.md` certifican el 100 % sin estas dos cláusulas | §8, DoD, trazabilidad | La certificación formal no refleja el estado real del requisito | **Cerrada (2026-11-14, `T-RVF-14`)** |
-| **5** | **FIX-34-05** | **P2 · Contractual** | La spec usa `THERMAL_BREAKDOWN`; el motor usa `incident_category = 'TEMPERATURE_COLD'` | `RF-02.2` | Ambigüedad de nomenclatura entre especificación, esquema y tests; hoy se resuelve por convención oral/documental | **Abierta** |
+| **5** | **FIX-34-05** | **P2 · Contractual** | La spec usa `THERMAL_BREAKDOWN`; el motor usa `incident_category = 'TEMPERATURE_COLD'` | `RF-02.2` | Ambigüedad de nomenclatura entre especificación, esquema y tests; hoy se resuelve por convención oral/documental | **Cerrada (2026-11-14)** |
 | **6** | **FIX-34-06** | **P2 · Contractual** | La spec usa `machines.status = 'OUT_OF_SERVICE'`; el esquema no tiene ese estado y el código usa `is_blocked_no_access = TRUE` para bebidas frías | `RF-02.2`, §6.2 | Mapeo correcto en la práctica, pero no explícito en el contrato; dificulta la verificación literal | **Abierta** |
-| **7** | **FIX-34-07** | **P3 · Verificación** | La certificación global no se repetirá hasta cerrar los fixes anteriores | DoD 5 | Necesario para actualizar métricas y `DocMetricsGuard` sin arrastrar cifras obsoletas | **Pendiente de FIX-34-05…06** |
+| **7** | **FIX-34-07** | **P3 · Verificación** | La certificación global no se repetirá hasta cerrar los fixes anteriores | DoD 5 | Necesario para actualizar métricas y `DocMetricsGuard` sin arrastrar cifras obsoletas | **Pendiente de FIX-34-06** |
 
 ### Lectura de prioridades
 
@@ -233,8 +233,10 @@ La opción A es la de menor riesgo y no requiere migración.
 
 ### Criterio de aceptación
 
-- [ ] Spec, contratos, esquema, código y tests usan el mismo nombre o declaran el mapeo de forma inequívoca.
-- [ ] La matriz de trazabilidad cita el valor real del enum.
+- [x] Spec, contratos, esquema, código y tests usan el mismo nombre o declaran el mapeo de forma inequívoca.
+- [x] La matriz de trazabilidad cita el valor real del enum.
+
+**Cierre (2026-11-14):** se adoptó la opción A. La spec canónica y su espejo declaran que `THERMAL_BREAKDOWN` es la etiqueta funcional y que el valor persistido es `incidents.category = 'TEMPERATURE_COLD'`; los contratos incluyen la sección 2.0 de nomenclatura; `database_schema.md`, `schema_correspondence_contract.md` y el comentario del enum en `supabase_init.sql` explicitan el mapeo; el código y los tests dejan de presentar `THERMAL_BREAKDOWN` como valor persistido; la matriz cita `TEMPERATURE_COLD` en `RF-02.2` y `QA 2`. No se renombró el enum ni se migraron datos.
 
 ---
 

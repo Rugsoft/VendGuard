@@ -85,7 +85,7 @@ El esquema implementa 41 tipos `ENUM` nativos en PostgreSQL:
 - `machine_type`: `'HOT_DRINKS'`, `'COLD_DRINKS'`, `'SNACKS'`, `'PERISHABLE_FOOD'`, `'COMBO'`
 - `preventive_machine_type`: `'PERISHABLE_FOOD'`, `'HOT_DRINKS'`, `'COLD_DRINKS'`, `'SNACKS'`, `'COMBO'`
 - `urgency_level`: `'LOW'`, `'MEDIUM'`, `'HIGH'`, `'CRITICAL'`
-- `incident_category`: `'TEMPERATURE_COLD'`, `'PAYMENT_SYSTEM'`, `'PRODUCT_JAM'`, `'ELECTRICAL_OFF'`, `'OTHER'`
+- `incident_category`: `'TEMPERATURE_COLD'`, `'PAYMENT_SYSTEM'`, `'PRODUCT_JAM'`, `'ELECTRICAL_OFF'`, `'OTHER'`. La etiqueta funcional `THERMAL_BREAKDOWN` del Módulo 34 se persiste como `'TEMPERATURE_COLD'`; no existe `breakdown_type` en `incidents`.
 - `incident_status`: `'REGISTERED'`, `'ASSIGNED'`, `'IN_PROGRESS'`, `'PENDING_PARTS'`, `'PENDING_INFO'`, `'RESOLVED'`, `'REOPENED'`, `'CLOSED'`, `'CANCELLED'`
 - `sanitary_status`: `'OK'`, `'ATTENTION_REQUIRED'`, `'EXPIRED'`, `'QUARANTINE'`, `'SEASONAL_PAUSE'`
 - `comment_author_type`: `'REPORTER'`, `'TECHNICIAN'`, `'COORDINATOR'`, `'SYSTEM'`

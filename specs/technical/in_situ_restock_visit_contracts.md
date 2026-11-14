@@ -32,6 +32,10 @@
 
 La persistencia del Módulo 34 se materializa en la migración incremental `database/supabase_migrations/030_in_situ_restock_visit_and_fefo.sql` y converge 1:1 en `database/supabase_init.sql`, ampliando la Tabla 43 (`machine_planogram_slots`), elevando el esquema de **46 a 48 tablas** (`machine_restock_visits` Tabla 47 y `machine_restock_visit_items` Tabla 48) y declarando **41 tipos `ENUM` nativos** en total (nuevo tipo #31 `restock_visit_status`).
 
+### 2.0. Nomenclatura canónica de la incidencia térmica (`FIX-34-05`)
+
+`THERMAL_BREAKDOWN` es la etiqueta funcional del dominio para la avería de frío. El ticket que crea o escala la visita se persiste en `incidents.category`, de tipo `incident_category`, con el valor canónico **`TEMPERATURE_COLD`**. No existe `breakdown_type` en `incidents`: la columna homónima de `machine_troubleshooting_guides` es otra y también usa el enum `incident_category`. Contratos, esquema, código y pruebas deben citar `TEMPERATURE_COLD` cuando se refieran al valor persistido, y pueden conservar `THERMAL_BREAKDOWN` solo como etiqueta funcional.
+
 ### 2.1. Nuevo Tipo Enumerado y Ampliación de `audit_entity_type` y `machine_planogram_slots`
 
 ```sql
@@ -216,7 +220,7 @@ CREATE INDEX IF NOT EXISTS idx_machine_restock_visit_items_product_batch
 | `MACHINE_OUTSIDE_RESTOCKER_ZONES` | `403` | El reponedor intenta consultar o registrar una visita en una máquina fuera de sus Zonas Operativas cubiertas hoy (`C2`, `Art. V.4`). |
 | `MACHINE_NOT_FOUND` | `404` | La máquina indicada no existe o está inactiva (`machines.is_active = FALSE`). |
 | `RESTOCK_VISIT_NOT_FOUND` | `404` | No existe la visita de reposición solicitada. |
-| `SANITARY_RESTOCK_BLOCKED` | `409` | La máquina está en `SANITARY_QUARANTINE`, `OUT_OF_SERVICE` o tiene una avería abierta de tipo `THERMAL_BREAKDOWN` (`RF-02.1`, `D2`, `Art. II`). |
+| `SANITARY_RESTOCK_BLOCKED` | `409` | La máquina está en `SANITARY_QUARANTINE`, `OUT_OF_SERVICE` o tiene una avería térmica abierta (`TEMPERATURE_COLD`; etiqueta funcional `THERMAL_BREAKDOWN`) (`RF-02.1`, `D2`, `Art. II`). |
 | `OFFLINE_VISIT_CONFLICT` | `409` | Al sincronizar una visita offline diferida, la máquina o el saldo real en furgoneta cambiaron impidiendo su aplicación (`C3`, `RF-04.2`). |
 | `INVALID_CABIN_TEMPERATURE` | `422` | Falta `cabin_temp_celsius` en una máquina refrigerada (`PERISHABLE_FOOD`, `COMBO`, `COLD_DRINKS`) o el valor está fuera de `[-5.0, 35.0] °C` (`QA 4`, `Art. II`). |
 | `CABIN_TEMP_EXCEEDS_SANITARY_LIMIT` | `422` | En una visita enviada como `COMPLETED` (o con `qty_added > 0`), `cabin_temp_celsius > 4.0 °C` en `PERISHABLE_FOOD`/`COMBO` o `> 8.0 °C` en `COLD_DRINKS` (`RF-02.2`, `D2`, `Art. II`). |

@@ -25,8 +25,9 @@ use VendGuard\Core\Domain\Model\RestockerVanProductStock;
  * Reglas que muerde, en el orden en que las aplica el servicio:
  *
  *   1. **Cerrojo 1 · estado de la máquina (409).** Una máquina en cuarentena
- *      sanitaria, fuera de servicio o con una avería `THERMAL_BREAKDOWN` abierta
- *      no admite una sola unidad (`SANITARY_RESTOCK_BLOCKED`, Art. II). El
+ *      sanitaria, fuera de servicio o con una avería térmica (`TEMPERATURE_COLD`,
+ *      etiqueta funcional `THERMAL_BREAKDOWN`) abierta no admite una sola unidad
+ *      (`SANITARY_RESTOCK_BLOCKED`, Art. II). El
  *      perímetro territorial y el rol son autorización de servicio (`C2`) y no
  *      se mezclan aquí: este validador no conoce usuarios ni zonas.
  *   2. **Cerrojo 2 · lectura de cabina (422, QA 4).** Toda máquina refrigerada
@@ -84,8 +85,9 @@ final class MachineRestockVisitValidator
      * @param string|null $sanitaryStatus Valor de `machines.sanitary_status` o el
      *                                    estado funcional `SANITARY_QUARANTINE`.
      * @param bool $isOutOfService Máquina fuera de servicio (`OUT_OF_SERVICE`).
-     * @param bool $hasOpenThermalBreakdown Avería correctiva `THERMAL_BREAKDOWN`
-     *                                      activa sobre la máquina.
+     * @param bool $hasOpenThermalBreakdown Open thermal incident (functional label
+     *                                      `THERMAL_BREAKDOWN`; persisted category
+     *                                      `TEMPERATURE_COLD`).
      *
      * @throws MachineRestockVisitValidationException `409 SANITARY_RESTOCK_BLOCKED`
      */
@@ -107,7 +109,7 @@ final class MachineRestockVisitValidator
         }
 
         if ($hasOpenThermalBreakdown) {
-            $reasons[] = 'tiene una avería THERMAL_BREAKDOWN abierta';
+            $reasons[] = 'tiene una avería térmica abierta (TEMPERATURE_COLD)';
         }
 
         if ($reasons !== []) {
