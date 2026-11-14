@@ -951,6 +951,43 @@ assert('El aborto con precinto, foto y notas es válido', visitVm.validateVisit(
 const abortPayload = visitVm.buildVisitPayload();
 assert('El aborto térmico envía estado y cero movimientos', abortPayload.status === 'ABORTED_THERMAL_BREACH' && abortPayload.items.length === 0);
 
+const onlineGet = api.get;
+const onlineCreate = api.restocker.createRestockVisit;
+const onlineUpload = api.restocker.uploadVisitPhoto;
+const uploadCalls = [];
+const onlineCreateCalls = [];
+api.get = async (url) => {
+  if (url === '/restocker/my-route') return bootstrapPayload;
+  throw new Error('URL inesperada: ' + url);
+};
+api.restocker.uploadVisitPhoto = async (photo, name) => {
+  uploadCalls.push({ photo, name });
+  return { photo_evidence_url: '/uploads/visits/evidencia.jpg' };
+};
+api.restocker.createRestockVisit = async (machineId, payload) => {
+  onlineCreateCalls.push({ machineId, payload });
+  return { id: 88, visit_code: 'MRV-2026-0088', status: 'COMPLETED', machine_code: 'VEND-0701' };
+};
+const onlineVisitVm = buildVm({
+  restocker: bootstrapPayload.data.restocker,
+  machines: JSON.parse(JSON.stringify([visitMachine])),
+  vanProductStocks: JSON.parse(JSON.stringify(visitStocks)),
+  visitQueue: new RestockVisitOfflineQueue({ indexedDB: createFakeIndexedDb() })
+});
+await onlineVisitVm.openVisitAssistant(onlineVisitVm.machines[0]);
+onlineVisitVm.visitForm.cabin_temp_celsius = 3.5;
+onlineVisitVm.markHygieneComplete();
+onlineVisitVm.withdrawVisitRemainder(onlineVisitVm.visitForm.items[0]);
+onlineVisitVm.visitForm.internal_notes = 'Evidencia de retirada FEFO para el cierre.';
+onlineVisitVm.visitPhotoFile = { name: 'evidencia.jpg', size: 1024, type: 'image/jpeg' };
+onlineVisitVm.visitPhotoName = 'evidencia.jpg';
+await onlineVisitVm.submitVisit();
+assert('La visita online sube la foto antes del alta idempotente', uploadCalls.length === 1 && uploadCalls[0].name === 'evidencia.jpg' && onlineCreateCalls.length === 1 && onlineCreateCalls[0].machineId === 7);
+assert('La visita online envía la URL de evidencia y cierra el asistente', onlineCreateCalls[0].payload.photo_evidence_url === '/uploads/visits/evidencia.jpg' && onlineVisitVm.showVisitModal === false && onlineVisitVm.loadingActionMessage.includes('Visita registrada'));
+api.get = onlineGet;
+api.restocker.createRestockVisit = onlineCreate;
+api.restocker.uploadVisitPhoto = onlineUpload;
+
 visitVm.visitForm.cabin_temp_celsius = 3.5;
 const offlineVisitVm = buildVm({
   restocker: bootstrapPayload.data.restocker,
