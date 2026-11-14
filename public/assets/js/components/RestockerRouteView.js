@@ -2456,9 +2456,8 @@ export const RestockerRouteView = {
                       <span style="display: block;">⚠️ FEFO: retira todo el remanente de este carril antes de cargar el lote nuevo.</span>
                       <button
                         type="button"
-                        class="vg-btn vg-btn-secondary vg-btn-sm"
+                        class="vg-btn vg-btn-secondary vg-btn-sm mt-1"
                         data-testid="btn-withdraw-fefo"
-                        style="margin-top: 5px;"
                         @click="withdrawVisitRemainder(item)"
                       >
                         🗑️ Retirar remanente {{ item.slot_expiry_status === 'EXPIRED' ? 'caducado' : 'próximo a caducar' }} ({{ item.qty_before }} uds.)
@@ -2555,7 +2554,7 @@ export const RestockerRouteView = {
                 />
                 <div v-if="visitPhotoPreviewUrl" style="margin-top: 7px;">
                   <img :src="visitPhotoPreviewUrl" alt="Evidencia de la visita" style="max-width: 100%; max-height: 150px; border-radius: var(--radius-interactive); border: 1px solid var(--color-hairline);" />
-                  <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-clear-visit-photo" @click="clearVisitPhoto" style="margin-left: 4px;">
+                  <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm ms-1" data-testid="btn-clear-visit-photo" @click="clearVisitPhoto">
                     Quitar foto
                   </button>
                 </div>

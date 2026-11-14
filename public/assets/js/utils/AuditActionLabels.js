@@ -236,6 +236,18 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'DISPATCH_VAN_RESTOCK_ORDER', label: 'Expedición de Orden de Carga', tone: 'info', group: 'restock' },
   { code: 'CONFIRM_VAN_RESTOCK_ORDER', label: 'Recepción de Carga Confirmada', tone: 'success', group: 'restock' },
   { code: 'CANCEL_VAN_RESTOCK_ORDER', label: 'Cancelación de Orden de Carga', tone: 'danger', group: 'restock' },
+  // Módulo 33: las órdenes de carga y sus movimientos de stock se auditan con
+  // acciones propias; sin etiqueta el visor mostraba el código crudo y el
+  // filtro no permitía localizarlas.
+  { code: 'PRODUCT_LOADING_ORDER_CREATED', label: 'Alta de Orden de Carga de Producto', tone: 'primary', group: 'restock' },
+  { code: 'PRODUCT_LOADING_ORDER_UPDATED', label: 'Edición de Orden de Carga de Producto', tone: 'neutral', group: 'restock' },
+  { code: 'PRODUCT_LOADING_ORDER_DISPATCHED', label: 'Despacho de Orden de Carga de Producto', tone: 'info', group: 'restock' },
+  { code: 'PRODUCT_LOADING_ORDER_CONFIRMED', label: 'Recepción de Orden de Carga de Producto', tone: 'success', group: 'restock' },
+  { code: 'PRODUCT_LOADING_ORDER_RECONCILED', label: 'Liquidación de Orden de Carga de Producto', tone: 'success', group: 'restock' },
+  { code: 'PRODUCT_LOADING_ORDER_CANCELLED', label: 'Cancelación de Orden de Carga de Producto', tone: 'danger', group: 'restock' },
+  { code: 'RESTOCKER_VAN_STOCK_RECEIVED', label: 'Recepción de Lote en Furgoneta', tone: 'success', group: 'restock' },
+  { code: 'RESTOCKER_VAN_STOCK_ADJUSTED', label: 'Ajuste Manual de Lote en Furgoneta', tone: 'warning', group: 'restock' },
+  { code: 'RESTOCKER_VAN_STOCK_RECONCILED', label: 'Liquidación de Stock de Furgoneta', tone: 'info', group: 'restock' },
   { code: 'RESTOCK_VISIT_COMPLETED', label: 'Visita de Reposición Completada', tone: 'success', group: 'restock' },
   { code: 'RESTOCK_VISIT_ABORTED_THERMAL_BREACH', label: 'Visita Abortada por Rotura de Cadena de Frío', tone: 'danger', group: 'sanitary' },
   { code: 'OFFLINE_RESTOCK_VISIT_CONFLICT_DUMP', label: 'Conflicto Offline Archivado en Auditoría', tone: 'warning', group: 'restock' },
