@@ -2519,7 +2519,10 @@ export const CoordinatorDashboardView = {
       <CoordinatorPlanogramTab v-else-if="activeTab === 'planogram'" />
 
       <!-- CONTENIDO PESTAÑA: ÓRDENES DE CARGA DE PRODUCTO Y STOCK POR LOTE (Módulo 33, RF-03.2, RF-05.1) -->
-      <CoordinatorProductLoadingTab v-else-if="activeTab === 'product-loading'" />
+      <CoordinatorProductLoadingTab
+        v-else-if="activeTab === 'product-loading'"
+        @open-incident-detail="openIncidentDetailFromPreventive"
+      />
 
       <!-- CONTENIDO PESTAÑA: MANTENIMIENTO PREVENTIVO Y SANITARIO (RF-PREV-02, RF-PREV-06) -->
       <div v-else-if="activeTab === 'preventive'" class="vg-preventive-management-container" data-testid="preventive-panel-container">

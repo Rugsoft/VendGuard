@@ -1,14 +1,15 @@
 /**
  * VendGuard - CoordinatorProductLoadingTab Test Suite
  *
- * Certifica la pestaña de Coordinación del Módulo 33 (RF-03.2, RF-05.1,
- * RNF-03, D1-D4, QA 1, Art. V.4):
+ * Certifica la pestaña de Coordinación de los Módulos 33 y 34 (RF-03.2,
+ * RF-05.1, RF-05.2, RNF-03, D1-D4, QA 1, QA 3, Art. V.4):
  *   1. KPIs, filtros y carga de órdenes.
  *   2. Propuesta individual y emisión masiva.
  *   3. Edición, despacho térmico, liquidación y cancelación.
  *   4. Hoja de Picking A4 en dos secciones, sin importes.
  *   5. Stock por lote FEFO y ajuste auditado.
  *   6. Integración en el dashboard, cliente API y Service Worker.
+ *   7. Visitas de reposición in situ, cinco KPIs y expediente FEFO.
  *
  * Dogma Vanilla: Node.js ESM nativo, sin dependencias externas.
  */
@@ -409,6 +410,119 @@ const products = [
   { id: 2, sku: 'AGUA-50-01', name: 'Agua mineral 50 cl', category: 'COLD_DRINK', requires_cold_chain: false }
 ];
 
+const restockVisits = [
+  {
+    id: 501,
+    visit_code: 'MRV-2026-0501',
+    machine_id: 1,
+    machine_code: 'VEND-RVF10-01',
+    machine_model: 'RVF 10 Food',
+    machine_type: 'PERISHABLE_FOOD',
+    location_name: 'Sede Central · Hall',
+    restocker_id: 7,
+    restocker_name: 'Marta Reponedora',
+    status: 'COMPLETED',
+    status_label: 'Completada',
+    status_icon: '✅',
+    started_at: '2026-11-13 08:10:00+00',
+    completed_at: '2026-11-13 08:42:00+00',
+    cabin_temp_celsius: 3.4,
+    triggered_incident_id: null,
+    triggered_ticket_code: null,
+    units_added: 13,
+    units_withdrawn: 2,
+    commercial_spoilage_loss_eur: 2.5,
+    created_at: '2026-11-13 08:10:00+00'
+  },
+  {
+    id: 502,
+    visit_code: 'MRV-2026-0502',
+    machine_id: 2,
+    machine_code: 'VEND-RVF10-02',
+    machine_model: 'RVF 10 Food',
+    machine_type: 'PERISHABLE_FOOD',
+    location_name: 'Sede Norte · Cafetería',
+    restocker_id: 8,
+    restocker_name: 'Luis Cargador',
+    status: 'ABORTED_THERMAL_BREACH',
+    status_label: 'Abortada por temperatura',
+    status_icon: '🌡️',
+    started_at: '2026-11-13 09:05:00+00',
+    completed_at: '2026-11-13 09:30:00+00',
+    cabin_temp_celsius: 8.6,
+    triggered_incident_id: 77,
+    triggered_ticket_code: 'SAT-2026-0007',
+    units_added: 0,
+    units_withdrawn: 2,
+    commercial_spoilage_loss_eur: 6.5,
+    created_at: '2026-11-13 09:05:00+00'
+  }
+];
+
+const visitKpis = {
+  completed_visits_count: 1,
+  aborted_thermal_visits_count: 1,
+  total_units_added: 13,
+  total_units_withdrawn: 4,
+  total_commercial_spoilage_loss_eur: 9.0
+};
+
+const visitDetail = {
+  ...restockVisits[0],
+  hygiene_checklist: {
+    coffee_grounds_emptied: true,
+    liquid_waste_bucket_cleaned: true,
+    mixers_and_ducts_rinsed: false,
+    dispensing_tray_and_glass_cleaned: true,
+    cabin_spills_checked: null
+  },
+  precautionary_seal_applied: true,
+  photo_evidence_url: '/uploads/restock/visit-501.jpg',
+  internal_notes: 'Reposición completada con retirada de dos unidades caducadas.',
+  client_mutation_id: '8f2c1f9e-8d0e-4f47-9a9c-1e7f3b2a6c11',
+  is_thermal_abort: false,
+  items: [
+    {
+      id: 1,
+      visit_id: 501,
+      slot_id: 10,
+      slot_code: 'A1',
+      product_id: 1,
+      qty_before: 2,
+      qty_withdrawn_expired: 1,
+      qty_withdrawn_damaged: 1,
+      qty_added: 6,
+      qty_after: 6,
+      withdrawn_batch_code: 'LOTE-ANTIGUO',
+      withdrawn_expiration_date: '2026-11-11',
+      loaded_batch_code: 'LOTE-SW-01',
+      loaded_expiration_date: '2026-11-16',
+      unit_cost_snapshot_eur: 1.25,
+      commercial_spoilage_loss_eur: 2.5,
+      created_at: '2026-11-13 08:42:00+00'
+    },
+    {
+      id: 2,
+      visit_id: 501,
+      slot_id: 11,
+      slot_code: 'A2',
+      product_id: 2,
+      qty_before: 4,
+      qty_withdrawn_expired: 0,
+      qty_withdrawn_damaged: 0,
+      qty_added: 7,
+      qty_after: 11,
+      withdrawn_batch_code: null,
+      withdrawn_expiration_date: null,
+      loaded_batch_code: 'LOTE-SW-02',
+      loaded_expiration_date: '2026-11-20',
+      unit_cost_snapshot_eur: 0.4,
+      commercial_spoilage_loss_eur: 0,
+      created_at: '2026-11-13 08:42:00+00'
+    }
+  ]
+};
+
 const calls = [];
 api.coordinator.getUsers = async (params) => {
   calls.push({ method: 'getUsers', params });
@@ -512,6 +626,17 @@ api.coordinator.adjustRestockerVanStock = async (restockerId, payload) => {
 api.coordinator.getProducts = async (params) => {
   calls.push({ method: 'getProducts', params });
   return { data: { products } };
+};
+api.coordinator.getRestockVisits = async (params) => {
+  calls.push({ method: 'getRestockVisits', params });
+  return { data: { visits: restockVisits, kpis: visitKpis } };
+};
+api.coordinator.getRestockVisit = async (visitId) => {
+  calls.push({ method: 'getRestockVisit', visitId });
+  if (Number(visitId) === 999) {
+    throw new Error('No existe la visita de reposición solicitada.');
+  }
+  return { data: visitDetail };
 };
 
 function buildInstance() {
@@ -783,12 +908,15 @@ async function runTests() {
   assert('6.2 El dashboard incluye la pestaña tab-product-loading', CoordinatorDashboardView.template.includes('data-testid="tab-product-loading"'));
   assert(
     '6.3 El dashboard renderiza la pestaña con v-else-if',
-    CoordinatorDashboardView.template.includes('<CoordinatorProductLoadingTab v-else-if="activeTab === \'product-loading\'"')
+    CoordinatorDashboardView.template.includes('<CoordinatorProductLoadingTab')
+      && CoordinatorDashboardView.template.includes('v-else-if="activeTab === \'product-loading\'"')
+      && CoordinatorDashboardView.template.includes('@open-incident-detail="openIncidentDetailFromPreventive"')
   );
   assert(
-    '6.4 El panel ofrece las sub-vistas de órdenes y stock',
+    '6.4 El panel ofrece las tres sub-vistas: órdenes, stock y visitas',
     CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-orders-section"')
       && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-stock-section"')
+      && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-visits-section"')
   );
   assert(
     '6.5 El componente usa tokens CSS y no hexadecimales',
@@ -822,17 +950,138 @@ async function runTests() {
     'updateProductLoadingOrder',
     'dispatchProductLoadingOrder',
     'reconcileProductLoadingOrder',
-    'cancelProductLoadingOrder'
+    'cancelProductLoadingOrder',
+    'getRestockVisits',
+    'getRestockVisit'
   ];
   assert(
-    '6.9 El API expone las doce operaciones del módulo',
+    '6.9 El API expone las catorce operaciones del módulo',
     apiMethods.every((method) => typeof api.coordinator[method] === 'function')
   );
+
+  // ─────────────────────────────────────────────────────────────────────
+  // 7. Visitas de reposición in situ y control FEFO
+  // ─────────────────────────────────────────────────────────────────────
+  console.log('\n--- 7. Visitas de reposición in situ y control FEFO ---');
+
+  const visitsComponent = buildInstance();
+  await visitsComponent.loadVisits();
+  assert(
+    '7.1 Carga el libro de visitas y sus cinco KPIs ejecutivos',
+    visitsComponent.visits.length === 2
+      && visitsComponent.visitKpis.completed_visits_count === 1
+      && visitsComponent.visitKpis.aborted_thermal_visits_count === 1
+      && visitsComponent.visitKpis.total_units_added === 13
+      && visitsComponent.visitKpis.total_units_withdrawn === 4
+      && visitsComponent.visitKpis.total_commercial_spoilage_loss_eur === 9
+  );
+  assert(
+    '7.2 El semáforo de visitas distingue completada y aborto térmico',
+    visitsComponent.visitStatusTone('COMPLETED').includes('vg-badge-success')
+      && visitsComponent.visitStatusTone('ABORTED_THERMAL_BREACH').includes('vg-badge-danger')
+  );
+
+  visitsComponent.visitFilters = {
+    restocker_id: 7,
+    machine_id: '',
+    status: 'COMPLETED',
+    date_from: '2026-11-01',
+    date_to: ''
+  };
+  await visitsComponent.loadVisits();
+  const visitCall = calls.filter((call) => call.method === 'getRestockVisits').at(-1);
+  assert(
+    '7.3 Los filtros saneados viajan al API sin parámetros vacíos',
+    visitCall?.params?.restocker_id === 7
+      && visitCall?.params?.status === 'COMPLETED'
+      && visitCall?.params?.date_from === '2026-11-01'
+      && !Object.prototype.hasOwnProperty.call(visitCall.params, 'machine_id')
+      && !Object.prototype.hasOwnProperty.call(visitCall.params, 'date_to')
+  );
+
+  visitsComponent.visitFilters = { restocker_id: '', machine_id: '', status: '', date_from: '', date_to: '' };
+  await visitsComponent.openVisitDetailModal(501);
+  assert(
+    '7.4 El expediente carga la visita, sus líneas y su merma',
+    visitsComponent.showVisitDetailModal === true
+      && visitsComponent.selectedVisitId === 501
+      && visitsComponent.visitDetailVisit?.visit_code === 'MRV-2026-0501'
+      && visitsComponent.visitItems.length === 2
+      && visitsComponent.visitDetailVisit?.commercial_spoilage_loss_eur === 2.5
+  );
+  assert(
+    '7.5 El expediente conserva coste unitario y merma por carril',
+    visitsComponent.visitItems[0].unit_cost_snapshot_eur === 1.25
+      && visitsComponent.visitItems[0].commercial_spoilage_loss_eur === 2.5
+      && visitsComponent.visitItems[0].qty_withdrawn_expired + visitsComponent.visitItems[0].qty_withdrawn_damaged === 2
+      && visitsComponent.visitItems[1].loaded_batch_code === 'LOTE-SW-02'
+  );
+  assert(
+    '7.6 El checklist higiénico se proyecta con etiquetas y valores triestado',
+    visitsComponent.visitHygieneItems.length === 5
+      && visitsComponent.visitHygieneItems[0].label === 'Cajón de posos vaciado'
+      && visitsComponent.visitHygieneValue(true) === 'Sí'
+      && visitsComponent.visitHygieneValue(false) === 'No'
+      && visitsComponent.visitHygieneValue(null) === 'No aplica'
+  );
+  assert(
+    '7.7 El ticket SAT y la evidencia fotográfica quedan enlazados',
+    visitsComponent.visitTicketHref(restockVisits[1]) === '#incident-77'
+      && visitsComponent.visitTicketHref(restockVisits[0]) === ''
+      && visitsComponent.visitDetailVisit?.photo_evidence_url === '/uploads/restock/visit-501.jpg'
+  );
+  assert(
+    '7.8 La merma se formatea en euros sin exponer precios de venta',
+    visitsComponent.formatCurrency(2.5).includes('2,50')
+      && visitsComponent.formatCurrency(2.5).includes('€')
+  );
+  assert(
+    '7.9 El expediente muestra checklist, foto, ticket y costes carril a carril',
+    CoordinatorProductLoadingTab.template.includes('product-loading-visits-kpis')
+      && CoordinatorProductLoadingTab.template.includes('product-loading-visits-table')
+      && CoordinatorProductLoadingTab.template.includes('product-loading-visit-detail-modal')
+      && CoordinatorProductLoadingTab.template.includes('product-loading-visit-detail-hygiene')
+      && CoordinatorProductLoadingTab.template.includes('product-loading-visit-detail-photo')
+      && CoordinatorProductLoadingTab.template.includes('product-loading-visit-detail-ticket')
+      && CoordinatorProductLoadingTab.template.includes('product-loading-visit-detail-items')
+      && CoordinatorProductLoadingTab.template.includes('unit_cost_snapshot_eur')
+      && CoordinatorProductLoadingTab.template.includes('commercial_spoilage_loss_eur')
+  );
+  assert(
+    '7.10 El libro no ofrece ninguna operación de borrado',
+    !calls.some((call) => String(call.method).toLowerCase().includes('delete'))
+      && !CoordinatorProductLoadingTab.methods.openVisitDetailModal.toString().toLowerCase().includes('delete')
+  );
+  await visitsComponent.openVisitDetailModal(999);
+  assert(
+    '7.11 Un expediente inexistente se comunica sin romper el modal',
+    visitsComponent.visitDetail === null
+      && visitsComponent.visitDetailError.includes('No existe')
+      && visitsComponent.showVisitDetailModal === true
+  );
+  assert(
+    '7.12 El cliente API expone las dos lecturas de visitas',
+    typeof api.coordinator.getRestockVisits === 'function'
+      && typeof api.coordinator.getRestockVisit === 'function'
+  );
+
+  const emittedEvents = [];
+  visitsComponent.$emit = (event, payload) => emittedEvents.push({ event, payload });
+  visitsComponent.openVisitTicket(restockVisits[1]);
+  assert(
+    '7.13 El ticket SAT se delega en la ficha integral de incidencias',
+    emittedEvents.length === 1
+      && emittedEvents[0].event === 'open-incident-detail'
+      && emittedEvents[0].payload === 77
+  );
+
+  visitsComponent.showVisitDetailModal = false;
+  visitsComponent.visitDetailError = '';
 
   console.log('\n======================================================================');
   if (failures === 0) {
     console.log(` RESULTADO: ¡TODAS LAS PRUEBAS PASARON (${assertions} aserciones, 0 fallos)!`);
-    console.log(' PESTAÑA DE ÓRDENES DE CARGA Y STOCK POR LOTE VERIFICADA.');
+    console.log(' PESTAÑA DE ÓRDENES DE CARGA, STOCK POR LOTE Y VISITAS IN SITU VERIFICADA.');
   } else {
     console.error(` RESULTADO: ${failures} PRUEBA(S) FALLIDA(S) de ${assertions} evaluadas.`);
   }

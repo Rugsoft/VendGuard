@@ -74,7 +74,7 @@ flowchart LR
   - **Requisitos:** `RF-01` a `RF-05`, `D1`–`D4`, `C1`–`C4`, `QA 1`–`QA 4`, `Art. II`, `Art. III.1`, `Art. III.3`, `Art. V.1`, `Art. V.2`, `Art. V.4`, `Art. V.5`.
   - **Verificación:** `php tests/integration/InSituRestockVisitApiTest.php && php tests/integration/InSituRestockVisitConstitutionalTest.php`
 
-- [ ] **T-RVF-11 · Extender `CoordinatorProductLoadingTab.js` con la sub-vista «📋 Visitas de Reposición In Situ y Control FEFO» (5 KPIs con coste de merma comercial, filtros y modal de detalle carril a carril)**
+- [x] **T-RVF-11 · Extender `CoordinatorProductLoadingTab.js` con la sub-vista «📋 Visitas de Reposición In Situ y Control FEFO» (5 KPIs con coste de merma comercial, filtros y modal de detalle carril a carril)**
   - **Requisitos:** `RF-05.2`, `RNF-03`, `D4`, `QA 3`, `Art. V.4`.
   - **Verificación:** `node tests/frontend/coordinator_product_loading_tab.test.mjs`
 

@@ -1806,6 +1806,13 @@ export class ApiClient {
       const q = new URLSearchParams(params).toString();
       return this.get(`/coordinator/restocker-van-stocks${q ? `?${q}` : ''}`);
     },
+    getRestockVisits: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/restock-visits${q ? `?${q}` : ''}`);
+    },
+    getRestockVisit: (visitId) => {
+      return this.get(`/coordinator/restock-visits/${encodeURIComponent(visitId)}`);
+    },
     adjustRestockerVanStock: (restockerId, payload) => {
       return this.put(`/coordinator/restocker-van-stocks/${encodeURIComponent(restockerId)}`, payload);
     },

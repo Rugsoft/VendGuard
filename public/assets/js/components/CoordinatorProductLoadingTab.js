@@ -2,8 +2,9 @@
  * VendGuard - CoordinatorProductLoadingTab (CoordinatorProductLoadingTab.js)
  *
  * Pestaña de Coordinación para las órdenes de carga de producto de las
- * furgonetas de reposición y el inventario por lote (Módulo 33, RF-03.2,
- * RF-05.1, RNF-03, D1-D4, QA 1, Art. V.4). Dos sub-vistas:
+ * furgonetas de reposición, el inventario por lote y las visitas in situ
+ * (Módulos 33 y 34, RF-03.2, RF-05.1, RF-05.2, RNF-03, D1-D4, QA 1,
+ * Art. V.4). Tres sub-vistas:
  *
  *   1. «🚚 Órdenes de Carga de Producto y Cámara Frigorífica»: KPIs, propuesta
  *      individual con modo de demanda y colchón, emisión masiva, edición en
@@ -11,6 +12,9 @@
  *      cancelación justificada y Hoja de Picking A4 en dos secciones.
  *   2. «🚐 Stock de Producto en Furgonetas (Por Lote)»: filtros por reponedor,
  *      categoría y semáforo FEFO, y ajuste manual auditado.
+ *   3. «📋 Visitas de Reposición In Situ y Control FEFO»: cinco KPIs ejecutivos,
+ *      filtros por reponedor, estado, máquina y rango de fechas, libro histórico
+ *      y expediente carril a carril con checklist, foto y ticket SAT (`RF-05.2`).
  *
  * La vista no decide ninguna regla sanitaria: el cerrojo térmico, la
  * obligatoriedad de lote/caducidad, el cuadre y la justificación mínima viven
@@ -46,6 +50,29 @@ const emptyStockKpis = () => ({
   expiring_soon_lots: 0
 });
 
+const emptyVisitKpis = () => ({
+  completed_visits_count: 0,
+  aborted_thermal_visits_count: 0,
+  total_units_added: 0,
+  total_units_withdrawn: 0,
+  total_commercial_spoilage_loss_eur: 0
+});
+
+const EUR_FORMATTER = new Intl.NumberFormat('es-ES', {
+  style: 'currency',
+  currency: 'EUR',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
+const HYGIENE_LABELS = {
+  coffee_grounds_emptied: 'Cajón de posos vaciado',
+  liquid_waste_bucket_cleaned: 'Cubo de residuos líquidos limpio',
+  mixers_and_ducts_rinsed: 'Batidores y conductos enjuagados',
+  dispensing_tray_and_glass_cleaned: 'Bandeja de erogación y cristal limpios',
+  cabin_spills_checked: 'Derrames de cabina revisados'
+};
+
 const blankStockForm = () => ({
   restocker_id: '',
   product_id: '',
@@ -58,6 +85,7 @@ const blankStockForm = () => ({
 export const CoordinatorProductLoadingTab = {
   name: 'CoordinatorProductLoadingTab',
   components: { ModalDialog },
+  emits: ['open-incident-detail'],
   data() {
     return {
       activeSection: 'orders',
@@ -134,7 +162,18 @@ export const CoordinatorProductLoadingTab = {
       showStockAdjustModal: false,
       stockForm: blankStockForm(),
       stockFormError: '',
-      isAdjustingStock: false
+      isAdjustingStock: false,
+
+      visits: [],
+      visitKpis: emptyVisitKpis(),
+      visitFilters: { restocker_id: '', machine_id: '', status: '', date_from: '', date_to: '' },
+      isLoadingVisits: false,
+      visitError: '',
+      showVisitDetailModal: false,
+      selectedVisitId: null,
+      visitDetail: null,
+      isLoadingVisitDetail: false,
+      visitDetailError: ''
     };
   },
   computed: {
@@ -206,12 +245,34 @@ export const CoordinatorProductLoadingTab = {
         }
         return true;
       });
+    },
+    visitStatusOptions() {
+      return [
+        { value: 'COMPLETED', label: 'Completada' },
+        { value: 'ABORTED_THERMAL_BREACH', label: 'Abortada por temperatura' }
+      ];
+    },
+    visitDetailVisit() {
+      return this.visitDetail?.visit || this.visitDetail || null;
+    },
+    visitItems() {
+      return this.visitDetail?.items || [];
+    },
+    visitHygieneItems() {
+      const checklist = this.visitDetailVisit?.hygiene_checklist;
+      if (!checklist || typeof checklist !== 'object') return [];
+      return Object.entries(checklist).map(([key, value]) => ({
+        key,
+        label: HYGIENE_LABELS[key] || key,
+        value
+      }));
     }
   },
   mounted() {
     this.loadOrders();
     this.loadRestockers();
     this.loadVanStocks();
+    this.loadVisits();
   },
   methods: {
     unwrap,
@@ -309,6 +370,86 @@ export const CoordinatorProductLoadingTab = {
       } finally {
         this.isLoadingStock = false;
       }
+    },
+
+    formatCurrency(value) {
+      const amount = Number(value);
+      return EUR_FORMATTER.format(Number.isFinite(amount) ? amount : 0);
+    },
+
+    visitStatusTone(status) {
+      switch (status) {
+        case 'COMPLETED':
+          return 'vg-badge vg-badge-success';
+        case 'ABORTED_THERMAL_BREACH':
+          return 'vg-badge vg-badge-danger';
+        default:
+          return 'vg-badge vg-badge-neutral';
+      }
+    },
+
+    visitTicketHref(visit) {
+      const incidentId = visit?.triggered_incident_id;
+      return incidentId === null || incidentId === undefined ? '' : `#incident-${incidentId}`;
+    },
+
+    openVisitTicket(visit) {
+      const incidentId = visit?.triggered_incident_id;
+      if (incidentId === null || incidentId === undefined || incidentId === '') return;
+      this.$emit('open-incident-detail', Number(incidentId));
+    },
+
+    visitHygieneValue(value) {
+      if (value === true) return 'Sí';
+      if (value === false) return 'No';
+      return 'No aplica';
+    },
+
+    visitFilterParams() {
+      const params = {};
+      Object.entries(this.visitFilters).forEach(([key, value]) => {
+        if (value === '' || value === null || value === undefined) return;
+        params[key] = value;
+      });
+      return params;
+    },
+
+    async loadVisits() {
+      this.isLoadingVisits = true;
+      this.visitError = '';
+      try {
+        const data = unwrap(await api.coordinator.getRestockVisits(this.visitFilterParams()));
+        this.visitKpis = { ...emptyVisitKpis(), ...(data?.kpis || {}) };
+        this.visits = Array.isArray(data?.visits) ? data.visits : [];
+      } catch (error) {
+        this.visitError = error?.message || 'No se pudo cargar el libro de visitas de reposición in situ.';
+      } finally {
+        this.isLoadingVisits = false;
+      }
+    },
+
+    async fetchVisitDetail(visitId) {
+      this.isLoadingVisitDetail = true;
+      this.visitDetailError = '';
+      try {
+        const data = unwrap(await api.coordinator.getRestockVisit(visitId));
+        this.selectedVisitId = Number(visitId);
+        this.visitDetail = data || null;
+        return this.visitDetail;
+      } catch (error) {
+        this.visitDetailError = error?.message || 'No se pudo cargar el expediente de la visita.';
+        this.visitDetail = null;
+        return null;
+      } finally {
+        this.isLoadingVisitDetail = false;
+      }
+    },
+
+    async openVisitDetailModal(visitId) {
+      this.showVisitDetailModal = true;
+      this.visitDetail = null;
+      this.visitDetailError = '';
+      await this.fetchVisitDetail(visitId);
     },
 
     async loadProducts() {
@@ -813,6 +954,15 @@ export const CoordinatorProductLoadingTab = {
           >
             🚐 Stock por Lote
           </button>
+          <button
+            type="button"
+            class="vg-btn"
+            :class="activeSection === 'visits' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            data-testid="product-loading-visits-section-button"
+            @click="activeSection = 'visits'"
+          >
+            📋 Visitas In Situ y FEFO
+          </button>
         </div>
       </div>
 
@@ -924,7 +1074,7 @@ export const CoordinatorProductLoadingTab = {
       </section>
 
       <!-- Sub-vista 2: stock por lote -->
-      <section v-else data-testid="product-loading-stock-section">
+      <section v-else-if="activeSection === 'stock'" data-testid="product-loading-stock-section">
         <div v-if="stockSuccess" class="vg-alert vg-alert-success" role="status" style="margin-bottom: 14px;">✅ {{ stockSuccess }}</div>
         <div v-if="stockError" class="vg-alert vg-alert-error" role="alert" style="margin-bottom: 14px;">⚠️ {{ stockError }}</div>
 
@@ -1023,6 +1173,229 @@ export const CoordinatorProductLoadingTab = {
           </table>
         </div>
       </section>
+
+      <!-- Sub-vista 3: visitas de reposición in situ y control FEFO -->
+      <section v-else-if="activeSection === 'visits'" data-testid="product-loading-visits-section">
+        <div v-if="visitError" class="vg-alert vg-alert-error" role="alert" data-testid="product-loading-visits-error" style="margin-bottom: 14px;">
+          ⚠️ {{ visitError }}
+        </div>
+
+        <div data-testid="product-loading-visits-kpis" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px;">
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">✅ Visitas completadas</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-success-text);">{{ visitKpis.completed_visits_count }}</div>
+          </div>
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">🌡️ Abortos térmicos</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-error-text);">{{ visitKpis.aborted_thermal_visits_count }}</div>
+          </div>
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">📦 Unidades abastecidas</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-primary);">{{ visitKpis.total_units_added }}</div>
+          </div>
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">♻️ Unidades retiradas</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-warning-text);">{{ visitKpis.total_units_withdrawn }}</div>
+          </div>
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">💶 Merma comercial</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-error-text);">{{ formatCurrency(visitKpis.total_commercial_spoilage_loss_eur) }}</div>
+          </div>
+        </div>
+
+        <div class="vg-card" style="padding: 14px; margin-bottom: 16px;">
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;">
+            <div>
+              <label class="vg-label" for="visit-filter-restocker">Reponedor</label>
+              <select id="visit-filter-restocker" v-model="visitFilters.restocker_id" class="vg-input" data-testid="product-loading-visit-filter-restocker" @change="loadVisits">
+                <option value="">Todos</option>
+                <option v-for="restocker in restockerOptions" :key="restocker.id" :value="restocker.id">{{ restocker.label }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="vg-label" for="visit-filter-status">Estado</label>
+              <select id="visit-filter-status" v-model="visitFilters.status" class="vg-input" data-testid="product-loading-visit-filter-status" @change="loadVisits">
+                <option value="">Todos</option>
+                <option v-for="status in visitStatusOptions" :key="status.value" :value="status.value">{{ status.label }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="vg-label" for="visit-filter-machine">Máquina (ID)</label>
+              <input id="visit-filter-machine" v-model="visitFilters.machine_id" class="vg-input" type="number" min="1" placeholder="Todas" data-testid="product-loading-visit-filter-machine" @change="loadVisits" />
+            </div>
+            <div>
+              <label class="vg-label" for="visit-filter-date-from">Desde</label>
+              <input id="visit-filter-date-from" v-model="visitFilters.date_from" class="vg-input" type="date" data-testid="product-loading-visit-filter-date-from" @change="loadVisits" />
+            </div>
+            <div>
+              <label class="vg-label" for="visit-filter-date-to">Hasta</label>
+              <input id="visit-filter-date-to" v-model="visitFilters.date_to" class="vg-input" type="date" data-testid="product-loading-visit-filter-date-to" @change="loadVisits" />
+            </div>
+            <button type="button" class="vg-btn vg-btn-secondary ms-auto" data-testid="product-loading-visits-refresh" @click="loadVisits">
+              {{ isLoadingVisits ? 'Cargando…' : '↻ Actualizar' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="vg-card" style="padding: 0; overflow-x: auto;">
+          <table class="vg-table" data-testid="product-loading-visits-table">
+            <thead>
+              <tr>
+                <th>Visita</th>
+                <th>Máquina / Ubicación</th>
+                <th>Reponedor</th>
+                <th>Estado</th>
+                <th>Temp. cabina</th>
+                <th>Abastecidas</th>
+                <th>Retiradas</th>
+                <th>Merma</th>
+                <th>Ticket SAT</th>
+                <th>Finalizada</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="visit in visits" :key="visit.id">
+                <td style="font-family: var(--font-display); font-weight: 700;">{{ visit.visit_code }}</td>
+                <td>
+                  <strong>{{ visit.machine_code }}</strong>
+                  <div style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ visit.location_name }}</div>
+                </td>
+                <td>{{ visit.restocker_name }}</td>
+                <td><span :class="visitStatusTone(visit.status)">{{ visit.status_icon }} {{ visit.status_label }}</span></td>
+                <td>{{ visit.cabin_temp_celsius === null || visit.cabin_temp_celsius === undefined ? '—' : visit.cabin_temp_celsius + ' °C' }}</td>
+                <td>{{ visit.units_added }}</td>
+                <td>{{ visit.units_withdrawn }}</td>
+                <td>{{ formatCurrency(visit.commercial_spoilage_loss_eur) }}</td>
+                <td>
+                  <a v-if="visit.triggered_ticket_code" :href="visitTicketHref(visit)" :data-testid="'product-loading-visit-ticket-' + visit.id" @click.prevent="openVisitTicket(visit)">🎫 {{ visit.triggered_ticket_code }}</a>
+                  <span v-else style="color: var(--color-ink-muted);">—</span>
+                </td>
+                <td>{{ formatDateTime(visit.completed_at || visit.started_at) }}</td>
+                <td>
+                  <button type="button" class="vg-btn vg-btn-secondary" :data-testid="'product-loading-visit-detail-' + visit.id" @click="openVisitDetailModal(visit.id)">Ver expediente</button>
+                </td>
+              </tr>
+              <tr v-if="!isLoadingVisits && visits.length === 0">
+                <td colspan="11" style="text-align: center; padding: 28px; color: var(--color-ink-muted);">
+                  No hay visitas de reposición in situ que coincidan con los filtros.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Expediente de visita in situ -->
+      <ModalDialog v-model="showVisitDetailModal" :title="visitDetailVisit ? visitDetailVisit.visit_code : 'Expediente de visita'" subtitle="Trazabilidad carril a carril, FEFO y triple cerrojo sanitario." size="xl">
+        <div v-if="isLoadingVisitDetail" data-testid="product-loading-visit-detail-loading" style="padding: 24px; text-align: center; color: var(--color-ink-muted);">
+          Cargando expediente…
+        </div>
+        <div v-else-if="visitDetailError" class="vg-alert vg-alert-error" role="alert" data-testid="product-loading-visit-detail-error">
+          ⚠️ {{ visitDetailError }}
+        </div>
+        <div v-else-if="visitDetailVisit" data-testid="product-loading-visit-detail-modal">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px;">
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Máquina</div>
+              <div><strong>{{ visitDetailVisit.machine_code }}</strong> · {{ visitDetailVisit.machine_model }}</div>
+              <div style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ visitDetailVisit.location_name }}</div>
+            </div>
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Reponedor</div>
+              <div>{{ visitDetailVisit.restocker_name }}</div>
+            </div>
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Estado</div>
+              <div><span :class="visitStatusTone(visitDetailVisit.status)">{{ visitDetailVisit.status_label }}</span></div>
+              <div v-if="visitDetailVisit.is_thermal_abort" class="vg-badge vg-badge-danger" style="margin-top: 6px;">🌡️ Aborto térmico</div>
+            </div>
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Temperatura de cabina</div>
+              <div>{{ visitDetailVisit.cabin_temp_celsius === null || visitDetailVisit.cabin_temp_celsius === undefined ? '—' : visitDetailVisit.cabin_temp_celsius + ' °C' }}</div>
+            </div>
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Inicio / Cierre</div>
+              <div>{{ formatDateTime(visitDetailVisit.started_at) }}</div>
+              <div style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ formatDateTime(visitDetailVisit.completed_at) }}</div>
+            </div>
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Unidades / Merma</div>
+              <div>+{{ visitDetailVisit.units_added }} · −{{ visitDetailVisit.units_withdrawn }}</div>
+              <div style="color: var(--color-error-text);">{{ formatCurrency(visitDetailVisit.commercial_spoilage_loss_eur) }}</div>
+            </div>
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Sello precautorio</div>
+              <div>{{ visitDetailVisit.precautionary_seal_applied ? 'Aplicado' : 'No aplicado' }}</div>
+            </div>
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Ticket SAT</div>
+              <a v-if="visitDetailVisit.triggered_ticket_code" :href="visitTicketHref(visitDetailVisit)" data-testid="product-loading-visit-detail-ticket" @click.prevent="openVisitTicket(visitDetailVisit)">🎫 {{ visitDetailVisit.triggered_ticket_code }}</a>
+              <span v-else style="color: var(--color-ink-muted);">Sin ticket</span>
+            </div>
+          </div>
+
+          <div v-if="visitDetailVisit.internal_notes" class="vg-alert vg-alert-info" data-testid="product-loading-visit-detail-notes" style="margin-bottom: 16px;">
+            📝 {{ visitDetailVisit.internal_notes }}
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 16px;">
+            <div class="vg-card" style="padding: 14px;" data-testid="product-loading-visit-detail-hygiene">
+              <h4 style="margin: 0 0 10px; font-family: var(--font-display);">🧼 Checklist higiénico</h4>
+              <div v-if="visitHygieneItems.length === 0" style="color: var(--color-ink-muted);">Sin checklist registrado.</div>
+              <ul v-else style="margin: 0; padding-left: 18px;">
+                <li v-for="entry in visitHygieneItems" :key="entry.key">{{ entry.label }}: <strong>{{ visitHygieneValue(entry.value) }}</strong></li>
+              </ul>
+            </div>
+            <div class="vg-card" style="padding: 14px;" data-testid="product-loading-visit-detail-photo">
+              <h4 style="margin: 0 0 10px; font-family: var(--font-display);">📷 Evidencia fotográfica</h4>
+              <a v-if="visitDetailVisit.photo_evidence_url" :href="visitDetailVisit.photo_evidence_url" target="_blank" rel="noopener" data-testid="product-loading-visit-detail-photo-link">Abrir evidencia</a>
+              <div v-else style="color: var(--color-ink-muted);">Sin foto adjunta.</div>
+            </div>
+          </div>
+
+          <div class="vg-card" style="padding: 0; overflow-x: auto;">
+            <table class="vg-table" data-testid="product-loading-visit-detail-items">
+              <thead>
+                <tr>
+                  <th>Carril</th>
+                  <th>Producto</th>
+                  <th>Antes</th>
+                  <th>Retiradas</th>
+                  <th>Cargadas</th>
+                  <th>Después</th>
+                  <th>Lote retirado</th>
+                  <th>Lote cargado</th>
+                  <th>Caducidad cargada</th>
+                  <th>Coste unitario</th>
+                  <th>Merma</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in visitItems" :key="item.id">
+                  <td style="font-family: monospace;">{{ item.slot_code }}</td>
+                  <td>#{{ item.product_id }}</td>
+                  <td>{{ item.qty_before }}</td>
+                  <td>{{ item.qty_withdrawn_expired + item.qty_withdrawn_damaged }}</td>
+                  <td>{{ item.qty_added }}</td>
+                  <td>{{ item.qty_after }}</td>
+                  <td>{{ item.withdrawn_batch_code || '—' }}</td>
+                  <td>{{ item.loaded_batch_code || '—' }}</td>
+                  <td>{{ item.loaded_expiration_date || '—' }}</td>
+                  <td>{{ formatCurrency(item.unit_cost_snapshot_eur) }}</td>
+                  <td>{{ formatCurrency(item.commercial_spoilage_loss_eur) }}</td>
+                </tr>
+                <tr v-if="visitItems.length === 0">
+                  <td colspan="11" style="text-align: center; padding: 24px; color: var(--color-ink-muted);">Sin líneas de carril registradas.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <template #footer>
+          <button type="button" class="vg-btn vg-btn-secondary" data-testid="product-loading-visit-detail-close" @click="showVisitDetailModal = false">Cerrar</button>
+        </template>
+      </ModalDialog>
 
       <!-- Propuesta individual -->
       <ModalDialog v-model="showProposalModal" title="Propuesta de carga matutina" subtitle="Solo máquinas operativas de las zonas cubiertas hoy (QA 1)." size="xl">
