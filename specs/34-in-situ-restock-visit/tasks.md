@@ -46,7 +46,7 @@ flowchart LR
   - **Requisitos:** `RF-01.1`, `RF-01.2`, `RF-03.1`, `D1`, `D3`, `C1`, `QA 3`.
   - **Verificación:** `php tests/unit/InSituRestockVisitDomainModelsTest.php`
 
-- [ ] **T-RVF-04 · Crear `MachineRestockVisitValidator` y `MachineRestockVisitValidationException` (Triple Cerrojo Sanitario `Art. II`, doble regla FEFO `QA 1`, techo térmico `QA 4`, checklist adaptativo `D3`, foto `Art. V.5` y nota $\ge 20$ chars `Art. V.1`)**
+- [x] **T-RVF-04 · Crear `MachineRestockVisitValidator` y `MachineRestockVisitValidationException` (Triple Cerrojo Sanitario `Art. II`, doble regla FEFO `QA 1`, techo térmico `QA 4`, checklist adaptativo `D3`, foto `Art. V.5` y nota $\ge 20$ chars `Art. V.1`)**
   - **Requisitos:** `RF-02.1`–`RF-02.3`, `RF-03.1`, `RF-03.2`, `D1`–`D3`, `C1`, `QA 1`, `QA 4`, `Art. II`, `Art. V.1`, `Art. V.5`.
   - **Verificación:** `php tests/unit/MachineRestockVisitValidatorTest.php`
 
