@@ -14,8 +14,10 @@ use VendGuard\Core\Domain\Model\MachinePlanogramSlot;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\ProductCategory;
 use VendGuard\Core\Domain\Model\ProductUnitType;
+use VendGuard\Core\Domain\Model\RestockerVanProductStock;
 use VendGuard\Core\Domain\Model\VendingProduct;
 use VendGuard\Core\Domain\Repository\MachinePlanogramRepositoryInterface;
+use VendGuard\Core\Domain\Repository\RestockerVanStockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\VendingProductRepositoryInterface;
 use VendGuard\Core\Service\ModelPlanogramPresetCatalog;
 use VendGuard\Core\Service\PlanogramCompatibilityValidator;
@@ -70,14 +72,18 @@ final class MachinePlanogramService
 
     private ?AuditLogger $auditLogger;
 
+    private ?RestockerVanStockRepositoryInterface $stockRepository;
+
     public function __construct(
         MachinePlanogramRepositoryInterface $planogramRepository,
         VendingProductRepositoryInterface $productRepository,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?RestockerVanStockRepositoryInterface $stockRepository = null
     ) {
         $this->planogramRepository = $planogramRepository;
         $this->productRepository = $productRepository;
         $this->auditLogger = $auditLogger;
+        $this->stockRepository = $stockRepository;
     }
 
     /**
@@ -520,6 +526,9 @@ final class MachinePlanogramService
         }
 
         $slots = array_map([$this, 'stripCommercialData'], $this->planogramRepository->findSlotsByMachine($machineId, true));
+        if ($this->stockRepository !== null) {
+            $slots = $this->enrichSlotsWithVanBatches($slots, $restockerId);
+        }
 
         return [
             'machine' => $machine,
@@ -573,6 +582,68 @@ final class MachinePlanogramService
         }
 
         return $slot;
+    }
+
+    /**
+     * Añade a cada carril los lotes sanos de la furgoneta compatibles por producto.
+     *
+     * El orden es FEFO estricto (caducidad ascendente, sin fecha al final y lote
+     * como desempate), y cada entrada lleva solo cantidades y caducidad: ningún
+     * coste ni margen cruza al reponedor (Art. V.4). Los lotes caducados o sin
+     * saldo no se ofrecen porque el cerrojo `QA 1` los rechaza al cargar.
+     *
+     * @param list<array<string, mixed>> $slots
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function enrichSlotsWithVanBatches(array $slots, int $restockerId): array
+    {
+        $lotsByProduct = [];
+        foreach ($this->stockRepository?->findByRestocker($restockerId) ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $lot = RestockerVanProductStock::fromDatabaseRow($row);
+            if ($lot->getQuantityAvailable() <= 0 || !$lot->isUsable()) {
+                continue;
+            }
+
+            $lotsByProduct[$lot->getProductId()][] = $lot;
+        }
+
+        return array_map(function (array $slot) use ($lotsByProduct): array {
+            $lots = $lotsByProduct[(int)$slot['product_id']] ?? [];
+            usort($lots, static function (RestockerVanProductStock $left, RestockerVanProductStock $right): int {
+                $leftDate = $left->getExpirationDate();
+                $rightDate = $right->getExpirationDate();
+
+                if ($leftDate === null && $rightDate !== null) {
+                    return 1;
+                }
+                if ($leftDate !== null && $rightDate === null) {
+                    return -1;
+                }
+                if ($leftDate !== null && $rightDate !== null && $leftDate != $rightDate) {
+                    return $leftDate <=> $rightDate;
+                }
+
+                return $left->getBatchCode() <=> $right->getBatchCode();
+            });
+
+            $batches = array_map(static fn (RestockerVanProductStock $lot): array => [
+                'product_id' => $lot->getProductId(),
+                'batch_code' => $lot->getBatchCode(),
+                'expiration_date' => $lot->getExpirationDate()?->format('Y-m-d'),
+                'quantity_available' => $lot->getQuantityAvailable(),
+                'expiry_status' => $lot->expiryStatus()->value,
+            ], $lots);
+
+            $slot['available_van_batches'] = $batches;
+            $slot['fefo_recommended_batch_code'] = $batches !== [] ? $batches[0]['batch_code'] : null;
+
+            return $slot;
+        }, $slots);
     }
 
     /**

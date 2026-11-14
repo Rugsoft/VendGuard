@@ -62,7 +62,7 @@ flowchart LR
   - **Requisitos:** `RF-02.1`–`RF-02.3`, `RF-03.1`–`RF-03.3`, `RF-04.2`, `D1`–`D4`, `C1`–`C3`, `QA 1`–`QA 4`, `Art. II`, `Art. III.3`, `Art. V.1`, `Art. V.2`, `Art. V.4`, `Art. V.5`.
   - **Verificación:** `php tests/unit/MachineRestockVisitServiceTest.php`
 
-- [ ] **T-RVF-08 · Integrar en `ProductLoadingOrderService` y `MachinePlanogramService` el pre-cálculo de liquidación (`C4`: `suggested_restocked_in_machines_qty` y `suggested_withdrawn_spoilage_qty`) y los lotes FEFO de furgoneta compatibles por máquina**
+- [x] **T-RVF-08 · Integrar en `ProductLoadingOrderService` y `MachinePlanogramService` el pre-cálculo de liquidación (`C4`: `suggested_restocked_in_machines_qty` y `suggested_withdrawn_spoilage_qty`) y los lotes FEFO de furgoneta compatibles por máquina**
   - **Requisitos:** `RF-03.4`, `RF-05.1`, `C4`, `QA 1`, `Art. V.4`.
   - **Verificación:** `php tests/unit/ProductLoadingOrderServiceTest.php && php tests/unit/MachinePlanogramServiceTest.php`
 

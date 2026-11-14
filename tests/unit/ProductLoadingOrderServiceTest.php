@@ -24,12 +24,15 @@ use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\ProductCategory;
 use VendGuard\Core\Domain\Model\ProductLoadingOrder;
 use VendGuard\Core\Domain\Model\ProductLoadingOrderItem;
+use VendGuard\Core\Domain\Model\MachineRestockVisit;
+use VendGuard\Core\Domain\Model\MachineRestockVisitItem;
 use VendGuard\Core\Domain\Model\ProductUnitType;
 use VendGuard\Core\Domain\Model\RestockerVanProductStock;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Model\VendingProduct;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
+use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Core\Domain\Repository\ProductLoadingOrderRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RestockerVanStockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
@@ -788,6 +791,51 @@ final class FakeAuditLogRepositoryForLoadingServiceTest implements AuditLogRepos
     }
 }
 
+/** Repositorio de visitas mínimo: solo la agregación `C4` tiene comportamiento. */
+final class FakeMachineRestockVisitRepositoryForLoadingServiceTest implements MachineRestockVisitRepositoryInterface
+{
+    /** @var array<int, list<array<string, mixed>>> */
+    public array $suggestionsByOrder = [];
+
+    public function insertVisit(MachineRestockVisit $visit): MachineRestockVisit
+    {
+        return $visit;
+    }
+
+    public function insertItem(MachineRestockVisitItem $item): MachineRestockVisitItem
+    {
+        return $item;
+    }
+
+    public function findById(int $visitId, bool $includeCosts = false): ?array
+    {
+        return null;
+    }
+
+    public function findByClientMutationId(
+        int $restockerId,
+        string $clientMutationId,
+        bool $includeCosts = false
+    ): ?array {
+        return null;
+    }
+
+    public function listForRestocker(int $restockerId, array $filters = []): array
+    {
+        return [];
+    }
+
+    public function listForCoordinator(array $filters = []): array
+    {
+        return [];
+    }
+
+    public function suggestLiquidationQuantities(int $loadingOrderId, int $restockerId): array
+    {
+        return $this->suggestionsByOrder[$loadingOrderId] ?? [];
+    }
+}
+
 /**
  * @return array{
  *   service: ProductLoadingOrderService,
@@ -858,6 +906,7 @@ function makeProductLoadingWorld(array $extraUsers = []): array
 
     $catalog = new FakeVendingProductRepositoryForLoadingServiceTest($products);
     $audit = new FakeAuditLogRepositoryForLoadingServiceTest();
+    $visits = new FakeMachineRestockVisitRepositoryForLoadingServiceTest();
     $codes = ['PLO-2026-9001', 'PLO-2026-9002', 'PLO-2026-9003', 'PLO-2026-9004', 'PLO-2026-9005'];
     $generator = static function () use (&$codes): string {
         return array_shift($codes) ?? 'PLO-2026-' . random_int(1000, 9999);
@@ -870,7 +919,8 @@ function makeProductLoadingWorld(array $extraUsers = []): array
         new FakeUserRepositoryForLoadingServiceTest($users),
         new AuditLogger($audit),
         null,
-        $generator
+        $generator,
+        $visits
     );
 
     return [
@@ -879,6 +929,7 @@ function makeProductLoadingWorld(array $extraUsers = []): array
         'stocks' => $stocks,
         'catalog' => $catalog,
         'audit' => $audit,
+        'visits' => $visits,
         'products' => $products,
         'actor' => ['id' => 3, 'role' => 'COORDINATOR', 'name' => 'Coordinación'],
         'date' => $date,
@@ -1269,6 +1320,47 @@ $assert(
     && $coldStock?->getQuantityAvailable() === 8
     && $ambientStock?->getQuantityAvailable() === 7
 );
+$world['visits']->suggestionsByOrder[$orderId] = [
+    [
+        'product_id' => 101,
+        'batch_code' => 'LOTE-T8-A',
+        'suggested_restocked_in_machines_qty' => 4,
+        'suggested_withdrawn_spoilage_qty' => 1,
+    ],
+    [
+        'product_id' => 102,
+        'batch_code' => null,
+        'suggested_restocked_in_machines_qty' => 2,
+        'suggested_withdrawn_spoilage_qty' => 0,
+    ],
+];
+
+$liquidated = $service->getOrder($orderId);
+$liquidatedByProduct = [];
+foreach ($liquidated['items'] as $liquidatedItem) {
+    $liquidatedByProduct[(int)$liquidatedItem['product_id']] = $liquidatedItem;
+}
+
+$assert(
+    '6.1b El detalle de la orden confirmada precarga las cantidades C4 por producto/lote',
+    ($liquidatedByProduct[101]['suggested_restocked_in_machines_qty'] ?? null) === 4
+    && ($liquidatedByProduct[101]['suggested_withdrawn_spoilage_qty'] ?? null) === 1
+    && ($liquidatedByProduct[102]['suggested_restocked_in_machines_qty'] ?? null) === 2
+    && ($liquidatedByProduct[102]['suggested_withdrawn_spoilage_qty'] ?? null) === 0
+);
+
+$contextAfterConfirm = $service->getRestockerLoadingContext(7);
+$contextItems = [];
+foreach (($contextAfterConfirm['active_loading_order']['items'] ?? []) as $contextItem) {
+    $contextItems[(int)$contextItem['product_id']] = $contextItem;
+}
+$assert(
+    '6.1c El bootstrap de la ruta entrega las mismas cantidades sugeridas',
+    ($contextItems[101]['suggested_restocked_in_machines_qty'] ?? null) === 4
+    && ($contextItems[101]['suggested_withdrawn_spoilage_qty'] ?? null) === 1
+    && ($contextItems[102]['suggested_restocked_in_machines_qty'] ?? null) === 2
+);
+
 $assert(
     '6.2 La recepción deja auditoría de orden y de cada incremento de lote',
     $world['audit']->events[count($world['audit']->events) - 1]->getAction() === ProductLoadingOrderService::AUDIT_CONFIRMED
