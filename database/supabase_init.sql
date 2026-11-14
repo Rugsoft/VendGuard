@@ -228,6 +228,18 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
+-- Módulo 34 · tipo nativo #31 del estado final de la visita in situ (RF-01.2).
+-- Solo hay dos desenlaces posibles: la visita se completa con producto cargado o
+-- se aborta porque la cabina superó el techo sanitario del Art. II.
+DO $do$
+BEGIN
+    CREATE TYPE restock_visit_status AS ENUM (
+        'COMPLETED',
+        'ABORTED_THERMAL_BREACH'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
 DO $do$
 BEGIN
     -- `RESTOCKER` (Módulo 31): el cuarto actor operativo del sistema, el
@@ -340,7 +352,11 @@ BEGIN
         -- Stock por lote del vehículo y orden de carga del Módulo 33 (Art. III.3):
         -- el ajuste del saldo del reponedor y el ciclo de vida de la orden se
         -- auditan con entidad propia, no como edición del producto ni del usuario.
-        'RESTOCKER_VAN_STOCK', 'PRODUCT_LOADING_ORDER'
+        'RESTOCKER_VAN_STOCK', 'PRODUCT_LOADING_ORDER',
+        -- Visita de reposición in situ del Módulo 34 (Art. III.3): la visita, su
+        -- lectura térmica, la merma retirada y el ticket SAT disparado se auditan
+        -- contra esta entidad, no contra la máquina ni contra el reponedor.
+        'MACHINE_RESTOCK_VISIT'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -3652,6 +3668,11 @@ CREATE TABLE IF NOT EXISTS machine_planogram_slots (
     is_active             BOOLEAN NOT NULL DEFAULT TRUE,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Lote y caducidad vigentes en el carril (Módulo 34 · D1, RF-01.1): el
+    -- semáforo FEFO del móvil se calcula con este par, y la visita los recalcula
+    -- cuando retira el remanente o carga producto nuevo.
+    current_batch_code    VARCHAR(40),
+    current_expiration_date DATE,
     CONSTRAINT pk_machine_planogram_slots PRIMARY KEY (id),
     CONSTRAINT uq_machine_planogram_slot UNIQUE (machine_id, slot_code),
     CONSTRAINT fk_machine_planogram_slots_machine FOREIGN KEY (machine_id)
@@ -3663,6 +3684,9 @@ CREATE TABLE IF NOT EXISTS machine_planogram_slots (
     CONSTRAINT chk_machine_planogram_min_threshold CHECK (min_threshold >= 0 AND min_threshold < max_capacity),
     CONSTRAINT chk_machine_planogram_estimated_qty CHECK (
         current_estimated_qty >= 0 AND current_estimated_qty <= max_capacity
+    ),
+    CONSTRAINT chk_machine_planogram_current_batch_format CHECK (
+        current_batch_code IS NULL OR current_batch_code ~ '^[A-Z0-9_-]{2,40}$'
     )
 );
 
@@ -4145,9 +4169,272 @@ CREATE OR REPLACE TRIGGER trg_enforce_loading_order_cold_chain_dispatch
     BEFORE UPDATE ON product_loading_orders
     FOR EACH ROW EXECUTE FUNCTION enforce_loading_order_cold_chain_dispatch();
 
+-- =============================================================================
+-- SECCIÓN 17 · Tablas 47 y 48 · Visita de reposición in situ y control FEFO
+--              (Módulo 34 · 34-in-situ-restock-visit)
+-- =============================================================================
+-- El carril del planograma ya conocía su capacidad y su existencia estimada, pero
+-- no qué lote ni qué caducidad vivía dentro. Sin ese dato no hay FEFO posible: ni
+-- aviso de carril caducado, ni retirada obligatoria antes de abastecer, ni orden
+-- de lotes de la furgoneta por la fecha más próxima a vencer. La visita in situ
+-- conserva además la prueba documental del Art. II —temperatura de cabina al
+-- abrir la puerta, precinto, foto y nota interna— y el desglose carril a carril
+-- con la merma comercial congelada a coste de la fecha (QA 3). Ambas tablas son
+-- históricas: no admiten `DELETE` (Art. III.1) ni `UPDATE` (Art. III.3).
+
+-- -----------------------------------------------------------------------------
+-- Tabla 47 · machine_restock_visits — cabecera histórica de la visita
+-- -----------------------------------------------------------------------------
+-- `visit_code` es la identidad legible e inmutable (`MRV-AAAA-NNNN`) y
+-- `uq_machine_restock_visits_mutation` resuelve la idempotencia del móvil: el
+-- reenvío de la misma mutación devuelve la visita grabada en lugar de descontar
+-- dos veces de la furgoneta (D4). `loading_order_id` enlaza la visita con la
+-- orden de carga del Módulo 33 (C4) y `route_schedule_id` queda reservado para la
+-- Feature 27 sin acoplar una tabla que aún no existe (Art. VI). El protocolo de
+-- aborto está sellado por `CHECK`: sin precinto, sin lectura térmica, sin foto o
+-- con una nota de menos de 20 caracteres, no es un aborto válido (Art. II,
+-- Art. V.1, Art. V.5).
+CREATE TABLE IF NOT EXISTS machine_restock_visits (
+    id                          BIGINT GENERATED ALWAYS AS IDENTITY,
+    visit_code                  VARCHAR(32) NOT NULL,
+    machine_id                  BIGINT NOT NULL,
+    restocker_id                BIGINT NOT NULL,
+    loading_order_id            BIGINT,
+    route_schedule_id           BIGINT,
+    status                      restock_visit_status NOT NULL DEFAULT 'COMPLETED',
+    started_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at                TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    cabin_temp_celsius          NUMERIC(4, 1),
+    hygiene_checklist_json      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    precautionary_seal_applied  BOOLEAN NOT NULL DEFAULT FALSE,
+    photo_evidence_url          VARCHAR(255),
+    internal_notes              VARCHAR(500),
+    triggered_incident_id       BIGINT,
+    client_mutation_id          VARCHAR(64) NOT NULL,
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_machine_restock_visits PRIMARY KEY (id),
+    CONSTRAINT uq_machine_restock_visits_code UNIQUE (visit_code),
+    CONSTRAINT uq_machine_restock_visits_mutation UNIQUE (restocker_id, client_mutation_id),
+    CONSTRAINT fk_machine_restock_visits_machine
+        FOREIGN KEY (machine_id) REFERENCES machines (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_restock_visits_restocker
+        FOREIGN KEY (restocker_id) REFERENCES users (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_restock_visits_loading_order
+        FOREIGN KEY (loading_order_id) REFERENCES product_loading_orders (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_restock_visits_triggered_incident
+        FOREIGN KEY (triggered_incident_id) REFERENCES incidents (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_machine_restock_visits_code_format
+        CHECK (visit_code ~ '^MRV-[0-9]{4}-[0-9]{4,}$'),
+    CONSTRAINT chk_machine_restock_visits_mutation_format
+        CHECK (char_length(btrim(client_mutation_id)) >= 6),
+    CONSTRAINT chk_machine_restock_visits_time_order
+        CHECK (completed_at >= started_at),
+    CONSTRAINT chk_machine_restock_visits_temp_range
+        CHECK (cabin_temp_celsius IS NULL OR (cabin_temp_celsius >= -5.0 AND cabin_temp_celsius <= 35.0)),
+    CONSTRAINT chk_machine_restock_visits_thermal_abort_coherence
+        CHECK (
+            status <> 'ABORTED_THERMAL_BREACH'
+            OR (
+                precautionary_seal_applied = TRUE
+                AND cabin_temp_celsius IS NOT NULL
+                AND photo_evidence_url IS NOT NULL
+                AND char_length(btrim(photo_evidence_url)) > 0
+                AND internal_notes IS NOT NULL
+                AND char_length(btrim(internal_notes)) >= 20
+            )
+        )
+);
+
+CREATE INDEX IF NOT EXISTS idx_machine_restock_visits_machine_created
+    ON machine_restock_visits (machine_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_machine_restock_visits_restocker_created
+    ON machine_restock_visits (restocker_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_machine_restock_visits_loading_order
+    ON machine_restock_visits (loading_order_id)
+    WHERE loading_order_id IS NOT NULL;
+
+CREATE OR REPLACE TRIGGER trg_no_delete_machine_restock_visits
+    BEFORE DELETE ON machine_restock_visits
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+-- -----------------------------------------------------------------------------
+-- Tabla 48 · machine_restock_visit_items — desglose carril a carril
+-- -----------------------------------------------------------------------------
+-- Las cotas son una identidad aritmética (C1): las retiradas no superan la
+-- existencia previa, `qty_after` es exactamente `qty_before - retiradas +
+-- añadidas` y el snapshot contable se congela a coste de la fecha de la visita
+-- (QA 3). `loaded_batch_code` es obligatorio en cuanto se carga una unidad: sin
+-- lote no hay trazabilidad ni segunda pasada FEFO.
+CREATE TABLE IF NOT EXISTS machine_restock_visit_items (
+    id                              BIGINT GENERATED ALWAYS AS IDENTITY,
+    visit_id                        BIGINT NOT NULL,
+    slot_id                         BIGINT NOT NULL,
+    slot_code                       VARCHAR(24) NOT NULL,
+    product_id                      BIGINT NOT NULL,
+    qty_before                      INTEGER NOT NULL DEFAULT 0,
+    qty_withdrawn_expired           INTEGER NOT NULL DEFAULT 0,
+    qty_withdrawn_damaged           INTEGER NOT NULL DEFAULT 0,
+    qty_added                       INTEGER NOT NULL DEFAULT 0,
+    qty_after                       INTEGER NOT NULL DEFAULT 0,
+    withdrawn_batch_code            VARCHAR(40),
+    withdrawn_expiration_date       DATE,
+    loaded_batch_code               VARCHAR(40),
+    loaded_expiration_date          DATE,
+    unit_cost_snapshot_eur          NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    commercial_spoilage_loss_eur    NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_machine_restock_visit_items PRIMARY KEY (id),
+    CONSTRAINT uq_machine_restock_visit_item_slot UNIQUE (visit_id, slot_code),
+    CONSTRAINT fk_machine_restock_visit_items_visit
+        FOREIGN KEY (visit_id) REFERENCES machine_restock_visits (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_restock_visit_items_slot
+        FOREIGN KEY (slot_id) REFERENCES machine_planogram_slots (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_restock_visit_items_product
+        FOREIGN KEY (product_id) REFERENCES vending_products (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_machine_restock_visit_items_qty_bounds
+        CHECK (
+            qty_before >= 0 AND qty_before <= 10000
+            AND qty_withdrawn_expired >= 0 AND qty_withdrawn_expired <= 10000
+            AND qty_withdrawn_damaged >= 0 AND qty_withdrawn_damaged <= 10000
+            AND qty_added >= 0 AND qty_added <= 10000
+            AND qty_withdrawn_expired + qty_withdrawn_damaged <= qty_before
+            AND qty_after = qty_before - qty_withdrawn_expired - qty_withdrawn_damaged + qty_added
+            AND qty_after >= 0 AND qty_after <= 10000
+        ),
+    CONSTRAINT chk_machine_restock_visit_items_batch_formats
+        CHECK (
+            (withdrawn_batch_code IS NULL OR withdrawn_batch_code ~ '^[A-Z0-9_-]{2,40}$')
+            AND (loaded_batch_code IS NULL OR loaded_batch_code ~ '^[A-Z0-9_-]{2,40}$')
+            AND (qty_added = 0 OR loaded_batch_code IS NOT NULL)
+        ),
+    CONSTRAINT chk_machine_restock_visit_items_cost_coherence
+        CHECK (
+            unit_cost_snapshot_eur >= 0.00 AND unit_cost_snapshot_eur <= 9999.99
+            AND commercial_spoilage_loss_eur = ROUND((qty_withdrawn_expired + qty_withdrawn_damaged) * unit_cost_snapshot_eur, 2)
+        )
+);
+
+CREATE INDEX IF NOT EXISTS idx_machine_restock_visit_items_visit
+    ON machine_restock_visit_items (visit_id);
+
+CREATE INDEX IF NOT EXISTS idx_machine_restock_visit_items_product_batch
+    ON machine_restock_visit_items (product_id, loaded_batch_code);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_machine_restock_visit_items
+    BEFORE DELETE ON machine_restock_visit_items
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+-- -----------------------------------------------------------------------------
+-- 17.1 · Inmutabilidad absoluta de la visita (Art. III.3, C1)
+-- -----------------------------------------------------------------------------
+-- Se corrigen con otra visita, nunca reescribiendo la anterior: la anterior es
+-- la prueba documental de lo que se retiró, se cargó y se midió.
+CREATE OR REPLACE FUNCTION prevent_restock_visit_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'ART_III_3_IMMUTABLE_VISIT_VIOLATION: La visita de reposición in situ y su desglose son históricos e inmutables; una corrección se registra como una visita nueva.'
+        USING ERRCODE = '45000';
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_immutable_machine_restock_visits
+    BEFORE UPDATE ON machine_restock_visits
+    FOR EACH ROW EXECUTE FUNCTION prevent_restock_visit_mutation();
+
+CREATE OR REPLACE TRIGGER trg_immutable_machine_restock_visit_items
+    BEFORE UPDATE ON machine_restock_visit_items
+    FOR EACH ROW EXECUTE FUNCTION prevent_restock_visit_mutation();
+
+-- -----------------------------------------------------------------------------
+-- 17.2 · Cerrojo térmico y de estado en el motor (Art. II, RNF-02, D2, QA 4)
+-- -----------------------------------------------------------------------------
+-- La tipología manda: una máquina refrigerada no admite una visita sin lectura
+-- de cabina, y una visita completada no puede declarar una cabina por encima del
+-- techo sanitario. El protocolo de aborto lo tramita el servicio, que además
+-- marca la cuarentena y abre o escala el ticket al SAT (QA 2).
+CREATE OR REPLACE FUNCTION enforce_restock_visit_sanitary_guard()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_machine_type TEXT;
+    v_machine_code VARCHAR(32);
+    v_thermal_ceiling NUMERIC(4, 1);
+BEGIN
+    SELECT m.machine_type::text, m.code
+      INTO v_machine_type, v_machine_code
+      FROM machines m
+     WHERE m.id = NEW.machine_id;
+
+    IF v_machine_type IN ('PERISHABLE_FOOD', 'COMBO', 'COLD_DRINKS')
+       AND NEW.cabin_temp_celsius IS NULL THEN
+        RAISE EXCEPTION 'ART_II_CABIN_TEMP_REQUIRED: La máquina % (%) exige lectura de temperatura de cabina al abrir la puerta.', v_machine_code, v_machine_type
+            USING ERRCODE = '45000';
+    END IF;
+
+    IF NEW.status = 'COMPLETED' AND NEW.cabin_temp_celsius IS NOT NULL THEN
+        v_thermal_ceiling := CASE
+            WHEN v_machine_type IN ('PERISHABLE_FOOD', 'COMBO') THEN 4.0
+            WHEN v_machine_type = 'COLD_DRINKS' THEN 8.0
+            ELSE NULL
+        END;
+
+        IF v_thermal_ceiling IS NOT NULL AND NEW.cabin_temp_celsius > v_thermal_ceiling THEN
+            RAISE EXCEPTION 'ART_II_CABIN_TEMP_EXCEEDED: La máquina % registra % °C y supera el techo sanitario de % °C; la visita debe tramitarse como ABORTED_THERMAL_BREACH.', v_machine_code, NEW.cabin_temp_celsius, v_thermal_ceiling
+                USING ERRCODE = '45000';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_enforce_restock_visit_sanitary_guard
+    BEFORE INSERT ON machine_restock_visits
+    FOR EACH ROW EXECUTE FUNCTION enforce_restock_visit_sanitary_guard();
+
+-- Una visita abortada por rotura de frío no introduce una sola unidad: `qty_added`
+-- queda en 0 en todas sus líneas, se declare en el cliente o no.
+CREATE OR REPLACE FUNCTION enforce_restock_visit_item_guard()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_visit_status restock_visit_status;
+BEGIN
+    SELECT v.status
+      INTO v_visit_status
+      FROM machine_restock_visits v
+     WHERE v.id = NEW.visit_id;
+
+    IF v_visit_status = 'ABORTED_THERMAL_BREACH' AND NEW.qty_added > 0 THEN
+        RAISE EXCEPTION 'ART_II_THERMAL_ABORT_ADD_FORBIDDEN: La visita % está abortada por rotura de cadena de frío y no admite unidades cargadas en el carril %.', NEW.visit_id, NEW.slot_code
+            USING ERRCODE = '45000';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_enforce_restock_visit_item_guard
+    BEFORE INSERT ON machine_restock_visit_items
+    FOR EACH ROW EXECUTE FUNCTION enforce_restock_visit_item_guard();
+
+
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 46 tablas (las 46 del contrato de correspondencia) · 46 columnas `ENUM` · 14
+-- 48 tablas (las 48 del contrato de correspondencia) · 47 columnas `ENUM` · 17
 -- funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
 -- `prevent_satisfaction_survey_rewrite()`, `prevent_service_sheet_update()`
@@ -4159,9 +4446,11 @@ CREATE OR REPLACE TRIGGER trg_enforce_loading_order_cold_chain_dispatch
 -- `enforce_planogram_slot_compatibility()`, `validate_product_update_against_planograms()`
 -- y `validate_machine_type_against_planogram()`) y las dos del cerrojo sanitario
 -- del Módulo 33 (`enforce_van_stock_cold_chain_batch()` y
--- `enforce_loading_order_cold_chain_dispatch()`)
--- 87 disparadores: 46 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 28
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2), 11 `BEFORE UPDATE` de
+-- `enforce_loading_order_cold_chain_dispatch()`) y las tres del blindaje de la
+-- visita in situ del Módulo 34 (`prevent_restock_visit_mutation()`,
+-- `enforce_restock_visit_sanitary_guard()` y `enforce_restock_visit_item_guard()`)
+-- 93 disparadores: 48 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 28
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2), 13 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
 -- `trg_no_update_technician_shift_logs`, `trg_immutable_root_causes`,
@@ -4170,12 +4459,16 @@ CREATE OR REPLACE TRIGGER trg_enforce_loading_order_cold_chain_dispatch
 -- `trg_immutable_sanitary_spoilage_records` y
 -- `trg_incidents_protect_sla_tier_snapshot`,
 -- `trg_validate_product_update_against_planograms` y
--- `trg_validate_machine_type_against_planogram` del Módulo 32) y 2 del cerrojo
--- sanitario de frío y lote del Módulo 33 (`trg_enforce_van_stock_cold_chain_batch`,
--- `BEFORE INSERT OR UPDATE`, y `trg_enforce_loading_order_cold_chain_dispatch`)
--- 74 restricciones nombradas: 46 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 31 únicas
--- 107 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- `trg_validate_machine_type_against_planogram` del Módulo 32,
+-- `trg_immutable_machine_restock_visits` y `trg_immutable_machine_restock_visit_items`
+-- del Módulo 34) y 2 del cerrojo sanitario de frío y lote del Módulo 33
+-- (`trg_enforce_van_stock_cold_chain_batch`, `BEFORE INSERT OR UPDATE`, y
+-- `trg_enforce_loading_order_cold_chain_dispatch`) y 2 del cerrojo térmico de la
+-- visita in situ del Módulo 34 (`trg_enforce_restock_visit_sanitary_guard` y
+-- `trg_enforce_restock_visit_item_guard`, `BEFORE INSERT`)
+-- 82 restricciones nombradas: 48 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 34 únicas
+-- 116 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
 -- en la bitácora), las 12 del Módulo 23 (5 en órdenes y 7 en líneas) y las 4 del
 -- Módulo 24 (formato del identificador, tipo de parada, operación y resultado) y
@@ -4190,13 +4483,15 @@ CREATE OR REPLACE TRIGGER trg_enforce_loading_order_cold_chain_dispatch
 -- `role_in_zone` con `is_primary`, orden de la baja lógica y prohibición de que un
 -- reponedor quede de guardia técnica), las 12 del Módulo 32 (8 del producto y 4
 -- del carril) y las 13 del Módulo 33 (3 del stock por lote, 5 de la orden y 5 de
--- la línea)
--- · 107 claves foráneas con las reglas declaradas en el contrato §2.4
--- 114 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- la línea) y las 9 del Módulo 34 (5 de la visita, 3 de la línea de visita y el
+-- formato del lote vigente del carril)
+-- · 114 claves foráneas con las reglas declaradas en el contrato §2.4
+-- 119 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
 -- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2), el Módulo 23 (5) y el
 -- Módulo 24 (2), el Módulo 26 (3), el Módulo 27 (6), el Módulo 28 (3) y el
--- Módulo 29 (4), el Módulo 31 (2) y el Módulo 32 (3) y el Módulo 33 (3)— y doce
+-- Módulo 29 (4), el Módulo 31 (2) y el Módulo 32 (3), el Módulo 33 (3) y el
+-- Módulo 34 (5)— y doce
 -- índices únicos parciales:
 -- `uq_incident_assignments_active_custody` (M26, Art. V.3), `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
@@ -4204,12 +4499,16 @@ CREATE OR REPLACE TRIGGER trg_enforce_loading_order_cold_chain_dispatch
 -- `uq_tech_shifts_single_active` (M21, Resolución R3),
 -- `uq_van_restock_open_per_tech` (M23, Decisión D3), `uq_restocker_zone_live` y
 -- `uq_restocker_primary_zone` (M31, RF-02.1 y QA 1) y
--- `uq_product_loading_orders_active_restocker` (M33, D3, RF-02.3)
+-- `uq_product_loading_orders_active_restocker` (M33, D3, RF-02.3). La identidad
+-- de la visita in situ (`uq_machine_restock_visits_code`) y la idempotencia del
+-- móvil (`uq_machine_restock_visits_mutation`, M34, D4) son restricciones únicas
+-- plenas, no parciales: rigen sobre toda la tabla histórica.
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)
 -- 1 columna derivada (`incident_replaced_parts.total_cost_snapshot`, D-7)
--- 8 columnas `JSONB`: 3 en `audit_log` (D-4), 2 en `technician_shift_logs` (M22),
+-- 9 columnas `JSONB`: 3 en `audit_log` (D-4), 2 en `technician_shift_logs` (M22),
 -- `signed_document` en `incident_service_sheets` (M19), `payload_json` en
--- `notification_outbox` (M16) y `response_payload` en `offline_sync_mutations` (M24)
+-- `notification_outbox` (M16), `response_payload` en `offline_sync_mutations` (M24)
+-- y `hygiene_checklist_json` en `machine_restock_visits` (M34, D3)
 --
 -- La verificación de correspondencia entre motores y la convergencia del esquema
 -- desplegado son T-HYBRID-23 y T-HYBRID-24; las semillas maestras, T-HYBRID-03.

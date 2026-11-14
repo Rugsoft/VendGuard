@@ -34,7 +34,7 @@ flowchart LR
 
 ## Detalle de Tareas
 
-- [ ] **T-RVF-01 · Crear migración `030_in_situ_restock_visit_and_fefo.sql`, converger `supabase_init.sql` y sembrar lotes en carril y visitas en `supabase_seeds.sql` y `SeedRunner`**
+- [x] **T-RVF-01 · Crear migración `030_in_situ_restock_visit_and_fefo.sql`, converger `supabase_init.sql` y sembrar lotes en carril y visitas en `supabase_seeds.sql` y `SeedRunner`**
   - **Requisitos:** `RF-01.1`, `RF-01.2`, `RNF-01`, `RNF-02`, `D1`, `D2`, `D4`, `C1`, `QA 3`, `Art. II`, `Art. III.1`, `Art. III.3`.
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
 

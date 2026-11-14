@@ -43,7 +43,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 46 tablas del contrato de correspondencia (§2.1, Módulos 14 a 33). */
+/** Las 48 tablas del contrato de correspondencia (§2.1, Módulos 14 a 34). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -76,6 +76,10 @@ const CONTRACT_TABLES = [
     'restocker_van_product_stocks',
     'product_loading_orders',
     'product_loading_order_items',
+    // Módulo 34 · visita de reposición in situ y su desglose carril a carril:
+    // ambas declaran `prevent_hard_delete()` y la inmutabilidad del Art. III.3.
+    'machine_restock_visits',
+    'machine_restock_visit_items',
 ];
 
 /** Adiciones declaradas del motor nuevo (§5). */
@@ -273,7 +277,7 @@ try {
 
     $baseOnlyTables = $readTables($pgPdo, $schema);
     $assert(
-        'El DDL base crea las 46 tablas del contrato y ninguna más',
+        'El DDL base crea las 48 tablas del contrato y ninguna más',
         $sameSet($baseOnlyTables, CONTRACT_TABLES),
         'tablas: ' . count($baseOnlyTables) . ' · ' . $listSample(array_merge(array_diff($baseOnlyTables, CONTRACT_TABLES), array_diff(CONTRACT_TABLES, $baseOnlyTables)))
     );
@@ -323,6 +327,7 @@ try {
             '027_restocker_role_and_zone_assignments.sql',
             '028_product_catalog_and_planogram_slots.sql',
             '029_product_loading_orders_and_cold_picking.sql',
+            '030_in_situ_restock_visit_and_fefo.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -330,7 +335,7 @@ try {
     $runner->assertConverged();
     $convergedTables = $readTables($pgPdo, $schema);
     $assert(
-        'Tras la migración, el inventario converge al del repositorio (46 tablas + libro A-5)',
+        'Tras la migración, el inventario converge al del repositorio (48 tablas + libro A-5)',
         $sameSet($convergedTables, array_merge(CONTRACT_TABLES, [ADDITION_LEDGER])),
         'tablas: ' . count($convergedTables)
     );
@@ -366,6 +371,7 @@ try {
         '027_restocker_role_and_zone_assignments.sql',
         '028_product_catalog_and_planogram_slots.sql',
         '029_product_loading_orders_and_cold_picking.sql',
+        '030_in_situ_restock_visit_and_fefo.sql',
     ];
     $ledgerFiles = array_map(static fn (array $row): string => (string)$row['filename'], $ledgerRows);
     $ledgerChecksumsOk = true;
@@ -373,7 +379,7 @@ try {
         $ledgerChecksumsOk = $ledgerChecksumsOk && strlen((string)$ledgerRow['checksum']) === 64;
     }
     $assert(
-        'El libro registra las 29 migraciones, en orden, con su huella de 64 caracteres',
+        'El libro registra las 30 migraciones, en orden, con su huella de 64 caracteres',
         $ledgerFiles === $expectedLedgerFiles && $ledgerChecksumsOk,
         'registradas: ' . count($ledgerRows)
     );
@@ -398,15 +404,15 @@ try {
 
     $pgTables = $readTables($pgPdo, $schema);
     $assert(
-        'El motor único declara las 46 tablas canónicas del dominio',
+        'El motor único declara las 48 tablas canónicas del dominio',
         $sameSet(array_values(array_diff($pgTables, [ADDITION_LEDGER])), CONTRACT_TABLES),
         'tablas: ' . count($pgTables)
     );
 
     $pgColumns = $readColumnNames($pgPdo, $schema);
     $assert(
-        'Todas las 46 tablas tienen columnas declaradas en PostgreSQL',
-        count($pgColumns) >= 46
+        'Todas las 48 tablas tienen columnas declaradas en PostgreSQL',
+        count($pgColumns) >= 48
     );
     $assert(
         'incidents declara las 52 columnas del contrato (43 + 7 de taxonomía + 2 de SLA)',
@@ -507,9 +513,22 @@ try {
         ]
     );
     $assert(
-        'El esquema declara los 46 conjuntos ENUM nativos del dominio (40 tipos)',
-        count($pgEnums) === 46,
+        'El esquema declara los 47 conjuntos ENUM nativos del dominio (41 tipos)',
+        count($pgEnums) === 47,
         'conjuntos: ' . count($pgEnums)
+    );
+
+    $assert(
+        'El estado final de la visita in situ declara sus dos desenlaces (Módulo 34)',
+        ($pgEnums['machine_restock_visits.status'] ?? []) === ['COMPLETED', 'ABORTED_THERMAL_BREACH'],
+        implode(' · ', $pgEnums['machine_restock_visits.status'] ?? [])
+    );
+
+    $assert(
+        'machine_planogram_slots declara el lote y la caducidad vigentes del carril (Módulo 34, D1)',
+        isset($pgColumns['machine_planogram_slots']['current_batch_code'], $pgColumns['machine_planogram_slots']['current_expiration_date'])
+            && $pgColumns['machine_planogram_slots']['current_batch_code']['nullable'] === true
+            && $pgColumns['machine_planogram_slots']['current_expiration_date']['nullable'] === true
     );
 
     $enumTypesStmt = $pgPdo->prepare(
@@ -522,8 +541,8 @@ try {
     $enumTypesStmt->execute([':schema' => $schema]);
     $enumTypeCount = (int)$enumTypesStmt->fetchColumn();
     $assert(
-        'El esquema declara los 40 tipos ENUM nativos distintos del contrato',
-        $enumTypeCount === 40,
+        'El esquema declara los 41 tipos ENUM nativos distintos del contrato',
+        $enumTypeCount === 41,
         'tipos: ' . $enumTypeCount
     );
 
@@ -549,8 +568,8 @@ try {
     $triggerStmt->execute([':schema' => $schema]);
     $pgTriggerTables = array_map(static fn (array $row): string => (string)$row['table_name'], $triggerStmt->fetchAll());
     $assert(
-        'A-4: las 46 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
-        count(array_unique($pgTriggerTables)) === 46 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
+        'A-4: las 48 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
+        count(array_unique($pgTriggerTables)) === 48 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
         'tablas con disparador: ' . count(array_unique($pgTriggerTables))
     );
 
@@ -584,6 +603,45 @@ try {
     $assert(
         'Disparador trg_incidents_protect_sla_tier_snapshot vinculado a incidents (Módulo 30)',
         (string)$slaTriggerStmt->fetchColumn() === 'trg_incidents_protect_sla_tier_snapshot'
+    );
+
+    // Módulo 34: la idempotencia del móvil y la inmutabilidad histórica de la
+    // visita son parte del contrato convergente, no solo del servicio.
+    $visitIndexStmt = $pgPdo->prepare(
+        "SELECT indexname FROM pg_indexes WHERE schemaname = :schema AND tablename = 'machine_restock_visits' AND indexname = :idx"
+    );
+    $visitIndexStmt->execute([':schema' => $schema, ':idx' => 'uq_machine_restock_visits_mutation']);
+    $assert(
+        'Índice único de idempotencia uq_machine_restock_visits_mutation presente en la visita (Módulo 34, D4)',
+        (string)$visitIndexStmt->fetchColumn() === 'uq_machine_restock_visits_mutation'
+    );
+
+    $immutabilityStmt = $pgPdo->prepare(
+        "SELECT trigger_name FROM information_schema.triggers
+          WHERE trigger_schema = :schema AND event_object_table = :table AND trigger_name = :trigger"
+    );
+    $immutabilityStmt->execute([
+        ':schema' => $schema,
+        ':table' => 'machine_restock_visit_items',
+        ':trigger' => 'trg_immutable_machine_restock_visit_items',
+    ]);
+    $assert(
+        'Disparador de inmutabilidad trg_immutable_machine_restock_visit_items vinculado (Módulo 34, Art. III.3)',
+        (string)$immutabilityStmt->fetchColumn() === 'trg_immutable_machine_restock_visit_items'
+    );
+
+    $thermalGuardStmt = $pgPdo->prepare(
+        "SELECT trigger_name FROM information_schema.triggers
+          WHERE trigger_schema = :schema AND event_object_table = :table AND trigger_name = :trigger"
+    );
+    $thermalGuardStmt->execute([
+        ':schema' => $schema,
+        ':table' => 'machine_restock_visits',
+        ':trigger' => 'trg_enforce_restock_visit_sanitary_guard',
+    ]);
+    $assert(
+        'Disparador del cerrojo térmico trg_enforce_restock_visit_sanitary_guard vinculado (Módulo 34, Art. II)',
+        (string)$thermalGuardStmt->fetchColumn() === 'trg_enforce_restock_visit_sanitary_guard'
     );
 
     // Sin tablas inesperadas

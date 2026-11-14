@@ -3042,6 +3042,191 @@ class SeedRunner
     }
 
     /**
+     * Lote y caducidad vigentes en los carriles refrigerados (Módulo 34 · D1, QA 1).
+     *
+     * Sin este par el semáforo FEFO del móvil no tiene nada que medir. Se siembra
+     * para que el reponedor vea un carril `EXPIRING_SOON` real (`VEND-0101.11` y
+     * `VEND-0801.11`, con el lote que caduca pasados mañana) y otro `OK`. Solo se
+     * escribe donde el carril nace sin lote (`current_batch_code IS NULL`): la
+     * existencia y el lote son estado operativo, y una resemilla no puede
+     * reescribir lo que el reponedor dejó en su última visita.
+     *
+     * @return int Carriles canónicos con lote vigente tras sembrar.
+     */
+    public function seedMachinePlanogramCurrentBatches(): int
+    {
+        $update = $this->pdo->prepare(
+            'UPDATE machine_planogram_slots
+                SET current_batch_code = :batch_code,
+                    current_expiration_date = :expiration_date
+              WHERE machine_id = (SELECT id FROM machines WHERE code = :machine_code LIMIT 1)
+                AND slot_code = :slot_code
+                AND current_batch_code IS NULL
+                AND current_expiration_date IS NULL'
+        );
+
+        foreach (self::canonicalPlanogramSlotBatchRows() as $row) {
+            $update->bindValue(':batch_code', $row['batch_code'], PDO::PARAM_STR);
+            $update->bindValue(
+                ':expiration_date',
+                date('Y-m-d', strtotime(sprintf('+%d days', $row['expiration_days']))),
+                PDO::PARAM_STR
+            );
+            $update->bindValue(':machine_code', $row['machine_code'], PDO::PARAM_STR);
+            $update->bindValue(':slot_code', $row['slot_code'], PDO::PARAM_STR);
+            $update->execute();
+        }
+
+        // Se informa del carril canónico con lote vivo, no de las filas tocadas:
+        // reejecutar la siembra no altera el resumen.
+        $verify = $this->pdo->prepare(
+            'SELECT COUNT(*)
+               FROM machine_planogram_slots s
+               INNER JOIN machines m ON m.id = s.machine_id
+              WHERE m.code = :machine_code
+                AND s.slot_code = :slot_code
+                AND s.current_batch_code = :batch_code'
+        );
+
+        $count = 0;
+        foreach (self::canonicalPlanogramSlotBatchRows() as $row) {
+            $verify->execute([
+                ':machine_code' => $row['machine_code'],
+                ':slot_code' => $row['slot_code'],
+                ':batch_code' => $row['batch_code'],
+            ]);
+            $count += (int)$verify->fetchColumn();
+        }
+
+        return $count;
+    }
+
+    /**
+     * Visitas de reposición in situ demo (Módulo 34 · RF-01.2, D2, D3, QA 3).
+     *
+     * Una visita `COMPLETED` con retirada FEFO real —seis sándwiches caducados
+     * salen del carril 11 de `VEND-0101` antes de cargar el lote nuevo, con su
+     * merma comercial congelada a coste de la fecha— y una
+     * `ABORTED_THERMAL_BREACH` histórica en `VEND-0701`, con precinto, foto y nota
+     * interna de más de 20 caracteres. Ambas son hechos históricos inmutables: se
+     * insertan **solo si no existen** y una resemilla no las reescribe ni duplica
+     * (Art. III.3). La cuarentena de la máquina abortada no se siembra porque el
+     * arranque en limpio no crea incidencias: el `triggered_incident_id` lo escribe
+     * el servicio cuando el SAT ya tiene el ticket (`QA 2`).
+     *
+     * @return int Visitas canónicas vivas tras sembrar.
+     */
+    public function seedMachineRestockVisits(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+
+        $visitInsert = $this->pdo->prepare(sprintf(
+            'INSERT INTO machine_restock_visits (
+                visit_code, machine_id, restocker_id, loading_order_id, status,
+                started_at, completed_at, cabin_temp_celsius, hygiene_checklist_json,
+                precautionary_seal_applied, photo_evidence_url, internal_notes, client_mutation_id
+            ) VALUES (
+                :visit_code,
+                (SELECT id FROM machines WHERE code = :machine_code LIMIT 1),
+                (SELECT id FROM users WHERE %1$s = :restocker_email LIMIT 1),
+                (SELECT id FROM product_loading_orders WHERE order_code = :order_code LIMIT 1),
+                :status, :started_at, :completed_at, :cabin_temp, :hygiene_checklist,
+                :precautionary_seal, :photo_evidence_url, :internal_notes, :client_mutation_id
+            ) %2$s',
+            $identityColumn,
+            $this->dialect->upsertDoNothing(['visit_code'])
+        ));
+
+        foreach (self::canonicalRestockVisitRows() as $visit) {
+            $startedAt = date('Y-m-d H:i:s', time() + $visit['started_offset_hours'] * 3600);
+            $completedAt = date('Y-m-d H:i:s', strtotime($startedAt) + $visit['duration_minutes'] * 60);
+
+            $visitInsert->bindValue(':visit_code', $visit['visit_code'], PDO::PARAM_STR);
+            $visitInsert->bindValue(':machine_code', $visit['machine_code'], PDO::PARAM_STR);
+            $visitInsert->bindValue(':restocker_email', $visit['restocker_email'], PDO::PARAM_STR);
+            $visitInsert->bindValue(
+                ':order_code',
+                $visit['order_code'],
+                $visit['order_code'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $visitInsert->bindValue(':status', $visit['status'], PDO::PARAM_STR);
+            $visitInsert->bindValue(':started_at', $startedAt, PDO::PARAM_STR);
+            $visitInsert->bindValue(':completed_at', $completedAt, PDO::PARAM_STR);
+            $visitInsert->bindValue(':cabin_temp', $visit['cabin_temp_celsius'], PDO::PARAM_STR);
+            $visitInsert->bindValue(':hygiene_checklist', $visit['hygiene_checklist_json'], PDO::PARAM_STR);
+            $visitInsert->bindValue(':precautionary_seal', $visit['precautionary_seal_applied'], PDO::PARAM_BOOL);
+            $visitInsert->bindValue(':photo_evidence_url', $visit['photo_evidence_url'], PDO::PARAM_STR);
+            $visitInsert->bindValue(':internal_notes', $visit['internal_notes'], PDO::PARAM_STR);
+            $visitInsert->bindValue(':client_mutation_id', $visit['client_mutation_id'], PDO::PARAM_STR);
+            $visitInsert->execute();
+        }
+
+        $itemInsert = $this->pdo->prepare(sprintf(
+            'INSERT INTO machine_restock_visit_items (
+                visit_id, slot_id, slot_code, product_id, qty_before,
+                qty_withdrawn_expired, qty_withdrawn_damaged, qty_added, qty_after,
+                withdrawn_batch_code, withdrawn_expiration_date,
+                loaded_batch_code, loaded_expiration_date,
+                unit_cost_snapshot_eur, commercial_spoilage_loss_eur
+            ) VALUES (
+                (SELECT id FROM machine_restock_visits WHERE visit_code = :visit_code LIMIT 1),
+                (SELECT s.id
+                   FROM machine_planogram_slots s
+                   INNER JOIN machines m ON m.id = s.machine_id
+                  WHERE m.code = :machine_code AND s.slot_code = :slot_code LIMIT 1),
+                :slot_code,
+                (SELECT id FROM vending_products WHERE sku = :sku LIMIT 1),
+                :qty_before, :qty_withdrawn_expired, :qty_withdrawn_damaged, :qty_added, :qty_after,
+                :withdrawn_batch_code, :withdrawn_expiration_date,
+                :loaded_batch_code, :loaded_expiration_date,
+                :unit_cost_snapshot_eur, :commercial_spoilage_loss_eur
+            ) %s',
+            $this->dialect->upsertDoNothing(['visit_id', 'slot_code'])
+        ));
+
+        foreach (self::canonicalRestockVisitItemRows() as $item) {
+            $itemInsert->bindValue(':visit_code', $item['visit_code'], PDO::PARAM_STR);
+            $itemInsert->bindValue(':machine_code', $item['machine_code'], PDO::PARAM_STR);
+            $itemInsert->bindValue(':slot_code', $item['slot_code'], PDO::PARAM_STR);
+            $itemInsert->bindValue(':sku', $item['sku'], PDO::PARAM_STR);
+
+            foreach (['qty_before', 'qty_withdrawn_expired', 'qty_withdrawn_damaged', 'qty_added', 'qty_after'] as $column) {
+                $itemInsert->bindValue(':' . $column, $item[$column], PDO::PARAM_INT);
+            }
+
+            foreach (['withdrawn_batch_code', 'loaded_batch_code'] as $column) {
+                $itemInsert->bindValue(
+                    ':' . $column,
+                    $item[$column],
+                    $item[$column] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+                );
+            }
+
+            foreach (['withdrawn_expiration_days' => ':withdrawn_expiration_date', 'loaded_expiration_days' => ':loaded_expiration_date'] as $offsetKey => $placeholder) {
+                $days = $item[$offsetKey];
+                $itemInsert->bindValue(
+                    $placeholder,
+                    $days === null ? null : date('Y-m-d', strtotime(sprintf('%+d days', $days))),
+                    $days === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+                );
+            }
+
+            $itemInsert->bindValue(':unit_cost_snapshot_eur', $item['unit_cost_snapshot_eur'], PDO::PARAM_STR);
+            $itemInsert->bindValue(':commercial_spoilage_loss_eur', $item['commercial_spoilage_loss_eur'], PDO::PARAM_STR);
+            $itemInsert->execute();
+        }
+
+        $verify = $this->pdo->prepare('SELECT COUNT(*) FROM machine_restock_visits WHERE visit_code = :visit_code');
+        $count = 0;
+        foreach (self::canonicalRestockVisitRows() as $visit) {
+            $verify->execute([':visit_code' => $visit['visit_code']]);
+            $count += (int)$verify->fetchColumn();
+        }
+
+        return $count;
+    }
+
+    /**
      * Stock de producto por lote en las furgonetas de reposición (Módulo 33 · D2, D4).
      *
      * El saldo se identifica por `(restocker_id, product_id, batch_code)`: dos lotes
@@ -3505,6 +3690,145 @@ class SeedRunner
         ];
     }
 
+    /**
+     * Los nueve carriles refrigerados con lote y caducidad vigentes (Módulo 34 · D1).
+     *
+     * Es el mismo catálogo que declara `database/supabase_seeds.sql` (sección 23):
+     * dos carriles `EXPIRING_SOON` (`VEND-0101.11` y `VEND-0801.11`, con el lote que
+     * caduca pasados mañana) y siete `OK`. La caducidad se declara como
+     * desplazamiento en días respecto de la siembra para que el semáforo FEFO se
+     * demuestre vivo y no congelado en una fecha del pasado.
+     *
+     * @return list<array{machine_code: string, slot_code: string, batch_code: string, expiration_days: int}>
+     */
+    private static function canonicalPlanogramSlotBatchRows(): array
+    {
+        return [
+            ['machine_code' => 'VEND-0101', 'slot_code' => '11', 'batch_code' => 'L-SAND-2602', 'expiration_days' => 2],
+            ['machine_code' => 'VEND-0101', 'slot_code' => '13', 'batch_code' => 'L-YOG-2611', 'expiration_days' => 12],
+            ['machine_code' => 'VEND-0301', 'slot_code' => '11', 'batch_code' => 'L-SAND-2606', 'expiration_days' => 4],
+            ['machine_code' => 'VEND-0301', 'slot_code' => '12', 'batch_code' => 'L-ENS-2610', 'expiration_days' => 10],
+            ['machine_code' => 'VEND-0301', 'slot_code' => '13', 'batch_code' => 'L-YOG-2612', 'expiration_days' => 13],
+            ['machine_code' => 'VEND-0701', 'slot_code' => '11', 'batch_code' => 'L-SAND-2606', 'expiration_days' => 4],
+            ['machine_code' => 'VEND-0701', 'slot_code' => '13', 'batch_code' => 'L-YOG-2611', 'expiration_days' => 12],
+            ['machine_code' => 'VEND-0201', 'slot_code' => '11', 'batch_code' => 'L-SAND-2606', 'expiration_days' => 4],
+            ['machine_code' => 'VEND-0801', 'slot_code' => '11', 'batch_code' => 'L-SAND-2602', 'expiration_days' => 2],
+        ];
+    }
+
+    /**
+     * Las dos visitas de reposición in situ demo (Módulo 34 · RF-01.2, D2, D3).
+     *
+     * La completada retira seis sándwiches caducados y recarga con el lote nuevo
+     * (`6 - 6 + 4 = 4`, la identidad del `C1`); la abortada se declara con precinto,
+     * foto, nota de más de 20 caracteres y cabina a 7,5 °C sobre una máquina
+     * `PERISHABLE_FOOD`. Ambas cuelgan del reponedor titular de la zona centro.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalRestockVisitRows(): array
+    {
+        return [
+            [
+                'visit_code' => 'MRV-2026-0001',
+                'machine_code' => 'VEND-0101',
+                'restocker_email' => 'lucia.repostaje@vendguard.internal',
+                'order_code' => 'PLO-2026-0001',
+                'status' => 'COMPLETED',
+                'started_offset_hours' => -24,
+                'duration_minutes' => 12,
+                'cabin_temp_celsius' => '3.0',
+                'hygiene_checklist_json' => '{"coffee_grounds_emptied": null, "liquid_waste_bucket_cleaned": null, "mixers_and_ducts_rinsed": null, "dispensing_tray_and_glass_cleaned": true, "cabin_spills_checked": true}',
+                'precautionary_seal_applied' => false,
+                'photo_evidence_url' => '/uploads/restock-visits/MRV-2026-0001.jpg',
+                'internal_notes' => 'Retirada total de seis sándwiches caducados del carril 11 antes de recargar con el lote nuevo.',
+                'client_mutation_id' => 'seed-mutation-completed-0001',
+            ],
+            [
+                'visit_code' => 'MRV-2026-0002',
+                'machine_code' => 'VEND-0701',
+                'restocker_email' => 'lucia.repostaje@vendguard.internal',
+                'order_code' => null,
+                'status' => 'ABORTED_THERMAL_BREACH',
+                'started_offset_hours' => -72,
+                'duration_minutes' => 9,
+                'cabin_temp_celsius' => '7.5',
+                'hygiene_checklist_json' => '{}',
+                'precautionary_seal_applied' => true,
+                'photo_evidence_url' => '/uploads/restock-visits/MRV-2026-0002.jpg',
+                'internal_notes' => 'Apertura con 7,5 °C en cabina: máquina precintada y avería térmica comunicada al SAT de la zona.',
+                'client_mutation_id' => 'seed-mutation-abort-0002',
+            ],
+        ];
+    }
+
+    /**
+     * Las tres líneas de desglose de las visitas demo (Módulo 34 · C1, QA 3).
+     *
+     * El carril 11 de `VEND-0101` retira las seis unidades caducadas (`L-SAND-2599`,
+     * vencido ayer) y carga cuatro del lote `L-SAND-2602`; el coste se congela a
+     * 1,15 € y la merma comercial resulta `6 × 1,15 = 6,90 €`, visible solo en
+     * Coordinación (Art. V.4). Las otras dos líneas no mueven existencias.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalRestockVisitItemRows(): array
+    {
+        return [
+            [
+                'visit_code' => 'MRV-2026-0001',
+                'machine_code' => 'VEND-0101',
+                'slot_code' => '11',
+                'sku' => 'SAND-MIXTO-01',
+                'qty_before' => 6,
+                'qty_withdrawn_expired' => 6,
+                'qty_withdrawn_damaged' => 0,
+                'qty_added' => 4,
+                'qty_after' => 4,
+                'withdrawn_batch_code' => 'L-SAND-2599',
+                'withdrawn_expiration_days' => -1,
+                'loaded_batch_code' => 'L-SAND-2602',
+                'loaded_expiration_days' => 2,
+                'unit_cost_snapshot_eur' => '1.15',
+                'commercial_spoilage_loss_eur' => '6.90',
+            ],
+            [
+                'visit_code' => 'MRV-2026-0001',
+                'machine_code' => 'VEND-0101',
+                'slot_code' => '13',
+                'sku' => 'YOGUR-NAT-125',
+                'qty_before' => 5,
+                'qty_withdrawn_expired' => 0,
+                'qty_withdrawn_damaged' => 0,
+                'qty_added' => 0,
+                'qty_after' => 5,
+                'withdrawn_batch_code' => null,
+                'withdrawn_expiration_days' => null,
+                'loaded_batch_code' => null,
+                'loaded_expiration_days' => null,
+                'unit_cost_snapshot_eur' => '0.38',
+                'commercial_spoilage_loss_eur' => '0.00',
+            ],
+            [
+                'visit_code' => 'MRV-2026-0002',
+                'machine_code' => 'VEND-0701',
+                'slot_code' => '11',
+                'sku' => 'SAND-MIXTO-01',
+                'qty_before' => 7,
+                'qty_withdrawn_expired' => 0,
+                'qty_withdrawn_damaged' => 0,
+                'qty_added' => 0,
+                'qty_after' => 7,
+                'withdrawn_batch_code' => null,
+                'withdrawn_expiration_days' => null,
+                'loaded_batch_code' => null,
+                'loaded_expiration_days' => null,
+                'unit_cost_snapshot_eur' => '1.15',
+                'commercial_spoilage_loss_eur' => '0.00',
+            ],
+        ];
+    }
+
     public function seedAll(string $defaultPassword = 'Password123!'): array
     {
         $this->pdo->beginTransaction();
@@ -3539,6 +3863,10 @@ class SeedRunner
             // planograma se inserta solo si no existe, para no pisar existencias.
             $vendingProductCount = $this->seedVendingProducts();
             $planogramSlotCount = $this->seedMachinePlanograms();
+            // El lote vigente del carril (Módulo 34 · D1) se declara después de
+            // crear los carriles: solo escribe donde el carril nace sin lote, de
+            // modo que una resemilla no pisa lo que dejó el reponedor.
+            $planogramBatchCount = $this->seedMachinePlanogramCurrentBatches();
             // El stock por lote de las furgonetas (Módulo 33) se siembra después
             // del catálogo: resuelve reponedor por `email_key` y producto por `sku`,
             // y no reafirma existencias operativas al resembrar.
@@ -3546,6 +3874,10 @@ class SeedRunner
             // Las órdenes de carga demo cuelgan del reponedor y de sus lotes: son
             // hechos históricos que una resemilla no reescribe.
             $productLoadingOrderCount = $this->seedProductLoadingOrders();
+            // Las visitas in situ (Módulo 34) cuelgan del reponedor, del carril y
+            // de la orden de carga: son hechos históricos inmutables que una
+            // resemilla no reescribe ni duplica (Art. III.3).
+            $restockVisitCount = $this->seedMachineRestockVisits();
             // Las guías de diagnóstico (Módulo 28) resuelven repuesto y causa por sus
             // códigos: entran cuando ambas maestras ya están sembradas. `Fas Perla`
             // queda sin guía a propósito para el indicador de cobertura (QA 1).
@@ -3592,8 +3924,10 @@ class SeedRunner
                 'spare_part_compatibilities' => $partsRes['compatibilities'],
                 'vending_products' => $vendingProductCount,
                 'machine_planogram_slots' => $planogramSlotCount,
+                'machine_planogram_slot_batches' => $planogramBatchCount,
                 'restocker_van_product_stocks' => $restockerVanStockCount,
                 'product_loading_orders' => $productLoadingOrderCount,
+                'machine_restock_visits' => $restockVisitCount,
                 'troubleshooting_guides' => $troubleshootingGuideCount,
                 'technician_van_stocks' => $vanStockCount,
                 'van_restock_orders' => $vanRestockOrderCount,
