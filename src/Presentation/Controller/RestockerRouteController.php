@@ -25,6 +25,7 @@ use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
+use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoInSituRestockVisitGateway;
 use VendGuard\Infrastructure\Repository\PdoMachinePlanogramRepository;
@@ -142,7 +143,10 @@ final class RestockerRouteController
             $this->visitRepository,
             new PdoMachinePlanogramRepository($pdo),
             $stockRepository,
-            new PdoInSituRestockVisitGateway($pdo),
+            new PdoInSituRestockVisitGateway(
+                pdo: $pdo,
+                notifications: NotificationOutboxEnqueuerFactory::create($pdo)
+            ),
             new PdoTransactionManager($pdo),
             new AuditLogger()
         );

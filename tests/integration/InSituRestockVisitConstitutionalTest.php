@@ -192,6 +192,15 @@ try {
           WHERE restocker_id = :restocker_id AND is_primary = TRUE'
     )->execute([':restocker_id' => $otherId]);
 
+    $pdo->prepare(
+        'INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary)
+         VALUES (:technician_id, :zone_id, TRUE)'
+    )->execute([':technician_id' => $technicianId, ':zone_id' => $zoneId]);
+    $pdo->prepare(
+        "INSERT INTO technician_shifts (technician_id, status)
+         VALUES (:technician_id, 'ON_SHIFT')"
+    )->execute([':technician_id' => $technicianId]);
+
     $createProduct = static function (
         PDO $pdo,
         string $sku,
@@ -530,17 +539,33 @@ try {
         'SELECT sanitary_status FROM machines WHERE id = ' . $foodMachineId
     )->fetch(PDO::FETCH_ASSOC);
     $incident = $pdo->query(
-        'SELECT ticket_code, category, urgency, status, photo_path, description
+        'SELECT ticket_code, category, urgency, status, assigned_technician_id, assigned_at, photo_path, description
            FROM incidents WHERE id = ' . $triggeredIncidentId
     )->fetch(PDO::FETCH_ASSOC);
     $assert(
-        '3.5 La máquina queda en cuarentena y el ticket es CRITICAL de temperatura',
+        '3.5 La máquina queda en cuarentena y el ticket CRITICAL se asigna al SAT disponible',
         ($foodMachine['sanitary_status'] ?? '') === 'QUARANTINE'
             && ($incident['urgency'] ?? '') === 'CRITICAL'
             && ($incident['category'] ?? '') === 'TEMPERATURE_COLD'
-            && ($incident['status'] ?? '') === 'REGISTERED',
+            && ($incident['status'] ?? '') === 'ASSIGNED'
+            && (int)($incident['assigned_technician_id'] ?? 0) === $technicianId
+            && ($incident['assigned_at'] ?? null) !== null,
         (string)($incident['ticket_code'] ?? 'sin ticket')
     );
+
+    $custody = $pdo->query(
+        'SELECT technician_id, assignment_source, unassigned_at
+           FROM incident_assignments WHERE incident_id = ' . $triggeredIncidentId
+    )->fetchAll(PDO::FETCH_ASSOC);
+    $assert(
+        '3.5b La asignación deja un único tramo de custodia abierto con la fuente existente',
+        count($custody) === 1
+            && (int)($custody[0]['technician_id'] ?? 0) === $technicianId
+            && ($custody[0]['assignment_source'] ?? '') === 'COORDINATOR_ASSIGN'
+            && ($custody[0]['unassigned_at'] ?? null) === null,
+        'tramos=' . count($custody)
+    );
+
     $assert(
         '3.6 El ticket nuevo conserva la temperatura y la foto de la visita',
         ($incident['photo_path'] ?? '') === $photoUrl
@@ -548,15 +573,58 @@ try {
         (string)($incident['ticket_code'] ?? '')
     );
 
+    $coordinatorEmail = (string)$pdo->query(
+        'SELECT email FROM users WHERE id = ' . $coordinatorId
+    )->fetchColumn();
+    $technicianEmail = (string)$pdo->query(
+        'SELECT email FROM users WHERE id = ' . $technicianId
+    )->fetchColumn();
+    $newTicketOutbox = $pdo->query(
+        "SELECT template, recipient, recipient_role, dedup_key, status
+           FROM notification_outbox
+          WHERE incident_id = " . $triggeredIncidentId
+    )->fetchAll(PDO::FETCH_ASSOC);
+    $coldAlertRows = array_values(array_filter(
+        $newTicketOutbox,
+        static fn(array $row): bool => ($row['template'] ?? '') === 'COLD_CHAIN_IMMEDIATE_ALERT'
+    ));
+    $coldAlertRecipients = array_map(
+        static fn(array $row): string => strtolower((string)$row['recipient']),
+        $coldAlertRows
+    );
+    $coldAlertsComplete = $coldAlertRows !== [];
+    foreach ($coldAlertRows as $row) {
+        $coldAlertsComplete = $coldAlertsComplete
+            && trim((string)($row['dedup_key'] ?? '')) !== ''
+            && ($row['status'] ?? '') === 'PENDING';
+    }
+    $newTicketOutboxCount = count($newTicketOutbox);
+    $assert(
+        '3.6b El ticket nuevo encola la alerta de frío para Coordinación y el técnico asignado',
+        $newTicketOutboxCount > 0
+            && $coldAlertsComplete
+            && in_array(strtolower($coordinatorEmail), $coldAlertRecipients, true)
+            && in_array(strtolower($technicianEmail), $coldAlertRecipients, true),
+        'outbox=' . $newTicketOutboxCount
+    );
+
     $repeatedAbort = $call('POST', '/api/restocker/machines/' . $foodMachineId . '/visits', $abortPayload, $ownerToken);
     $abortTicketCount = (int)$pdo->query(
         'SELECT COUNT(*) FROM incidents WHERE machine_id = ' . $foodMachineId
     )->fetchColumn();
+    $repeatedOutboxCount = (int)$pdo->query(
+        'SELECT COUNT(*) FROM notification_outbox WHERE incident_id = ' . $triggeredIncidentId
+    )->fetchColumn();
+    $assignmentCount = (int)$pdo->query(
+        'SELECT COUNT(*) FROM incident_assignments WHERE incident_id = ' . $triggeredIncidentId
+    )->fetchColumn();
     $assert(
-        '3.7 El reenvío idempotente no duplica la visita ni el ticket SAT',
+        '3.7 El reenvío idempotente no duplica la visita, el ticket SAT, la asignación ni la alerta encolada',
         $repeatedAbort->getStatusCode() === 201
             && (int)($data($repeatedAbort)['id'] ?? 0) === $abortVisitId
             && $abortTicketCount === 1
+            && $assignmentCount === 1
+            && $repeatedOutboxCount === $newTicketOutboxCount
     );
 
     $blockedAfterAbort = $call(
@@ -613,6 +681,23 @@ try {
             && ($escalatedComment['photo_path'] ?? '') === $photoUrl,
         $errorCode($escalatedAbort)
     );
+    $escalatedOutbox = $pdo->query(
+        "SELECT template, recipient_role, dedup_key FROM notification_outbox
+          WHERE incident_id = " . $existingTicketId
+    )->fetchAll(PDO::FETCH_ASSOC);
+    $escalatedColdRows = array_values(array_filter(
+        $escalatedOutbox,
+        static fn(array $row): bool => ($row['template'] ?? '') === 'COLD_CHAIN_IMMEDIATE_ALERT'
+    ));
+    $assert(
+        '3.9b La elevación de un ticket existente vuelve a encolar la alerta de frío',
+        $escalatedColdRows !== []
+            && count(array_filter(
+                $escalatedColdRows,
+                static fn(array $row): bool => trim((string)($row['dedup_key'] ?? '')) !== ''
+            )) === count($escalatedColdRows),
+        'outbox=' . count($escalatedOutbox)
+    );
 
     $coldOk = $call(
         'POST',
@@ -632,6 +717,35 @@ try {
             && $coldTooWarm->getStatusCode() === 422
             && $errorCode($coldTooWarm) === 'CABIN_TEMP_EXCEEDS_SANITARY_LIMIT',
         $errorCode($coldTooWarm)
+    );
+
+    $pdo->prepare(
+        'UPDATE technician_shifts
+            SET closed_at = CURRENT_TIMESTAMP
+          WHERE technician_id = :technician_id AND closed_at IS NULL'
+    )->execute([':technician_id' => $technicianId]);
+    $noTechAbort = $call(
+        'POST',
+        '/api/restocker/machines/' . $coldMachineId . '/visits',
+        $visitPayload('rvf10-no-tech', 'ABORTED_THERMAL_BREACH', 8.5, [], $photoUrl, $abortNotes, true),
+        $ownerToken
+    );
+    $noTechData = $data($noTechAbort);
+    $noTechIncidentId = (int)($noTechData['triggered_incident_id'] ?? 0);
+    $noTechIncident = $pdo->query(
+        'SELECT status, assigned_technician_id FROM incidents WHERE id = ' . $noTechIncidentId
+    )->fetch(PDO::FETCH_ASSOC);
+    $noTechOutboxCount = (int)$pdo->query(
+        'SELECT COUNT(*) FROM notification_outbox WHERE incident_id = ' . $noTechIncidentId
+    )->fetchColumn();
+    $assert(
+        '3.11 Sin técnico disponible el ticket queda REGISTERED, pero la alerta se encola igualmente',
+        $noTechAbort->getStatusCode() === 201
+            && $noTechIncidentId > 0
+            && ($noTechIncident['status'] ?? '') === 'REGISTERED'
+            && ($noTechIncident['assigned_technician_id'] ?? null) === null
+            && $noTechOutboxCount > 0,
+        $errorCode($noTechAbort)
     );
 
     // ─────────────────────────────────────────────────────────────────────

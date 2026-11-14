@@ -9,6 +9,7 @@ use PDO;
 use RuntimeException;
 use VendGuard\Application\Service\IncidentTicketAllocator;
 use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
+use VendGuard\Application\Service\SuggestedTechniciansService;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
@@ -39,7 +40,14 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  *      `CRITICAL` y se anexa una nota interna con temperatura, foto y notas; si no,
  *      se crea una incidencia térmica `REGISTERED` con la política única de códigos.
  *      La foto se guarda en el expediente y en la nota interna (Art. V.4).
- *   4. **Coste interno.** `unit_cost_eur` solo se lee para congelar el snapshot de
+ *   4. **Asignación automática (`RF-02.2`).** El ticket nuevo se entrega al primer
+ *      candidato del recomendador si está disponible o es un técnico de guardia
+ *      fuera de turno; si no hay candidato utilizable permanece `REGISTERED`. La
+ *      asignación usa la cadena de custodia existente y viaja dentro de la misma
+ *      transacción de la visita. La fuente de custodia es la ya existente
+ *      `COORDINATOR_ASSIGN`: el sistema actúa en nombre de Coordinación y no se
+ *      inventa un valor fuera del enum del motor.
+ *   5. **Coste interno.** `unit_cost_eur` solo se lee para congelar el snapshot de
  *      la línea; este método no forma parte de ninguna proyección del reponedor
  *      (Art. V.4).
  */
@@ -53,16 +61,21 @@ final class PdoInSituRestockVisitGateway implements InSituRestockVisitGatewayInt
 
     private ?NotificationOutboxEnqueuerService $notifications;
 
+    private SuggestedTechniciansService $suggestions;
+
     public function __construct(
         ?PDO $pdo = null,
         ?IncidentRepositoryInterface $incidents = null,
         ?IncidentTicketAllocator $tickets = null,
-        ?NotificationOutboxEnqueuerService $notifications = null
+        ?NotificationOutboxEnqueuerService $notifications = null,
+        ?SuggestedTechniciansService $suggestions = null
     ) {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
         $this->incidents = $incidents ?? new PdoIncidentRepository($this->pdo);
         $this->tickets = $tickets ?? new IncidentTicketAllocator();
         $this->notifications = $notifications;
+        $this->suggestions = $suggestions
+            ?? new SuggestedTechniciansService(new PdoTechnicianSuggestionRepository($this->pdo));
     }
 
     /**
@@ -326,9 +339,73 @@ final class PdoInSituRestockVisitGateway implements InSituRestockVisitGatewayInt
             throw new RuntimeException('El ticket térmico se creó sin devolver una clave primaria.');
         }
 
-        $this->notifications?->enqueueIncidentOpened($created);
+        $this->assignBestTechnician($created);
+
+        // La alerta se compone con la incidencia ya asignada para que el bloque
+        // técnico del outbox apunte al responsable real y no a la guardia genérica.
+        $incidentForAlert = $this->incidents->findById((int)$incidentId) ?? $created;
+        $this->notifications?->enqueueIncidentOpened($incidentForAlert);
 
         return (int)$incidentId;
+    }
+
+    /**
+     * Entrega el ticket térmico al primer candidato utilizable del recomendador.
+     *
+     * El recomendador puede encabezar la lista con un técnico fuera de turno si
+     * está de guardia (RF-08.5/R6); ese caso sí es asignable. Una ausencia activa
+     * o una pausa de comida, en cambio, no lo son. Sin candidato utilizable el
+     * ticket conserva el estado `REGISTERED` y el alta sigue siendo válida.
+     */
+    private function assignBestTechnician(Incident $incident): void
+    {
+        $incidentId = $incident->getId();
+        if ($incidentId === null) {
+            return;
+        }
+
+        $suggestion = $this->suggestions->getSuggestions((int)$incidentId);
+        $top = $suggestion?->rankedTechnicians[0] ?? null;
+        if (!is_array($top)) {
+            return;
+        }
+
+        $technicianId = (int)($top['technician_id'] ?? 0);
+        if ($technicianId <= 0 || !$this->isAssignable($top)) {
+            return;
+        }
+
+        // `assign()` abre el tramo de custodia, sella `assigned_at` y mueve el
+        // expediente a `ASSIGNED` dentro de la transacción de la visita. La fuente
+        // por defecto es `COORDINATOR_ASSIGN`, el valor existente que representa
+        // esta entrega en nombre de Coordinación.
+        $this->incidents->assign((int)$incidentId, $technicianId);
+    }
+
+    /**
+     * Un técnico es asignable si está disponible o si, estando de guardia, solo
+     * está fuera de turno. La guardia cubre la emergencia; la ausencia y la pausa
+     * no se puentean.
+     *
+     * @param array<string, mixed> $technician Fila del ranking del recomendador.
+     */
+    private function isAssignable(array $technician): bool
+    {
+        $currentStatus = is_array($technician['current_status'] ?? null)
+            ? $technician['current_status']
+            : [];
+
+        if (($currentStatus['is_available'] ?? false) === true) {
+            return true;
+        }
+
+        if (($technician['is_on_call'] ?? false) !== true) {
+            return false;
+        }
+
+        $reason = $currentStatus['unavailability_reason'] ?? null;
+
+        return $reason === null || $reason === 'Fuera de turno';
     }
 
     private function escalate(
