@@ -21,7 +21,7 @@ S4 — **Cola Offline PWA del Reponedor, Idempotencia `client_mutation_id` y Sup
 | **WU-1 / T-RVF-02** | S1 | inline | `test(db): certify the in-situ restock visit schema and raise contracts to 48 tables` | ✅ hecho (`73a0b61`) |
 | **WU-2 / T-RVF-03** | S1, S3 | inline | `feat(domain): add the in-situ restock visit models and slot FEFO traceability` | ✅ hecho (`c79eee6`) |
 | **WU-2 / T-RVF-04** | S2, S3 | inline | `feat(domain): add the in-situ restock visit validator with sanitary triple lock` | ✅ hecho (`9fcd24d`) |
-| **WU-3 / T-RVF-05** | S1, S2, S3 | inline | `feat(planogram): persist slot batch traceability and the post-visit FEFO movement` | ✅ hecho |
+| **WU-3 / T-RVF-05** | S1, S2, S3 | inline | `feat(planogram): persist slot batch traceability and the post-visit FEFO movement` | ✅ hecho (`ce061c7`) |
 | **WU-3 / T-RVF-06** | S1, S3, S4 | inline | — | 🔲 pendiente |
 | **WU-4 / T-RVF-07** | S2, S3, S4 | inline | — | 🔲 pendiente |
 | **WU-4 / T-RVF-08** | S2, S3 | inline | — | 🔲 pendiente |
