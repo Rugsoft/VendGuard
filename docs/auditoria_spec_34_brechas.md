@@ -15,7 +15,7 @@
 La implementación está muy avanzada: las 13 tareas originales del módulo están cerradas, la batería global pasa al 100 % y el canal `new_engine` también está en verde.
 
 - Batería global: **432/432 suites · 16.381 aserciones · 0 fallos**.
-- Canal `new_engine`: **60/60 suites · 1.968 aserciones · 0 fallos · 0 no ejecutables**.
+- Canal `new_engine`: **60/60 suites · 1.972 aserciones · 0 fallos · 0 no ejecutables**.
 - Tareas: **13/13 originales** en [`tasks.md`](../specs/34-in-situ-restock-visit/tasks.md) y [`odd/tasks/in-situ-restock-visit.md`](../odd/tasks/in-situ-restock-visit.md), más `T-RVF-14` de reconciliación documental (**14/14** tras el cierre de `FIX-34-04`).
 
 Sin embargo, **la Spec 34 no está cumplida al 100 %**. La brecha está concentrada en dos cláusulas de `RF-02.2` que no se ejecutan en la ruta real y que ninguna suite comprueba:
@@ -29,7 +29,7 @@ El resto de `RF-01`, `RF-02.1`, `RF-02.3`, `RF-03`, `RF-04`, `RF-05`, los `RNF-0
 
 ### Cierre de la entrega (2026-11-14)
 
-`FIX-34-01`, `FIX-34-02` y `FIX-34-03` quedan implementados y cubiertos por regresión. El ticket térmico nuevo se asigna al primer candidato utilizable del recomendador —o permanece `REGISTERED` sin candidato— mediante `PdoIncidentRepository::assign()`, con un único tramo de custodia y la fuente existente `COORDINATOR_ASSIGN`; la alerta de frío se encola en `notification_outbox` tanto en el alta como en la escalada, después de rehidratar el expediente asignado. La suite constitucional pasa a **42/42** y las suites focales quedan en verde. `FIX-34-04` se cierra con `T-RVF-14`: la matriz publica filas explícitas de asignación y outbox, `tasks.md` y ODD registran la corrección y la Feature 24 ya no declara el 100 % sin esas cláusulas. `FIX-34-05` deja alineada la nomenclatura térmica: `THERMAL_BREAKDOWN` es la etiqueta funcional y `TEMPERATURE_COLD` el valor persistido en `incidents.category`. `FIX-34-06` cierra la deuda de disponibilidad: `OUT_OF_SERVICE` queda como estado funcional y se persiste con `machines.is_blocked_no_access = TRUE` en `COLD_DRINKS`; `SANITARY_QUARANTINE` se persiste con `sanitary_status = 'QUARANTINE'`; no se añade columna ni migración. La suite constitucional verifica el flag en el caso `COLD_DRINKS` y el frontend deja de consultar un `sanitary_status` inexistente. La certificación global completa sigue pendiente de reejecución (`FIX-34-07`).
+`FIX-34-01`, `FIX-34-02` y `FIX-34-03` quedan implementados y cubiertos por regresión. El ticket térmico nuevo se asigna al primer candidato utilizable del recomendador —o permanece `REGISTERED` sin candidato— mediante `PdoIncidentRepository::assign()`, con un único tramo de custodia y la fuente existente `COORDINATOR_ASSIGN`; la alerta de frío se encola en `notification_outbox` tanto en el alta como en la escalada, después de rehidratar el expediente asignado. La suite constitucional pasa a **42/42** y las suites focales quedan en verde. `FIX-34-04` se cierra con `T-RVF-14`: la matriz publica filas explícitas de asignación y outbox, `tasks.md` y ODD registran la corrección y la Feature 24 ya no declara el 100 % sin esas cláusulas. `FIX-34-05` deja alineada la nomenclatura térmica: `THERMAL_BREAKDOWN` es la etiqueta funcional y `TEMPERATURE_COLD` el valor persistido en `incidents.category`. `FIX-34-06` cierra la deuda de disponibilidad: `OUT_OF_SERVICE` queda como estado funcional y se persiste con `machines.is_blocked_no_access = TRUE` en `COLD_DRINKS`; `SANITARY_QUARANTINE` se persiste con `sanitary_status = 'QUARANTINE'`; no se añade columna ni migración. La suite constitucional verifica el flag en el caso `COLD_DRINKS` y el frontend deja de consultar un `sanitary_status` inexistente. La certificación global completa se reejecutó en `FIX-34-07`: 432/432 suites y 16.381 aserciones en la batería hermética, y 60/60 suites y 1.972 aserciones en el canal `new_engine`, ambas sin fallos.
 
 ---
 
@@ -43,7 +43,7 @@ El resto de `RF-01`, `RF-02.1`, `RF-02.3`, `RF-03`, `RF-04`, `RF-05`, los `RNF-0
 | **4** | **FIX-34-04** | **P1 · Documental** | `traceability-matrix.md`, `tasks.md`, ODD y `features_pendientes.md` certifican el 100 % sin estas dos cláusulas | §8, DoD, trazabilidad | La certificación formal no refleja el estado real del requisito | **Cerrada (2026-11-14, `T-RVF-14`)** |
 | **5** | **FIX-34-05** | **P2 · Contractual** | La spec usa `THERMAL_BREAKDOWN`; el motor usa `incident_category = 'TEMPERATURE_COLD'` | `RF-02.2` | Ambigüedad de nomenclatura entre especificación, esquema y tests; hoy se resuelve por convención oral/documental | **Cerrada (2026-11-14)** |
 | **6** | **FIX-34-06** | **P2 · Contractual** | La spec usa `machines.status = 'OUT_OF_SERVICE'`; el esquema no tiene ese estado y el código usa `is_blocked_no_access = TRUE` para bebidas frías | `RF-02.2`, §6.2 | Mapeo correcto en la práctica, pero no explícito en el contrato; dificulta la verificación literal | **Cerrada (2026-11-14)** |
-| **7** | **FIX-34-07** | **P3 · Verificación** | La certificación global no se repetirá hasta cerrar los fixes anteriores | DoD 5 | Necesario para actualizar métricas y `DocMetricsGuard` sin arrastrar cifras obsoletas | **Pendiente de ejecución** |
+| **7** | **FIX-34-07** | **P3 · Verificación** | La certificación global no se repetirá hasta cerrar los fixes anteriores | DoD 5 | Necesario para actualizar métricas y `DocMetricsGuard` sin arrastrar cifras obsoletas | **Cerrada (2026-11-14)** |
 
 ### Lectura de prioridades
 
@@ -206,9 +206,9 @@ La documentación de cierre afirma que el módulo está al 100 % y que `RF-02.2`
 
 - [x] Ninguna matriz, tarea u ODD declara `RF-02.2` completo sin las pruebas de asignación y outbox.
 - [x] La certificación final cita las suites concretas y sus recuentos reales.
-- [x] Las cifras documentales coinciden con la última corrida focal; la corrida global queda pendiente (`FIX-34-07`).
+- [x] Las cifras documentales coinciden con la última corrida focal; la corrida global se reejecutó después en `FIX-34-07`.
 
-**Cierre (2026-11-14):** `T-RVF-14` añade las filas `02.2a` (asignación/custodia) y `02.2b` (`notification_outbox`) a la matriz, registra la tarea de corrección en `tasks.md` y ODD, actualiza la ficha de la Feature 24 y deja constancia de que las cifras globales no se refrescan hasta `FIX-34-07`.
+**Cierre (2026-11-14):** `T-RVF-14` añade las filas `02.2a` (asignación/custodia) y `02.2b` (`notification_outbox`) a la matriz, registra la tarea de corrección en `tasks.md` y ODD, actualiza la ficha de la Feature 24 y deja constancia de que las cifras globales se refrescarían en `FIX-34-07`, ya ejecutado con la corrida final.
 
 ---
 
@@ -283,10 +283,12 @@ El comportamiento de bloqueo es el correcto para el modelo real, pero la denomin
 
 ### Criterio de aceptación
 
-- [ ] Todas las suites focales en verde.
-- [ ] Batería global y `new_engine` en verde, con recuentos coherentes con la documentación.
-- [ ] La matriz ya no reduce `RF-02.2`.
-- [ ] La Spec 34 puede declararse 100 % solo con las dos cláusulas implementadas y probadas.
+- [x] Todas las suites focales en verde.
+- [x] Batería global y `new_engine` en verde, con recuentos coherentes con la documentación.
+- [x] La matriz ya no reduce `RF-02.2`.
+- [x] La Spec 34 puede declararse 100 % solo con las dos cláusulas implementadas y probadas.
+
+**Cierre (2026-11-14):** la batería global se reejecutó con `.env.battery` y cerró **432/432 suites · 16.381 aserciones · 0 fallos · exit=0**, con `DocMetricsGuard` coherente, semillas restauradas y sin residuos. El canal `new_engine` se reejecutó con `.env.docker-tls` y cerró **60/60 suites · 1.972 aserciones · 0 no ejecutables · 0 fallos · exit=0**. La matriz, `README.md` y `docs/features_pendientes.md` citan ya la corrida final; no se modifica código ni esquema.
 
 ---
 
@@ -344,7 +346,17 @@ php tests/run_new_engine.php
 60 suites · 1.968 aserciones · 0 fallos · 0 no ejecutables · exit=0
 ```
 
-Tras el cierre de `FIX-34-01/02/03` se reejecutaron las suites focales; la corrida global completa queda pendiente (`FIX-34-07`) para refrescar las cifras y `DocMetricsGuard`.
+La corrida de auditoría anterior queda como referencia histórica. La corrida de cierre de `FIX-34-07` (2026-11-14) fue:
+
+```text
+php tests/run_all.php
+432 suites · 16.381 aserciones · 0 fallos · exit=0
+
+php tests/run_new_engine.php
+60 suites · 1.972 aserciones · 0 fallos · 0 no ejecutables · exit=0
+```
+
+`DocMetricsGuard` quedó coherente, la base se restableció con semillas intactas y el canal `new_engine` no dejó suites no ejecutables. La diferencia de +4 aserciones respecto a la cifra histórica del canal corresponde a las aserciones vigentes de `OfflineSyncLockBrowserTest` (16 en esta corrida); no es una omisión.
 
 ---
 
@@ -356,7 +368,7 @@ Tras el cierre de `FIX-34-01/02/03` se reejecutaron las suites focales; la corri
 | **DoD 2** — Triple Cerrojo, cuarentena, ticket `CRITICAL` idempotente, asignación SAT y outbox | ✅ | Alta/escalada idempotentes, asignación al candidato disponible o `REGISTERED`, custodia y alerta encolada; `InSituRestockVisitConstitutionalTest` 42/42. |
 | **DoD 3** — checklist, descuento atómico, `D1`, snapshot y `C4` | ✅ | 33/33, 46/46, 29/29, 53/53, 38/38 y 171/171. |
 | **DoD 4** — asistente, foto, cola IndexedDB, conflictos y consola | ✅ | 171/171, 63/63, 45/45, 15/15, 7/7 y 23/23. |
-| **DoD 5** — batería al 100 % | ⏳ pendiente de reejecución | La corrida de auditoría sigue en 432/432 y 60/60; el fix se validó con las suites focales (`FIX-34-07`). |
+| **DoD 5** — batería al 100 % | ✅ | Corrida final `FIX-34-07`: batería global **432/432 suites · 16.381 aserciones · 0 fallos** y canal `new_engine` **60/60 suites · 1.972 aserciones · 0 no ejecutables · 0 fallos**; `DocMetricsGuard` coherente y semillas restauradas. |
 
 > El `DoD 5` certifica que las suites existentes pasan, no que la especificación esté completa. Tras el cierre de `RF-02.2`, la regresión constitucional ya hace fallar asignación y outbox; falta reejecutar la batería global.
 
@@ -385,7 +397,7 @@ Tras el cierre de `FIX-34-01/02/03` se reejecutaron las suites focales; la corri
 7. FIX-34-07  Batería global, new_engine y métricas finales
 ```
 
-**La Spec 34 puede declararse cerrada respecto a `RF-02.2` una vez completados FIX-34-01, FIX-34-02 y FIX-34-03; la certificación global sigue pendiente de reejecución (FIX-34-07).**
+**La Spec 34 queda cerrada respecto a `RF-02.2` y a la certificación global: FIX-34-01/02/03 implementados y probados, FIX-34-04/05/06 cerrados y FIX-34-07 reejecutado con la batería global y `new_engine` en verde.**
 
 ---
 
