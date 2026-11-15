@@ -4,6 +4,185 @@ Registro de los hitos de producto y de los módulos cerrados bajo el ciclo SDD.
 El proyecto no publica versiones semánticas independientes: cada entrada corresponde
 a un módulo funcional certificado por la batería global.
 
+## [Certificación] · Batería global y canal new_engine tras los Módulos 25 a 34 — 2026-11-15
+
+**Estado:** Cerrada en verde · cifras canónicas auditadas por `DocMetricsGuard`.
+
+### Certificación
+
+- Batería global: **432 suites y 16.381 aserciones**, 0 fallos y 100 % en verde en 464,23 s; 190/190 suites PHP Unit, 104/104 JS Unit, 135/135 de integración y 3/3 E2E manuales.
+- Canal `new_engine`: **60 suites evaluadas, 59 en verde, 1 no ejecutable y 1.938 aserciones**, 0 fallos y salida `0`. La no ejecutable es `PostgresTieredSlaMetricsPerformanceTest`, que declara su propio contrato TLS (`deploy/local/supabase/.env.local`) contra el motor local del puerto 5432; el canal la publica con su causa (`SQLSTATE[08006] · server does not support SSL`) en lugar de omitirla. `PoolerLatencyMeasurementTest` pasa 30/30 aserciones.
+- La insignia, la frase canónica y el árbol del README declaran esas mismas cifras y la guarda documental no registra desviaciones.
+
+## [Módulo 34] · Visita de Reposición In Situ, Control FEFO y Limpieza Diaria — 2026-11-15
+
+**Estado:** Cerrado · especificación, contratos, implementación y certificación en verde.
+
+### Añadido
+
+- Tablas 47 y 48 `machine_restock_visits` / `machine_restock_visit_items` (17 columnas cada una), de solo inserción —los disparadores `trg_immutable_*` rechazan `UPDATE` con `45000`—, código `MRV-AAAA-NNNN` e idempotencia `uq_machine_restock_visits_mutation (restocker_id, client_mutation_id)`.
+- Trazabilidad de lote en el carril: `machine_planogram_slots` añade `current_batch_code` y `current_expiration_date`; la visita completada aplica `qty_after = qty_before − retiradas + añadidas`, actualiza la caducidad viva más próxima y descuenta la furgoneta de forma atómica.
+- Triple cerrojo sanitario (Art. II): bloqueo por cuarentena, fuera de servicio o avería térmica abierta (`409 SANITARY_RESTOCK_BLOCKED`); lectura de cabina ≤ 4,0 °C en perecederos y mixtas y ≤ 8,0 °C en bebidas frías, con `ABORTED_THERMAL_BREACH` —precinto, foto y nota ≥ 20—, cuarentena y ticket crítico `TEMPERATURE_COLD`; retirada FEFO obligatoria (`422 FEFO_WITHDRAWAL_REQUIRED`) y prohibición de gastar un lote más nuevo (`422 FEFO_OLDER_VAN_BATCH_AVAILABLE`).
+- Checklist de higiene adaptativo por tipología (cuatro puntos en café y mixtas; dos en frías, snacks y perecederos), fotografía ≤ 5 MB obligatoria ante aborto o merma y snapshot financiero visible solo para Coordinación (Art. V.4 y V.5).
+- Asistente móvil con cola `IndexedDB`, volcado de conflictos `409 OFFLINE_VISIT_CONFLICT` y sub-vista de Coordinación «📋 Visitas de Reposición In Situ y Control FEFO»; la liquidación del Módulo 33 precarga unidades abastecidas y mermas.
+
+### Corregido
+
+- `OUT_OF_SERVICE` se alinea con `machines.is_blocked_no_access` y la avería térmica se persiste como `incident_category = 'TEMPERATURE_COLD'`; el ticket térmico se asigna con el recomendador territorial y encola sus alertas de outbox.
+
+### Certificación
+
+- `InSituRestockVisitApiTest`, `InSituRestockVisitConstitutionalTest`, `PostgresInSituRestockVisitSchemaTest`, `MachineRestockVisitServiceTest`, `MachineRestockVisitValidatorTest` e `InSituRestockVisitDomainModelsTest`.
+
+## [Módulo 33] · Órdenes de Carga de Producto y Picking con Trazabilidad de Frío — 2026-11-14
+
+**Estado:** Cerrado · ciclo completo de carga, recepción y liquidación certificado.
+
+### Añadido
+
+- Tablas 44–46 (`restocker_van_product_stocks`, `product_loading_orders`, `product_loading_order_items`) y enumerados 28–30; orden `PLO-AAAA-NNNN` y una sola activa por reponedor (`uq_product_loading_orders_active_restocker`).
+- Propuesta matutina `ALERTS_ONLY` / `ALL_GAPS` con colchón `0..50 %`, descuento del stock útil de la furgoneta y exclusión declarada de máquinas en cuarentena o fuera de servicio.
+- Despacho con temperatura de cámara `[-5,0, 4,0] °C` (`422 COLD_CHAMBER_TEMP_EXCEEDED`), lote real y caducidad dentro de `max_shelf_life_days` (`422 EXPIRATION_EXCEEDS_MAX_SHELF_LIFE`), con caducidad inmutable por lote (`409 BATCH_EXPIRATION_MISMATCH`).
+- Recepción móvil en un toque, liquidación al cierre con la identidad `stock − abastecidas − mermas = retorno esperado` frente al contado, notas ≥ 20 caracteres ante descuadre y autocierre de líneas con `dispatched_qty = 0`.
+- Stock por lote con semáforo `EXPIRED` / `EXPIRING_SOON` / `OK`, ajuste auditado de Coordinación y **Hoja de Picking A4** en dos bloques sin costes ni precios (Art. V.4).
+
+### Corregido
+
+- La liquidación admite el alias `notes`, el alta individual sigue permitida para un reponedor ausente (con aviso), la recepción tolera producto desactivado en tránsito y la cancelación desde `DISPATCHED` conserva la coherencia del ciclo.
+
+### Certificación
+
+- `ProductLoadingColdPickingApiTest`, `ProductLoadingConcurrencyTest`, `ProductLoadingConstitutionalTest`, `PostgresProductLoadingSchemaTest`, `ProductLoadingOrderServiceTest` y `ProductLoadingValidatorTest`.
+
+## [Módulo 32] · Catálogo Maestro de Productos y Planograma por Máquina — 2026-11-13
+
+**Estado:** Cerrado · catálogo, planograma y cerrojo sanitario certificados.
+
+### Añadido
+
+- Tablas 42 y 43 (`vending_products`, `machine_planogram_slots`) y enumerados 26–27: categorías `COLD_DRINK`, `SNACK`, `PERISHABLE_FOOD`, `HOT_BEVERAGE_INGREDIENT` y `CUP_STIRRER_CONSUMABLE`; unidades `UNIT`, `GRAMS` y `SLEEVE`.
+- `sku` único e inmutable; coste y precio acotados —precio `0,00 €` solo en ingredientes y consumibles—, cadena de frío obligatoria en perecederos y vida útil máxima para el control de caducidades.
+- Planograma con capacidad (1–10.000), umbral menor que la capacidad, existencia estimada dentro de ella y una fila viva por `(máquina, carril)`, con baja lógica.
+- Cerrojo sanitario bidireccional: los disparadores impiden carriles incompatibles con el tipo de máquina o con perecedero sin frío, y el cambio de tipología responde `409 PLANOGRAM_INCOMPATIBLE_WITH_MACHINE_TYPE`.
+- Presets por modelo normalizado y clonado entre máquinas; el reponedor lee el planograma de sus zonas sin coste, precio ni margen (Art. V.4).
+
+### Corregido
+
+- Los errores de validación se muestran dentro del modal, la selección de máquina respeta los filtros activos, los márgenes no disponibles o negativos se representan correctamente y la insignia de producto retirado unifica su texto.
+
+### Certificación
+
+- `ProductCatalogPlanogramApiTest`, `PlanogramConstitutionalTest`, `PostgresProductPlanogramSchemaTest`, `MachinePlanogramServiceTest`, `PlanogramCompatibilityValidatorTest` y `ModelPlanogramPresetCatalogTest`.
+
+## [Módulo 31] · Rol de Cargador/Reponedor de Ruta, Zonificación de Carga y Jornada — 2026-11-12
+
+**Estado:** Cerrado · cuarto rol operativo con cobertura territorial y registro horario.
+
+### Añadido
+
+- Rol `RESTOCKER` en `user_role`, con alta en el CRUD de personal, código de operador (`REP-01`, `REP-02` en semillas), rol inmutable (`409 ROLE_CHANGE_FORBIDDEN`) y guardia técnica prohibida (`chk_users_restocker_not_on_call`).
+- Tabla 41 `restocker_zone_assignments` con `role_in_zone` PRIMARY/BACKUP e `is_primary` sincronizados: un titularato vivo por reponedor, suplencias sin límite, baja lógica y auditoría `RESTOCKER_ZONE`.
+- Consolas de Coordinación con contadores `primary_restockers_count`/`backup_restockers_count`, dos cuadrantes independientes (SAT y Carga), lectura inversa por operario y cobertura en vivo con seis niveles y recomendado.
+- Filtro por rol en Ausencias, Turnos y Registro de Horas, con columna de rol en el CSV; cierre de turno directo del reponedor, sin traspaso de averías, y promoción automática del suplente al ausentarse.
+- Vista móvil `RestockerRouteView.js` con zonas, jornada y modal «⏱️ Mis Horas»; las rutas SAT le responden `403`.
+
+### Certificación
+
+- `RestockerRoleZonesShiftsApiTest`, `RestockerRbacConstitutionalTest`, `RestockerStaffHttpTest`, `PostgresRestockerZoneSchemaTest`, `RestockerZoneCoverageRankerTest` y `RestockerShiftAndWorkHoursTest`.
+
+## [Módulo 30] · Perfiles de SLA Diferenciados por Tipo de Sede — 2026-11-11
+
+**Estado:** Cerrado · contratos escalonados con techo sanitario y sellado inmutable.
+
+### Añadido
+
+- Enumerado `sla_tier` y `locations.sla_tier` (Estándar por defecto), con `422 INVALID_SLA_TIER` fuera del catálogo y auditoría solo del cambio efectivo de contrato.
+- Matriz de objetivos por urgencia —Estándar 8/12/24 h, Prioritario 6/8/12 h, Crítico 24x7 4/4/8 h— y techo innegociable de **240 min** para perecederos y mixtas con fallo térmico o prioridad crítica (Art. II).
+- `incidents.sla_tier_snapshot` inmutable (`23514 IMMUTABLE_SLA_TIER_SNAPSHOT`), `sla_target_minutes` con `CHECK` de los cinco valores y `sla_target_at`; backfill que conserva el umbral de los expedientes cerrados.
+- Recálculo desde `created_at` al cambiar la prioridad en triaje o al agravarse por absorción QR, con descuento de pausas de sede y del intervalo cerrado de una reapertura en garantía (Art. V.6).
+- Ruta que promueve a crítico todo vencimiento ≤ 4,0 h con prelación `COLD_CHAIN` sobre `CONTRACTUAL_SLA`, escalado contractual 24/7 con bono +60 y saturación por ≥ 3 paradas vivas.
+- Métricas por sede con perfil, objetivo nominal, brechas ticket a ticket y estado SLA; visibilidad en Coordinación, técnico (online y offline) y portal propio, con opacidad en QR y A4 (Art. V.4).
+
+### Certificación
+
+- `TieredSlaDomainTest`, `TieredSlaContractsApiTest`, `PostgresTieredSlaSchemaTest`, `PostgresTieredSlaBackfillTest` y `TieredSlaFrontendTest.mjs`.
+
+## [Módulo 29] · Acta de Merma y Destrucción de Lotes por Cuarentena Sanitaria — 2026-11-07
+
+**Estado:** Cerrado · documento oficial inmutable y libro APPCC certificados.
+
+### Añadido
+
+- Tabla 40 `sanitary_spoilage_records` (22 columnas) con `record_code` único `ACTA-MERMA-AAAA-NNNN`, distinción entre técnico certificador y usuario que tramita, origen de la cuarentena, temperaturas, método de destrucción, foto obligatoria y observaciones de higiene de 20–1000 caracteres.
+- Coherencia de las dos ramas —máquina vacía o lotes reales con unidades destruidas y sus `CHECK`—, levantamiento atómico, desbloqueo del QR y relación `1..N` ante reaperturas en garantía.
+- Inmutabilidad tras la emisión: solo cabe el ajuste económico auditado, con motivo y rastro; coste visible únicamente para Coordinación (Art. III.1 y V.4).
+- Pestaña APPCC con bandeja, filtros y CSV, histórico por máquina y **Acta Oficial A4** imprimible.
+
+### Certificación
+
+- `SanitarySpoilageApiIntegrationTest`, `SanitarySpoilageServiceIntegrationTest`, `PostgresSanitarySpoilageSchemaTest`, `SanitarySpoilageValidatorTest` y `SanitarySpoilageFrontendTest.mjs`.
+
+## [Módulo 28] · Guías Rápidas de Diagnóstico por Modelo — 2026-11-05
+
+**Estado:** Cerrado · catálogo y superficie móvil certificados.
+
+### Añadido
+
+- Tabla 39 `machine_troubleshooting_guides` (14 columnas) con modelo visible y clave plegada, categoría del aviso, tres bloques `JSONB` acotados (0–20 códigos, 2–10 pasos, 0–10 repuestos) y una sola guía viva por modelo/categoría.
+- Uso en ruta con conmutación de modelo, acordeón, cruce de repuestos con el stock de la furgoneta, enlace a la causa raíz sugerida y sincronización sin conexión; excluida de las inspecciones preventivas y con aviso de cadena de frío.
+- Gobierno en Coordinación con instrucciones ≥ 20 caracteres reales por paso, inmutabilidad de modelo y categoría, auditoría del estado anterior y el nuevo y semillas de los modelos del parque.
+
+### Certificación
+
+- `TroubleshootingGuideApiIntegrationTest`, `TroubleshootingGuideServiceIntegrationTest`, `PostgresTroubleshootingGuideSchemaTest`, `TroubleshootingGuideValidatorTest` y `TroubleshootingGuideSurfacesGuardTest.mjs`.
+
+## [Módulo 27] · Bandeja de Taller Central para Piezas Recuperadas — 2026-11-04
+
+**Estado:** Cerrado · ciclo de reacondicionamiento y economía circular certificados.
+
+### Añadido
+
+- Tabla 38 `workshop_repair_items` (34 columnas): una fila por unidad física, con snapshot de coste y vínculo a la pieza, el expediente y la máquina de origen; diez claves foráneas `ON DELETE RESTRICT` y coherencia terminal entre restauración y baja.
+- Ciclo de recepción, inicio en banco y dictamen con diagnóstico ≥ 20 caracteres reales, control de concurrencia sobre la misma pieza y destino de reintegro al inventario o baja.
+- Ahorro por reacondicionamiento frente a compra, ordenación de la bandeja, CSV y recordatorio móvil de la pieza pendiente de entregar.
+- Opacidad de importes para el técnico y de la bandeja completa para la sede (Art. V.4).
+
+### Certificación
+
+- `WorkshopRefurbishmentApiIntegrationTest`, `WorkshopRefurbishmentServiceIntegrationTest`, `PostgresWorkshopRepairSchemaTest` y `WorkshopRepairDomainAndValidatorTest`.
+
+## [Módulo 26] · Historial de Reasignaciones y Cadena de Custodia — 2026-11-03
+
+**Estado:** Cerrado · tramos inmutables y trazabilidad de custodia certificados.
+
+### Añadido
+
+- Tabla 37 `incident_assignments` con snapshots de nombre y código del técnico y de quien asigna o desasigna, cierre con motivo de 1–1000 caracteres y un solo custodio técnico activo (`uq_incident_assignments_active_custody`).
+- Apertura y cierre automático del tramo en las cuatro vías —asignación, reasignación, desasignación y relevo de turno— dentro de la misma transacción, con `409` ante colisión y prohibición de reescribir un tramo cerrado (Art. III.3 y V.3).
+- Línea de tiempo «Cadena de Custodia» en el detalle de coordinación con retención y espera en bandeja, además de métricas por técnico; la sede, el QR y el albarán no reciben identidades ni histórico (Art. V.4).
+- Enumerados `incident_assignment_source` (9 canales) e `incident_unassignment_reason_type` (10 causas).
+
+### Certificación
+
+- `CustodyChainApiTest`, `CustodyChainConstitutionalTest`, `CustodyChainEdgeCasesTest`, `CustodyChainPerformanceTest`, `ShiftHandoverCustodyChainTest` y `OpportunisticCustodyChainTest`.
+
+## [Módulo 25] · Taxonomía de Causas Raíz y Análisis Pareto 80/20 — 2026-10-31
+
+**Estado:** Cerrado · catálogo gobernado y Pareto certificados.
+
+### Añadido
+
+- Tablas 35 y 36 (`root_causes`, `standard_solutions`) con 16 causas y 34 soluciones estandarizadas en cinco categorías; código y categoría inmutables, baja lógica y una única predeterminada activa por causa (`uq_standard_solutions_default_per_cause`).
+- Alta atómica de la causa con su primera solución, guardas que impiden dejar una causa activa sin predeterminada y auditoría del estado anterior y el nuevo (Art. III.3).
+- Captura obligatoria en la resolución del técnico, la avería oportunista y el cierre de coordinación (`require_taxonomy`), con compatibilidad para las llamadas históricas sin claves.
+- Cinco snapshots congelados en el cierre, conservación de la clasificación anterior en la línea de tiempo al reabrir en garantía y exención de la retirada por 3.ª reincidencia crónica.
+- Diagrama Pareto con cierre exacto en `100,00 %`, Zona Vital al cruzar el `80,00 %`, cruce de MTTR y coste de repuestos, filtros, contador de históricas sin clasificar y CSV de dos secciones auditado; certificado bajo 500 ms con 10.000 incidencias.
+- Acceso restringido: Coordinación gobierna y exporta; el técnico solo lee catálogo y etiquetas; sede, QR y albarán reciben `403` (Art. V.4).
+
+### Certificación
+
+- `RootCauseTaxonomyIntegrationTest`, `RootCauseTaxonomyServiceTest`, `RootCauseParetoServiceTest`, `ResolutionTaxonomyValidatorTest`, `PostgresRootCauseTaxonomySchemaTest`, `RootCauseParetoPerformanceTest` y `RootCauseTaxonomyFrontendAndPwaTest.mjs`.
+
 ## [Módulo 24] · Cierre de cobertura del Modo Sin Conexión PWA — 2026-10-28
 
 **Estado:** Cerrado · cobertura EARS completa y documentación alineada con el código.
