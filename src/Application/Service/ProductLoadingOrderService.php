@@ -20,6 +20,7 @@ use VendGuard\Core\Domain\Model\ProductLoadingOrderItem;
 use VendGuard\Core\Domain\Model\RestockerVanProductStock;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Model\VendingProduct;
+use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Core\Domain\Repository\ProductLoadingOrderRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RestockerVanStockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
@@ -96,7 +97,8 @@ final class ProductLoadingOrderService
         private readonly UserRepositoryInterface $userRepository,
         ?AuditLogger $auditLogger = null,
         private readonly ?PDO $pdo = null,
-        private readonly ?Closure $orderCodeGenerator = null
+        private readonly ?Closure $orderCodeGenerator = null,
+        private readonly ?MachineRestockVisitRepositoryInterface $restockVisitRepository = null
     ) {
         $this->auditLogger = $auditLogger ?? new AuditLogger();
     }
@@ -1056,6 +1058,8 @@ final class ProductLoadingOrderService
      */
     private function buildDetail(ProductLoadingOrder $order, array $items): array
     {
+        $items = $this->enrichWithSuggestedLiquidationQuantities($order, $items);
+
         $restocker = $this->userRepository->findById($order->getRestockerId(), false, false);
         $zones = [];
         try {
@@ -1077,6 +1081,62 @@ final class ProductLoadingOrderService
             'items' => $items,
             'picking_sheet' => $this->buildPickingSheet($orderRow, $items),
         ];
+    }
+
+    /**
+     * Precarga `C4` de la liquidación: unidades cargadas y mermas del turno.
+     *
+     * Solo se consultan las visitas cuando la orden está en
+     * `CONFIRMED_BY_RESTOCKER`; para el resto de estados las líneas declaran 0 y
+     * el formulario no inventa cantidades. La clave es producto + lote porque el
+     * mismo producto puede viajar en varios lotes y cada uno se liquida aparte.
+     *
+     * @param list<array<string, mixed>> $items
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function enrichWithSuggestedLiquidationQuantities(ProductLoadingOrder $order, array $items): array
+    {
+        $suggested = [];
+        if ($this->restockVisitRepository !== null
+            && $order->getId() !== null
+            && $order->getStatus() === ProductLoadingOrderStatus::CONFIRMED_BY_RESTOCKER) {
+            foreach ($this->restockVisitRepository->suggestLiquidationQuantities(
+                (int)$order->getId(),
+                $order->getRestockerId()
+            ) as $row) {
+                $key = $this->liquidationBatchKey(
+                    (int)$row['product_id'],
+                    $row['batch_code'] !== null ? (string)$row['batch_code'] : null
+                );
+                $suggested[$key] = [
+                    'suggested_restocked_in_machines_qty' => (int)$row['suggested_restocked_in_machines_qty'],
+                    'suggested_withdrawn_spoilage_qty' => (int)$row['suggested_withdrawn_spoilage_qty'],
+                ];
+            }
+        }
+
+        return array_map(static function (array $item) use ($suggested): array {
+            $key = self::liquidationBatchKey(
+                (int)$item['product_id'],
+                $item['batch_code'] !== null ? (string)$item['batch_code'] : null
+            );
+            $quantities = $suggested[$key] ?? [
+                'suggested_restocked_in_machines_qty' => 0,
+                'suggested_withdrawn_spoilage_qty' => 0,
+            ];
+
+            return $item + $quantities;
+        }, $items);
+    }
+
+    private static function liquidationBatchKey(int $productId, ?string $batchCode): string
+    {
+        $batch = $batchCode !== null && trim($batchCode) !== ''
+            ? strtoupper(trim($batchCode))
+            : RestockerVanProductStock::DEFAULT_BATCH_CODE;
+
+        return $productId . '|' . $batch;
     }
 
     /**

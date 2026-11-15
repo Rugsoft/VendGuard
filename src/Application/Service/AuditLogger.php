@@ -206,6 +206,44 @@ class AuditLogger
     }
 
     /**
+     * Registra un hecho de la visita de reposición in situ (Módulo 34, Art. III.3).
+     *
+     * La visita tiene espacio de identificadores propio, así que se audita bajo
+     * `MACHINE_RESTOCK_VISIT` y no bajo `MACHINE`: el visor puede filtrar el
+     * histórico del Triple Cerrojo sin mezclarlo con el resto del parque.
+     *
+     * @param int $visitId Visita afectada.
+     * @param string $action Acción del catálogo de la visita.
+     * @param array{id: int|null, role: string, name: string} $user Reponedor que firma.
+     * @param array<string, mixed>|null $previousState
+     * @param array<string, mixed> $newState
+     * @param array<string, mixed>|null $metadata
+     */
+    public function logMachineRestockVisitEvent(
+        int $visitId,
+        string $action,
+        array $user,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_MACHINE_RESTOCK_VISIT,
+            entityId: $visitId,
+            action: strtoupper(trim($action)),
+            userId: $user['id'] ?? null,
+            userRole: $user['role'] ?? 'RESTOCKER',
+            userName: $user['name'] ?? 'Reponedor',
+            previousState: $previousState,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
+
+    /**
      * Registra un evento administrativo o maestro en una sede cliente (EARS 5.2).
      * 
      * @param int $locationId ID de la sede.

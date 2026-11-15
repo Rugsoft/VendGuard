@@ -1832,6 +1832,33 @@ INNER JOIN vending_products p ON p.sku = v.sku
 ON CONFLICT (machine_id, slot_code) DO NOTHING;
 
 
+-- Lote y caducidad vigentes en los carriles refrigerados (Módulo 34 · D1, QA 1).
+-- Sin este par el semáforo FEFO del móvil no tiene nada que medir: aquí se siembra
+-- para que el reponedor vea un carril `EXPIRING_SOON` real (`VEND-0101.11` y
+-- `VEND-0801.11`, con el lote que caduca pasados mañana) y otro `OK`. Solo se
+-- escribe donde el carril nace sin lote (`current_batch_code IS NULL`): la
+-- existencia y el lote de un carril son estado operativo, y una resemilla no
+-- puede reescribir lo que el reponedor dejó en su última visita.
+UPDATE machine_planogram_slots s
+   SET current_batch_code = v.batch_code,
+       current_expiration_date = v.expiration_date
+  FROM (VALUES
+      ('VEND-0101', '11', 'L-SAND-2602',  (CURRENT_DATE + 2)),
+      ('VEND-0101', '13', 'L-YOG-2611',   (CURRENT_DATE + 12)),
+      ('VEND-0301', '11', 'L-SAND-2606',  (CURRENT_DATE + 4)),
+      ('VEND-0301', '12', 'L-ENS-2610',   (CURRENT_DATE + 10)),
+      ('VEND-0301', '13', 'L-YOG-2612',   (CURRENT_DATE + 13)),
+      ('VEND-0701', '11', 'L-SAND-2606',  (CURRENT_DATE + 4)),
+      ('VEND-0701', '13', 'L-YOG-2611',   (CURRENT_DATE + 12)),
+      ('VEND-0201', '11', 'L-SAND-2606',  (CURRENT_DATE + 4)),
+      ('VEND-0801', '11', 'L-SAND-2602',  (CURRENT_DATE + 2))
+  ) AS v(machine_code, slot_code, batch_code, expiration_date)
+ WHERE s.slot_code = v.slot_code
+   AND s.current_batch_code IS NULL
+   AND s.current_expiration_date IS NULL
+   AND s.machine_id = (SELECT id FROM machines WHERE code = v.machine_code);
+
+
 -- ============================================================================
 -- SECCIÓN 24 · restocker_van_product_stocks y product_loading_orders — lotes en
 --              furgoneta y órdenes de carga demo (Módulo 33)
@@ -1989,6 +2016,130 @@ WHERE NOT EXISTS (
 );
 
 
+-- ============================================================================
+-- SECCIÓN 25 · machine_restock_visits y machine_restock_visit_items — visitas de
+--              reposición in situ demo (Módulo 34)
+-- ============================================================================
+-- QUÉ SIEMBRA
+--   Dos visitas históricas y su desglose carril a carril: una `COMPLETED` con
+--   retirada FEFO real (seis sándwiches caducados salen del carril 11 de
+--   `VEND-0101` antes de cargar el lote nuevo, con su merma comercial congelada
+--   a coste de la fecha) y una `ABORTED_THERMAL_BREACH` histórica en `VEND-0701`
+--   (apertura a 7,5 °C, precinto colocado y avería térmica comunicada al SAT).
+--
+-- POR QUÉ LA VISITA ABORTADA NO DEJA LA MÁQUINA EN CUARENTENA
+--   La semilla es el registro documental de una visita que ocurrió hace días: la
+--   cabina se reparó y la cuarentena se levantó por el flujo del Módulo 29. El
+--   arranque en limpio no siembra incidencias (`0 incidencias`), así que
+--   `triggered_incident_id` queda nulo: en producción lo escribe el servicio al
+--   crear o escalar el ticket `CRITICAL` (`QA 2`), y aquí no se inventa un
+--   expediente que no existe.
+--
+-- POR QUÉ LA VISITA COMPLETADA CUADRA CON EL CARRIL SEMBRADO
+--   El carril `11` de `VEND-0101` queda con 4 unidades del lote `L-SAND-2602`
+--   —el que caduca pasados mañana, `EXPIRING_SOON`— porque la visita retiró las 6
+--   caducadas y cargó 4 del lote nuevo: `6 - 6 + 4 = 4`. La identidad aritmética
+--   del `C1` se demuestra con la semilla, no solo con la restricción.
+--
+-- POR QUÉ SE INSERTA SOLO SI NO EXISTE
+--   La visita es un hecho histórico inmutable (Art. III.3): una resemilla no la
+--   reescribe ni la duplica. Las referencias se resuelven por `visit_code`,
+--   `machine_code`, `slot_code` y `sku`, nunca por identificadores que la
+--   secuencia asigna distinto en cada base.
+-- ============================================================================
+
+-- Visita completada con retirada FEFO: la temperatura de cabina (3,0 °C) está
+-- dentro del techo sanitario y el checklist declara los dos puntos de cabina.
+INSERT INTO machine_restock_visits (
+    visit_code, machine_id, restocker_id, loading_order_id, status,
+    started_at, completed_at, cabin_temp_celsius, hygiene_checklist_json,
+    precautionary_seal_applied, photo_evidence_url, internal_notes, client_mutation_id
+)
+SELECT
+    'MRV-2026-0001',
+    (SELECT id FROM machines WHERE code = 'VEND-0101'),
+    (SELECT id FROM users WHERE email_key = 'lucia.repostaje@vendguard.internal'),
+    (SELECT id FROM product_loading_orders WHERE order_code = 'PLO-2026-0001'),
+    'COMPLETED'::restock_visit_status,
+    CURRENT_TIMESTAMP - INTERVAL '1 day',
+    CURRENT_TIMESTAMP - INTERVAL '1 day' + INTERVAL '12 minutes',
+    3.0,
+    '{"coffee_grounds_emptied": null, "liquid_waste_bucket_cleaned": null, "mixers_and_ducts_rinsed": null, "dispensing_tray_and_glass_cleaned": true, "cabin_spills_checked": true}'::jsonb,
+    FALSE,
+    '/uploads/restock-visits/MRV-2026-0001.jpg',
+    'Retirada total de seis sándwiches caducados del carril 11 antes de recargar con el lote nuevo.',
+    'seed-mutation-completed-0001'
+WHERE NOT EXISTS (
+    SELECT 1 FROM machine_restock_visits WHERE visit_code = 'MRV-2026-0001'
+);
+
+
+-- Visita abortada por rotura de cadena de frío: cabina a 7,5 °C (> 4,0 °C en
+-- `PERISHABLE_FOOD`), precinto preventivo, foto y nota interna de más de 20
+-- caracteres (Art. II, Art. V.1, Art. V.5). No carga una sola unidad.
+INSERT INTO machine_restock_visits (
+    visit_code, machine_id, restocker_id, loading_order_id, status,
+    started_at, completed_at, cabin_temp_celsius, hygiene_checklist_json,
+    precautionary_seal_applied, photo_evidence_url, internal_notes, client_mutation_id
+)
+SELECT
+    'MRV-2026-0002',
+    (SELECT id FROM machines WHERE code = 'VEND-0701'),
+    (SELECT id FROM users WHERE email_key = 'lucia.repostaje@vendguard.internal'),
+    NULL,
+    'ABORTED_THERMAL_BREACH'::restock_visit_status,
+    CURRENT_TIMESTAMP - INTERVAL '3 days',
+    CURRENT_TIMESTAMP - INTERVAL '3 days' + INTERVAL '9 minutes',
+    7.5,
+    '{}'::jsonb,
+    TRUE,
+    '/uploads/restock-visits/MRV-2026-0002.jpg',
+    'Apertura con 7,5 °C en cabina: máquina precintada y avería térmica comunicada al SAT de la zona.',
+    'seed-mutation-abort-0002'
+WHERE NOT EXISTS (
+    SELECT 1 FROM machine_restock_visits WHERE visit_code = 'MRV-2026-0002'
+);
+
+
+-- Desglose carril a carril de las dos visitas demo (C1, D1, QA 3).
+INSERT INTO machine_restock_visit_items (
+    visit_id, slot_id, slot_code, product_id, qty_before,
+    qty_withdrawn_expired, qty_withdrawn_damaged, qty_added, qty_after,
+    withdrawn_batch_code, withdrawn_expiration_date,
+    loaded_batch_code, loaded_expiration_date,
+    unit_cost_snapshot_eur, commercial_spoilage_loss_eur
+)
+SELECT
+    v1.id,
+    s.id,
+    v.slot_code,
+    p.id,
+    v.qty_before, v.qty_withdrawn_expired, v.qty_withdrawn_damaged, v.qty_added, v.qty_after,
+    v.withdrawn_batch_code, v.withdrawn_expiration_date,
+    v.loaded_batch_code, v.loaded_expiration_date,
+    v.unit_cost_snapshot_eur, v.commercial_spoilage_loss_eur
+FROM (VALUES
+    ('MRV-2026-0001', 'VEND-0101', '11', 'SAND-MIXTO-01', 6, 6, 0, 4, 4,
+     'L-SAND-2599', (CURRENT_DATE - 1), 'L-SAND-2602', (CURRENT_DATE + 2), 1.15, 6.90),
+    ('MRV-2026-0001', 'VEND-0101', '13', 'YOGUR-NAT-125', 5, 0, 0, 0, 5,
+     NULL, NULL, NULL, NULL, 0.38, 0.00),
+    ('MRV-2026-0002', 'VEND-0701', '11', 'SAND-MIXTO-01', 7, 0, 0, 0, 7,
+     NULL, NULL, NULL, NULL, 1.15, 0.00)
+) AS v(visit_code, machine_code, slot_code, sku, qty_before,
+       qty_withdrawn_expired, qty_withdrawn_damaged, qty_added, qty_after,
+       withdrawn_batch_code, withdrawn_expiration_date,
+       loaded_batch_code, loaded_expiration_date,
+       unit_cost_snapshot_eur, commercial_spoilage_loss_eur)
+INNER JOIN machine_restock_visits v1 ON v1.visit_code = v.visit_code
+INNER JOIN machines m ON m.code = v.machine_code
+INNER JOIN machine_planogram_slots s ON s.machine_id = m.id AND s.slot_code = v.slot_code
+INNER JOIN vending_products p ON p.sku = v.sku
+WHERE NOT EXISTS (
+    SELECT 1 FROM machine_restock_visit_items i
+     WHERE i.visit_id = v1.id AND i.slot_code = v.slot_code
+);
+
+
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante técnico · 3 vinculaciones de cuadrante de carga (M31) ·
 --       5 saldos de stock de furgoneta · 1 configuración de ruta ·
@@ -2021,4 +2172,8 @@ WHERE NOT EXISTS (
 --       6 saldos de producto por lote en las furgonetas de reposición
 --       (Módulo 33) y 2 órdenes de carga —una liquidada al cierre y otra
 --       despachada con temperatura de cámara de 3,5 °C— con sus 5 líneas.
+--       9 carriles refrigerados con lote y caducidad vigentes (Módulo 34), dos de
+--       ellos en `EXPIRING_SOON`, y 2 visitas de reposición in situ —una
+--       completada con retirada FEFO de 6 unidades y otra abortada por rotura de
+--       frío a 7,5 °C— con sus 3 líneas de desglose carril a carril.
 -- =============================================================================

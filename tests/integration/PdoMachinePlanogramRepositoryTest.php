@@ -29,6 +29,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php';
 
+use VendGuard\Core\Domain\Exception\PlanogramValidationException;
 use VendGuard\Core\Domain\Model\MachinePlanogramSlot;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\ProductCategory;
@@ -427,6 +428,177 @@ try {
         '6.9 Un reponedor inválido no ve máquinas',
         $repo->findMachinesForRestocker(0) === [] && $repo->findMachineForRestocker(1, 0) === null
     );
+    // =================================================================
+    // 7. FEFO de carril y actualización post-visita (Módulo 34, D1, QA 1)
+    // =================================================================
+    echo "\n--- 7. Lote vigente, semáforo FEFO y movimiento post-visita ---\n";
+
+    $productRepo->updateStatus($productId, true);
+    $today = new DateTimeImmutable('today');
+
+    $repo->upsertSlot(new MachinePlanogramSlot(
+        null, TEST_MACHINE_ID, 'FEFO_EXPIRED', $productId, 20, 10, 2, true,
+        null, null, 'FEFO-B0', $today->modify('-1 day')
+    ));
+    $repo->upsertSlot(new MachinePlanogramSlot(
+        null, TEST_MACHINE_ID, 'FEFO_SOON', $productId, 20, 10, 2, true,
+        null, null, 'FEFO-B1', $today->modify('+1 day')
+    ));
+    $repo->upsertSlot(new MachinePlanogramSlot(
+        null, TEST_MACHINE_ID, 'FEFO_FRESH', $productId, 20, 10, 2, true,
+        null, null, 'FEFO-B2', $today->modify('+5 days')
+    ));
+    $repo->upsertSlot(new MachinePlanogramSlot(
+        null, TEST_MACHINE_ID, 'FEFO_EMPTY', $productId, 20, 0, 2, true,
+        null, null, 'FEFO-B3', $today->modify('-1 day')
+    ));
+
+    $expiredSlot = $repo->findSlot(TEST_MACHINE_ID, 'FEFO_EXPIRED');
+    $soonSlot = $repo->findSlot(TEST_MACHINE_ID, 'FEFO_SOON');
+    $freshSlot = $repo->findSlot(TEST_MACHINE_ID, 'FEFO_FRESH');
+    $emptySlot = $repo->findSlot(TEST_MACHINE_ID, 'FEFO_EMPTY');
+
+    $assert(
+        '7.1 El carril caducado expone lote, fecha, EXPIRED y retirada obligatoria',
+        $expiredSlot['current_batch_code'] === 'FEFO-B0'
+        && $expiredSlot['current_expiration_date'] === $today->modify('-1 day')->format('Y-m-d')
+        && $expiredSlot['slot_expiry_status'] === 'EXPIRED'
+        && $expiredSlot['fefo_withdrawal_required'] === true
+        && $expiredSlot['slot_expiry_status_label'] !== '',
+        json_encode($expiredSlot)
+    );
+    $assert(
+        '7.2 Un carril que caduca en 48 h o menos está EXPIRING_SOON',
+        $soonSlot['slot_expiry_status'] === 'EXPIRING_SOON'
+        && $soonSlot['fefo_withdrawal_required'] === true
+    );
+    $assert(
+        '7.3 Un lote sano no alerta y un carril vacío nunca alerta (EARS 01.1.2)',
+        $freshSlot['slot_expiry_status'] === 'OK'
+        && $freshSlot['fefo_withdrawal_required'] === false
+        && $emptySlot['slot_expiry_status'] === 'OK'
+        && $emptySlot['fefo_withdrawal_required'] === false
+    );
+    $assert(
+        '7.4 Ninguna fila FEFO expone coste interno (Art. V.4)',
+        !array_key_exists('unit_cost_eur', $expiredSlot)
+        && !array_key_exists('unit_cost_eur', $freshSlot)
+    );
+
+    $machineCard = null;
+    foreach ($repo->findMachinesForRestocker(RESTOCKER_ONE_ZONE) as $row) {
+        if ($row['code'] === 'VEND-0102') {
+            $machineCard = $row;
+            break;
+        }
+    }
+    $assert(
+        '7.5 La tarjeta de la máquina cuenta un caducado y uno próximo a caducar',
+        $machineCard !== null
+        && $machineCard['expired_slots_count'] === 1
+        && $machineCard['expiring_soon_slots_count'] === 1
+        && $machineCard['can_restock'] === true,
+        json_encode($machineCard)
+    );
+
+    $previousSanitaryStatus = (string)$pdo->query(
+        'SELECT sanitary_status FROM machines WHERE id = ' . TEST_MACHINE_ID
+    )->fetchColumn();
+    $pdo->exec("UPDATE machines SET sanitary_status = 'QUARANTINE' WHERE id = " . TEST_MACHINE_ID);
+    $quarantinedCard = $repo->findMachineForRestocker(TEST_MACHINE_ID, RESTOCKER_ONE_ZONE);
+    $pdo->exec("UPDATE machines SET sanitary_status = '" . $previousSanitaryStatus . "' WHERE id = " . TEST_MACHINE_ID);
+    $assert(
+        '7.6 Una máquina en cuarentena no puede reponerse (Art. II)',
+        $quarantinedCard !== null && $quarantinedCard['can_restock'] === false
+    );
+
+    $mixedMovement = $repo->applyVisitSlotMovement(
+        TEST_MACHINE_ID, 'FEFO_FRESH', 2, 1, 4, 'fefo-b9', $today->modify('+3 days')
+    );
+    $assert(
+        '7.7 El remanente sano conserva la caducidad más próxima y su lote (D1)',
+        $mixedMovement['current_estimated_qty'] === 11
+        && $mixedMovement['current_batch_code'] === 'FEFO-B9'
+        && $mixedMovement['current_expiration_date'] === $today->modify('+3 days')->format('Y-m-d')
+        && $mixedMovement['slot_expiry_status'] === 'OK',
+        json_encode($mixedMovement)
+    );
+
+    $replacedBatch = $repo->applyVisitSlotMovement(
+        TEST_MACHINE_ID, 'FEFO_EXPIRED', 10, 0, 6, 'FEFO-B4', $today->modify('+4 days')
+    );
+    $assert(
+        '7.8 Retirar todo el remanente caducado adopta el lote cargado (D1)',
+        $replacedBatch['current_estimated_qty'] === 6
+        && $replacedBatch['current_batch_code'] === 'FEFO-B4'
+        && $replacedBatch['current_expiration_date'] === $today->modify('+4 days')->format('Y-m-d')
+    );
+
+    $emptied = $repo->applyVisitSlotMovement(TEST_MACHINE_ID, 'FEFO_SOON', 10, 0, 0);
+    $assert(
+        '7.9 Vaciar el carril borra lote y caducidad sin borrar la fila (D1, Art. III.1)',
+        $emptied['current_estimated_qty'] === 0
+        && $emptied['current_batch_code'] === null
+        && $emptied['current_expiration_date'] === null
+        && $emptied['slot_expiry_status'] === 'OK'
+        && $emptied['fefo_withdrawal_required'] === false
+    );
+
+    $withdrawError = null;
+    try {
+        $repo->applyVisitSlotMovement(TEST_MACHINE_ID, 'FEFO_FRESH', 12, 0, 0);
+    } catch (PlanogramValidationException $exception) {
+        $withdrawError = $exception;
+    }
+    $assert(
+        '7.10 Retirar más de lo existente se rechaza y no altera el carril (C1)',
+        $withdrawError !== null
+        && $withdrawError->getErrorCode() === 'INVALID_PLANOGRAM_SLOT_BOUNDS'
+        && $repo->findSlot(TEST_MACHINE_ID, 'FEFO_FRESH')['current_estimated_qty'] === 11
+    );
+
+    $overflowError = null;
+    try {
+        $repo->applyVisitSlotMovement(TEST_MACHINE_ID, 'FEFO_FRESH', 0, 0, 10, 'FEFO-B5', $today->modify('+6 days'));
+    } catch (PlanogramValidationException $exception) {
+        $overflowError = $exception;
+    }
+    $assert(
+        '7.11 Superar la capacidad del carril se rechaza sin persistir el movimiento',
+        $overflowError !== null
+        && $overflowError->getErrorCode() === 'INVALID_PLANOGRAM_SLOT_BOUNDS'
+        && $repo->findSlot(TEST_MACHINE_ID, 'FEFO_FRESH')['current_estimated_qty'] === 11
+    );
+
+    $pdo->beginTransaction();
+    $repo->applyVisitSlotMovement(TEST_MACHINE_ID, 'FEFO_FRESH', 0, 0, 2, 'FEFO-B6', $today->modify('+7 days'));
+    $pdo->rollBack();
+    $assert(
+        '7.12 El movimiento respeta la transacción del llamador (visita atómica)',
+        $repo->findSlot(TEST_MACHINE_ID, 'FEFO_FRESH')['current_estimated_qty'] === 11
+    );
+
+    $repo->deactivateSlot(TEST_MACHINE_ID, 'FEFO_EMPTY');
+    $inactiveError = null;
+    try {
+        $repo->applyVisitSlotMovement(TEST_MACHINE_ID, 'FEFO_EMPTY', 0, 0, 1, 'FEFO-B7', $today->modify('+8 days'));
+    } catch (PlanogramValidationException $exception) {
+        $inactiveError = $exception;
+    }
+    $assert(
+        '7.13 Un carril inactivo no admite movimientos (RF-03.3)',
+        $inactiveError !== null && $inactiveError->getErrorCode() === 'INVALID_PLANOGRAM_SLOT_BOUNDS'
+    );
+
+    $finalCard = $repo->findMachineForRestocker(TEST_MACHINE_ID, RESTOCKER_ONE_ZONE);
+    $assert(
+        '7.14 Tras la visita no quedan alertas FEFO pendientes en la máquina',
+        $finalCard !== null
+        && $finalCard['expired_slots_count'] === 0
+        && $finalCard['expiring_soon_slots_count'] === 0,
+        json_encode($finalCard)
+    );
+
 } finally {
     $cleanup($pdo);
 }

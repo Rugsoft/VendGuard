@@ -107,6 +107,14 @@ final class TestDataCleaner
         // `vending_products`, de modo que tampoco lo alcanza el grafo: entra como
         // raíz y el sembrador restituye los seis saldos canónicos.
         'restocker_van_product_stocks',
+        // Visitas de reposición in situ (Módulo 34): cuelgan de `machines`,
+        // `users` y `incidents` —maestras y raíz protegidas—, de modo que el grafo
+        // desde `incidents` solo alcanzaría las que nacen de un aborto térmico y
+        // dejaría las completadas. La cabecera entra como raíz propia y sus líneas
+        // caen antes por la FK RESTRICT; ambas son inmutables, así que el borrado
+        // pasa por la ventana de purga del arnés (Art. III.1).
+        'machine_restock_visit_items',
+        'machine_restock_visits',
     ];
 
     /**
@@ -178,6 +186,11 @@ final class TestDataCleaner
         'product_loading_order_items',
         'product_loading_orders',
         'restocker_van_product_stocks',
+        // Libro sanitario del Módulo 34: la visita y su desglose son operativos
+        // —una suite los emite al certificar el cierre de visita— y su purga no
+        // arrastra ninguna maestra.
+        'machine_restock_visit_items',
+        'machine_restock_visits',
     ];
 
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */

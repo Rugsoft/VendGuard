@@ -1,8 +1,8 @@
 /**
  * VendGuard - RestockerRouteView (RestockerRouteView.js)
  *
- * Vista móvil dedicada al Cargador / Reponedor de Ruta (`RESTOCKER`), Módulos 31
- * y 33 (`D1`, `RF-04.1` a `RF-04.3`, `D3`, `D4`, `C4`, Art. V.4).
+ * Vista móvil dedicada al Cargador / Reponedor de Ruta (`RESTOCKER`), Módulos 31,
+ * 33 y 34 (`D1`, `RF-02` a `RF-05.1`, `D3`, `D4`, `C3`, `C4`, Art. II, Art. V.4).
  *
  * Responsabilidades:
  * 1. Autenticación exclusiva de `RESTOCKER`: cualquier otro rol se rechaza y la
@@ -19,6 +19,9 @@
  * 6. Ciclo móvil de la orden de carga: recepción en un toque, liquidación por
  *    lote al cierre, stock FEFO con semáforo y comprobante de la última orden
  *    liquidada (`C4`), siempre sin costes internos (Art. V.4).
+ * 7. Asistente de visita in situ: control térmico con aborto automático, retirada
+ *    y carga FEFO, checklist adaptativo, evidencia fotográfica y cola offline
+ *    IndexedDB aislada por `restocker_id` con sincronización FIFO (`C3`, `D4`).
  *
  * Dogma Vanilla: Vue 3 Options API en ES Module nativo, sin bundler ni
  * dependencias externas. El diseño sigue `docs/design.md` con tokens CSS.
@@ -26,6 +29,64 @@
 
 import { api } from '../api.js';
 import { store } from '../store.js';
+import {
+  RestockVisitOfflineQueue,
+  RESTOCK_VISIT_CONFLICT,
+  RESTOCK_VISIT_PENDING
+} from '../utils/RestockVisitOfflineQueue.js';
+
+const HYGIENE_ITEMS = [
+  { key: 'coffee_grounds_emptied', label: 'Cajón de posos vaciado', scope: 'hot' },
+  { key: 'liquid_waste_bucket_cleaned', label: 'Cubo de residuos líquidos limpio', scope: 'hot' },
+  { key: 'mixers_and_ducts_rinsed', label: 'Batidores y conductos enjuagados', scope: 'hot' },
+  { key: 'dispensing_tray_and_glass_cleaned', label: 'Bandeja de erogación y cristal limpios', scope: 'all' },
+  { key: 'cabin_spills_checked', label: 'Derrames de cabina revisados', scope: 'cold' }
+];
+
+const THERMAL_CEILINGS = Object.freeze({
+  PERISHABLE_FOOD: 4,
+  COMBO: 4,
+  COLD_DRINKS: 8
+});
+
+const HOT_MACHINE_TYPES = new Set(['HOT_DRINKS', 'COMBO']);
+
+const blankVisitForm = () => ({
+  client_mutation_id: '',
+  started_at: '',
+  cabin_temp_celsius: '',
+  precautionary_seal_applied: false,
+  photo_evidence_url: '',
+  internal_notes: '',
+  hygiene_checklist: {},
+  items: []
+});
+
+const createClientMutationId = () => {
+  try {
+    if (typeof globalThis !== 'undefined' && typeof globalThis.crypto?.randomUUID === 'function') {
+      return globalThis.crypto.randomUUID();
+    }
+  } catch (error) {
+    // El identificador de respaldo sigue siendo válido sin Web Crypto.
+  }
+
+  return `MRV-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const hygieneItemRequired = (item, machineType) => {
+  if (item.scope === 'all') return true;
+  const isHot = HOT_MACHINE_TYPES.has(String(machineType || ''));
+  return item.scope === 'hot' ? isHot : !isHot;
+};
+
+const hygieneDefaults = (machineType) => {
+  const defaults = {};
+  for (const item of HYGIENE_ITEMS) {
+    defaults[item.key] = hygieneItemRequired(item, machineType) ? false : null;
+  }
+  return defaults;
+};
 
 export const RestockerRouteView = {
   name: 'RestockerRouteView',
@@ -51,6 +112,25 @@ export const RestockerRouteView = {
       planogram: null,
       planogramLoading: false,
       planogramError: '',
+
+      // Visita in situ, historial y cola offline (Módulo 34, T-RVF-12)
+      showVisitModal: false,
+      visitMachine: null,
+      visitPlanogram: null,
+      visitLoading: false,
+      visitError: '',
+      visitSuccess: '',
+      visitSubmitting: false,
+      visitForm: blankVisitForm(),
+      visitPhotoFile: null,
+      visitPhotoName: '',
+      visitPhotoPreviewUrl: '',
+      recentVisits: [],
+      pendingVisitMutations: [],
+      visitQueueSequence: 0,
+      isSyncingVisits: false,
+      visitSyncMessage: '',
+      visitSyncError: '',
 
       // Órdenes de carga de producto y stock por lote (Módulo 33, T-PLD-12)
       activeLoadingOrder: null,
@@ -191,12 +271,91 @@ export const RestockerRouteView = {
     },
     reconcileLoadingHasDiscrepancy() {
       return this.reconcileLoadingForm.items.some((item) => this.reconcileLoadingDiscrepancy(item) !== 0);
+    },
+    navigatorOnline() {
+      return typeof navigator === 'undefined' ? true : navigator.onLine !== false;
+    },
+    visitRestockerId() {
+      return Number(this.restocker?.id ?? this.currentUser?.id ?? 0) || null;
+    },
+    visitThermalCeiling() {
+      return THERMAL_CEILINGS[String(this.visitMachine?.machine_type || '')] ?? null;
+    },
+    visitTemperatureRequired() {
+      return this.visitThermalCeiling !== null;
+    },
+    visitCabinTemperature() {
+      const raw = this.visitForm?.cabin_temp_celsius;
+      if (raw === '' || raw === null || raw === undefined) return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    },
+    visitThermalBreach() {
+      return this.visitThermalCeiling !== null
+        && this.visitCabinTemperature !== null
+        && this.visitCabinTemperature > this.visitThermalCeiling;
+    },
+    visitMode() {
+      return this.visitThermalBreach ? 'ABORTED_THERMAL_BREACH' : 'COMPLETED';
+    },
+    visitIsThermalAbort() {
+      return this.visitMode === 'ABORTED_THERMAL_BREACH';
+    },
+    visitInputsLocked() {
+      return this.visitIsThermalAbort;
+    },
+    visitHygieneItems() {
+      const checklist = this.visitForm?.hygiene_checklist || {};
+      return HYGIENE_ITEMS.map((item) => ({
+        ...item,
+        required: hygieneItemRequired(item, this.visitMachine?.machine_type),
+        value: checklist[item.key] ?? null
+      }));
+    },
+    visitHygieneMissing() {
+      return this.visitHygieneItems.filter((item) => item.required && item.value !== true);
+    },
+    visitTotalAdded() {
+      return (this.visitForm?.items || []).reduce((total, item) => total + Number(item.qty_added || 0), 0);
+    },
+    visitTotalWithdrawn() {
+      return (this.visitForm?.items || []).reduce(
+        (total, item) => total + Number(item.qty_withdrawn_expired || 0) + Number(item.qty_withdrawn_damaged || 0),
+        0
+      );
+    },
+    visitHasWithdrawals() {
+      return this.visitTotalWithdrawn > 0;
+    },
+    visitPhotoReady() {
+      return Boolean(this.visitPhotoFile || this.visitForm?.photo_evidence_url);
+    },
+    visitNeedsEvidence() {
+      return this.visitIsThermalAbort || this.visitHasWithdrawals;
+    },
+    pendingVisitCount() {
+      return this.pendingVisitMutations.filter((item) => item.status === RESTOCK_VISIT_PENDING).length;
+    },
+    conflictVisitCount() {
+      return this.pendingVisitMutations.filter((item) => item.status === RESTOCK_VISIT_CONFLICT).length;
     }
   },
   mounted() {
     if (this.isAuthenticated) {
       this.loadMyRoute();
       this.loadShiftStatus();
+      this.loadPendingVisitQueue();
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      this.visitOnlineHandler = () => {
+        if (this.navigatorOnline) this.syncPendingVisits();
+      };
+      window.addEventListener('online', this.visitOnlineHandler);
+    }
+  },
+  beforeUnmount() {
+    if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function' && this.visitOnlineHandler) {
+      window.removeEventListener('online', this.visitOnlineHandler);
     }
   },
   methods: {
@@ -250,12 +409,14 @@ export const RestockerRouteView = {
         this.activeLoadingOrder = data.active_loading_order || null;
         this.lastReconciledOrder = data.last_reconciled_order || null;
         this.vanProductStocks = Array.isArray(data.van_product_stocks) ? data.van_product_stocks : [];
+        this.recentVisits = Array.isArray(data.recent_visits) ? data.recent_visits.slice(0, 5) : [];
         this.vanStockKpis = data.van_stock_kpis && typeof data.van_stock_kpis === 'object'
           ? data.van_stock_kpis
           : this.vanStockKpis;
         this.hasExpiredVanLots = data.has_expired_van_lots === true
           || Number(this.vanStockKpis.expired_lots || 0) > 0;
         this.applyShiftResponse(data.shift || {}, 'OFF_SHIFT');
+        await this.loadPendingVisitQueue();
       } catch (err) {
         this.loadError = err?.message || 'No se pudo cargar tu ruta de reposición.';
       } finally {
@@ -541,12 +702,640 @@ export const RestockerRouteView = {
       }
     },
 
+    machineCanRestock(machine) {
+      if (!machine) return false;
+      if (machine.can_restock === false) return false;
+      if (machine.is_blocked_no_access === true) return false;
+      return String(machine.sanitary_status || '') !== 'QUARANTINE';
+    },
+
+    machineRestockBlockReason(machine) {
+      const sanitaryStatus = String(machine?.sanitary_status || '');
+      if (sanitaryStatus === 'QUARANTINE') {
+        return 'Máquina en cuarentena sanitaria: no se puede iniciar una visita de reposición.';
+      }
+      if (machine?.is_blocked_no_access === true) {
+        return 'Máquina fuera de servicio (acceso bloqueado): no se puede iniciar una visita de reposición.';
+      }
+      if (machine?.is_seasonal_pause === true) {
+        return 'Máquina en pausa estacional: no admite visitas de reposición.';
+      }
+
+      return 'Esta máquina no admite una visita de reposición ahora mismo.';
+    },
+
+    machineStockStatus(machine) {
+      if (Number(machine?.stockout_slots_count || 0) > 0) return 'STOCKOUT';
+      if (Number(machine?.low_stock_slots_count || 0) > 0) return 'LOW_STOCK';
+      return 'OK';
+    },
+
+    visitStatusLabel(status) {
+      const labels = {
+        COMPLETED: 'Completada',
+        ABORTED_THERMAL_BREACH: 'Abortada por temperatura',
+        PENDING: 'Pendiente de sincronizar'
+      };
+      return labels[status] || status || '—';
+    },
+
+    visitStatusIcon(status) {
+      if (status === 'ABORTED_THERMAL_BREACH') return '🌡️';
+      if (status === 'PENDING') return '📥';
+      return '✅';
+    },
+
+    visitStatusStyle(status) {
+      if (status === 'ABORTED_THERMAL_BREACH') {
+        return { backgroundColor: 'var(--color-error-bg)', color: 'var(--color-error-text)' };
+      }
+      if (status === 'PENDING') {
+        return { backgroundColor: 'var(--color-warning-bg)', color: 'var(--color-warning-text)' };
+      }
+      return { backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success-text)' };
+    },
+
+    visitBatchLabel(batch) {
+      const expiry = batch?.expiration_date ? ` · cad. ${this.formatShiftDate(batch.expiration_date)}` : '';
+      return `${batch?.batch_code || 'SIN-LOTE'}${expiry} · ${Number(batch?.quantity_available || 0)} uds.`;
+    },
+
+    visitSelectedBatch(item) {
+      if (!item) return null;
+      return (item.available_van_batches || []).find(
+        (batch) => String(batch.batch_code) === String(item.loaded_batch_code)
+      ) || null;
+    },
+
+    visitItemWithdrawn(item) {
+      return Number(item?.qty_withdrawn_expired || 0) + Number(item?.qty_withdrawn_damaged || 0);
+    },
+
+    visitItemMustWithdrawBeforeLoading(item) {
+      if (!item) return false;
+      const requiresFefo = item.fefo_withdrawal_required === true
+        || item.slot_expiry_status === 'EXPIRED'
+        || item.slot_expiry_status === 'EXPIRING_SOON';
+      return requiresFefo && this.visitItemWithdrawn(item) < Number(item.qty_before || 0);
+    },
+
+    visitItemNeedsWithdrawal(item) {
+      if (!item) return false;
+      if (item.slot_expiry_status === 'EXPIRED') {
+        return this.visitItemWithdrawn(item) < Number(item.qty_before || 0);
+      }
+      return Number(item.qty_added || 0) > 0 && this.visitItemMustWithdrawBeforeLoading(item);
+    },
+
+    visitItemQtyAfter(item) {
+      return Number(item?.qty_before || 0) - this.visitItemWithdrawn(item) + Number(item?.qty_added || 0);
+    },
+
+    visitItemMaxAddable(item) {
+      if (!item || this.visitInputsLocked || this.visitItemMustWithdrawBeforeLoading(item)) return 0;
+      const batch = this.visitSelectedBatch(item);
+      const space = Number(item.max_capacity || 0) - this.visitItemQtyAfter(item);
+      return Math.max(0, Math.min(space, Number(batch?.quantity_available || 0)));
+    },
+
+    withdrawVisitRemainder(item) {
+      if (!item || this.visitInputsLocked) return;
+      item.qty_withdrawn_expired = Math.max(0, Number(item.qty_before || 0));
+      item.qty_withdrawn_damaged = 0;
+      item.qty_added = 0;
+      this.visitError = '';
+    },
+
+    fillVisitItem(item) {
+      if (!item || this.visitInputsLocked) return;
+      if (this.visitItemMustWithdrawBeforeLoading(item)) {
+        this.visitError = `Carril ${item.slot_code}: retira primero el remanente FEFO antes de cargar.`;
+        return;
+      }
+      const maxAddable = this.visitItemMaxAddable(item);
+      if (maxAddable <= 0) {
+        this.visitError = `Carril ${item.slot_code}: no hay hueco o lote de furgoneta disponible.`;
+        return;
+      }
+      item.qty_added = maxAddable;
+      this.visitError = '';
+    },
+
+    markHygieneComplete() {
+      for (const entry of this.visitHygieneItems) {
+        this.visitForm.hygiene_checklist[entry.key] = entry.required ? true : null;
+      }
+    },
+
+    initializeVisitItems(slots) {
+      return (Array.isArray(slots) ? slots : []).map((slot) => {
+        const expiryStatus = String(slot.slot_expiry_status || 'OK');
+        const batches = Array.isArray(slot.available_van_batches)
+          ? slot.available_van_batches.map((batch) => ({
+            product_id: Number(batch.product_id ?? slot.product_id),
+            batch_code: String(batch.batch_code || ''),
+            expiration_date: batch.expiration_date || null,
+            quantity_available: Number(batch.quantity_available || 0)
+          })).filter((batch) => batch.batch_code !== '' && batch.quantity_available > 0)
+          : [];
+        const recommended = batches.some(
+          (batch) => String(batch.batch_code) === String(slot.fefo_recommended_batch_code)
+        ) ? String(slot.fefo_recommended_batch_code) : (batches[0]?.batch_code || '');
+
+        return {
+          slot_id: slot.id ?? null,
+          slot_code: String(slot.slot_code || ''),
+          product_id: Number(slot.product_id || 0),
+          product_sku: slot.product_sku || null,
+          product_name: slot.product_name || 'Producto sin nombre',
+          qty_before: Number(slot.current_estimated_qty || 0),
+          max_capacity: Number(slot.max_capacity || 0),
+          min_threshold: Number(slot.min_threshold || 0),
+          slot_expiry_status: expiryStatus,
+          current_batch_code: slot.current_batch_code || null,
+          current_expiration_date: slot.current_expiration_date || null,
+          fefo_withdrawal_required: slot.fefo_withdrawal_required === true
+            || expiryStatus === 'EXPIRED'
+            || expiryStatus === 'EXPIRING_SOON',
+          available_van_batches: batches,
+          loaded_batch_code: recommended,
+          qty_withdrawn_expired: 0,
+          qty_withdrawn_damaged: 0,
+          qty_added: 0
+        };
+      });
+    },
+
+    async openVisitAssistant(machine) {
+      if (!machine?.id) return;
+      if (!this.machineCanRestock(machine)) {
+        this.loadingActionError = this.machineRestockBlockReason(machine);
+        return;
+      }
+
+      this.visitMachine = machine;
+      this.visitPlanogram = null;
+      this.visitError = '';
+      this.visitSuccess = '';
+      this.loadingActionError = '';
+      this.showVisitModal = true;
+      this.visitForm = blankVisitForm();
+      this.visitForm.client_mutation_id = createClientMutationId();
+      this.visitForm.started_at = new Date().toISOString();
+      this.visitForm.hygiene_checklist = hygieneDefaults(machine.machine_type);
+      this.clearVisitPhoto();
+      await this.loadVisitPlanogram(machine.id);
+    },
+
+    closeVisitAssistant() {
+      this.showVisitModal = false;
+      this.visitMachine = null;
+      this.visitPlanogram = null;
+      this.visitError = '';
+      this.visitLoading = false;
+      this.visitSubmitting = false;
+      this.clearVisitPhoto();
+    },
+
+    async loadVisitPlanogram(machineId) {
+      this.visitLoading = true;
+      this.visitError = '';
+      try {
+        const response = await api.restocker.getMachinePlanogram(machineId);
+        const data = this.normalizeApiData(response);
+        this.visitPlanogram = data?.machine ? data : null;
+        if (!this.visitPlanogram) {
+          this.visitError = 'No se pudo leer el planograma para preparar la visita.';
+          return;
+        }
+        this.visitForm.items = this.initializeVisitItems(this.visitPlanogram.slots);
+      } catch (error) {
+        this.visitError = error?.message || 'No se pudo cargar el planograma para la visita.';
+      } finally {
+        this.visitLoading = false;
+      }
+    },
+
     normalizeApiData(response) {
       return response?.data && typeof response.data === 'object' ? response.data : (response || {});
     },
 
     realLength(value) {
       return String(value ?? '').trim().length;
+    },
+
+    handleVisitPhoto(event) {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+
+      this.visitError = '';
+      const size = Number(file.size || 0);
+      if (size > 5 * 1024 * 1024) {
+        this.visitError = 'La fotografía no puede superar 5 MB (Art. V.5).';
+        this.visitPhotoFile = null;
+        this.visitPhotoName = '';
+        this.visitPhotoPreviewUrl = '';
+        if (event.target) event.target.value = '';
+        return;
+      }
+
+      const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      const mime = String(file.type || '').toLowerCase();
+      if (mime !== '' && !allowed.includes(mime)) {
+        this.visitError = 'La evidencia debe ser una imagen JPG, PNG o WebP (Art. V.5).';
+        this.visitPhotoFile = null;
+        this.visitPhotoName = '';
+        this.visitPhotoPreviewUrl = '';
+        if (event.target) event.target.value = '';
+        return;
+      }
+
+      this.clearVisitPhoto();
+      this.visitPhotoFile = file;
+      this.visitPhotoName = String(file.name || 'visit-evidence');
+      if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && typeof Blob !== 'undefined' && file instanceof Blob) {
+        this.visitPhotoPreviewUrl = URL.createObjectURL(file);
+      }
+    },
+
+    clearVisitPhoto() {
+      if (this.visitPhotoPreviewUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(this.visitPhotoPreviewUrl);
+      }
+      this.visitPhotoPreviewUrl = '';
+      this.visitPhotoFile = null;
+      this.visitPhotoName = '';
+      if (this.visitForm) this.visitForm.photo_evidence_url = '';
+    },
+
+    isNetworkFailure(error) {
+      return !this.navigatorOnline
+        || error?.status === 0
+        || error?.code === 'NETWORK_ERROR'
+        || error?.code === 'REQUEST_TIMEOUT';
+    },
+
+    validateVisit() {
+      this.visitError = '';
+      if (!this.visitMachine?.id) {
+        this.visitError = 'No hay una máquina seleccionada para la visita.';
+        return false;
+      }
+      if (!this.visitPlanogram || this.visitLoading) {
+        this.visitError = 'Espera a que cargue el planograma de la máquina.';
+        return false;
+      }
+
+      const temperature = this.visitCabinTemperature;
+      if (this.visitTemperatureRequired && temperature === null) {
+        this.visitError = 'Registra la temperatura de cabina antes de continuar (Art. II).';
+        return false;
+      }
+      if (temperature !== null && (temperature < -5 || temperature > 35)) {
+        this.visitError = 'La temperatura de cabina debe estar entre -5 °C y 35 °C.';
+        return false;
+      }
+
+      if (this.visitIsThermalAbort) {
+        if (this.visitTotalAdded > 0 || this.visitTotalWithdrawn > 0) {
+          this.visitError = 'El aborto térmico no puede cargar ni retirar existencias.';
+          return false;
+        }
+        if (this.visitForm.precautionary_seal_applied !== true) {
+          this.visitError = 'Confirma el precinto de seguridad antes de abortar la visita (Art. II).';
+          return false;
+        }
+        if (!this.visitPhotoReady) {
+          this.visitError = 'El aborto térmico exige una fotografía de evidencia (Art. II).';
+          return false;
+        }
+        if (this.realLength(this.visitForm.internal_notes) < 20) {
+          this.visitError = 'El aborto térmico exige una justificación de al menos 20 caracteres reales.';
+          return false;
+        }
+        return true;
+      }
+
+      if (this.visitHygieneMissing.length > 0) {
+        this.visitError = `Completa el checklist de higiene: falta ${this.visitHygieneMissing.map((item) => item.label).join(', ')}.`;
+        return false;
+      }
+
+      if (this.visitHasWithdrawals && !this.visitPhotoReady) {
+        this.visitError = 'Toda retirada FEFO exige fotografía de evidencia (Art. II).';
+        return false;
+      }
+      if (this.visitHasWithdrawals && this.realLength(this.visitForm.internal_notes) < 20) {
+        this.visitError = 'Toda retirada FEFO exige una justificación de al menos 20 caracteres reales.';
+        return false;
+      }
+
+      for (const item of this.visitForm.items) {
+        if (this.visitItemNeedsWithdrawal(item)) {
+          this.visitError = `Carril ${item.slot_code}: retira el remanente FEFO antes de cargar.`;
+          return false;
+        }
+
+        const after = this.visitItemQtyAfter(item);
+        if (after < 0 || after > Number(item.max_capacity || 0)) {
+          this.visitError = `Carril ${item.slot_code}: la cantidad final no cabe en el carril.`;
+          return false;
+        }
+
+        if (Number(item.qty_added || 0) > 0) {
+          if (!item.loaded_batch_code) {
+            this.visitError = `Carril ${item.slot_code}: selecciona un lote de la furgoneta.`;
+            return false;
+          }
+          const batch = this.visitSelectedBatch(item);
+          if (!batch || Number(batch.quantity_available || 0) < Number(item.qty_added || 0)) {
+            this.visitError = `Carril ${item.slot_code}: el lote seleccionado no tiene saldo suficiente.`;
+            return false;
+          }
+        }
+      }
+
+      return true;
+    },
+
+    buildVisitPayload() {
+      const items = this.visitIsThermalAbort ? [] : this.visitForm.items.map((item) => ({
+        slot_code: item.slot_code,
+        qty_withdrawn_expired: Number(item.qty_withdrawn_expired || 0),
+        qty_withdrawn_damaged: Number(item.qty_withdrawn_damaged || 0),
+        qty_added: Number(item.qty_added || 0),
+        loaded_batch_code: item.loaded_batch_code || null
+      }));
+
+      return {
+        client_mutation_id: this.visitForm.client_mutation_id,
+        status: this.visitMode,
+        started_at: this.visitForm.started_at,
+        completed_at: new Date().toISOString(),
+        cabin_temp_celsius: this.visitCabinTemperature,
+        precautionary_seal_applied: this.visitForm.precautionary_seal_applied === true,
+        photo_evidence_url: this.visitForm.photo_evidence_url || null,
+        internal_notes: String(this.visitForm.internal_notes || '').trim() || null,
+        hygiene_checklist: { ...this.visitForm.hygiene_checklist },
+        items
+      };
+    },
+
+    extractPhotoEvidenceUrl(response) {
+      const url = response?.photo_evidence_url
+        ?? response?.data?.photo_evidence_url
+        ?? response?.url
+        ?? null;
+      return typeof url === 'string' ? url : '';
+    },
+
+    ensureVisitQueue() {
+      if (!this.visitQueue) {
+        this.visitQueue = new RestockVisitOfflineQueue();
+      }
+      return this.visitQueue;
+    },
+
+    async loadPendingVisitQueue() {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId) {
+        this.pendingVisitMutations = [];
+        return;
+      }
+
+      try {
+        this.pendingVisitMutations = await this.ensureVisitQueue().list(restockerId);
+      } catch (error) {
+        this.pendingVisitMutations = [];
+        this.visitSyncError = error?.message || 'No se pudo leer la cola offline de visitas.';
+      }
+    },
+
+    async submitVisit() {
+      if (this.visitSubmitting || !this.validateVisit()) return;
+
+      const payload = this.buildVisitPayload();
+      let photo = this.visitPhotoFile;
+      this.visitSubmitting = true;
+      this.visitSuccess = '';
+      try {
+        if (!this.navigatorOnline) {
+          await this.queueOfflineVisit(payload, photo);
+          return;
+        }
+
+        if (photo) {
+          const uploaded = await api.restocker.uploadVisitPhoto(photo, this.visitPhotoName);
+          const photoUrl = this.extractPhotoEvidenceUrl(uploaded);
+          if (!photoUrl) {
+            throw new Error('La subida de la fotografía no devolvió una URL de evidencia.');
+          }
+          payload.photo_evidence_url = photoUrl;
+          this.visitForm.photo_evidence_url = photoUrl;
+          photo = null;
+        }
+
+        const saved = await api.restocker.createRestockVisit(this.visitMachine.id, payload);
+        const savedVisit = saved?.visit || saved;
+        if (savedVisit && typeof savedVisit === 'object') {
+          this.recentVisits = [savedVisit, ...this.recentVisits].slice(0, 5);
+        }
+        this.showVisitModal = false;
+        this.visitSuccess = `Visita registrada en ${this.visitMachine.code || 'la máquina'}.`;
+        this.loadingActionMessage = this.visitSuccess;
+        await this.loadMyRoute();
+      } catch (error) {
+        if (this.isNetworkFailure(error)) {
+          await this.queueOfflineVisit(payload, photo);
+        } else {
+          this.visitError = error?.message || 'No se pudo registrar la visita de reposición.';
+        }
+      } finally {
+        this.visitSubmitting = false;
+      }
+    },
+
+    async queueOfflineVisit(payload, photo = null) {
+      const machine = this.visitMachine;
+      const restockerId = this.visitRestockerId;
+      if (!machine?.id || !restockerId) {
+        this.visitError = 'No se pudo identificar la máquina o el reponedor para guardar la visita offline.';
+        return;
+      }
+
+      try {
+        const sequence = Date.now() * 1000 + (Number(this.visitQueueSequence || 0) % 1000);
+        this.visitQueueSequence = (Number(this.visitQueueSequence || 0) + 1) % 1000;
+        await this.ensureVisitQueue().enqueue({
+          client_mutation_id: payload.client_mutation_id,
+          restocker_id: restockerId,
+          machine_id: machine.id,
+          machine_code: machine.code || null,
+          payload,
+          photo,
+          photo_name: this.visitPhotoName || photo?.name || null,
+          created_at: payload.completed_at,
+          sequence_order: sequence
+        });
+        this.applyOptimisticVisit(machine, payload);
+        await this.loadPendingVisitQueue();
+        this.showVisitModal = false;
+        this.visitSuccess = 'Visita guardada en la cola offline. Se sincronizará al recuperar conexión.';
+        this.loadingActionMessage = this.visitSuccess;
+      } catch (error) {
+        this.visitError = error?.message || 'No se pudo guardar la visita en la cola offline.';
+      }
+    },
+
+    applyOptimisticVisit(machine, payload) {
+      const items = this.visitForm.items || [];
+      for (const item of items) {
+        const added = Number(item.qty_added || 0);
+        const withdrawn = this.visitItemWithdrawn(item);
+        if (added > 0) {
+          const stock = this.vanProductStocks.find(
+            (row) => Number(row.product_id) === Number(item.product_id)
+              && String(row.batch_code || 'SIN-LOTE') === String(item.loaded_batch_code || 'SIN-LOTE')
+          );
+          if (stock) {
+            stock.quantity_available = Math.max(0, Number(stock.quantity_available || 0) - added);
+            if (stock.usable_quantity !== undefined) {
+              stock.usable_quantity = Math.max(0, Number(stock.usable_quantity || 0) - added);
+            }
+          }
+        }
+
+        const slot = this.visitPlanogram?.slots?.find(
+          (row) => String(row.slot_code) === String(item.slot_code)
+        );
+        if (slot) {
+          slot.current_estimated_qty = Math.max(0, Number(slot.current_estimated_qty || 0) - withdrawn + added);
+          if (withdrawn >= Number(item.qty_before || 0)) {
+            slot.fefo_withdrawal_required = false;
+            slot.slot_expiry_status = 'OK';
+            slot.current_batch_code = item.loaded_batch_code || null;
+            slot.current_expiration_date = this.visitSelectedBatch(item)?.expiration_date || null;
+          }
+          slot.stock_status = slot.current_estimated_qty <= 0
+            ? 'STOCKOUT'
+            : (slot.current_estimated_qty <= Number(slot.min_threshold || 0) ? 'LOW_STOCK' : 'OK');
+        }
+      }
+
+      const routeMachine = this.machines.find((row) => Number(row.id) === Number(machine.id));
+      if (routeMachine && this.visitPlanogram?.slots) {
+        const slots = this.visitPlanogram.slots.filter((slot) => slot.is_active !== false);
+        const capacity = slots.reduce((total, slot) => total + Number(slot.max_capacity || 0), 0);
+        const estimated = slots.reduce((total, slot) => total + Number(slot.current_estimated_qty || 0), 0);
+        routeMachine.stockout_slots_count = slots.filter((slot) => Number(slot.current_estimated_qty || 0) <= 0).length;
+        routeMachine.low_stock_slots_count = slots.filter((slot) => {
+          const qty = Number(slot.current_estimated_qty || 0);
+          return qty > 0 && qty <= Number(slot.min_threshold || 0);
+        }).length;
+        routeMachine.ok_slots_count = slots.filter((slot) => Number(slot.current_estimated_qty || 0) > Number(slot.min_threshold || 0)).length;
+        routeMachine.total_capacity = capacity;
+        routeMachine.total_estimated_qty = estimated;
+        routeMachine.fill_rate_percent = capacity > 0 ? Math.round((estimated / capacity) * 10000) / 100 : 0;
+        routeMachine.expired_slots_count = slots.filter((slot) => Number(slot.current_estimated_qty || 0) > 0 && slot.slot_expiry_status === 'EXPIRED').length;
+        routeMachine.expiring_soon_slots_count = slots.filter((slot) => Number(slot.current_estimated_qty || 0) > 0 && slot.slot_expiry_status === 'EXPIRING_SOON').length;
+        routeMachine.pending_visit_sync = true;
+        this.visitMachine = routeMachine;
+      }
+
+      const localVisit = {
+        id: `offline-${payload.client_mutation_id}`,
+        visit_code: 'PENDIENTE',
+        machine_id: machine.id,
+        machine_code: machine.code || null,
+        machine_location_name: machine.location_name || null,
+        status: payload.status,
+        completed_at: payload.completed_at,
+        cabin_temp_celsius: payload.cabin_temp_celsius,
+        units_added: items.reduce((total, item) => total + Number(item.qty_added || 0), 0),
+        units_withdrawn: items.reduce((total, item) => total + this.visitItemWithdrawn(item), 0),
+        is_offline_pending: true
+      };
+      this.recentVisits = [localVisit, ...this.recentVisits.filter((visit) => visit.id !== localVisit.id)].slice(0, 5);
+    },
+
+    async syncPendingVisits() {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId) {
+        this.visitSyncError = 'Inicia sesión como reponedor para sincronizar visitas.';
+        return;
+      }
+      if (!this.navigatorOnline) {
+        this.visitSyncError = 'Sin conexión. Las visitas seguirán guardadas en la cola offline.';
+        return;
+      }
+      if (this.isSyncingVisits) return;
+
+      this.isSyncingVisits = true;
+      this.visitSyncError = '';
+      this.visitSyncMessage = '';
+      let synced = 0;
+      let conflicts = 0;
+      try {
+        const queue = this.ensureVisitQueue();
+        const pending = await queue.list(restockerId, [RESTOCK_VISIT_PENDING]);
+        for (const item of pending) {
+          try {
+            const payload = { ...item.payload };
+            if (item.photo) {
+              const uploaded = await api.restocker.uploadVisitPhoto(item.photo, item.photo_name);
+              const photoUrl = this.extractPhotoEvidenceUrl(uploaded);
+              if (!photoUrl) throw new Error('La fotografía de la visita no devolvió una URL válida.');
+              payload.photo_evidence_url = photoUrl;
+            }
+            await api.restocker.createRestockVisit(item.machine_id, payload);
+            await queue.remove(item.client_mutation_id);
+            synced += 1;
+          } catch (error) {
+            if (this.isNetworkFailure(error)) {
+              this.visitSyncError = 'Se perdió la conexión durante la sincronización. La cola conserva las visitas restantes.';
+              break;
+            }
+            await queue.markConflict(
+              item.client_mutation_id,
+              error?.message || 'La visita offline fue rechazada por el servidor.'
+            );
+            conflicts += 1;
+          }
+        }
+
+        await this.loadPendingVisitQueue();
+        if (synced > 0) await this.loadMyRoute();
+        if (synced > 0 || conflicts > 0) {
+          this.visitSyncMessage = `${synced} visita(s) sincronizada(s).${conflicts > 0 ? ` ${conflicts} conflicto(s) pendientes de archivar.` : ''}`;
+        } else if (!this.visitSyncError) {
+          this.visitSyncMessage = 'No hay visitas pendientes de sincronizar.';
+        }
+      } catch (error) {
+        this.visitSyncError = error?.message || 'No se pudo sincronizar la cola offline de visitas.';
+      } finally {
+        this.isSyncingVisits = false;
+      }
+    },
+
+    async archiveVisitConflict(item) {
+      if (!item?.client_mutation_id || this.isSyncingVisits) return;
+      this.isSyncingVisits = true;
+      this.visitSyncError = '';
+      this.visitSyncMessage = '';
+      try {
+        await api.restocker.dumpVisitConflict({
+          machine_id: item.machine_id,
+          client_mutation_id: item.client_mutation_id,
+          reason: item.conflict_reason || 'La visita offline ya no puede aplicarse.'
+        });
+        await this.ensureVisitQueue().remove(item.client_mutation_id);
+        await this.loadPendingVisitQueue();
+        this.visitSyncMessage = 'Conflicto archivado en auditoría. La cola local queda limpia.';
+      } catch (error) {
+        this.visitSyncError = error?.message || 'No se pudo archivar el conflicto offline.';
+      } finally {
+        this.isSyncingVisits = false;
+      }
     },
 
     expiryStatusLabel(status) {
@@ -628,6 +1417,8 @@ export const RestockerRouteView = {
           .filter((item) => item.is_active !== false && Number(item.dispatched_qty || 0) > 0)
           .map((item) => {
             const balance = this.currentLoadingLotBalance(item);
+            const suggestedRestocked = Math.max(0, Number(item.suggested_restocked_in_machines_qty || 0));
+            const suggestedWithdrawn = Math.max(0, Number(item.suggested_withdrawn_spoilage_qty || 0));
             return {
               product_id: item.product_id,
               product_sku: item.product_sku,
@@ -636,9 +1427,9 @@ export const RestockerRouteView = {
               expiration_date: item.expiration_date,
               dispatched_qty: Number(item.dispatched_qty),
               van_stock_before_reconcile: balance,
-              restocked_in_machines_qty: 0,
-              withdrawn_spoilage_qty: 0,
-              counted_return_qty: balance
+              restocked_in_machines_qty: suggestedRestocked,
+              withdrawn_spoilage_qty: suggestedWithdrawn,
+              counted_return_qty: Math.max(0, balance - suggestedRestocked - suggestedWithdrawn)
             };
           })
       };
@@ -738,6 +1529,14 @@ export const RestockerRouteView = {
       this.showPlanogramModal = false;
       this.selectedMachine = null;
       this.planogram = null;
+      this.showVisitModal = false;
+      this.visitMachine = null;
+      this.visitPlanogram = null;
+      this.recentVisits = [];
+      this.pendingVisitMutations = [];
+      this.visitSyncMessage = '';
+      this.visitSyncError = '';
+      this.clearVisitPhoto();
       this.shiftStatus = 'OFF_SHIFT';
       this.todaySummary = null;
     }
@@ -1261,17 +2060,169 @@ export const RestockerRouteView = {
                 <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-error-bg); color: var(--color-error-text);">{{ machine.stockout_slots_count }} agotados</span>
                 <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text);">{{ machine.low_stock_slots_count }} bajo umbral</span>
                 <span style="font-size: 10px; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-info-bg); color: var(--color-info-text);">{{ Number(machine.fill_rate_percent || 0).toFixed(0) }} % llenado</span>
+                <span
+                  data-testid="restocker-machine-stock-status"
+                  :data-stock-status="machineStockStatus(machine)"
+                  :style="stockStatusStyle(machineStockStatus(machine))"
+                  style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive);"
+                >{{ stockStatusLabel(machineStockStatus(machine)) }}</span>
+                <span
+                  v-if="Number(machine.expired_slots_count || 0) > 0"
+                  data-testid="restocker-machine-expired-slots"
+                  style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-error-bg); color: var(--color-error-text);"
+                >🔴 {{ machine.expired_slots_count }} lote(s) caducado(s)</span>
+                <span
+                  v-if="Number(machine.expiring_soon_slots_count || 0) > 0"
+                  data-testid="restocker-machine-expiring-slots"
+                  style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text);"
+                >🟡 {{ machine.expiring_soon_slots_count }} caducidad(es) próxima(s)</span>
+                <span
+                  v-if="machine.pending_visit_sync"
+                  data-testid="restocker-machine-pending-visit"
+                  style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text);"
+                >📥 Visita pendiente</span>
               </div>
 
-              <button
-                type="button"
-                class="vg-btn vg-btn-secondary vg-btn-sm mt-2"
-                data-testid="btn-open-planogram"
-                :data-machine-id="machine.id"
-                @click="openPlanogram(machine)"
+              <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary vg-btn-sm"
+                  data-testid="btn-open-planogram"
+                  :data-machine-id="machine.id"
+                  @click="openPlanogram(machine)"
+                >
+                  Ver planograma
+                </button>
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-primary vg-btn-sm"
+                  data-testid="btn-start-visit"
+                  :data-machine-id="machine.id"
+                  :disabled="!machineCanRestock(machine)"
+                  :title="machineCanRestock(machine) ? 'Abrir el asistente de visita in situ' : machineRestockBlockReason(machine)"
+                  @click="openVisitAssistant(machine)"
+                >
+                  📋 Iniciar Visita de Reposición
+                </button>
+              </div>
+              <p
+                v-if="!machineCanRestock(machine)"
+                data-testid="restocker-machine-block-reason"
+                style="font-size: 11px; color: var(--color-warning-text); background-color: var(--color-warning-bg); border-radius: var(--radius-interactive); padding: 6px 8px; margin: 6px 0 0 0;"
               >
-                Ver planograma
-              </button>
+                ⚠️ {{ machineRestockBlockReason(machine) }}
+              </p>
+            </li>
+          </ul>
+        </section>
+
+        <!-- Historial reciente y cola offline de visitas (Módulo 34, RF-05.1, C3, D4) -->
+        <section
+          data-testid="restocker-recent-visits"
+          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 500; margin: 0 0 4px 0;">🕓 Mis Visitas de Reposición Recientes</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
+                Últimas cinco visitas registradas en tus zonas.
+              </p>
+            </div>
+            <button
+              v-if="pendingVisitMutations.length > 0"
+              type="button"
+              class="vg-btn vg-btn-secondary vg-btn-sm"
+              data-testid="btn-sync-visits"
+              :disabled="isSyncingVisits"
+              @click="syncPendingVisits"
+            >
+              {{ isSyncingVisits ? 'Sincronizando…' : '🔄 Sincronizar Visitas Pendientes' }}
+            </button>
+          </div>
+
+          <div
+            v-if="visitSyncMessage"
+            data-testid="restocker-visit-sync-message"
+            style="font-size: 12px; color: var(--color-success-text); background-color: var(--color-success-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;"
+          >
+            {{ visitSyncMessage }}
+          </div>
+          <div
+            v-if="visitSyncError"
+            data-testid="restocker-visit-sync-error"
+            style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;"
+          >
+            ⚠️ {{ visitSyncError }}
+          </div>
+
+          <div
+            v-if="pendingVisitMutations.length > 0"
+            data-testid="restocker-offline-visit-queue"
+            style="margin-top: 10px; padding: 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); background-color: var(--color-warning-bg);"
+          >
+            <strong style="display: block; font-size: 12px; color: var(--color-warning-text);">
+              📥 Cola offline de visitas · {{ pendingVisitCount }} pendiente(s) · {{ conflictVisitCount }} conflicto(s)
+            </strong>
+            <ul style="margin: 8px 0 0 0; padding: 0; list-style: none; display: grid; gap: 6px;">
+              <li
+                v-for="item in pendingVisitMutations"
+                :key="item.client_mutation_id"
+                data-testid="restocker-offline-visit-item"
+                style="font-size: 11px; color: var(--color-slate);"
+              >
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
+                  <span>
+                    <strong>{{ item.machine_code || ('Máquina #' + item.machine_id) }}</strong>
+                    · {{ item.status === 'CONFLICT' ? 'Conflicto' : 'Pendiente' }}
+                    · {{ item.payload?.status === 'ABORTED_THERMAL_BREACH' ? 'Aborto térmico' : 'Visita completada' }}
+                  </span>
+                  <button
+                    v-if="item.status === 'CONFLICT'"
+                    type="button"
+                    class="vg-btn vg-btn-ghost vg-btn-sm"
+                    data-testid="btn-archive-visit-conflict"
+                    :disabled="isSyncingVisits"
+                    @click="archiveVisitConflict(item)"
+                  >
+                    📥 Archivar Conflicto Offline en Auditoría
+                  </button>
+                </div>
+                <span v-if="item.conflict_reason" style="display: block; color: var(--color-error-text); margin-top: 2px;">
+                  {{ item.conflict_reason }}
+                </span>
+              </li>
+            </ul>
+          </div>
+
+          <p v-if="recentVisits.length === 0" data-testid="restocker-recent-visits-empty" style="font-size: 13px; color: var(--color-ink-muted); margin: 12px 0 0 0;">
+            Todavía no hay visitas registradas.
+          </p>
+          <ul v-else style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 8px;">
+            <li
+              v-for="visit in recentVisits"
+              :key="visit.id || visit.visit_code"
+              data-testid="restocker-recent-visit-item"
+              style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px 10px;"
+            >
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                <div style="min-width: 0;">
+                  <strong style="display: block; font-size: 12px; font-family: var(--font-display); font-weight: 500;">
+                    {{ visit.machine_code || 'Máquina' }} · {{ visit.visit_code || 'Visita' }}
+                  </strong>
+                  <span style="display: block; font-size: 11px; color: var(--color-ink-muted);">
+                    {{ visit.location_name || visit.machine_location_name || '—' }} · {{ formatShiftDate(visit.completed_at || visit.created_at) }}
+                  </span>
+                </div>
+                <span
+                  :style="visitStatusStyle(visit.status)"
+                  style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive); white-space: nowrap;"
+                >{{ visitStatusIcon(visit.status) }} {{ visit.status_label || visitStatusLabel(visit.status) }}</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--color-ink-muted); margin-top: 5px;">
+                <span>{{ visit.cabin_temp_celsius ?? '—' }} °C</span>
+                <span>+{{ visit.units_added ?? 0 }} uds. cargadas</span>
+                <span>−{{ visit.units_withdrawn ?? 0 }} uds. retiradas</span>
+              </div>
             </li>
           </ul>
         </section>
@@ -1390,6 +2341,265 @@ export const RestockerRouteView = {
           </div>
         </div>
 
+        <!-- Asistente de visita in situ (Módulo 34, RF-02 a RF-05.1, Art. II) -->
+        <div
+          v-if="showVisitModal"
+          data-testid="modal-restock-visit"
+          style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 75; padding: 0;"
+          @click.self="closeVisitAssistant"
+        >
+          <div
+            style="background-color: var(--color-surface-card); width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; border-top-left-radius: var(--radius-card); border-top-right-radius: var(--radius-card); border: 1px solid var(--color-hairline); padding: 16px; box-sizing: border-box;"
+          >
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div style="min-width: 0;">
+                <h2 style="font-family: var(--font-display); font-size: 18px; font-weight: 500; margin: 0;">
+                  📋 Visita in situ · {{ visitMachine?.code || 'Máquina' }}
+                </h2>
+                <p style="font-size: 12px; color: var(--color-ink-muted); margin: 2px 0 0 0;">
+                  {{ visitMachine?.model }} · {{ visitMachine?.location_name }}<template v-if="visitMachine?.zone_name"> · {{ visitMachine.zone_name }}</template>
+                </p>
+              </div>
+              <button
+                type="button"
+                class="vg-btn vg-btn-ghost vg-btn-sm"
+                data-testid="btn-close-visit"
+                @click="closeVisitAssistant"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <p v-if="visitLoading" style="font-size: 13px; color: var(--color-ink-muted); margin-top: 12px;">
+              Cargando carriles y lotes de la furgoneta…
+            </p>
+            <div
+              v-if="visitError"
+              data-testid="restocker-visit-error"
+              style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 12px;"
+            >
+              ⚠️ {{ visitError }}
+            </div>
+
+            <template v-if="visitPlanogram && !visitLoading">
+              <!-- Control térmico y aborto automático (Art. II) -->
+              <div
+                style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px; margin-top: 12px;"
+              >
+                <label style="display: block; font-size: 11px; font-weight: 600; color: var(--color-slate);">
+                  Temperatura de cabina (°C) {{ visitTemperatureRequired ? '· obligatoria' : '· opcional' }}
+                </label>
+                <input
+                  v-model.number="visitForm.cabin_temp_celsius"
+                  type="number"
+                  step="0.1"
+                  min="-5"
+                  max="35"
+                  data-testid="visit-cabin-temperature"
+                  style="width: 100%; box-sizing: border-box; height: 36px; margin-top: 4px; padding: 0 8px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);"
+                />
+                <p v-if="visitThermalCeiling !== null" style="font-size: 10px; color: var(--color-ink-muted); margin: 4px 0 0 0;">
+                  Techo sanitario para {{ machineTypeLabel(visitMachine?.machine_type) }}: ≤ {{ visitThermalCeiling }} °C.
+                </p>
+                <div
+                  v-if="visitThermalBreach"
+                  data-testid="visit-thermal-breach"
+                  style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 8px;"
+                >
+                  🌡️ <strong>ABORTED_THERMAL_BREACH</strong> · La cabina supera el techo sanitario. La carga y la retirada quedan bloqueadas. Precinta la máquina, fotografía la evidencia y justifica el aborto.
+                </div>
+              </div>
+
+              <template v-if="visitIsThermalAbort">
+                <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; margin-top: 12px;">
+                  <input v-model="visitForm.precautionary_seal_applied" type="checkbox" data-testid="visit-precautionary-seal" style="margin-top: 2px;" />
+                  <span>Precinto de seguridad aplicado en la máquina (obligatorio en aborto térmico).</span>
+                </label>
+              </template>
+
+              <!-- Carriles y movimientos FEFO (RF-03, RF-03.1, RF-05) -->
+              <template v-else>
+                <p v-if="visitForm.items.length === 0" style="font-size: 13px; color: var(--color-ink-muted); margin-top: 12px;">
+                  Esta máquina no tiene carriles activos para reponer.
+                </p>
+                <ul v-else style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 8px;">
+                  <li
+                    v-for="item in visitForm.items"
+                    :key="item.slot_code"
+                    data-testid="visit-slot"
+                    :data-slot-code="item.slot_code"
+                    style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px;"
+                  >
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                      <div style="min-width: 0;">
+                        <strong style="display: block; font-size: 12px; font-family: var(--font-display); font-weight: 500;">{{ item.slot_code }} · {{ item.product_name }}</strong>
+                        <span style="display: block; font-size: 11px; color: var(--color-ink-muted);">
+                          {{ item.qty_before }} / {{ item.max_capacity }} uds. · lote {{ item.current_batch_code || '—' }}
+                          <template v-if="item.current_expiration_date"> · cad. {{ formatShiftDate(item.current_expiration_date) }}</template>
+                        </span>
+                      </div>
+                      <span
+                        v-if="item.slot_expiry_status !== 'OK'"
+                        data-testid="visit-slot-fefo-badge"
+                        :style="expiryStatusStyle(item.slot_expiry_status)"
+                        style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive); white-space: nowrap;"
+                      >{{ expiryStatusIcon(item.slot_expiry_status) }} {{ expiryStatusLabel(item.slot_expiry_status) }}</span>
+                    </div>
+
+                    <div
+                      v-if="visitItemMustWithdrawBeforeLoading(item)"
+                      data-testid="visit-fefo-warning"
+                      style="font-size: 11px; color: var(--color-warning-text); background-color: var(--color-warning-bg); border-radius: var(--radius-interactive); padding: 7px 8px; margin-top: 7px;"
+                    >
+                      <span style="display: block;">⚠️ FEFO: retira todo el remanente de este carril antes de cargar el lote nuevo.</span>
+                      <button
+                        type="button"
+                        class="vg-btn vg-btn-secondary vg-btn-sm mt-1"
+                        data-testid="btn-withdraw-fefo"
+                        @click="withdrawVisitRemainder(item)"
+                      >
+                        🗑️ Retirar remanente {{ item.slot_expiry_status === 'EXPIRED' ? 'caducado' : 'próximo a caducar' }} ({{ item.qty_before }} uds.)
+                      </button>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px;">
+                      <label style="display: block; font-size: 10px; color: var(--color-ink-muted);">
+                        Retirar caducado
+                        <input v-model.number="item.qty_withdrawn_expired" type="number" min="0" max="9999" data-testid="visit-withdraw-expired" style="width: 100%; box-sizing: border-box; height: 32px; margin-top: 3px; padding: 0 5px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);" />
+                      </label>
+                      <label style="display: block; font-size: 10px; color: var(--color-ink-muted);">
+                        Retirar dañado
+                        <input v-model.number="item.qty_withdrawn_damaged" type="number" min="0" max="9999" data-testid="visit-withdraw-damaged" style="width: 100%; box-sizing: border-box; height: 32px; margin-top: 3px; padding: 0 5px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);" />
+                      </label>
+                      <label style="display: block; font-size: 10px; color: var(--color-ink-muted);">
+                        Cargar
+                        <input
+                          v-model.number="item.qty_added"
+                          type="number"
+                          min="0"
+                          :max="visitItemMaxAddable(item)"
+                          :disabled="visitItemMustWithdrawBeforeLoading(item)"
+                          data-testid="visit-add-qty"
+                          style="width: 100%; box-sizing: border-box; height: 32px; margin-top: 3px; padding: 0 5px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);"
+                        />
+                      </label>
+                    </div>
+
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px;">
+                      <select
+                        v-model="item.loaded_batch_code"
+                        data-testid="visit-batch-select"
+                        style="flex: 1 1 180px; min-width: 0; height: 32px; padding: 0 5px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font-size: 11px;"
+                      >
+                        <option value="">Selecciona lote FEFO</option>
+                        <option v-for="batch in item.available_van_batches" :key="batch.batch_code" :value="batch.batch_code">
+                          {{ visitBatchLabel(batch) }}
+                        </option>
+                      </select>
+                      <button
+                        type="button"
+                        class="vg-btn vg-btn-secondary vg-btn-sm"
+                        data-testid="btn-fill-slot"
+                        :disabled="visitInputsLocked || visitItemMustWithdrawBeforeLoading(item) || visitItemMaxAddable(item) <= 0"
+                        @click="fillVisitItem(item)"
+                      >
+                        ⚡ Llenar al máximo ({{ visitItemMaxAddable(item) }})
+                      </button>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--color-ink-muted); margin-top: 6px;">
+                      <span>Quedarán {{ visitItemQtyAfter(item) }} uds.</span>
+                      <span v-if="visitItemWithdrawn(item) > 0" style="color: var(--color-warning-text);">Retiradas {{ visitItemWithdrawn(item) }} uds.</span>
+                    </div>
+                  </li>
+                </ul>
+
+                <!-- Checklist adaptativo (RF-02, Art. II) -->
+                <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px; margin-top: 12px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                    <strong style="font-size: 12px; color: var(--color-slate);">🧽 Checklist de higiene</strong>
+                    <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-complete-hygiene" @click="markHygieneComplete">
+                      Marcar completo
+                    </button>
+                  </div>
+                  <label
+                    v-for="entry in visitHygieneItems"
+                    v-show="entry.required"
+                    :key="entry.key"
+                    style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; margin-top: 8px;"
+                  >
+                    <input v-model="visitForm.hygiene_checklist[entry.key]" type="checkbox" :data-testid="'visit-hygiene-' + entry.key" style="margin-top: 2px;" />
+                    <span>{{ entry.label }}</span>
+                  </label>
+                  <p v-if="visitHygieneMissing.length > 0" style="font-size: 10px; color: var(--color-warning-text); margin: 7px 0 0 0;">
+                    Faltan {{ visitHygieneMissing.length }} comprobaciones obligatorias.
+                  </p>
+                </div>
+              </template>
+
+              <!-- Evidencia común: foto y notas (Art. II, Art. V.5) -->
+              <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px; margin-top: 12px;">
+                <strong style="display: block; font-size: 12px; color: var(--color-slate);">📷 Evidencia de la visita</strong>
+                <p style="font-size: 10px; color: var(--color-ink-muted); margin: 4px 0 0 0;">
+                  JPG, PNG o WebP · máximo 5 MB. Obligatoria en aborto térmico o si retiras existencias.
+                </p>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  data-testid="visit-photo-input"
+                  style="display: block; width: 100%; box-sizing: border-box; margin-top: 7px; font-size: 11px;"
+                  @change="handleVisitPhoto"
+                />
+                <div v-if="visitPhotoPreviewUrl" style="margin-top: 7px;">
+                  <img :src="visitPhotoPreviewUrl" alt="Evidencia de la visita" style="max-width: 100%; max-height: 150px; border-radius: var(--radius-interactive); border: 1px solid var(--color-hairline);" />
+                  <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm ms-1" data-testid="btn-clear-visit-photo" @click="clearVisitPhoto">
+                    Quitar foto
+                  </button>
+                </div>
+                <label style="display: block; font-size: 11px; font-weight: 600; color: var(--color-slate); margin-top: 9px;">
+                  Notas internas {{ visitNeedsEvidence ? '· obligatorias (≥ 20 caracteres)' : '· opcionales' }}
+                </label>
+                <textarea
+                  v-model="visitForm.internal_notes"
+                  rows="3"
+                  maxlength="500"
+                  data-testid="visit-notes"
+                  style="width: 100%; box-sizing: border-box; margin-top: 4px; padding: 7px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: 12px;"
+                ></textarea>
+                <div style="font-size: 10px; color: var(--color-ink-muted); margin-top: 3px;">
+                  {{ realLength(visitForm.internal_notes) }} caracteres reales.
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px;">
+                <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px;">
+                  <span style="display: block; font-size: 10px; color: var(--color-ink-muted); text-transform: uppercase;">Cargadas</span>
+                  <strong style="font-family: var(--font-display); font-size: 15px; color: var(--color-success-text);">{{ visitTotalAdded }} uds.</strong>
+                </div>
+                <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px;">
+                  <span style="display: block; font-size: 10px; color: var(--color-ink-muted); text-transform: uppercase;">Retiradas</span>
+                  <strong style="font-family: var(--font-display); font-size: 15px; color: var(--color-warning-text);">{{ visitTotalWithdrawn }} uds.</strong>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 8px; margin-top: 14px;">
+                <button type="button" class="vg-btn vg-btn-lg vg-btn-secondary flex-grow-1" @click="closeVisitAssistant">
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-lg vg-btn-primary flex-grow-1"
+                  data-testid="btn-submit-visit"
+                  :disabled="visitSubmitting"
+                  @click="submitVisit"
+                >
+                  {{ visitSubmitting ? 'Registrando…' : (visitIsThermalAbort ? 'Abortar visita y precintar' : 'Registrar visita') }}
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+
         <!-- Modal de liquidación al cierre (Módulo 33, D3, QA 4, Art. V.1) -->
         <div
           v-if="showReconcileLoadingModal"
@@ -1427,6 +2637,12 @@ export const RestockerRouteView = {
 
             <p style="font-size: 11px; color: var(--color-ink-muted); margin: 10px 0 0 0;">
               Retorno esperado = saldo del lote − abastecidas − mermas. Si el conteo físico no coincide, explica el descuadre.
+            </p>
+            <p
+              data-testid="restocker-c4-prefill"
+              style="font-size: 11px; color: var(--color-info-text); background-color: var(--color-info-bg); border-radius: var(--radius-interactive); padding: 7px 9px; margin: 8px 0 0 0;"
+            >
+              📋 Abastecidas y mermas vienen precargadas desde tus visitas in situ (C4), sin costes.
             </p>
 
             <ul style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 10px;">

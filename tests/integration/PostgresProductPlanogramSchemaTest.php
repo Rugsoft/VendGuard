@@ -313,10 +313,11 @@ try {
 
     $slotColumns = PostgresFixtureBuilder::columns($pgPdo, 'machine_planogram_slots');
     $assert(
-        'La tabla declara sus diez columnas canónicas en el orden del contrato',
+        'La tabla declara sus doce columnas canónicas en el orden del contrato (Módulo 34 · D1)',
         array_keys($slotColumns) === [
             'id', 'machine_id', 'slot_code', 'product_id', 'max_capacity',
             'current_estimated_qty', 'min_threshold', 'is_active', 'created_at', 'updated_at',
+            'current_batch_code', 'current_expiration_date',
         ],
         implode(', ', array_keys($slotColumns))
     );
@@ -352,17 +353,19 @@ try {
     )->fetchAll(PDO::FETCH_COLUMN);
 
     $assert(
-        'Las cuatro restricciones CHECK del contrato están declaradas en la Tabla 43',
+        'Las cinco restricciones CHECK del contrato están declaradas en la Tabla 43',
         array_values(array_intersect([
             'chk_machine_planogram_slot_code_format',
             'chk_machine_planogram_max_capacity',
             'chk_machine_planogram_min_threshold',
             'chk_machine_planogram_estimated_qty',
+            'chk_machine_planogram_current_batch_format',
         ], $slotChecks)) === [
             'chk_machine_planogram_slot_code_format',
             'chk_machine_planogram_max_capacity',
             'chk_machine_planogram_min_threshold',
             'chk_machine_planogram_estimated_qty',
+            'chk_machine_planogram_current_batch_format',
         ],
         'declaradas: ' . implode(', ', $slotChecks)
     );

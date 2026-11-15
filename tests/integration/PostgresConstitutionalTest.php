@@ -13,7 +13,7 @@ declare(strict_types=1);
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
  *   1. **Art. III.1 — el borrado físico se rechaza con la boca abierta.** `DELETE FROM` sobre
- *      cada una de las 46 tablas del contrato lanza `SQLSTATE '45000'` con la marca
+ *      cada una de las 48 tablas del contrato lanza `SQLSTATE '45000'` con la marca
  *      `ART_III_1_VIOLATION`.
  *      Cada tabla se prueba **con una fila dentro**: un disparador `FOR EACH ROW` no ve una tabla
  *      vacía, de modo que certificar el rechazo sin filas no certificaría nada. La fixture se
@@ -87,7 +87,7 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 46 tablas del contrato de correspondencia (§2.1, Módulos 14 y 17–33). */
+/** Las 48 tablas del contrato de correspondencia (§2.1, Módulos 14 y 17–34). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -115,6 +115,8 @@ const CONTRACT_TABLES = [
     // Módulo 33: el stock por lote, la orden de carga y sus líneas declaran
     // `prevent_hard_delete()`; la baja es lógica (`is_active`/estado).
     'restocker_van_product_stocks', 'product_loading_orders', 'product_loading_order_items',
+    // Módulo 34 · visita de reposición in situ y su desglose carril a carril.
+    'machine_restock_visits', 'machine_restock_visit_items',
 ];
 
 /** Las siete restricciones de longitud mínima del Art. V.1, con la tabla y la columna que vigilan. */

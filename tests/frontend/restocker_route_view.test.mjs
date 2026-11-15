@@ -30,6 +30,8 @@ import { readFileSync } from 'node:fs';
 import { api } from '../../public/assets/js/api.js';
 import { store } from '../../public/assets/js/store.js';
 import { RestockerRouteView } from '../../public/assets/js/components/RestockerRouteView.js';
+import { RestockVisitOfflineQueue } from '../../public/assets/js/utils/RestockVisitOfflineQueue.js';
+import { createFakeIndexedDb } from '../Support/FakeIndexedDb.mjs';
 
 console.log('======================================================================');
 console.log(' VendGuard: Frontend Test Suite - RestockerRouteView (T-RES-12 / T-PLN-13)');
@@ -148,7 +150,22 @@ const bootstrapPayload = {
         fill_rate_percent: 90
       }
     ],
-    route_stops: []
+    route_stops: [],
+    recent_visits: [
+      {
+        id: 31,
+        visit_code: 'MRV-2026-0031',
+        machine_id: 7,
+        machine_code: 'VEND-0701',
+        location_name: 'Hospital del Mar',
+        status: 'COMPLETED',
+        status_label: 'Completada',
+        completed_at: '2026-11-13T09:15:00+00:00',
+        cabin_temp_celsius: 3.8,
+        units_added: 12,
+        units_withdrawn: 2
+      }
+    ]
   }
 };
 
@@ -173,6 +190,7 @@ assert('loadMyRoute() aplica el estado de turno del bootstrap', routeVm.shiftSta
 assert('El contador diario formatea los segundos efectivos', routeVm.todayEffectiveFormatted === '02h 00m', routeVm.todayEffectiveFormatted);
 assert('El estado base de ruta queda vacío hasta las Features 24/26/27', routeVm.routeStops.length === 0);
 assert('loadMyRoute() publica las dos máquinas de sus zonas', routeVm.machines.length === 2 && routeVm.machines[0].code === 'VEND-0701');
+assert('loadMyRoute() publica el historial reciente de visitas', routeVm.recentVisits.length === 1 && routeVm.recentVisits[0].visit_code === 'MRV-2026-0031');
 assert('machineHasAlert() distingue la máquina con alertas', routeVm.machineHasAlert(routeVm.machines[0]) === true && routeVm.machineHasAlert(routeVm.machines[1]) === false);
 assert('machineTypeLabel() traduce las tipologías', routeVm.machineTypeLabel('COMBO') === 'Mixta' && routeVm.machineTypeLabel('HOT_DRINKS') === 'Bebidas calientes');
 
@@ -531,6 +549,11 @@ const confirmedLoadingDetail = {
   },
   items: [dispatchedLoadingDetail.items[0]]
 };
+confirmedLoadingDetail.items[0] = {
+  ...confirmedLoadingDetail.items[0],
+  suggested_restocked_in_machines_qty: 2,
+  suggested_withdrawn_spoilage_qty: 1
+};
 
 const reconciledLoadingDetail = {
   order: {
@@ -660,6 +683,13 @@ await loadingVm.openReconcileLoadingModal();
 assert('Abrir la liquidación carga el saldo real por lote', loadingVm.showReconcileLoadingModal === true && loadingVm.reconcileLoadingForm.items.length === 1);
 const reconciliationLine = loadingVm.reconcileLoadingForm.items[0];
 assert('El saldo del lote coincide con el stock de la furgoneta', reconciliationLine.van_stock_before_reconcile === 5);
+assert(
+  'La liquidación C4 precarga abastecidas y mermas desde las visitas, sin costes',
+  reconciliationLine.restocked_in_machines_qty === 2
+    && reconciliationLine.withdrawn_spoilage_qty === 1
+    && reconciliationLine.counted_return_qty === 2
+    && !('unit_cost_eur' in reconciliationLine)
+);
 reconciliationLine.restocked_in_machines_qty = 3;
 reconciliationLine.withdrawn_spoilage_qty = 1;
 reconciliationLine.counted_return_qty = 0;
@@ -691,6 +721,375 @@ assert('El botón de liquidación usa el copy canónico de cierre', viewSource.i
 assert('El comprobante C4 es de solo lectura', viewSource.includes('data-testid="restocker-last-reconciled-order"') && viewSource.includes('Solo lectura'));
 assert('La vista declara las tres entradas del cuadre por línea', viewSource.includes('data-testid="reconcile-restocked"') && viewSource.includes('data-testid="reconcile-spoilage"') && viewSource.includes('data-testid="reconcile-counted"'));
 assert('La vista móvil no declara campos económicos internos', !viewSource.includes('unit_cost_eur') && !viewSource.includes('unit_margin_eur'));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10. Visita in situ, FEFO, evidencia y cola offline (T-RVF-12, D4, C3, Art. II)
+// ─────────────────────────────────────────────────────────────────────────────
+const queueSource = readFileSync(
+  new URL('../../public/assets/js/utils/RestockVisitOfflineQueue.js', import.meta.url),
+  'utf8'
+);
+const visitModalSource = viewSource.slice(
+  viewSource.indexOf('data-testid="modal-restock-visit"'),
+  viewSource.indexOf('data-testid="modal-reconcile-loading"')
+);
+const originalVisitPlanogram = api.restocker.getMachinePlanogram;
+const originalCreateRestockVisit = api.restocker.createRestockVisit;
+const originalUploadVisitPhoto = api.restocker.uploadVisitPhoto;
+const originalDumpVisitConflict = api.restocker.dumpVisitConflict;
+const originalGetVisits = api.restocker.getVisits;
+
+const visitPlanogramPayload = {
+  data: {
+    machine: {
+      id: 7,
+      code: 'VEND-0701',
+      model: 'Jofemar Vision',
+      machine_type: 'COMBO',
+      location_name: 'Hospital del Mar',
+      zone_name: 'Barcelona Litoral y Norte',
+      sanitary_status: 'OK'
+    },
+    summary: { active_slots_count: 3, stockout_slots_count: 1, low_stock_slots_count: 1, ok_slots_count: 1, total_capacity: 27, total_estimated_qty: 6, fill_rate_percent: 22.22 },
+    slots: [
+      {
+        id: 201,
+        slot_code: '21',
+        product_id: 1,
+        product_sku: 'SAND-MIXTO-01',
+        product_name: 'Sándwich mixto',
+        product_category: 'PERISHABLE_FOOD',
+        product_unit_type: 'UNIT',
+        max_capacity: 10,
+        current_estimated_qty: 2,
+        min_threshold: 2,
+        is_active: true,
+        slot_expiry_status: 'EXPIRED',
+        current_batch_code: 'LOTE-VIEJO',
+        current_expiration_date: '2026-11-10',
+        fefo_withdrawal_required: true,
+        available_van_batches: [
+          { product_id: 1, batch_code: 'LOTE-NEW1', expiration_date: '2026-11-20', quantity_available: 8 }
+        ],
+        fefo_recommended_batch_code: 'LOTE-NEW1'
+      },
+      {
+        id: 202,
+        slot_code: '22',
+        product_id: 2,
+        product_sku: 'YOGUR-01',
+        product_name: 'Yogur natural',
+        product_category: 'PERISHABLE_FOOD',
+        product_unit_type: 'UNIT',
+        max_capacity: 12,
+        current_estimated_qty: 4,
+        min_threshold: 3,
+        is_active: true,
+        slot_expiry_status: 'EXPIRING_SOON',
+        current_batch_code: 'LOTE-OLD2',
+        current_expiration_date: '2026-11-15',
+        fefo_withdrawal_required: true,
+        available_van_batches: [
+          { product_id: 2, batch_code: 'LOTE-NEW2', expiration_date: '2026-11-22', quantity_available: 6 }
+        ],
+        fefo_recommended_batch_code: 'LOTE-NEW2'
+      },
+      {
+        id: 203,
+        slot_code: '23',
+        product_id: 3,
+        product_sku: 'AGUA-50-01',
+        product_name: 'Agua mineral 50 cl',
+        product_category: 'COLD_DRINK',
+        product_unit_type: 'UNIT',
+        max_capacity: 5,
+        current_estimated_qty: 0,
+        min_threshold: 1,
+        is_active: true,
+        slot_expiry_status: 'OK',
+        current_batch_code: null,
+        current_expiration_date: null,
+        fefo_withdrawal_required: false,
+        available_van_batches: [
+          { product_id: 3, batch_code: 'LOTE-AGUA', expiration_date: '2027-01-10', quantity_available: 3 }
+        ],
+        fefo_recommended_batch_code: 'LOTE-AGUA'
+      }
+    ]
+  }
+};
+
+const visitMachine = {
+  id: 7,
+  code: 'VEND-0701',
+  model: 'Jofemar Vision',
+  machine_type: 'COMBO',
+  location_name: 'Hospital del Mar',
+  zone_name: 'Barcelona Litoral y Norte',
+  sanitary_status: 'OK',
+  can_restock: true,
+  active_slots_count: 3,
+  stockout_slots_count: 1,
+  low_stock_slots_count: 1,
+  ok_slots_count: 1,
+  total_capacity: 27,
+  total_estimated_qty: 6,
+  fill_rate_percent: 22.22,
+  expired_slots_count: 1,
+  expiring_soon_slots_count: 1
+};
+const blockedVisitMachine = {
+  id: 8,
+  code: 'VEND-0801',
+  model: 'Necta Korinto',
+  machine_type: 'COLD_DRINKS',
+  location_name: 'Torre Glòries',
+  sanitary_status: 'QUARANTINE',
+  can_restock: false,
+  expired_slots_count: 0,
+  expiring_soon_slots_count: 0
+};
+const visitStocks = [
+  { product_id: 1, batch_code: 'LOTE-NEW1', quantity_available: 8, usable_quantity: 8 },
+  { product_id: 2, batch_code: 'LOTE-NEW2', quantity_available: 6, usable_quantity: 6 },
+  { product_id: 3, batch_code: 'LOTE-AGUA', quantity_available: 3, usable_quantity: 3 }
+];
+
+let loadedVisitMachineId = null;
+api.restocker.getMachinePlanogram = async (machineId) => {
+  loadedVisitMachineId = machineId;
+  return visitPlanogramPayload;
+};
+const visitVm = buildVm({
+  restocker: bootstrapPayload.data.restocker,
+  machines: JSON.parse(JSON.stringify([visitMachine, blockedVisitMachine])),
+  vanProductStocks: JSON.parse(JSON.stringify(visitStocks)),
+  visitQueue: new RestockVisitOfflineQueue({ indexedDB: createFakeIndexedDb() })
+});
+
+assert('machineCanRestock() permite una máquina operativa', visitVm.machineCanRestock(visitVm.machines[0]) === true);
+assert(
+  'machineCanRestock() bloquea cuarentena y fuera de servicio',
+  visitVm.machineCanRestock({ ...visitMachine, sanitary_status: 'QUARANTINE', can_restock: true }) === false
+    && visitVm.machineCanRestock({ ...visitMachine, is_blocked_no_access: true }) === false
+);
+assert(
+  'machineRestockBlockReason() explica el bloqueo sanitario',
+  visitVm.machineRestockBlockReason(visitVm.machines[1]).includes('cuarentena')
+    && visitVm.machineRestockBlockReason({ ...visitMachine, is_blocked_no_access: true }).includes('fuera de servicio')
+);
+assert('machineStockStatus() resume el estado de la tarjeta', visitVm.machineStockStatus(visitVm.machines[0]) === 'STOCKOUT' && visitVm.machineStockStatus({ stockout_slots_count: 0, low_stock_slots_count: 0 }) === 'OK');
+assert('La vista pinta las insignias FEFO de la tarjeta', viewSource.includes('data-testid="restocker-machine-expired-slots"') && viewSource.includes('data-testid="restocker-machine-expiring-slots"'));
+assert('El botón de visita se deshabilita con aviso explícito', viewSource.includes('data-testid="btn-start-visit"') && viewSource.includes(':disabled="!machineCanRestock(machine)"') && viewSource.includes('data-testid="restocker-machine-block-reason"'));
+
+await visitVm.openVisitAssistant(visitVm.machines[0]);
+assert('La visita carga el planograma de la máquina elegida', loadedVisitMachineId === 7 && visitVm.showVisitModal === true && visitVm.visitPlanogram.slots.length === 3);
+assert('La visita inicializa un ítem por carril y un client_mutation_id', visitVm.visitForm.items.length === 3 && visitVm.visitForm.client_mutation_id.length > 8 && visitVm.visitForm.started_at.length > 10);
+assert('La visita preselecciona el lote FEFO recomendado', visitVm.visitForm.items[0].loaded_batch_code === 'LOTE-NEW1' && visitVm.visitForm.items[1].loaded_batch_code === 'LOTE-NEW2');
+assert('El checklist inicial adapta los cinco bloques al tipo de máquina', visitVm.visitHygieneItems.length === 5 && visitVm.visitHygieneMissing.length === 4 && visitVm.visitForm.hygiene_checklist.cabin_spills_checked === null);
+
+visitVm.visitForm.cabin_temp_celsius = 4.1;
+assert('El techo térmico de COMBO es 4 °C', visitVm.visitThermalCeiling === 4);
+assert('Superar el techo activa ABORTED_THERMAL_BREACH', visitVm.visitThermalBreach === true && visitVm.visitMode === 'ABORTED_THERMAL_BREACH' && visitVm.visitInputsLocked === true);
+visitVm.visitForm.cabin_temp_celsius = 4;
+assert('El umbral exacto de 4 °C no aborta la visita', visitVm.visitThermalBreach === false && visitVm.visitMode === 'COMPLETED');
+visitVm.visitMachine.machine_type = 'COLD_DRINKS';
+visitVm.visitForm.cabin_temp_celsius = 8.1;
+assert('El techo térmico de frío es 8 °C', visitVm.visitThermalCeiling === 8 && visitVm.visitThermalBreach === true);
+visitVm.visitForm.cabin_temp_celsius = 8;
+assert('El umbral exacto de 8 °C no aborta la visita', visitVm.visitThermalBreach === false);
+visitVm.visitMachine.machine_type = 'HOT_DRINKS';
+visitVm.visitForm.cabin_temp_celsius = 45;
+assert('Las máquinas sin techo térmico no abortan por temperatura', visitVm.visitThermalCeiling === null && visitVm.visitThermalBreach === false);
+visitVm.visitMachine.machine_type = 'COMBO';
+visitVm.visitForm.cabin_temp_celsius = 3.5;
+
+const expiredVisitItem = visitVm.visitForm.items[0];
+assert('Un carril caducado exige retirada FEFO antes de cargar', visitVm.visitItemMustWithdrawBeforeLoading(expiredVisitItem) === true && visitVm.visitItemMaxAddable(expiredVisitItem) === 0);
+visitVm.fillVisitItem(expiredVisitItem);
+assert('No se puede llenar un carril FEFO sin retirar el remanente', expiredVisitItem.qty_added === 0 && visitVm.visitError.includes('FEFO'));
+visitVm.withdrawVisitRemainder(expiredVisitItem);
+assert('La retirada FEFO descuenta todo el remanente caducado', expiredVisitItem.qty_withdrawn_expired === 2 && visitVm.visitItemMustWithdrawBeforeLoading(expiredVisitItem) === false);
+visitVm.fillVisitItem(expiredVisitItem);
+assert('Llenar al máximo respeta hueco y stock de furgoneta', expiredVisitItem.qty_added === 8 && visitVm.visitItemQtyAfter(expiredVisitItem) === 8);
+
+const expiringVisitItem = visitVm.visitForm.items[1];
+visitVm.fillVisitItem(expiringVisitItem);
+assert('Un carril próximo a caducar también exige retirada previa', expiringVisitItem.qty_added === 0 && visitVm.visitItemMustWithdrawBeforeLoading(expiringVisitItem) === true);
+visitVm.withdrawVisitRemainder(expiringVisitItem);
+visitVm.fillVisitItem(expiringVisitItem);
+assert('El carril próximo a caducar se llena tras la retirada FEFO', expiringVisitItem.qty_withdrawn_expired === 4 && expiringVisitItem.qty_added === 6);
+const healthyVisitItem = visitVm.visitForm.items[2];
+visitVm.fillVisitItem(healthyVisitItem);
+assert('El carril sano se llena con el stock FEFO disponible', healthyVisitItem.qty_added === 3 && visitVm.visitTotalAdded === 17 && visitVm.visitTotalWithdrawn === 6);
+
+visitVm.markHygieneComplete();
+assert('Marcar el checklist cubre las cuatro comprobaciones de COMBO', visitVm.visitHygieneMissing.length === 0);
+const visitPayload = visitVm.buildVisitPayload();
+assert('El payload de visita envía movimientos, lote y checklist sin costes', visitPayload.items.length === 3 && visitPayload.items[0].loaded_batch_code === 'LOTE-NEW1' && visitPayload.hygiene_checklist.coffee_grounds_emptied === true && !('unit_cost_eur' in visitPayload) && !('cost' in visitPayload));
+
+visitVm.visitMachine.machine_type = 'COLD_DRINKS';
+visitVm.markHygieneComplete();
+assert('El checklist de frío queda en dos comprobaciones y anula las de café', visitVm.visitHygieneItems.filter((entry) => entry.required).length === 2 && visitVm.visitForm.hygiene_checklist.coffee_grounds_emptied === null && visitVm.visitForm.hygiene_checklist.cabin_spills_checked === true);
+visitVm.visitMachine.machine_type = 'COMBO';
+visitVm.markHygieneComplete();
+
+visitVm.handleVisitPhoto({ target: { files: [{ name: 'grande.jpg', size: 5 * 1024 * 1024 + 1, type: 'image/jpeg' }], value: 'x' } });
+assert('La evidencia rechaza fotografías de más de 5 MB', visitVm.visitPhotoFile === null && visitVm.visitError.includes('5 MB'));
+visitVm.handleVisitPhoto({ target: { files: [{ name: 'evidencia.pdf', size: 1000, type: 'application/pdf' }], value: 'x' } });
+assert('La evidencia rechaza formatos que no son imagen', visitVm.visitPhotoFile === null && visitVm.visitError.includes('JPG'));
+const evidenceFile = { name: 'evidencia.jpg', size: 1024, type: 'image/jpeg' };
+visitVm.handleVisitPhoto({ target: { files: [evidenceFile], value: '' } });
+assert('La evidencia válida queda adjunta a la visita', visitVm.visitPhotoFile === evidenceFile && visitVm.visitPhotoName === 'evidencia.jpg' && visitVm.visitPhotoReady === true);
+assert('Una visita con retiradas exige foto y notas de 20 caracteres', visitVm.validateVisit() === false && visitVm.visitError.includes('justificación'));
+visitVm.visitForm.internal_notes = 'Retirada FEFO justificada por caducidad y control sanitario.';
+assert('La visita completa supera la validación', visitVm.validateVisit() === true);
+assert('La validación no confunde el techo térmico exacto con un aborto', visitVm.visitMode === 'COMPLETED');
+
+visitVm.visitForm.cabin_temp_celsius = 4.1;
+assert('El aborto térmico bloquea los movimientos ya declarados', visitVm.validateVisit() === false && visitVm.visitError.includes('no puede cargar'));
+for (const item of visitVm.visitForm.items) {
+  item.qty_withdrawn_expired = 0;
+  item.qty_withdrawn_damaged = 0;
+  item.qty_added = 0;
+}
+assert('El aborto térmico exige precinto de seguridad', visitVm.validateVisit() === false && visitVm.visitError.includes('precinto'));
+visitVm.visitForm.precautionary_seal_applied = true;
+assert('El aborto con precinto, foto y notas es válido', visitVm.validateVisit() === true);
+const abortPayload = visitVm.buildVisitPayload();
+assert('El aborto térmico envía estado y cero movimientos', abortPayload.status === 'ABORTED_THERMAL_BREACH' && abortPayload.items.length === 0);
+
+const onlineGet = api.get;
+const onlineCreate = api.restocker.createRestockVisit;
+const onlineUpload = api.restocker.uploadVisitPhoto;
+const uploadCalls = [];
+const onlineCreateCalls = [];
+api.get = async (url) => {
+  if (url === '/restocker/my-route') return bootstrapPayload;
+  throw new Error('URL inesperada: ' + url);
+};
+api.restocker.uploadVisitPhoto = async (photo, name) => {
+  uploadCalls.push({ photo, name });
+  return { photo_evidence_url: '/uploads/visits/evidencia.jpg' };
+};
+api.restocker.createRestockVisit = async (machineId, payload) => {
+  onlineCreateCalls.push({ machineId, payload });
+  return { id: 88, visit_code: 'MRV-2026-0088', status: 'COMPLETED', machine_code: 'VEND-0701' };
+};
+const onlineVisitVm = buildVm({
+  restocker: bootstrapPayload.data.restocker,
+  machines: JSON.parse(JSON.stringify([visitMachine])),
+  vanProductStocks: JSON.parse(JSON.stringify(visitStocks)),
+  visitQueue: new RestockVisitOfflineQueue({ indexedDB: createFakeIndexedDb() })
+});
+await onlineVisitVm.openVisitAssistant(onlineVisitVm.machines[0]);
+onlineVisitVm.visitForm.cabin_temp_celsius = 3.5;
+onlineVisitVm.markHygieneComplete();
+onlineVisitVm.withdrawVisitRemainder(onlineVisitVm.visitForm.items[0]);
+onlineVisitVm.visitForm.internal_notes = 'Evidencia de retirada FEFO para el cierre.';
+onlineVisitVm.visitPhotoFile = { name: 'evidencia.jpg', size: 1024, type: 'image/jpeg' };
+onlineVisitVm.visitPhotoName = 'evidencia.jpg';
+await onlineVisitVm.submitVisit();
+assert('La visita online sube la foto antes del alta idempotente', uploadCalls.length === 1 && uploadCalls[0].name === 'evidencia.jpg' && onlineCreateCalls.length === 1 && onlineCreateCalls[0].machineId === 7);
+assert('La visita online envía la URL de evidencia y cierra el asistente', onlineCreateCalls[0].payload.photo_evidence_url === '/uploads/visits/evidencia.jpg' && onlineVisitVm.showVisitModal === false && onlineVisitVm.loadingActionMessage.includes('Visita registrada'));
+api.get = onlineGet;
+api.restocker.createRestockVisit = onlineCreate;
+api.restocker.uploadVisitPhoto = onlineUpload;
+
+visitVm.visitForm.cabin_temp_celsius = 3.5;
+const offlineVisitVm = buildVm({
+  restocker: bootstrapPayload.data.restocker,
+  machines: JSON.parse(JSON.stringify([visitMachine])),
+  vanProductStocks: JSON.parse(JSON.stringify(visitStocks)),
+  visitQueue: new RestockVisitOfflineQueue({ indexedDB: createFakeIndexedDb() })
+});
+await offlineVisitVm.openVisitAssistant(offlineVisitVm.machines[0]);
+offlineVisitVm.visitForm.cabin_temp_celsius = 3.5;
+offlineVisitVm.markHygieneComplete();
+offlineVisitVm.withdrawVisitRemainder(offlineVisitVm.visitForm.items[0]);
+offlineVisitVm.fillVisitItem(offlineVisitVm.visitForm.items[0]);
+const offlinePayload = offlineVisitVm.buildVisitPayload();
+await offlineVisitVm.queueOfflineVisit(offlinePayload, null);
+assert('La visita se guarda en la cola offline y cierra el asistente', offlineVisitVm.showVisitModal === false && offlineVisitVm.pendingVisitMutations.length === 1);
+assert('La cola offline aísla la visita por restocker_id', (await offlineVisitVm.visitQueue.list(12)).length === 1 && (await offlineVisitVm.visitQueue.list(13)).length === 0);
+assert('La visita offline descuenta preventivamente el stock de furgoneta', offlineVisitVm.vanProductStocks.find((row) => row.batch_code === 'LOTE-NEW1').quantity_available === 0);
+assert('La visita offline refleja el carril y el historial local', offlineVisitVm.machines[0].expired_slots_count === 0 && offlineVisitVm.recentVisits[0].is_offline_pending === true);
+
+const queue = offlineVisitVm.visitQueue;
+await queue.clear(12);
+const queueRecord = (id, sequence) => ({
+  client_mutation_id: id,
+  restocker_id: 12,
+  machine_id: 7,
+  payload: { client_mutation_id: id, status: 'COMPLETED', items: [] },
+  created_at: '2026-11-14T08:00:00+00:00',
+  sequence_order: sequence
+});
+await queue.enqueue(queueRecord('visit-2', 2));
+await queue.enqueue(queueRecord('visit-1', 1));
+await queue.enqueue({ ...queueRecord('visit-other', 3), restocker_id: 13 });
+assert('La cola FIFO ordena por secuencia y no mezcla reponedores', (await queue.list(12)).map((item) => item.client_mutation_id).join(',') === 'visit-1,visit-2' && (await queue.list(13)).length === 1);
+await queue.markConflict('visit-1', 'OFFLINE_VISIT_CONFLICT');
+assert('Marcar conflicto conserva la visita con su motivo', (await queue.list(12, ['CONFLICT']))[0].conflict_reason === 'OFFLINE_VISIT_CONFLICT');
+await queue.remove('visit-2');
+assert('Eliminar de la cola no toca otras visitas', (await queue.list(12)).length === 1);
+await queue.clear(12);
+assert('Vaciar la cola respeta el aislamiento del reponedor', (await queue.list(12)).length === 0 && (await queue.list(13)).length === 1);
+const memoryQueue = new RestockVisitOfflineQueue({ indexedDB: null });
+await memoryQueue.enqueue(queueRecord('memory-visit', 1));
+assert('La cola degrada a memoria en Node sin IndexedDB', memoryQueue.isMemoryBacked() === true && (await memoryQueue.list(12)).length === 1);
+
+const syncQueue = new RestockVisitOfflineQueue({ indexedDB: createFakeIndexedDb() });
+await syncQueue.enqueue(queueRecord('sync-1', 1));
+await syncQueue.enqueue(queueRecord('sync-2', 2));
+const syncVm = buildVm({ restocker: bootstrapPayload.data.restocker, visitQueue: syncQueue });
+const syncCalls = [];
+api.restocker.createRestockVisit = async (machineId, payload) => {
+  syncCalls.push({ machineId, payload });
+  if (payload.client_mutation_id === 'sync-2') {
+    const error = new Error('OFFLINE_VISIT_CONFLICT');
+    error.status = 409;
+    error.code = 'OFFLINE_VISIT_CONFLICT';
+    throw error;
+  }
+  return { id: 77, visit_code: 'MRV-2026-0077', status: 'COMPLETED' };
+};
+const syncGet = api.get;
+api.get = async (url) => {
+  if (url === '/restocker/my-route') return bootstrapPayload;
+  throw new Error('URL inesperada: ' + url);
+};
+await syncVm.syncPendingVisits();
+assert('La sincronización FIFO respeta el orden de la cola', syncCalls.length === 2 && syncCalls[0].payload.client_mutation_id === 'sync-1' && syncCalls[1].payload.client_mutation_id === 'sync-2');
+assert('Un 409 se conserva como conflicto y no se reintenta en bucle', (await syncQueue.list(12)).length === 1 && (await syncQueue.list(12, ['CONFLICT']))[0].client_mutation_id === 'sync-2');
+assert('La sincronización informa de visitas y conflictos', syncVm.visitSyncMessage.includes('1 visita(s) sincronizada(s)') && syncVm.visitSyncMessage.includes('1 conflicto(s)'));
+
+const dumpCalls = [];
+api.restocker.dumpVisitConflict = async (payload) => {
+  dumpCalls.push(payload);
+  return { status: 'ARCHIVED' };
+};
+const conflictedVisit = (await syncQueue.list(12, ['CONFLICT']))[0];
+await syncVm.archiveVisitConflict(conflictedVisit);
+assert('Archivar el conflicto llama a auditoría con su mutación', dumpCalls.length === 1 && dumpCalls[0].machine_id === 7 && dumpCalls[0].client_mutation_id === 'sync-2');
+assert('Archivar el conflicto vacía la cola local', (await syncQueue.list(12)).length === 0 && syncVm.visitSyncMessage.includes('auditoría'));
+
+assert('El cliente API expone las cuatro operaciones de visita', typeof api.restocker.getVisits === 'function' && typeof api.restocker.createRestockVisit === 'function' && typeof api.restocker.uploadVisitPhoto === 'function' && typeof api.restocker.dumpVisitConflict === 'function');
+assert('Los endpoints de visita son los del contrato móvil', apiSource.includes('/restocker/visits') && apiSource.includes('/restocker/machines/${encodeURIComponent(machineId)}/visits') && apiSource.includes('/restocker/visits/photo') && apiSource.includes('/restocker/visits/conflict-dump'));
+assert('La vista declara el asistente, historial y cola offline', viewSource.includes('data-testid="modal-restock-visit"') && viewSource.includes('data-testid="restocker-recent-visits"') && viewSource.includes('data-testid="restocker-offline-visit-queue"'));
+assert('La cola ofrece sincronización y archivado del conflicto', viewSource.includes('data-testid="btn-sync-visits"') && viewSource.includes('data-testid="btn-archive-visit-conflict"') && viewSource.includes('Archivar Conflicto Offline en Auditoría'));
+assert('La vista pre-rellena la liquidación desde C4 sin costes', viewSource.includes('data-testid="restocker-c4-prefill"') && viewSource.includes('suggested_restocked_in_machines_qty') && viewSource.includes('suggested_withdrawn_spoilage_qty'));
+assert('La cola offline usa IndexedDB, clave idempotente e índice por reponedor', queueSource.includes('indexedDB') && queueSource.includes('client_mutation_id') && queueSource.includes('by_restocker'));
+assert('La vista exige foto de 5 MB y techo térmico explícito', viewSource.includes('5 * 1024 * 1024') && viewSource.includes('PERISHABLE_FOOD: 4') && viewSource.includes('COLD_DRINKS: 8'));
+assert('El modal de visita no publica costes ni márgenes', !/unit_cost|unit_margin|margin_eur|coste interno/i.test(visitModalSource));
+assert('El service worker precachea la cola offline de visitas', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8').includes('/assets/js/utils/RestockVisitOfflineQueue.js'));
+
+api.restocker.getMachinePlanogram = originalVisitPlanogram;
+api.restocker.createRestockVisit = originalCreateRestockVisit;
+api.restocker.uploadVisitPhoto = originalUploadVisitPhoto;
+api.restocker.dumpVisitConflict = originalDumpVisitConflict;
+api.restocker.getVisits = originalGetVisits;
+api.get = syncGet;
 
 api.get = originalGet;
 api.post = originalPost;

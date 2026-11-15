@@ -67,6 +67,10 @@ const KNOWN_DYNAMIC_ACTION_SITES = [
     // `buildTicketEvent(action: $action)` y lo persiste. La acción real la
     // enumeran los llamadores del servicio, no esta capa.
     'src/Application/Service/AuditLogger.php::buildTicketEvent',
+    // Módulo 34: el desenlace de la visita elige entre dos acciones del catálogo
+    // con un ternario. Las dos ramas son literales y la guarda las enumera; el
+    // sitio se declara porque la expresión no es un literal plano.
+    'src/Application/Service/MachineRestockVisitService.php::logMachineRestockVisitEvent',
 ];
 
 /** AuditLogger writers whose second argument (or `action:` named argument) is the action. */
@@ -84,6 +88,9 @@ const AUDIT_WRITER_METHODS = [
     'logUnclaimedCashEvent',
     'logNotificationOutboxEvent',
     'logNotificationChannelSettingEvent',
+    // Módulo 34: la visita in situ tiene entidad propia y un único escritor de
+    // auditoría; sin esta firma sus tres acciones serían invisibles para el visor.
+    'logMachineRestockVisitEvent',
     // Módulo 16: firma de los seis hechos de la avería oportunista in situ.
     'logOpportunisticEvent',
     // Módulo 25: el catálogo maestro construye su `AuditEvent` en un único punto
@@ -91,6 +98,11 @@ const AUDIT_WRITER_METHODS = [
     // CREATE/UPDATE/REACTIVATE/DEACTIVATE del catálogo quedaban invisibles para
     // la guarda y el visor las ofrecía como filtros fantasma.
     'recordTaxonomyAudit',
+    // Módulo 33: las órdenes de carga y los movimientos de stock delegan en dos
+    // métodos privados que construyen el `AuditEvent` con la acción recibida.
+    // Sin estas firmas, sus nueve acciones quedaban fuera del vocabulario.
+    'auditOrder',
+    'auditStock',
 ];
 
 /**
@@ -156,28 +168,46 @@ function resolveActionArgument(array $arguments, int $position): ?array
  * Reduce la expresión de la acción a su forma analizable por la guarda.
  *
  * @param list<mixed> $expression Tokens del argumento de acción.
+ * @param array<string, string> $constants Constantes de acción declaradas en el fichero.
  * @return array{plain: ?string, literals: list<string>, flat: string}
- *         plain:    el literal único si la expresión es un literal plano
- *         literals: todos los literales contenidos (ramas de un ternario, etc.)
+ *         plain:    el literal único si la expresión es un literal plano o `self::CONST`
+ *         literals: todos los literales o constantes resueltas (ramas de un ternario, etc.)
  *         flat:     texto de la expresión, para el informe de sitios dinámicos
  */
-function analyseActionExpression(array $expression): array
+function analyseActionExpression(array $expression, array $constants = []): array
 {
     $clean = array_values(array_filter($expression, static fn($tk): bool => !(is_array($tk)
         && in_array($tk[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true))));
 
+    $plain = null;
+    if (count($clean) === 1 && is_array($clean[0]) && $clean[0][0] === T_CONSTANT_ENCAPSED_STRING) {
+        $plain = trim($clean[0][1], "'\"");
+    } elseif (count($clean) === 3
+        && is_array($clean[0]) && $clean[0][0] === T_STRING && in_array($clean[0][1], ['self', 'static'], true)
+        && (is_array($clean[1]) ? $clean[1][1] : $clean[1]) === '::'
+        && is_array($clean[2]) && $clean[2][0] === T_STRING
+        && isset($constants[$clean[2][1]])) {
+        $plain = $constants[$clean[2][1]];
+    }
+
     $literals = [];
     $flat = '';
-    foreach ($clean as $tk) {
+    foreach ($clean as $index => $tk) {
         if (is_array($tk) && $tk[0] === T_CONSTANT_ENCAPSED_STRING) {
             $literals[] = trim($tk[1], "'\"");
+        } elseif ($index >= 2
+            && is_array($tk) && $tk[0] === T_STRING
+            && (is_array($clean[$index - 1]) ? $clean[$index - 1][1] : $clean[$index - 1]) === '::'
+            && is_array($clean[$index - 2]) && in_array($clean[$index - 2][1], ['self', 'static'], true)
+            && isset($constants[$tk[1]])) {
+            $literals[] = $constants[$tk[1]];
         }
         $flat .= is_array($tk) ? $tk[1] : $tk;
     }
 
     return [
-        'plain' => count($clean) === 1 && count($literals) === 1 ? $literals[0] : null,
-        'literals' => $literals,
+        'plain' => $plain,
+        'literals' => array_values(array_unique($literals)),
         'flat' => $flat,
     ];
 }
@@ -202,11 +232,21 @@ function extractAuditActions(string $source, string $relativePath): array
     $tokens = token_get_all($source);
     $count = count($tokens);
 
+    // Constantes de acción del propio fichero: `self::AUDIT_CREATED` es una acción
+    // tan literal como la cadena que declara. Sin resolverla, el escritor quedaba
+    // como sitio dinámico y el visor no podía catalogar sus acciones.
+    $constants = [];
+    if (preg_match_all("/public\s+const\s+([A-Z][A-Z0-9_]*)\s*=\s*'([A-Z][A-Z0-9_]+)'/", $source, $declared, PREG_SET_ORDER)) {
+        foreach ($declared as $const) {
+            $constants[$const[1]] = $const[2];
+        }
+    }
+
     $isSkippable = static fn($token): bool => is_array($token)
         && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true);
 
-    $register = static function (array $expression, string $site) use (&$literals, &$dynamic): void {
-        $analysis = analyseActionExpression($expression);
+    $register = static function (array $expression, string $site) use (&$literals, &$dynamic, $constants): void {
+        $analysis = analyseActionExpression($expression, $constants);
 
         if ($analysis['plain'] !== null) {
             $literals[$analysis['plain']] = $literals[$analysis['plain']] ?? $site;
@@ -287,7 +327,7 @@ function extractAuditActions(string $source, string $relativePath): array
         // hidratación (`$row['action']` en `PdoAuditLogRepository`) o la delegación de
         // `AuditLogger::log()`, que escribe lo que ya enumeró otra llamada; tratarlas
         // como sitios dinámicos obligaría a declarar lecturas como si fueran escrituras.
-        $analysis = analyseActionExpression($expression);
+        $analysis = analyseActionExpression($expression, $constants);
         if ($analysis['plain'] === null) {
             continue;
         }

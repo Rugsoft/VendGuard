@@ -33,8 +33,10 @@ use VendGuard\Core\Domain\Model\MachinePlanogramSlot;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\ProductCategory;
 use VendGuard\Core\Domain\Model\ProductUnitType;
+use VendGuard\Core\Domain\Model\RestockerVanProductStock;
 use VendGuard\Core\Domain\Model\VendingProduct;
 use VendGuard\Core\Domain\Repository\MachinePlanogramRepositoryInterface;
+use VendGuard\Core\Domain\Repository\RestockerVanStockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\VendingProductRepositoryInterface;
 
 echo "======================================================================\n";
@@ -58,6 +60,77 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
 };
 
 /** Catálogo en memoria, suficiente para presets, cerrojos y costes. */
+/** Stock de furgoneta en memoria, suficiente para certificar el enriquecido FEFO. */
+final class InMemoryRestockerVanStockRepository implements RestockerVanStockRepositoryInterface
+{
+    /** @var array<int, list<array<string, mixed>>> */
+    public array $rowsByRestocker = [];
+
+    public function seed(
+        int $restockerId,
+        int $productId,
+        string $batchCode,
+        ?string $expirationDate,
+        int $quantity
+    ): void {
+        $this->rowsByRestocker[$restockerId][] = [
+            'restocker_id' => $restockerId,
+            'product_id' => $productId,
+            'batch_code' => $batchCode,
+            'expiration_date' => $expirationDate,
+            'quantity_available' => $quantity,
+            'requires_cold_chain' => false,
+        ];
+    }
+
+    public function search(
+        ?int $restockerId = null,
+        ?string $category = null,
+        ?string $expiryStatus = null,
+        ?string $search = null
+    ): array {
+        if ($restockerId !== null) {
+            return $this->findByRestocker($restockerId, $category, $expiryStatus, $search);
+        }
+
+        return array_merge(...array_values($this->rowsByRestocker) ?: [[]]);
+    }
+
+    public function findByRestocker(
+        int $restockerId,
+        ?string $category = null,
+        ?string $expiryStatus = null,
+        ?string $search = null
+    ): array {
+        return $this->rowsByRestocker[$restockerId] ?? [];
+    }
+
+    public function findLot(
+        int $restockerId,
+        int $productId,
+        string $batchCode,
+        bool $forUpdate = false
+    ): ?RestockerVanProductStock {
+        foreach ($this->findByRestocker($restockerId) as $row) {
+            if ((int)$row['product_id'] === $productId && $row['batch_code'] === $batchCode) {
+                return RestockerVanProductStock::fromDatabaseRow($row);
+            }
+        }
+
+        return null;
+    }
+
+    public function upsertLot(RestockerVanProductStock $stock): RestockerVanProductStock
+    {
+        return $stock;
+    }
+
+    public function sumUsableQuantityByProduct(int $restockerId, ?DateTimeImmutable $today = null): array
+    {
+        return [];
+    }
+}
+
 final class InMemoryVendingProductRepository implements VendingProductRepositoryInterface
 {
     /** @var array<int, VendingProduct> */
@@ -367,6 +440,19 @@ final class InMemoryMachinePlanogramRepository implements MachinePlanogramReposi
         return $this->findMachinesForRestocker($restockerId)[array_search($machineId, $this->restockerMachines[$restockerId], true)] ?? null;
     }
 
+    public function applyVisitSlotMovement(
+        int $machineId,
+        string $slotCode,
+        int $qtyWithdrawnExpired,
+        int $qtyWithdrawnDamaged,
+        int $qtyAdded,
+        ?string $loadedBatchCode = null,
+        ?\DateTimeImmutable $loadedExpirationDate = null,
+        ?\DateTimeImmutable $today = null
+    ): array {
+        throw new RuntimeException('No usado en esta suite.');
+    }
+
     private function rowFromEntity(MachinePlanogramSlot $slot): array
     {
         $product = $this->products->findById($slot->getProductId());
@@ -518,8 +604,16 @@ $planograms->upsertSlot(new MachinePlanogramSlot(null, 2, '12', (int)$inactiveSn
 $planograms->upsertSlot(new MachinePlanogramSlot(null, 5, 'HOPPER_MILK', (int)$milk->getId(), 1000, 400, 200, true));
 $planograms->operations = [];
 
+$vanStocks = new InMemoryRestockerVanStockRepository();
+$today = new DateTimeImmutable('today');
+$vanStocks->seed(10, (int)$coffee->getId(), 'COFFEE-EXPIRED', $today->modify('-1 day')->format('Y-m-d'), 5);
+$vanStocks->seed(10, (int)$coffee->getId(), 'COFFEE-ZERO', $today->modify('+1 day')->format('Y-m-d'), 0);
+$vanStocks->seed(10, (int)$coffee->getId(), 'COFFEE-LATE', $today->modify('+5 days')->format('Y-m-d'), 6);
+$vanStocks->seed(10, (int)$coffee->getId(), 'COFFEE-FEFO', $today->modify('+2 days')->format('Y-m-d'), 4);
+$vanStocks->seed(10, (int)$snack->getId(), 'SNACK-AJENO', $today->modify('+1 day')->format('Y-m-d'), 9);
+
 $audit = new RecordingPlanogramAuditLogger();
-$service = new MachinePlanogramService($planograms, $products, $audit);
+$service = new MachinePlanogramService($planograms, $products, $audit, $vanStocks);
 $actor = ['id' => 7, 'role' => 'COORDINATOR', 'name' => 'Coordinación Planograma'];
 
 // =====================================================================
@@ -847,6 +941,37 @@ $assert(
             && array_key_exists('sale_price_eur', $row),
         true
     )
+);
+
+$restockerSlotsByCode = [];
+foreach ($restockerPlanogram['slots'] as $restockerSlot) {
+    $restockerSlotsByCode[$restockerSlot['slot_code']] = $restockerSlot;
+}
+$coffeeSlot = $restockerSlotsByCode['HOPPER_COFFEE'];
+$coffeeBatches = $coffeeSlot['available_van_batches'] ?? [];
+$assert(
+    '6.5b Los lotes de furgoneta compatibles llegan en FEFO y excluyen caducados o sin saldo',
+    array_column($coffeeBatches, 'batch_code') === ['COFFEE-FEFO', 'COFFEE-LATE']
+    && array_column($coffeeBatches, 'quantity_available') === [4, 6]
+    && $coffeeSlot['fefo_recommended_batch_code'] === 'COFFEE-FEFO'
+);
+$assert(
+    '6.5c Los lotes del carril no filtran coste ni margen',
+    array_reduce(
+        $coffeeBatches,
+        static fn (bool $carry, array $batch): bool => $carry
+            && !array_key_exists('unit_cost_eur', $batch)
+            && !array_key_exists('unit_margin_eur', $batch)
+            && array_key_exists('expiration_date', $batch)
+            && array_key_exists('expiry_status', $batch),
+        true
+    )
+);
+$cupsSlot = $restockerSlotsByCode['TUBE_CUPS'];
+$assert(
+    '6.5d Un carril sin lotes de su producto no recibe lotes ajenos',
+    ($cupsSlot['available_van_batches'] ?? null) === []
+    && ($cupsSlot['fefo_recommended_batch_code'] ?? null) === null
 );
 
 $outsideCode = null;

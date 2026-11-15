@@ -397,6 +397,12 @@ class AppRouter
         $router->post('/api/coordinator/product-loading-orders/{id}/reconcile', [CoordinatorProductLoadingController::class, 'reconcileOrder'], [$coordinatorAuth]);
         $router->post('/api/coordinator/product-loading-orders/{id}/cancel', [CoordinatorProductLoadingController::class, 'cancelOrder'], [$coordinatorAuth]);
 
+        // Libro histórico de visitas in situ y control FEFO (Módulo 34: T-RVF-09,
+        // RF-05.2, QA 3, Art. V.4). Solo Coordinación recibe la merma comercial;
+        // la lectura de la visita incluye el snapshot contable completo.
+        $router->get('/api/coordinator/restock-visits', [CoordinatorProductLoadingController::class, 'listRestockVisits'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/restock-visits/{id}', [CoordinatorProductLoadingController::class, 'getRestockVisit'], [$coordinatorAuth]);
+
         // Actas de Merma APPCC (Módulo 29: T-SPOILAGE-10).
         // Los endpoints compartidos por Técnico y Coordinación se autentican como
         // personal interno y el controlador decide el rol permitido. Los tres
@@ -548,6 +554,14 @@ class AppRouter
         $router->get('/api/restocker/van-stocks', [RestockerRouteController::class, 'vanStocks'], [$restockerAuth]);
         $router->post('/api/restocker/product-loading-orders/{id}/confirm', [RestockerRouteController::class, 'confirmLoadingOrder'], [$restockerAuth]);
         $router->post('/api/restocker/product-loading-orders/{id}/reconcile', [RestockerRouteController::class, 'reconcileLoadingOrder'], [$restockerAuth]);
+        // Visita de reposición in situ (Módulo 34: T-RVF-09, RF-01 a RF-04,
+        // Art. II, Art. V.4 y Art. V.5). Las rutas estáticas se registran antes
+        // que el segmento dinámico `{machineId}` para que `visits` no se
+        // interprete como una máquina. El reponedor sale siempre del token.
+        $router->get('/api/restocker/visits', [RestockerRouteController::class, 'listVisits'], [$restockerAuth]);
+        $router->post('/api/restocker/visits/photo', [RestockerRouteController::class, 'uploadVisitPhoto'], [$restockerAuth]);
+        $router->post('/api/restocker/visits/conflict-dump', [RestockerRouteController::class, 'dumpVisitConflict'], [$restockerAuth]);
+        $router->post('/api/restocker/machines/{machineId}/visits', [RestockerRouteController::class, 'registerVisit'], [$restockerAuth]);
 
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)

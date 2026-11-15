@@ -13,6 +13,10 @@ use InvalidArgumentException;
  */
 enum IncidentCategory: string
 {
+    /**
+     * Canonical thermal category. The Module 34 functional label
+     * `THERMAL_BREAKDOWN` is persisted as this enum value.
+     */
     case TEMPERATURE_COLD = 'TEMPERATURE_COLD';
     case PAYMENT_SYSTEM = 'PAYMENT_SYSTEM';
     case PRODUCT_JAM = 'PRODUCT_JAM';

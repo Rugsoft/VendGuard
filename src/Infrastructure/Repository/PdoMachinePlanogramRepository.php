@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace VendGuard\Infrastructure\Repository;
 
+use DateTimeImmutable;
 use PDO;
+use PDOStatement;
+use VendGuard\Core\Domain\Enum\BatchExpiryStatus;
+use VendGuard\Core\Domain\Exception\PlanogramValidationException;
 use VendGuard\Core\Domain\Model\MachinePlanogramSlot;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\ProductCategory;
@@ -15,8 +19,9 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
 /**
  * PdoMachinePlanogramRepository
  *
- * Persistencia PDO de los carriles del planograma (Módulo 32, Tabla 43,
- * RF-02.1–RF-02.3, RF-05.2, C1, C2, QA 2, QA 3, Art. III.1).
+ * Persistencia PDO de los carriles del planograma (Módulo 32, Tabla 43;
+ * Módulo 34, `D1`; RF-01.1, RF-02.1–RF-02.3, RF-03.3, RF-05.2, C1, C2, QA 1,
+ * QA 2, QA 3, Art. III.1, Art. V.4).
  *
  * Decisiones que este repositorio sostiene:
  *   1. **Sin `DELETE` (C1, Art. III.1).** Guardar es `INSERT ... ON CONFLICT
@@ -39,6 +44,15 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  *   6. **Opacidad de costes (Art. V.4).** El planograma no selecciona
  *      `unit_cost_eur` ni márgenes: la omisión es estructural, no un filtro
  *      posterior que alguien pueda olvidar.
+ *   7. **FEFO de carril (Módulo 34, `D1`, QA 1).** Cada carril declara su lote
+ *      vigente, su caducidad y el semáforo `EXPIRED`/`EXPIRING_SOON`/`OK` que
+ *      calcula la entidad; un carril vacío nunca alerta (EARS 01.1.2). La
+ *      máquina expone además los contadores `expired_slots_count` y
+ *      `expiring_soon_slots_count` y el flag `can_restock`.
+ *   8. **Actualización post-visita (RF-03.3, Art. V.4).** `applyVisitSlotMovement()`
+ *      aplica la regla `D1` en una transacción, bloquea el carril con
+ *      `FOR UPDATE`, valida las cotas del movimiento y conserva la caducidad más
+ *      próxima cuando conviven remanente sano y lote cargado.
  *
  * Dogma Vanilla: PHP 8.2+ puro, PDO nativo, sin dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -52,6 +66,9 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
             CASE WHEN s.slot_code ~ '^[0-9]+$' THEN s.slot_code::bigint END ASC NULLS LAST,
             s.slot_code ASC
     ";
+
+    /** Estados del motor que inhabilitan la reposición (QA 1, Art. II). */
+    private const UNAVAILABLE_SANITARY_STATUSES = "('QUARANTINE', 'EXPIRED', 'SEASONAL_PAUSE')";
 
     private PDO $pdo;
 
@@ -159,6 +176,8 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
                     current_estimated_qty,
                     min_threshold,
                     is_active,
+                    current_batch_code,
+                    current_expiration_date,
                     created_at,
                     updated_at
                 ) VALUES (
@@ -169,6 +188,8 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
                     :current_estimated_qty,
                     :min_threshold,
                     :is_active,
+                    :current_batch_code,
+                    :current_expiration_date,
                     CURRENT_TIMESTAMP,
                     CURRENT_TIMESTAMP
                 )
@@ -178,6 +199,8 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
                     current_estimated_qty = EXCLUDED.current_estimated_qty,
                     min_threshold = EXCLUDED.min_threshold,
                     is_active = EXCLUDED.is_active,
+                    current_batch_code = EXCLUDED.current_batch_code,
+                    current_expiration_date = EXCLUDED.current_expiration_date,
                     updated_at = CURRENT_TIMESTAMP
             ");
 
@@ -188,6 +211,8 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
             $stmt->bindValue(':current_estimated_qty', $slot->getCurrentEstimatedQty(), PDO::PARAM_INT);
             $stmt->bindValue(':min_threshold', $slot->getMinThreshold(), PDO::PARAM_INT);
             $stmt->bindValue(':is_active', $slot->isActive(), PDO::PARAM_BOOL);
+            $this->bindNullableText($stmt, ':current_batch_code', $slot->getCurrentBatchCode());
+            $this->bindNullableDate($stmt, ':current_expiration_date', $slot->getCurrentExpirationDate());
             $stmt->execute();
 
             $this->pdo->commit();
@@ -229,10 +254,12 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
             $upsert = $this->pdo->prepare("
                 INSERT INTO machine_planogram_slots (
                     machine_id, slot_code, product_id, max_capacity,
-                    current_estimated_qty, min_threshold, is_active, created_at, updated_at
+                    current_estimated_qty, min_threshold, is_active,
+                    current_batch_code, current_expiration_date, created_at, updated_at
                 ) VALUES (
                     :machine_id, :slot_code, :product_id, :max_capacity,
                     :current_estimated_qty, :min_threshold, :is_active,
+                    :current_batch_code, :current_expiration_date,
                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 )
                 ON CONFLICT (machine_id, slot_code) DO UPDATE
@@ -241,6 +268,8 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
                     current_estimated_qty = EXCLUDED.current_estimated_qty,
                     min_threshold = EXCLUDED.min_threshold,
                     is_active = EXCLUDED.is_active,
+                    current_batch_code = EXCLUDED.current_batch_code,
+                    current_expiration_date = EXCLUDED.current_expiration_date,
                     updated_at = CURRENT_TIMESTAMP
             ");
 
@@ -252,6 +281,8 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
                 $upsert->bindValue(':current_estimated_qty', $slot->getCurrentEstimatedQty(), PDO::PARAM_INT);
                 $upsert->bindValue(':min_threshold', $slot->getMinThreshold(), PDO::PARAM_INT);
                 $upsert->bindValue(':is_active', $slot->isActive(), PDO::PARAM_BOOL);
+                $this->bindNullableText($upsert, ':current_batch_code', $slot->getCurrentBatchCode());
+                $this->bindNullableDate($upsert, ':current_expiration_date', $slot->getCurrentExpirationDate());
                 $upsert->execute();
             }
 
@@ -425,6 +456,220 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
     }
 
     /**
+     * {@inheritdoc}
+     */
+    public function applyVisitSlotMovement(
+        int $machineId,
+        string $slotCode,
+        int $qtyWithdrawnExpired,
+        int $qtyWithdrawnDamaged,
+        int $qtyAdded,
+        ?string $loadedBatchCode = null,
+        ?DateTimeImmutable $loadedExpirationDate = null,
+        ?DateTimeImmutable $today = null
+    ): array {
+        $cleanSlotCode = strtoupper(trim($slotCode));
+
+        if ($machineId <= 0) {
+            throw PlanogramValidationException::invalidSlotBounds(
+                'machine_id',
+                'la máquina del movimiento debe ser un identificador positivo.'
+            );
+        }
+
+        if ($qtyWithdrawnExpired < 0 || $qtyWithdrawnDamaged < 0 || $qtyAdded < 0) {
+            throw PlanogramValidationException::invalidSlotBounds(
+                'qty_added',
+                'las cantidades del movimiento no pueden ser negativas.'
+            );
+        }
+
+        $cleanBatch = $loadedBatchCode === null ? null : strtoupper(trim($loadedBatchCode));
+        if ($cleanBatch === '') {
+            $cleanBatch = null;
+        }
+
+        if ($qtyAdded > 0 && $cleanBatch === null) {
+            throw PlanogramValidationException::invalidSlotBounds(
+                'loaded_batch_code',
+                'cargar unidades exige declarar el lote de furgoneta.'
+            );
+        }
+
+        if ($cleanBatch !== null && preg_match(MachinePlanogramSlot::CURRENT_BATCH_PATTERN, $cleanBatch) !== 1) {
+            throw PlanogramValidationException::invalidSlotBounds(
+                'loaded_batch_code',
+                sprintf('el lote «%s» debe cumplir ^[A-Z0-9_-]{2,40}$.', $loadedBatchCode)
+            );
+        }
+
+        $loadedExpiration = $loadedExpirationDate?->setTime(0, 0);
+
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $lock = $this->pdo->prepare("
+                SELECT
+                    current_estimated_qty,
+                    max_capacity,
+                    current_batch_code,
+                    current_expiration_date
+                FROM machine_planogram_slots
+                WHERE machine_id = :machine_id
+                  AND slot_code = :slot_code
+                  AND is_active = TRUE
+                FOR UPDATE
+            ");
+            $lock->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
+            $lock->bindValue(':slot_code', $cleanSlotCode, PDO::PARAM_STR);
+            $lock->execute();
+
+            $row = $lock->fetch(PDO::FETCH_ASSOC);
+            if ($row === false) {
+                throw PlanogramValidationException::invalidSlotBounds(
+                    'slot_code',
+                    sprintf('el carril %s no está activo en el planograma de la máquina %d.', $cleanSlotCode, $machineId)
+                );
+            }
+
+            $qtyBefore = (int)$row['current_estimated_qty'];
+            $maxCapacity = (int)$row['max_capacity'];
+            $withdrawn = $qtyWithdrawnExpired + $qtyWithdrawnDamaged;
+            $qtyAfter = $qtyBefore - $withdrawn + $qtyAdded;
+
+            if ($withdrawn > $qtyBefore) {
+                throw PlanogramValidationException::invalidSlotBounds(
+                    'qty_withdrawn_expired',
+                    sprintf(
+                        'el carril %s sólo tenía %d unidades y se declaran %d retiradas.',
+                        $cleanSlotCode,
+                        $qtyBefore,
+                        $withdrawn
+                    )
+                );
+            }
+
+            if ($qtyAfter > $maxCapacity) {
+                throw PlanogramValidationException::invalidSlotBounds(
+                    'qty_added',
+                    sprintf(
+                        'el carril %s quedaría con %d unidades sobre una capacidad de %d.',
+                        $cleanSlotCode,
+                        $qtyAfter,
+                        $maxCapacity
+                    )
+                );
+            }
+
+            [$batchCode, $expirationDate] = $this->resolveVisitTraceability(
+                $qtyBefore,
+                $withdrawn,
+                $qtyAdded,
+                $qtyAfter,
+                $row['current_batch_code'] !== null ? (string)$row['current_batch_code'] : null,
+                self::parseDate($row['current_expiration_date']),
+                $cleanBatch,
+                $loadedExpiration,
+                $today
+            );
+
+            $update = $this->pdo->prepare("
+                UPDATE machine_planogram_slots
+                SET current_estimated_qty = :current_estimated_qty,
+                    current_batch_code = :current_batch_code,
+                    current_expiration_date = :current_expiration_date,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE machine_id = :machine_id
+                  AND slot_code = :slot_code
+                  AND is_active = TRUE
+            ");
+            $update->bindValue(':current_estimated_qty', $qtyAfter, PDO::PARAM_INT);
+            $this->bindNullableText($update, ':current_batch_code', $batchCode);
+            $update->bindValue(
+                ':current_expiration_date',
+                $expirationDate?->format('Y-m-d'),
+                $expirationDate === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $update->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
+            $update->bindValue(':slot_code', $cleanSlotCode, PDO::PARAM_STR);
+            $update->execute();
+
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
+
+        $persisted = $this->findSlot($machineId, $cleanSlotCode);
+        if ($persisted === null) {
+            throw new \RuntimeException('El carril se actualizó pero no pudo releerse.');
+        }
+
+        return $persisted;
+    }
+
+    /**
+     * Regla `D1` de lote y caducidad vigentes tras la visita.
+     *
+     * El remanente que sobrevive a la retirada es sano por construcción: el
+     * validador prohíbe cargar si queda producto caducado o próximo a vencer. Por
+     * eso, si conviven remanente y lote cargado, gana la caducidad más próxima
+     * —con su lote— para que la alerta no se pierda (`LEAST` del contrato).
+     *
+     * @return array{0: string|null, 1: DateTimeImmutable|null}
+     */
+    private function resolveVisitTraceability(
+        int $qtyBefore,
+        int $withdrawn,
+        int $qtyAdded,
+        int $qtyAfter,
+        ?string $currentBatchCode,
+        ?DateTimeImmutable $currentExpirationDate,
+        ?string $loadedBatchCode,
+        ?DateTimeImmutable $loadedExpirationDate,
+        ?DateTimeImmutable $today
+    ): array {
+        if ($qtyAfter === 0) {
+            return [null, null];
+        }
+
+        $remaining = $qtyBefore - $withdrawn;
+
+        if ($remaining === 0) {
+            return $qtyAdded > 0
+                ? [$loadedBatchCode, $loadedExpirationDate]
+                : [null, null];
+        }
+
+        if ($qtyAdded === 0 || $loadedExpirationDate === null) {
+            return [$currentBatchCode, $currentExpirationDate];
+        }
+
+        if ($currentExpirationDate === null) {
+            return [$loadedBatchCode, $loadedExpirationDate];
+        }
+
+        $reference = ($today ?? new DateTimeImmutable('today'))->setTime(0, 0);
+        if ($currentExpirationDate <= $reference) {
+            // Defensa en profundidad: un remanente caducado conserva su traza para
+            // que el carril siga alertando aunque el llamador no lo haya retirado.
+            return [$currentBatchCode, $currentExpirationDate];
+        }
+
+        return $loadedExpirationDate < $currentExpirationDate
+            ? [$loadedBatchCode, $loadedExpirationDate]
+            : [$currentBatchCode, $currentExpirationDate];
+    }
+
+    /**
      * Proyección común de carriles con producto y sin coste interno (Art. V.4).
      */
     private function slotSelect(): string
@@ -439,6 +684,8 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
                 s.current_estimated_qty,
                 s.min_threshold,
                 s.is_active,
+                s.current_batch_code,
+                s.current_expiration_date,
                 s.created_at,
                 s.updated_at,
                 vp.sku AS product_sku,
@@ -454,7 +701,8 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
     }
 
     /**
-     * Proyección de máquinas del perímetro vivo del reponedor con resumen (QA 2).
+     * Proyección de máquinas del perímetro vivo del reponedor con resumen,
+     * contadores FEFO y disponibilidad (QA 1, QA 2, Art. II).
      *
      * `EXISTS` en lugar de unir la asignación evita duplicar la máquina cuando el
      * reponedor tuviera dos filas históricas para la misma zona.
@@ -470,6 +718,8 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
                 m.model,
                 m.machine_type,
                 m.sanitary_status,
+                m.is_blocked_no_access,
+                m.is_seasonal_pause,
                 l.name AS location_name,
                 l.site_code,
                 oz.id AS zone_id,
@@ -483,6 +733,24 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
                 ) AS low_stock_slots_count,
                 COUNT(s.id) FILTER (WHERE s.current_estimated_qty > s.min_threshold) AS ok_slots_count,
                 COUNT(s.id) FILTER (WHERE vp.is_active = FALSE) AS inactive_product_slots_count,
+                COUNT(s.id) FILTER (
+                    WHERE s.current_estimated_qty > 0
+                      AND s.current_expiration_date IS NOT NULL
+                      AND s.current_expiration_date <= CURRENT_DATE
+                ) AS expired_slots_count,
+                COUNT(s.id) FILTER (
+                    WHERE s.current_estimated_qty > 0
+                      AND s.current_expiration_date IS NOT NULL
+                      AND s.current_expiration_date > CURRENT_DATE
+                      AND s.current_expiration_date <= CURRENT_DATE + 2
+                ) AS expiring_soon_slots_count,
+                CASE
+                    WHEN m.sanitary_status::text IN " . self::UNAVAILABLE_SANITARY_STATUSES . "
+                      OR m.is_blocked_no_access = TRUE
+                      OR m.is_seasonal_pause = TRUE
+                    THEN FALSE
+                    ELSE TRUE
+                END AS can_restock,
                 COALESCE(SUM(s.max_capacity), 0) AS total_capacity,
                 COALESCE(SUM(s.current_estimated_qty), 0) AS total_estimated_qty
             FROM machines m
@@ -502,6 +770,7 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
             {$machineFilter}
             GROUP BY
                 m.id, m.code, m.model, m.machine_type, m.sanitary_status,
+                m.is_blocked_no_access, m.is_seasonal_pause,
                 l.name, l.site_code, oz.id, oz.code, oz.name
             ORDER BY m.code ASC
         ";
@@ -539,6 +808,8 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
      */
     private function mapSlotRow(array $row): array
     {
+        $expirationDate = self::parseDate($row['current_expiration_date']);
+
         $slot = new MachinePlanogramSlot(
             (int)$row['id'],
             (int)$row['machine_id'],
@@ -549,8 +820,12 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
             (int)$row['min_threshold'],
             self::toBool($row['is_active']),
             $row['created_at'] !== null ? (string)$row['created_at'] : null,
-            $row['updated_at'] !== null ? (string)$row['updated_at'] : null
+            $row['updated_at'] !== null ? (string)$row['updated_at'] : null,
+            $row['current_batch_code'] !== null ? (string)$row['current_batch_code'] : null,
+            $expirationDate
         );
+
+        $slotExpiry = $slot->slotExpiryStatus();
 
         return [
             'id' => $slot->getId(),
@@ -572,6 +847,12 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
             'stock_status_label' => $slot->stockStatus()->label(),
             'restock_needed_qty' => $slot->restockNeededQty(),
             'fill_rate_percent' => $slot->fillRatePercent(),
+            'current_batch_code' => $slot->getCurrentBatchCode(),
+            'current_expiration_date' => $slot->getCurrentExpirationDate()?->format('Y-m-d'),
+            'slot_expiry_status' => $slotExpiry->value,
+            'slot_expiry_status_label' => $slotExpiry->label(),
+            'slot_expiry_status_icon' => $slotExpiry->icon(),
+            'fefo_withdrawal_required' => $slotExpiry !== BatchExpiryStatus::OK,
             'created_at' => $slot->getCreatedAt(),
             'updated_at' => $slot->getUpdatedAt(),
         ];
@@ -622,6 +903,9 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
             'zone_code' => (string)$row['zone_code'],
             'zone_name' => (string)$row['zone_name'],
             'sanitary_status' => (string)$row['sanitary_status'],
+            'expired_slots_count' => (int)$row['expired_slots_count'],
+            'expiring_soon_slots_count' => (int)$row['expiring_soon_slots_count'],
+            'can_restock' => self::toBool($row['can_restock']),
         ] + $summary;
     }
 
@@ -640,6 +924,30 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
             'total_estimated_qty' => 0,
             'fill_rate_percent' => 0.0,
         ];
+    }
+
+    private function bindNullableText(PDOStatement $stmt, string $parameter, ?string $value): void
+    {
+        $stmt->bindValue($parameter, $value, $value === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+    }
+
+    private function bindNullableDate(PDOStatement $stmt, string $parameter, ?DateTimeImmutable $date): void
+    {
+        $this->bindNullableText($stmt, $parameter, $date?->format('Y-m-d'));
+    }
+
+    /**
+     * Convierte una fecha `DATE` de PostgreSQL en medianoche inmutable.
+     */
+    private static function parseDate(mixed $value): ?DateTimeImmutable
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d', substr((string)$value, 0, 10));
+
+        return $date === false ? null : $date;
     }
 
     private static function toBool(mixed $value): bool
