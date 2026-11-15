@@ -242,6 +242,48 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Segregación financiera (Art. V.4):** el coste estimado y su ajuste son exclusivos de Coordinación, con motivo obligatorio y rastro de quién ajustó; la sede y el técnico no ven importes.
 * **Superficie operativa:** pestaña **APPCC** de coordinación con la bandeja de actas, filtros y exportación CSV, histórico por máquina en la ficha técnica, y **Acta Oficial A4** imprimible con la firma de higienización. Migración `025_sanitary_spoilage_records.sql`, con el enumerado `SANITARY_SPOILAGE_RECORD`.
 
+### 28. Perfiles de SLA Diferenciados por Tipo de Sede (Módulo 30)
+* **Tres perfiles contractuales y matriz cruzada con la prioridad del aviso:** cada sede declara su `sla_tier` — **Estándar**, **Prioritario Corporativo** o **Infraestructura Crítica 24x7** — con `STANDARD` por defecto y rechazo `422 INVALID_SLA_TIER` ante un valor desconocido. Sin riesgo de cadena de frío, el objetivo de resolución se cruza con la urgencia: Estándar **8 h** (crítica) / **12 h** (alta) / **24 h** (media o baja); Prioritario Corporativo **6 / 8 / 12 h**; Infraestructura Crítica 24x7 **4 / 4 / 8 h**.
+* **Techo sanitario innegociable (Art. II):** toda máquina de alimentos perecederos y toda mixta con avería `TEMPERATURE_COLD` o prioridad crítica se sella a **240 minutos (4,0 h)** con independencia del contrato y de la urgencia declarada.
+* **Sellado inmutable y recálculo desde el origen:** el aviso congela al nacer `sla_tier_snapshot` (protegido por `trg_incidents_protect_sla_tier_snapshot`, que responde `23514 IMMUTABLE_SLA_TIER_SNAPSHOT`), `sla_target_minutes` y `sla_target_at`. Un cambio de contrato solo rige para avisos nuevos; un cambio de prioridad en triaje o una absorción QR que agrave el aviso recalcula el objetivo desde la hora original de creación. Las pausas imputables a la sede y el intervalo cerrado de una reapertura en garantía se descuentan **sin reiniciar** el reloj (Art. V.6).
+* **Ruta con prelación sanitaria:** toda parada con vencimiento efectivo a **4,0 h o menos** sube al bloque crítico; dentro de él, las paradas con riesgo de cadena de frío (`critical_reason = 'COLD_CHAIN'`) van siempre por delante de las puramente contractuales (`'CONTRACTUAL_SLA'`).
+* **Escalado contractual 24/7 en el recomendador:** sin titulares ni suplentes en turno en una sede Crítica 24x7 (o sin efectivo libre ante un aviso de 4 h), el técnico de guardia recibe un bono de **+60 puntos** y el motivo «Escalado contractual 24/7», siempre subordinado al bono sanitario de +100 (Art. II). Con objetivos de hasta 8 h y zona saturada (≥ 3 paradas vivas) ordena por menor carga y, a igualdad, por proximidad.
+* **Cumplimiento ticket a ticket:** el desglose por sede del cuadro de mandos y su CSV publican el perfil contractual, el objetivo nominal de referencia (**24,0 / 12,0 / 8,0 h**), las brechas reales del periodo y el veredicto «Cumplido» / «Incumplido» / «Sin datos». El nivel de SLA se ve en Coordinación, en la ruta del técnico (también en el paquete sin conexión) y en el portal de cada sede para su propia ubicación; queda fuera del canal QR y de los documentos A4 (Art. V.4).
+* **Motor:** migración `026_tiered_sla_contracts.sql`, con el enumerado `sla_tier`; `SlaTargetCalculator` centraliza la matriz y el techo sanitario. Certificado por `TieredSlaDomainTest`, `PostgresTieredSlaSchemaTest`, `TieredSlaContractsApiTest` y `TieredSlaFrontendTest.mjs`.
+
+### 29. Rol de Cargador / Reponedor de Ruta y Cuadrante de Carga (Módulo 31)
+* **Cuarto rol operativo `RESTOCKER`:** alta en el CRUD de personal con código de operador (`REP-01` y `REP-02` en las semillas), rol inmutable tras el alta (`409 ROLE_CHANGE_FORBIDDEN`) y prohibición de guardia técnica (`chk_users_restocker_not_on_call`, `422 RESTOCKER_CANNOT_BE_ON_CALL`). El reponedor dispone de su propia vista móvil `RestockerRouteView.js` —zonas asignadas, barra de jornada, contador del día en vivo y modal «⏱️ Mis Horas»— y las rutas exclusivas del SAT le responden `403`.
+* **Zonificación de carga paralela a la del SAT:** `restocker_zone_assignments` (tabla 41) con `role_in_zone` (`PRIMARY`/`BACKUP`) e `is_primary` sincronizados: un único titularato vivo por reponedor (`uq_restocker_primary_zone`) y suplencias sin límite, con baja lógica (`removed_at`, Art. III.1), disparador anti-borrado y auditoría bajo la entidad `RESTOCKER_ZONE`.
+* **Consolas de coordinación sin pestañas nuevas:** Zonas Operativas publica los contadores `primary_restockers_count` / `backup_restockers_count` y dos cuadrantes independientes (**«🔧 Cuadrante SAT (Técnicos)»** y **«📦 Cuadrante de Carga (Reponedores)»**), más la lectura inversa por operario; Ausencias, Turnos y Registro de Horas incorporan el filtro por rol (`Todos` / `Técnicos SAT` / `Reponedores`) y la columna de rol en la exportación CSV.
+* **Jornada compartida con cierre propio:** turnos y ausencias usan el mismo motor que los técnicos, pero el reponedor cierra turno de forma directa, sin asistente de traspaso de averías, y sus ausencias promueven automáticamente al suplente de la zona. La cobertura en vivo de la zona resuelve seis niveles deterministas y señala al **#1 recomendado**.
+* **Motor:** migración `027_restocker_role_and_zone_assignments.sql`, que amplía `user_role` con `RESTOCKER` y `audit_entity_type` con `RESTOCKER_ZONE`.
+
+### 30. Catálogo Maestro de Productos y Planograma por Máquina (Módulo 32)
+* **Catálogo comercial del parque:** `vending_products` (tabla 42) con `sku` único e inmutable, cinco categorías (`COLD_DRINK`, `SNACK`, `PERISHABLE_FOOD`, `HOT_BEVERAGE_INGREDIENT`, `CUP_STIRRER_CONSUMABLE`) y tres unidades de venta (`UNIT`, `GRAMS`, `SLEEVE`). Coste y precio acotados —el precio `0,00 €` solo en ingredientes y consumibles—, cadena de frío obligatoria en perecederos y vida útil máxima (`max_shelf_life_days`) para el control de caducidades (Art. II).
+* **Planograma por máquina:** `machine_planogram_slots` (tabla 43) con capacidad (1–10.000), umbral de reposición estrictamente menor que la capacidad y existencia estimada dentro de ella; una fila viva por `(máquina, carril)`, baja lógica y semáforo de stock `STOCKOUT` / `LOW_STOCK` / `OK`.
+* **Cerrojo sanitario bidireccional (Art. II):** el motor impide sembrar un carril con una categoría incompatible con el tipo de máquina o con producto perecedero que no exige frío, y también rechaza cambiar el producto o la tipología de la máquina si dejaría carriles activos incompatibles (`409 PLANOGRAM_INCOMPATIBLE_WITH_MACHINE_TYPE` en `PUT /api/coordinator/admin/machines/{id}`).
+* **Operativa de coordinación:** alta y edición de productos, alta/edición/baja lógica de carriles, presets por modelo normalizado (*Necta Korinto*, *Saeco Cristallo*, *Fas Fast 900*, *Jofemar Vision*) y clonado de un planograma entre máquinas.
+* **Lectura del reponedor sin economía:** el reponedor ve el parque de sus zonas y el planograma en solo lectura, con filtro `stock_alert_only`, y **nunca** recibe coste unitario, precio ni margen (Art. V.4); una máquina fuera de sus zonas responde `403`.
+* **Motor:** migración `028_product_catalog_and_planogram_slots.sql`, con dos tipos nativos nuevos y los disparadores de compatibilidad y frío.
+
+### 31. Órdenes de Carga de Producto y Picking con Trazabilidad de Frío (Módulo 33)
+* **Ciclo de la orden:** `PENDING_PICKING` → `DISPATCHED` → `CONFIRMED_BY_RESTOCKER` → `RECONCILED_AT_CLOSE`, con `CANCELLED` como salida justificada (≥ 20 caracteres reales, Art. V.1). Código único `PLO-AAAA-NNNN` y una sola orden activa por reponedor (`uq_product_loading_orders_active_restocker`).
+* **Propuesta matutina configurable:** modo `ALERTS_ONLY` (solo carriles `STOCKOUT` / `LOW_STOCK`) o `ALL_GAPS` («Ruta completa»), colchón de seguridad `0..50 %` y descuento del stock útil no caducado de la furgoneta; excluye las máquinas en cuarentena o fuera de servicio y las declara en `excluded_unavailable_machines_count` (Art. II).
+* **Despacho con trazabilidad de frío (Art. II):** pasar a `DISPATCHED` exige temperatura de salida de cámara entre **−5,0 y 4,0 °C** cuando hay líneas refrigeradas (`422 COLD_CHAMBER_TEMP_EXCEEDED`), lote real (`^[A-Z0-9_-]{2,40}$`) y caducidad futura que no supere la vida útil del producto (`422 EXPIRATION_EXCEEDS_MAX_SHELF_LIFE`), con inmutabilidad de la caducidad por lote (`409 BATCH_EXPIRATION_MISMATCH`).
+* **Stock por lote y FEFO:** `restocker_van_product_stocks` (tabla 44) lleva el saldo por `(reponedor, producto, lote)` —pueden coexistir varios lotes del mismo producto— con semáforo `EXPIRED` / `EXPIRING_SOON` (≤ 48 h) / `OK`; el ajuste manual de Coordinación exige motivo de 20 caracteres reales y deja el saldo anterior y el nuevo en auditoría.
+* **Recepción y liquidación:** la confirmación móvil en un toque suma las cantidades despachadas por lote; al cierre, la liquidación contrasta `stock − abastecidas en máquinas − mermas retiradas = retorno esperado` frente al contado, exige justificación si hay descuadre y puede ejecutarse desde el móvil o desde Coordinación. La visita in situ del Módulo 34 precarga las unidades abastecidas y retiradas.
+* **Hoja de Picking A4 y privacidad:** dos bloques impresos («❄️ Cámara Frigorífica» y «📦 Almacén General y Consumibles») ordenados por urgencia y SKU, **sin importes** (Art. V.4); ninguna respuesta dirigida al reponedor publica coste ni margen.
+* **Motor:** migración `029_product_loading_orders_and_cold_picking.sql` (tablas 44–46 y tres enumerados).
+
+### 32. Visita de Reposición In Situ, Control FEFO y Limpieza Diaria (Módulo 34)
+* **Trazabilidad de lote en el carril:** `machine_planogram_slots` gana `current_batch_code` y `current_expiration_date`; al completar una visita cada carril aplica `qty_after = qty_before − retiradas caducadas − retiradas dañadas + añadidas` y conserva la caducidad más próxima que siga viva para no perder la alerta FEFO.
+* **Triple cerrojo sanitario (Art. II):** (1) bloquea el abastecimiento en cuarentena sanitaria, fuera de servicio o con avería térmica abierta (`409 SANITARY_RESTOCK_BLOCKED`); (2) exige lectura de cabina al abrir la puerta —**≤ 4,0 °C** en perecederos y mixtas, **≤ 8,0 °C** en bebidas frías— y, si se supera, cierra la visita como `ABORTED_THERMAL_BREACH` con precinto preventivo, fotografía (≤ 5 MB, Art. V.5) y nota de ≥ 20 caracteres, activa la cuarentena sanitaria —o el bloqueo de servicio en bebidas frías— y abre o escala al SAT de la zona una incidencia `CRITICAL` de categoría `TEMPERATURE_COLD`; (3) bloquea cargar un carril con remanente caducado o a ≤ 48 h sin retirarlo antes (`422 FEFO_WITHDRAWAL_REQUIRED`) y prohíbe gastar un lote de furgoneta más nuevo si hay otro sano que vence antes (`422 FEFO_OLDER_VAN_BATCH_AVAILABLE`).
+* **Checklist de higiene adaptativo:** cuatro puntos en máquinas de café y mixtas (posos, cubo de residuos líquidos, batidores y conductos, bandeja y cristal) y dos en frías, snacks y perecederos (bandeja y cristal, derrames de cabina), con evidencia fotográfica obligatoria ante aborto térmico o retirada de unidades.
+* **Ejecución atómica e idempotente:** tablas 47 y 48 (`machine_restock_visits` / `machine_restock_visit_items`) de **solo inserción** (sin `UPDATE` ni `DELETE`), idempotencia por `(restocker_id, client_mutation_id)` con respuesta `idempotent_replay = true`, descuento atómico de la furgoneta y cola `IndexedDB` para sótanos sin cobertura. Un conflicto diferido responde `409 OFFLINE_VISIT_CONFLICT` y puede volcarse sin bloquear el resto de la cola.
+* **Merma comercial separada de la sanitaria:** la retirada por caducidad o envase dañado con frío correcto **no** abre cuarentena; congela `unit_cost_snapshot_eur` y `commercial_spoilage_loss_eur`, visibles solo para Coordinación (Art. V.4), y alimenta la liquidación del Módulo 33.
+* **Superficie de coordinación:** sub-vista **«📋 Visitas de Reposición In Situ y Control FEFO»** con KPIs, filtros, detalle de visita y coste de la merma comercial; el reponedor solo accede a su histórico y a su propio stock.
+* **Motor:** migración `030_in_situ_restock_visit_and_fefo.sql`, con el enumerado `restock_visit_status`.
+
 ---
 
 ## 👥 Actores del Sistema y Credenciales de Demostración
@@ -251,9 +293,10 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 | Perfil / Actor | Identificador / Email | Contraseña / Código | Función Principal |
 | :--- | :--- | :--- | :--- |
 | **🏢 1. Responsable de Sede** | `SEDE-BCN-01` *(Hospital del Mar)*<br>`SEDE-BCN-02` *(Torre Glòries)* | Código + `DEV-<site_code>` *(clave de desarrollo, ver nota)* | Supervisa máquinas del edificio, reporta averías (< 2 min), anexa evidencias y reabre en garantía. |
-| **📊 2. Coordinador de Operaciones** | `coordinacion@vendguard.internal` | `Password123!` | Triaje central, supervisión 24/7 de SLAs, administración del parque y personal, preventivos y certificados sanitarios, catálogo y analítica de repuestos, cuadro de mando de métricas y visor de auditoría, gobierno del catálogo de causas raíz y análisis Pareto 80/20 de garantías. Supervisa además la pausa de espera de sede (reanudación manual y cancelación por inactividad), la superficie operativa del barrido sanitario, la cadena de custodia, la bandeja de taller, el catálogo de guías de diagnóstico y el libro APPCC de mermas. |
-| **📱 3. Técnico de Ruta de Campo** | `jordi.ruta@vendguard.internal`<br>`marta.ruta@vendguard.internal` | `Password123!` | Interfaz vertical *mobile-first*, gestión de averías en ruta, inicio de intervención, pausa estructurada por repuestos o por falta de acceso al inmueble (pausa de sede), resolución justificada con piezas sustituidas y causa raíz, guías rápidas de diagnóstico, hilo de conversación del expediente, inspecciones preventivas, consulta del historial de la máquina y métricas individuales. |
-| **🤳 4. Usuario / Consumidor Final** | Enlace QR (`?code=VEND-0101`) | *Público / Sin registro* | Reporte inmediato in situ escaneando la pegatina de la máquina, con feedback de estado si ya estaba reportada. |
+| **📊 2. Coordinador de Operaciones** | `coordinacion@vendguard.internal` | `Password123!` | Triaje central, supervisión 24/7 de SLAs, administración del parque y personal, preventivos y certificados sanitarios, catálogo y analítica de repuestos, cuadro de mando de métricas y visor de auditoría, gobierno del catálogo de causas raíz y análisis Pareto 80/20 de garantías. Supervisa además la pausa de espera de sede (reanudación manual y cancelación por inactividad), la superficie operativa del barrido sanitario, la cadena de custodia, la bandeja de taller, el catálogo de guías de diagnóstico, el libro APPCC de mermas, los perfiles de SLA por sede, el cuadrante de reponedores, el catálogo de productos y planogramas, las órdenes de carga de producto y las visitas de reposición in situ. |
+| **📱 3. Técnico de Ruta de Campo** | `jordi.ruta@vendguard.internal`<br>`marta.ruta@vendguard.internal` | `Password123!` | Interfaz vertical *mobile-first*, gestión de averías en ruta, inicio de intervención, pausa estructurada por repuestos o por falta de acceso al inmueble (pausa de sede), resolución justificada con piezas sustituidas y causa raíz, guías rápidas de diagnóstico, hilo de conversación del expediente, inspecciones preventivas, consulta del historial de la máquina, insignia de SLA contractual de cada parada y métricas individuales. |
+| **🚚 4. Cargador / Reponedor de Ruta** | `lucia.repostaje@vendguard.internal` *(REP-01)*<br>`oscar.repostaje@vendguard.internal` *(REP-02)* | `Password123!` | Vista móvil de reposición: zonas de carga, jornada y horas propias, planograma sin importes, recepción de la orden de carga, liquidación al cierre y visita in situ con control FEFO, checklist de higiene y cola sin conexión. |
+| **🤳 5. Usuario / Consumidor Final** | Enlace QR (`?code=VEND-0101`) | *Público / Sin registro* | Reporte inmediato in situ escaneando la pegatina de la máquina, con feedback de estado si ya estaba reportada. |
 
 > **Clave de centro de desarrollo (cierre de S-4).** En pruebas, las semillas emiten una clave determinista por sede; para el trabajo manual en local hay que pedirla de forma explícita (`VENDGUARD_DEV_SITE_KEYS=1 php bin/seed.php`). La regla es `DEV-<site_code>` (p. ej. `DEV-SEDE-BCN-01`). En producción el campo no se siembra jamás: cada sede recibe su clave aleatoria al alta o al reemitirse desde coordinación, se muestra una sola vez y solo se guarda su huella bcrypt. Sin clave emitida, el acceso de la sede falla en cerrado.
 
@@ -286,7 +329,7 @@ php bin/seed_demo_map.php
 ```
 
 #### Entorno Cloud / Producción (Render + Supabase PostgreSQL):
-El script [`bin/init_cloud_db.php`](bin/init_cloud_db.php) es el único punto de convergencia del esquema y no es tolerante a medias: aplica el DDL base (`database/supabase_init.sql`), **todas las migraciones incrementales** de `database/supabase_migrations/` (hoy 001–025, de ahí que una base ya desplegada converja en cada arranque), el catálogo maestro (`database/supabase_seeds.sql`) y el histórico de demostración. Todo está declarado con `IF NOT EXISTS` y semillas «insertar si no existe», así que reejecutarlo no duplica nada. Si cualquier paso falla, el script reintenta con espera progresiva y, agotados los intentos, **sale con código distinto de cero**: con el `&&` del arranque, el contenedor no levanta y no se sirve tráfico contra un esquema sin verificar (EARS-02.5).
+El script [`bin/init_cloud_db.php`](bin/init_cloud_db.php) es el único punto de convergencia del esquema y no es tolerante a medias: aplica el DDL base (`database/supabase_init.sql`), **todas las migraciones incrementales** de `database/supabase_migrations/` (hoy 001–030, de ahí que una base ya desplegada converja en cada arranque), el catálogo maestro (`database/supabase_seeds.sql`) y el histórico de demostración. Todo está declarado con `IF NOT EXISTS` y semillas «insertar si no existe», así que reejecutarlo no duplica nada. Si cualquier paso falla, el script reintenta con espera progresiva y, agotados los intentos, **sale con código distinto de cero**: con el `&&` del arranque, el contenedor no levanta y no se sirve tráfico contra un esquema sin verificar (EARS-02.5).
 ```powershell
 DATABASE_URL="postgres://usuario:clave@aws-0-<region>.pooler.supabase.com:6543/postgres?sslmode=verify-full" php bin/init_cloud_db.php
 ```
@@ -628,6 +671,67 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/coordinator/sanitary-spoilage-records[/export-csv]` | `COORDINATOR` | Libro APPCC de mermas con filtros y exportación CSV auditada. |
 | `PATCH` | `/api/coordinator/sanitary-spoilage-records/{id}/loss-estimate` | `COORDINATOR` | Ajuste económico auditado con motivo obligatorio (Art. V.4). |
 
+#### Perfiles de SLA Diferenciados por Sede (Módulo 30)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET/POST/PUT/PATCH` | `/api/coordinator/locations[/{id}]` | `COORDINATOR` | Alta y edición de sede con `sla_tier` (Estándar por defecto, `422 INVALID_SLA_TIER` fuera del enumerado) y auditoría solo del cambio efectivo de contrato. |
+| `GET` | `/api/coordinator/incidents` y `/api/coordinator/incidents/{id}/detail` | `COORDINATOR` | Triaje y ficha con el perfil sellado, el objetivo en minutos/horas y la hora límite de vencimiento. |
+| `GET` | `/api/coordinator/incidents/{id}/suggested-technicians` | `COORDINATOR` | Ranking con `contractual_24_7_escalation_active` y el bono `contractual_24_7_on_call_bonus` (+60 puntos). |
+| `GET` | `/api/coordinator/metrics/breakdown` y `/metrics/export` | `COORDINATOR` | Desglose por sede con perfil contractual, objetivo nominal de referencia, brechas reales y estado SLA. |
+| `GET` | `/api/technician/route/map` | `TECHNICIAN` | Parada con `sla_tier`, `sla_due_at` y `critical_reason` (`COLD_CHAIN` / `CONTRACTUAL_SLA`), también offline. |
+| `GET` | `/api/locations/{code}/machines` | `LOCATION_MANAGER` | SLA contratado de su propia sede y plazo comprometido de sus avisos; nunca datos de otras sedes. |
+
+#### Rol de Reponedor y Cuadrante de Carga (Módulo 31)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET/POST/PUT` | `/api/coordinator/staff[/{id}]` | `COORDINATOR` | Alta y edición de personal con rol `RESTOCKER` (código `REP-*`), rol inmutable y guardia técnica prohibida. |
+| `GET` | `/api/coordinator/restockers/quadrants` | `COORDINATOR` | Lectura inversa: zonas vivas por reponedor con su rol en cada una. |
+| `GET/POST` | `/api/coordinator/zones/{id}/restockers` | `COORDINATOR` | Cuadrante de carga de la zona con identidad y titularidad/suplencia. |
+| `DELETE` | `/api/coordinator/zones/{id}/restockers/{restocker_id}` | `COORDINATOR` | Baja lógica idempotente del vínculo, conservando el histórico de cobertura. |
+| `GET` | `/api/coordinator/zones/{id}/restocker-coverage` | `COORDINATOR` | Cobertura en vivo: turno, ausencia, carga viva y reponedor recomendado. |
+| `GET` | `/api/restocker/my-route` | `RESTOCKER` | Vista móvil del reponedor: zonas asignadas, estado de jornada y estado base de ruta. |
+| `GET/POST` | `/api/technician/shift/{status,start,pause-meal,resume,close}` | `TECHNICIAN` · `RESTOCKER` | Jornada compartida por los dos roles de campo; el cierre del reponedor es directo, sin traspaso de averías. |
+
+#### Catálogo de Productos y Planograma por Máquina (Módulo 32)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET/POST` | `/api/coordinator/products` | `COORDINATOR` | Catálogo de productos y consumibles con filtros y alta (`409` si el SKU ya existe). |
+| `PUT` | `/api/coordinator/products/{id}` | `COORDINATOR` | Edición de ficha; el `sku` permanece inmutable. |
+| `PATCH` | `/api/coordinator/products/{id}/status` | `COORDINATOR` | Baja lógica y reactivación del producto (Art. III.1). |
+| `GET/PUT` | `/api/coordinator/machines/{id}/planogram` | `COORDINATOR` | Planograma completo (con coste por carril) y guardado en bloque de los carriles. |
+| `PUT/DELETE` | `/api/coordinator/machines/{id}/planogram/slots/{slot_code}` | `COORDINATOR` | Alta o edición de un carril y baja lógica, con validación de compatibilidad y cadena de frío. |
+| `POST` | `/api/coordinator/machines/{id}/planogram/apply-preset` y `/clone` | `COORDINATOR` | Preset por modelo de máquina o clonado del planograma de otra máquina. |
+| `PUT` | `/api/coordinator/admin/machines/{id}` | `COORDINATOR` | Cambio de tipología con cerrojo de planograma (`409 PLANOGRAM_INCOMPATIBLE_WITH_MACHINE_TYPE`). |
+| `GET` | `/api/restocker/machines` | `RESTOCKER` | Parque de sus zonas con alerta de stock (`?stock_alert_only=true`) y planograma sin costes. |
+| `GET` | `/api/restocker/machines/{id}/planogram` | `RESTOCKER` | Planograma de solo lectura sin coste unitario, precio ni margen (Art. V.4). |
+
+#### Órdenes de Carga de Producto y Picking con Frío (Módulo 33)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/coordinator/restocker-van-stocks` | `COORDINATOR` | Stock por lote de las furgonetas con semáforo de caducidad y descuadres. |
+| `PUT` | `/api/coordinator/restocker-van-stocks/{restockerId}` | `COORDINATOR` | Alta o ajuste de un lote con motivo obligatorio de 20 caracteres reales y auditoría del saldo. |
+| `GET` | `/api/coordinator/product-loading-orders/proposal` | `COORDINATOR` | Propuesta matutina por `ALERTS_ONLY` o `ALL_GAPS`, con colchón y descuento del stock útil de la furgoneta. |
+| `GET/POST` | `/api/coordinator/product-loading-orders` | `COORDINATOR` | Listado y alta individual de órdenes en `PENDING_PICKING`. |
+| `POST` | `/api/coordinator/product-loading-orders/batch` | `COORDINATOR` | Emisión masiva excluyendo reponedores ausentes, inactivos o con orden abierta. |
+| `GET/PUT` | `/api/coordinator/product-loading-orders/{id}` | `COORDINATOR` | Detalle con lotes despachados y edición de líneas mientras siga en `PENDING_PICKING`. |
+| `GET` | `/api/coordinator/product-loading-orders/{id}/picking-sheet` | `COORDINATOR` | Hoja de Picking A4 en dos bloques (cámara frigorífica y almacén seco) sin importes. |
+| `POST` | `/api/coordinator/product-loading-orders/{id}/dispatch` | `COORDINATOR` | Despacho con temperatura de cámara ≤ 4,0 °C y lote/caducidad por línea refrigerada. |
+| `POST` | `/api/coordinator/product-loading-orders/{id}/reconcile` | `COORDINATOR` | Liquidación al cierre (`RECONCILED_AT_CLOSE`) con retorno contado y descuadre justificado. |
+| `POST` | `/api/coordinator/product-loading-orders/{id}/cancel` | `COORDINATOR` | Cancelación justificada (≥ 20 caracteres reales) y auditada. |
+| `GET` | `/api/restocker/van-stocks` | `RESTOCKER` | Stock FEFO propio por lote con semáforo `EXPIRED` / `EXPIRING_SOON` / `OK`. |
+| `POST` | `/api/restocker/product-loading-orders/{id}/confirm` | `RESTOCKER` | Recepción móvil en un toque; suma las cantidades despachadas por lote de forma atómica. |
+| `POST` | `/api/restocker/product-loading-orders/{id}/reconcile` | `RESTOCKER` | Liquidación al cierre desde el propio móvil, con pre-cálculo de abastecidas y mermas. |
+
+#### Visita de Reposición In Situ y Control FEFO (Módulo 34)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/restocker/machines/{machineId}/visits` | `RESTOCKER` | Visita completa e idempotente (`client_mutation_id`): triple cerrojo térmico/FEFO, checklist de higiene y líneas por carril. |
+| `GET` | `/api/restocker/visits` | `RESTOCKER` | Histórico propio de visitas con filtros por máquina y estado. |
+| `POST` | `/api/restocker/visits/photo` | `RESTOCKER` | Evidencia fotográfica (≤ 5 MB, validada por magic bytes) del aborto térmico o de la merma retirada. |
+| `POST` | `/api/restocker/visits/conflict-dump` | `RESTOCKER` | Vuelca una visita en conflicto como Nota Interna de Taller sin bloquear el resto de la cola offline. |
+| `GET` | `/api/coordinator/restock-visits` | `COORDINATOR` | Libro de visitas in situ con KPIs, filtros y coste de la merma comercial. |
+| `GET` | `/api/coordinator/restock-visits/{id}` | `COORDINATOR` | Detalle con snapshot contable por carril; el reponedor nunca recibe esos importes (Art. V.4). |
+
 ---
 
 ## 🧪 Batería Completa de Pruebas Automatizadas (T-39)
@@ -649,7 +753,7 @@ batería global: 432 suites · 16.381 aserciones
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
- Tiempo de ejecución total : 435.06 segundos  (variable en cada corrida)
+ Tiempo de ejecución total : 464.23 segundos  (variable en cada corrida)
  Suites de pruebas PHP Unit : 190 / 190 pasadas
  Suites de pruebas JS Unit  : 104 / 104 pasadas
  Suites de Integración PHP  : 135 / 135 pasadas
@@ -702,19 +806,21 @@ php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 
 El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla. La medición del pooler remoto sigue siendo la evidencia de RNF-01: si el enlace del proveedor incumple el presupuesto de 250 ms en alguna operación, el canal publica el fallo con su mediana y su p95, sin convertirlo en omisión.
 
-Corrida del 14 de noviembre de 2026 (canal cerrado en verde):
+Corrida del 15 de noviembre de 2026 (canal cerrado · 59 en verde y una suite con contrato propio):
 
 ```text
 ======================================================================
  RESUMEN DEL CANAL new_engine
  Suites evaluadas    : 60
- Suites en verde     : 60
- No ejecutables      : 0
- Aserciones          : 1.972
+ Suites en verde     : 59
+ No ejecutables      : 1
+ Aserciones          : 1.938
  Fallos              : 0
- RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
+ RESULTADO: CANAL CERRADO · 1 suite(s) declararon otro contrato y se listan arriba (no se omiten en silencio).
 ======================================================================
 ```
+
+La única suite no ejecutable es `PostgresTieredSlaMetricsPerformanceTest`: declara su propio contrato de entorno (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`), cuyo DSN exige TLS contra el motor local del puerto 5432, que en este puesto no lo ofrece; el canal la publica con su causa exacta (`SQLSTATE[08006] · server does not support SSL`) y sale con código `0`, sin contarla como fallo ni omitirla en silencio.
 
 El pooler remoto queda en verde y estable: `PoolerLatencyMeasurementTest` completa sus 20 rondas y pasa 30/30 aserciones en tres corridas. La optimización de `asignar` integró el cierre y la apertura de custodia en el CTE atómico y trasladó la revalidación de estado, titular y urgencia al propio `UPDATE` condicionado, eliminando en PostgreSQL la lectura bloqueada previa. Las medianas de «asignar» fueron **166,8 ms**, **165,6 ms** y **174,3 ms** (p95 194,2 / 224,6 / 241,1 ms) frente al presupuesto de 250 ms; el enlace base se mantuvo en 43,8–44,1 ms.
 
@@ -723,7 +829,7 @@ El cerrojo entre pestañas también queda certificado: `OfflineSyncLockBrowserTe
 
 El canal incluye además `OfflineSyncLockBrowserTest`, única suite que exige **navegador real**: abre dos pestañas de Chromium sobre el mismo perfil, comparte `IndexedDB` entre ambas y comprueba con un servidor de pruebas que el cerrojo `vendguard-offline-sync` impide dos envíos en vuelo y que el control negativo sin cerrojo sí los detecta. La quinta sección oculta `navigator.locks` en las dos pestañas —lo que ve una PWA servida por HTTP plano— y verifica que el arriendo en `localStorage` sostiene la misma exclusión (16 aserciones en total).
 
-Entre las suites específicas de este canal se encuentran `PostgresTimeTrackingSchemaTest` (Módulo 22 · integridad relacional de `technician_shifts` y `technician_shift_logs`), `PostgresConstitutionalTest` (Art. III.1 en las 40 tablas de su contrato de correspondencia, Módulos 14 y 17–29), `PostgresAbsenceShiftSchemaTest` (Módulo 21), `PostgresSatisfactionSurveySchemaTest` (Módulo 20), `PostgresServiceSheetSchemaTest` (Módulo 19), `PostgresVanRestockSchemaTest` (Módulo 23 · órdenes de carga y baja lógica), `PostgresVanStockSchemaTest` (Módulo 18), `PostgresZoneSchemaTest` (Módulo 17), `PostgresRootCauseTaxonomySchemaTest` (Módulo 25 · tablas 35/36, columnas congeladas, predeterminada única e inmutabilidad) y `RootCauseParetoPerformanceTest` (Módulo 25 · 10.000 averías bajo el umbral).
+Entre las suites específicas de este canal se encuentran `PostgresTimeTrackingSchemaTest` (Módulo 22 · integridad relacional de `technician_shifts` y `technician_shift_logs`), `PostgresConstitutionalTest` (Art. III.1 en las 48 tablas de su contrato de correspondencia, Módulos 14 y 17–34), `PostgresAbsenceShiftSchemaTest` (Módulo 21), `PostgresSatisfactionSurveySchemaTest` (Módulo 20), `PostgresServiceSheetSchemaTest` (Módulo 19), `PostgresVanRestockSchemaTest` (Módulo 23 · órdenes de carga y baja lógica), `PostgresVanStockSchemaTest` (Módulo 18), `PostgresZoneSchemaTest` (Módulo 17), `PostgresRootCauseTaxonomySchemaTest` (Módulo 25 · tablas 35/36, columnas congeladas, predeterminada única e inmutabilidad) y `RootCauseParetoPerformanceTest` (Módulo 25 · 10.000 averías bajo el umbral).
 
 ---
 
@@ -745,7 +851,7 @@ gestor-incidencias-vending/
 │   ├── sanitary_clock_sweep.php  # Barrido CLI del Reloj Sanitario Biológico (mismo reloj que el endpoint cron)
 │   └── send_notifications.php    # Worker CLI del despachador de notificaciones (mismo grafo que el endpoint cron)
 ├── database/
-│   ├── supabase_init.sql         # DDL canónico de PostgreSQL (41 tablas, 35 enumerados, disparadores)
+│   ├── supabase_init.sql         # DDL canónico de PostgreSQL (48 tablas, 41 enumerados, disparadores)
 │   ├── supabase_migrations/      # Migraciones incrementales canónicas del motor único
 │   ├── supabase_seeds.sql        # Catálogo maestro de semillas del motor único
 │   ├── DemoHistorySeeder.php     # Histórico de demostración portable: 17 averías (13 cerradas y 4 en garantía, dos reabiertas; diez clasificadas con causa raíz), traza y auditoría
@@ -795,6 +901,11 @@ gestor-incidencias-vending/
 │   ├── 27-workshop-refurbishment-loop/# Bandeja de taller central para piezas recuperadas
 │   ├── 28-troubleshooting-guides/# Guías rápidas de diagnóstico por modelo
 │   ├── 29-haccp-spoilage-log/    # Acta de merma y destrucción de lotes (APPCC/HACCP)
+│   ├── 30-tiered-sla-contracts/  # Perfiles de SLA escalonados por tipo de sede
+│   ├── 31-restocker-role-zones-shifts/# Rol de reponedor, zonificación de carga y jornada
+│   ├── 32-product-catalog-planogram/# Catálogo de productos y planograma por máquina
+│   ├── 33-product-loading-cold-picking/# Órdenes de carga de producto y picking con frío
+│   ├── 34-in-situ-restock-visit/ # Visita de reposición in situ, FEFO y limpieza diaria
 │   ├── functional/               # Especificaciones funcionales EARS transversales
 │   └── technical/                # Contratos de API, DDL y esquemas de base de datos
 ├── src/
