@@ -270,6 +270,86 @@ a un módulo funcional certificado por la batería global.
 - Canal `new_engine`: 25 suites evaluadas, 24 en verde y 744 aserciones; `PoolerLatencyMeasurementTest`
   sigue declarando otro contrato por falta de `DB_SSL_ROOT_CERT` y no se omite en silencio.
 
+## [Módulo 22] · Registro de Jornada y Horas Efectivas — 2026-10-25
+
+**Estado:** Cerrado · bitácora inmutable, informe y rectificación auditada certificados.
+
+### Añadido
+
+- Tabla 31 `technician_shift_logs`, de solo inserción —sin `UPDATE` ni `DELETE`—, con los eventos `START_SHIFT`, `PAUSE_MEAL`, `RESUME_SHIFT`, `CLOSE_SHIFT`, `FORCE_CLOSE_SHIFT` y `ADJUST_SHIFT`, el actor y los instantes de cada transición; el motivo de ajuste exige 20 caracteres reales.
+- `technician_shifts` amplía pausas de comida acumuladas al segundo, banderas de cierre forzado y ajuste, hora efectiva de salida y referencias al ajustador, conservando los instantes originales aunque el turno se rectifique.
+- Informe por periodo con horas brutas, comida, horas efectivas netas, intervención in situ, tiempo en ruta con suelo cero, intervenciones resueltas, turnos de más de 12 h y turnos abiertos huérfanos.
+- Rectificación con validación cuádruple —turno cerrado, motivo, coherencia temporal y actor autorizado—, anulación a `0s` sin borrar el registro y auditoría del cambio.
+- CSV UTF-8 BOM con dos secciones en `Europe/Madrid` y sub-pestañas «⏱️ Registro de Jornada y Horas» (Coordinación) y «⏱️ Mis Horas» (técnico), aisladas por el `user_id` del token (Art. V.4).
+
+### Certificación
+
+- `PostgresTimeTrackingSchemaTest`, `TechnicianTimeTrackingApiTest`, `PdoWorkHoursRoleFilterTest`, `TechnicianWorkHoursServiceTest`, `TechnicianShiftTimeTrackingTest`, `TechnicianShiftLogDomainTest` y `CoordinatorWorkHoursTabTest.mjs`.
+
+## [Módulo 21] · Ausencias Temporales y Relevo de Fin de Turno — 2026-10-25
+
+**Estado:** Cerrado · jornada móvil y traspaso atómico con salvaguarda sanitaria.
+
+### Añadido
+
+- Tabla 29 `technician_absences` con vacaciones, baja, formación y fuera de turno por ventana temporal, motivo y cancelación con rastro, sin tocar `users.is_active`; la restricción `EXCLUDE USING gist` impide solapamientos por técnico.
+- Tabla 30 `technician_shifts` con estados `ON_SHIFT`, `MEAL_BREAK` y `OFF_SHIFT`, turno partido mediante el índice parcial de turnos abiertos, pausa acumulada al segundo y cierre directo desde la comida.
+- Relevo atómico: cerrar turno exige resolver las averías `IN_PROGRESS`; los tickets `ASSIGNED`, `PENDING_PARTS` y `PENDING_INFO` se transfieren con `FOR UPDATE` y nota interna obligatoria, con `409` ante colisión.
+- Salvaguarda de frío (Art. II): si una máquina perecedera queda sin relevo manual, el protocolo escala a la guardia 24/7 o desasigna a `REGISTERED` con alarma crítica.
+- El recomendador territorial marca `NO_DISPONIBLE` al titular ausente y asciende al suplente de zona; Coordinación dispone de bandeja de ausencias, estado de jornada y cierre forzado asistido, y el técnico solo ve los compañeros disponibles para el relevo.
+
+### Certificación
+
+- `PostgresAbsenceShiftSchemaTest`, `AbsenceShiftE2ETest`, `CoordinatorAbsenceApiTest`, `TechnicianAbsenceAtomicityTest`, `TechnicianAbsenceConcurrencyTest`, `ShiftLifecycleAtomicityTest`, `ShiftHandoverConcurrencyTest`, `ShiftHandoverSanitaryTest` y `CoordinatorAbsencesTabTest.mjs`.
+
+## [Módulo 20] · Encuesta de Satisfacción Post-Resolución y Superficie CSAT — 2026-10-23
+
+**Estado:** Cerrado · encuesta por episodio, cuadro de mando y lectura del técnico (incremento 20.1) certificados.
+
+### Añadido
+
+- Tabla 28 `incident_satisfaction_surveys` con calificación de 1–5, comentario de hasta 500 caracteres, snapshot del técnico y unicidad por episodio `(incident_id, resolution_at)`: una reapertura abre un voto nuevo sin sobrescribir el anterior.
+- Encuesta y evento de auditoría en la misma transacción, sin correcciones posteriores; la tabla rechaza `UPDATE` (Art. III.1 y V.3).
+- Modal de la sede con estrellas, contador `pending_total` real, `409` ante episodio ya valorado y conservación de lo escrito ante fallo de red.
+- Bloque CSAT del cuadro de mando: media, respuestas, distribución 5→1, tabla por sede, tabla por técnico con nombre congelado y tendencia mensual bajo el filtro temporal.
+- Incremento 20.1: superficie de solo lectura `/api/technician/my-metrics/csat`, aislada por el `user_id` del token y con DTO propio, sin filtro territorial ni exportación (Art. V.4).
+
+### Certificación
+
+- `PostgresSatisfactionSurveySchemaTest`, `LocationSatisfactionApiTest`, `CoordinatorCsatMetricsApiTest`, `TechnicianCsatApiTest`, `CsatPrivacyConstitutionalTest`, `SatisfactionSurveyServiceTest` y `SatisfactionSurveyModalTest.mjs`.
+
+## [Módulo 19] · Firma Digital del Responsable de Sede y Albarán de Servicio — 2026-10-22
+
+**Estado:** Cerrado · captura táctil, hoja inmutable y documento congelado certificados.
+
+### Añadido
+
+- Tabla 27 `incident_service_sheets` con dos vías excluyentes: firma manuscrita digitalizada —firmante, documento y PNG— o declaración de ausencia con motivo ≥ 10 caracteres, y `CHECK` que impide mezclar ambas.
+- Validación real del PNG en servidor (firma binaria, MIME con `finfo`, cabecera `IHDR`), techo de 300 KiB y 2 Mpx; el cliente solo decide si el lienzo tiene tinta (< 150 píxeles con luminancia < 200) y dibuja a `devicePixelRatio`.
+- Hoja insertada en la misma transacción que piezas, descuento de furgoneta, solicitudes, transición a `RESOLVED` y notificación; sin `UPDATE` ni `DELETE`, una corrección exige resolución nueva (Art. III.1).
+- `signed_document` congela ticket, fecha, sede, máquina, técnico, diagnóstico, acción y piezas con nombre y cantidad: renombrar una sede o recatalogar una pieza no altera el papel firmado.
+- Albarán A4 imprimible con salto de página controlado y bloque de firma indivisible, sin costes, notas internas, SLA ni saldos; tras una reapertura, el vigente es el del último cierre y los anteriores quedan como históricos.
+- Autorización por titularidad de la hoja o del expediente, `403 SERVICE_SHEET_FORBIDDEN` para el resto y evento `VIEW_SERVICE_SHEET` en cada lectura, sin guardar nunca el trazo.
+
+### Certificación
+
+- `PostgresServiceSheetSchemaTest`, `ServiceSheetAtomicityTest`, `ServiceSheetDocumentTest`, `ServiceSheetPrivacyTest`, `ServiceSheetValidatorTest`, `ServiceSheetModalTest.mjs` y `TechnicianServiceSheetBlockTest.mjs`.
+
+## [Módulo 18] · Stock de Repuestos en Furgoneta — 2026-10-21
+
+**Estado:** Cerrado · inventario por técnico, descuento automático y alerta de reposición certificados.
+
+### Añadido
+
+- Tabla 26 `technician_van_stocks` con una fila por pareja `(técnico, pieza)` (`uq_van_stock_technician_part`), cantidad disponible entre −999 y 9.999 y umbral mínimo entre 0 y 9.999.
+- Coordinación fija el saldo absoluto y cada ajuste deja el delta en auditoría; el técnico consulta su furgoneta en solo lectura desde la ruta.
+- Descuento automático de una unidad al declarar una pieza del catálogo en la resolución —correctivo o preventivo—; la referencia fuera de catálogo no descuenta y el inventario **nunca** bloquea el cierre.
+- Saldo negativo admitido y marcado como descuadre, y bandeja de Coordinación ordenada por severidad para reponer; el picking, el albarán de reposición y la valoración monetaria quedan para el Módulo 23.
+
+### Certificación
+
+- `PostgresVanStockSchemaTest`, `VanStockApiTest`, `VanStockServiceTest`, `VanStockReadinessCalculatorTest`, `VanStockPrivacyTest`, `TechnicianVanStockPanelTest.mjs` y `CoordinatorVanStockTabTest.mjs`.
+
 ## [Módulo 17] · Corrección de los ocho hallazgos de la verificación funcional — 2026-10-21
 
 **Estado:** Cerrado · H-1 a H-8 corregidos y certificados por la batería global.
