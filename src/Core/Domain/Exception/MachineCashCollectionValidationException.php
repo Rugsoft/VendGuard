@@ -32,8 +32,19 @@ use DomainException;
  */
 final class MachineCashCollectionValidationException extends DomainException
 {
+    // ── 403 · rol y perímetro territorial ────────────────────────────────
+    public const MACHINE_OUTSIDE_RESTOCKER_ZONES = 'MACHINE_OUTSIDE_RESTOCKER_ZONES';
+    public const CASH_COLLECTION_FORBIDDEN_FOR_ROLE = 'CASH_COLLECTION_FORBIDDEN_FOR_ROLE';
+
+    // ── 404 · máquina o recaudación inexistente ──────────────────────────
+    public const MACHINE_NOT_FOUND = 'MACHINE_NOT_FOUND';
+    public const CASH_COLLECTION_NOT_FOUND = 'CASH_COLLECTION_NOT_FOUND';
+
     // ── 409 · cerrojo sanitario, conserjería y estado terminal ─────────────
     public const SANITARY_CASH_COLLECTION_BLOCKED = 'SANITARY_CASH_COLLECTION_BLOCKED';
+    public const BAG_SEAL_CODE_ALREADY_USED = 'BAG_SEAL_CODE_ALREADY_USED';
+    public const REFUND_REQUEST_NOT_ELIGIBLE_FOR_RECEPTION = 'REFUND_REQUEST_NOT_ELIGIBLE_FOR_RECEPTION';
+    public const INVALID_CASH_COLLECTION_STATE_TRANSITION = 'INVALID_CASH_COLLECTION_STATE_TRANSITION';
     public const LOCATION_HAS_NO_PHYSICAL_RECEPTION = 'LOCATION_HAS_NO_PHYSICAL_RECEPTION';
     public const CASH_COLLECTION_ALREADY_RECONCILED = 'CASH_COLLECTION_ALREADY_RECONCILED';
 
@@ -46,6 +57,7 @@ final class MachineCashCollectionValidationException extends DomainException
     public const RECEPTIONIST_NAME_REQUIRED = 'RECEPTIONIST_NAME_REQUIRED';
     public const THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN = 'THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN';
     public const DISCREPANCY_JUSTIFICATION_REQUIRED = 'DISCREPANCY_JUSTIFICATION_REQUIRED';
+    public const REFUND_AMOUNT_MISMATCH = 'REFUND_AMOUNT_MISMATCH';
 
     private string $errorCode;
 
@@ -92,6 +104,110 @@ final class MachineCashCollectionValidationException extends DomainException
     public function getContext(): array
     {
         return $this->context;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 403 · rol y perímetro territorial (C2, Art. V.4)
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function cashCollectionForbiddenForRole(string $role): self
+    {
+        return new self(
+            self::CASH_COLLECTION_FORBIDDEN_FOR_ROLE,
+            sprintf('El rol «%s» no está autorizado a operar sobre la recaudación de efectivo (Art. V.4).', $role),
+            403,
+            'actor',
+            ['role' => $role]
+        );
+    }
+
+    public static function machineOutsideRestockerZones(int $machineId, int $restockerId): self
+    {
+        return new self(
+            self::MACHINE_OUTSIDE_RESTOCKER_ZONES,
+            sprintf('La máquina %d no pertenece a las zonas operativas cubiertas hoy por el reponedor %d (C2).', $machineId, $restockerId),
+            403,
+            'machine_id',
+            ['machine_id' => $machineId, 'restocker_id' => $restockerId]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 404 · máquina o recaudación inexistente
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function machineNotFound(int $machineId): self
+    {
+        return new self(
+            self::MACHINE_NOT_FOUND,
+            sprintf('La máquina %d no existe o está inactiva.', $machineId),
+            404,
+            'machine_id',
+            ['machine_id' => $machineId]
+        );
+    }
+
+    public static function cashCollectionNotFound(int $collectionId): self
+    {
+        return new self(
+            self::CASH_COLLECTION_NOT_FOUND,
+            sprintf('La recaudación %d no existe o no tiene el dato solicitado.', $collectionId),
+            404,
+            'cash_collection_id',
+            ['cash_collection_id' => $collectionId]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 409 · precinto ya consumido, reintegro no elegible y transición inválida
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function bagSealCodeAlreadyUsed(string $bagSealCode): self
+    {
+        return new self(
+            self::BAG_SEAL_CODE_ALREADY_USED,
+            sprintf('El precinto «%s» ya fue utilizado en otra recaudación histórica (C1).', $bagSealCode),
+            409,
+            'bag_seal_code',
+            ['bag_seal_code' => $bagSealCode]
+        );
+    }
+
+    public static function refundRequestNotEligibleForReception(int $refundRequestId, string $reason): self
+    {
+        return new self(
+            self::REFUND_REQUEST_NOT_ELIGIBLE_FOR_RECEPTION,
+            sprintf('El reintegro %d no es elegible para entrega en conserjería: %s (D3).', $refundRequestId, $reason),
+            409,
+            'linked_refund_request_id',
+            ['linked_refund_request_id' => $refundRequestId, 'reason' => $reason]
+        );
+    }
+
+    public static function invalidCashCollectionStateTransition(string $from, string $to): self
+    {
+        return new self(
+            self::INVALID_CASH_COLLECTION_STATE_TRANSITION,
+            sprintf('La recaudación no puede pasar de %s a %s en su ciclo de custodia (D4).', $from, $to),
+            409,
+            'status',
+            ['from' => $from, 'to' => $to]
+        );
+    }
+
+    public static function refundAmountMismatch(float $claimedAmount, float $deliveredAmount): self
+    {
+        return new self(
+            self::REFUND_AMOUNT_MISMATCH,
+            sprintf(
+                'El efectivo entregado (%.2f €) no coincide con el importe reclamado (%.2f €) del reintegro vinculado (D3).',
+                $deliveredAmount,
+                $claimedAmount
+            ),
+            422,
+            'reception_cash_delivered_eur',
+            ['claimed_amount' => $claimedAmount, 'reception_cash_delivered_eur' => $deliveredAmount]
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────
