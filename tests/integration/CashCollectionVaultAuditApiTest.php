@@ -307,6 +307,26 @@ try {
             && ($repeatedData['idempotent'] ?? false) === true
     );
 
+    $regression = $call(
+        'POST',
+        '/api/restocker/machines/' . $machineId . '/cash-collections',
+        array_merge($capturePayload, [
+            'client_mutation_id' => 'ccv08-cash-regression-0001',
+            'bag_seal_code' => 'BAG-CCV8-0008',
+            'sales_counter_reading' => 100.00,
+            'reception_cash_delivered_eur' => 0.00,
+            'receptionist_name' => null,
+            'linked_refund_request_id' => null,
+        ]),
+        $ownerToken
+    );
+    $assert(
+        '3.2b Una lectura de contador inferior responde 422 SALES_COUNTER_REGRESSION',
+        $regression->getStatusCode() === 422
+            && $errorCode($regression) === 'SALES_COUNTER_REGRESSION',
+        $errorCode($regression)
+    );
+
     $duplicateSeal = $call(
         'POST',
         '/api/restocker/machines/' . $machineId . '/cash-collections',
@@ -331,6 +351,46 @@ try {
         '3.4 Un reponedor fuera de la zona recibe 403 MACHINE_OUTSIDE_RESTOCKER_ZONES',
         $outside->getStatusCode() === 403 && $errorCode($outside) === 'MACHINE_OUTSIDE_RESTOCKER_ZONES',
         $errorCode($outside)
+    );
+
+    $thermal = $call('POST', '/api/restocker/machines/' . $machineId . '/visits', [
+        'status' => 'ABORTED_THERMAL_BREACH',
+        'client_mutation_id' => 'ccv08-visit-thermal-0001',
+        'cabin_temp_celsius' => 9.5,
+        'cash_collection' => [
+            'client_mutation_id' => 'ccv08-thermal-cash-0001',
+            'bag_seal_code' => 'BAG-CCV8-0009',
+            'sales_counter_reading' => 130.00,
+        ],
+    ], $ownerToken);
+    $assert(
+        '3.4b Una visita abortada por frío con recaudación responde 422 THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN',
+        $thermal->getStatusCode() === 422
+            && $errorCode($thermal) === 'THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN',
+        $errorCode($thermal)
+    );
+
+    $pdo->prepare('UPDATE locations SET has_physical_reception = FALSE WHERE id = :id')
+        ->execute([':id' => $locationId]);
+    $noReception = $call(
+        'POST',
+        '/api/restocker/machines/' . $machineId . '/cash-collections',
+        array_merge($capturePayload, [
+            'client_mutation_id' => 'ccv08-cash-no-reception-0001',
+            'bag_seal_code' => 'BAG-CCV8-0010',
+            'sales_counter_reading' => 130.00,
+            'reception_cash_delivered_eur' => 1.00,
+            'linked_refund_request_id' => null,
+        ]),
+        $ownerToken
+    );
+    $pdo->prepare('UPDATE locations SET has_physical_reception = TRUE WHERE id = :id')
+        ->execute([':id' => $locationId]);
+    $assert(
+        '3.4c Una sede sin conserjería física responde 409 LOCATION_HAS_NO_PHYSICAL_RECEPTION',
+        $noReception->getStatusCode() === 409
+            && $errorCode($noReception) === 'LOCATION_HAS_NO_PHYSICAL_RECEPTION',
+        $errorCode($noReception)
     );
 
     $receipt = $call('GET', '/api/restocker/cash-collections/' . $collectionId . '/reception-receipt', [], $ownerToken);
@@ -490,6 +550,24 @@ try {
     $assert(
         '5.8 El libro financiero responde con la envolvente JSON',
         str_contains((string)$book->getHeader('Content-Type'), 'application/json')
+    );
+
+    $visitCashId = (int)($visitData['cash_collection']['id'] ?? 0);
+    $flagged = $call('POST', '/api/coordinator/cash-collections/' . $visitCashId . '/reconcile', [
+        'vault_counted_eur' => 25.00,
+        'discrepancy_justification' => '=HYPERLINK("http://evil.test","descuadre real de cinco euros")',
+    ], $coordinatorToken);
+    $assert(
+        '5.9 El descuadre justificado se sella como DISCREPANCY_FLAGGED',
+        $flagged->getStatusCode() === 200
+            && (($data($flagged)['status'] ?? '') === 'DISCREPANCY_FLAGGED')
+    );
+
+    $csvFlagged = $call('GET', '/api/coordinator/cash-collections/export-csv', [], $coordinatorToken, ['machine_id' => $machineId]);
+    $assert(
+        '5.10 El CSV neutraliza la fórmula de la justificación',
+        $csvFlagged->getStatusCode() === 200
+            && str_contains($csvFlagged->getBody(), "'=HYPERLINK")
     );
 
     $ok = $failures === 0;
