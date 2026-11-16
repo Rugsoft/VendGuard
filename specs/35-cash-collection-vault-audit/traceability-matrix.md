@@ -10,6 +10,8 @@
 
 **Estado:** ✅ Módulo 35 cerrado · 12/12 tareas (`T-CCV-01` a `T-CCV-12`) · batería global en verde y `DocMetricsGuard` coherente.
 
+**FIX-35-02 (2026-11-16):** `RNF-03` queda certificado en navegador real a `360 × 800` por `CashCollectionLayoutBrowserTest` (32/32): historial, modal rápido, bloque de visita, recibo de conserjería y sub-vista/detalle de Coordinación sin desbordamiento horizontal del documento; la tabla ancha de Coordinación conserva su scroll interno.
+
 ---
 
 ## 1. Requisitos Funcionales y criterios EARS
@@ -59,7 +61,7 @@
 |---|---|---|---|
 | **RNF-01** prohibición de borrado físico e inmutabilidad por etapas de la Tabla 49 (`Art. III.1`, `Art. III.3`) | `prevent_hard_delete()`, `enforce_machine_cash_collections_immutability()`, `TestDataCleaner` | `PostgresCashCollectionVaultAuditSchemaTest` · `CashCollectionVaultAuditConstitutionalTest` · `PdoMachineCashCollectionRepositoryTest` · `TestDataCleanerIsolationTest` | ✅ 46/46 · 23/23 · 45/45 · 50/50 — `DELETE` y `UPDATE` rechazados con `SQLSTATE 45000`; el plan de purga cubre las 38 tablas transitorias |
 | **RNF-02** defensa en profundidad sanitaria, justificación real y opacidad financiera (`Art. II.2`, `Art. V.1`, `Art. V.4`) | `MachineCashCollectionValidator`, `enforce_cash_collection_sanitary_guard()`, `RestockerCashCollectionViewDTO`, `MachineCashCollection::toRestockerArray` | `MachineCashCollectionValidatorTest` · `MachineCashCollectionServiceTest` · `PostgresCashCollectionVaultAuditSchemaTest` · `CashCollectionVaultAuditConstitutionalTest` · `CashCollectionVaultAuditApiTest` | ✅ 114/114 · 45/45 · 46/46 · 23/23 · 30/30 — dominio y PostgreSQL rechazan la misma combinación sanitaria; el móvil nunca recibe las cinco claves privadas |
-| **RNF-03** Sistema de Diseño, Dogma Vanilla y PWA (`Art. IV`) | `RestockerRouteView.js`, `CoordinatorProductLoadingTab.js`, `public/sw.js`, tokens `vg-*` | `restocker_route_view.test.mjs` · `coordinator_product_loading_tab.test.mjs` · `CoordinatorButtonVariantsGuardTest.mjs` · `FrontendTemplateCompileTest.mjs` · `DesignTokenDebtRatchetTest.mjs` · `OfflinePwaAssetsAndUiGuardTest.mjs` | ✅ 209/209 · 80/80 · 23/23 · 15/15 · 3/3 · 45/45 — sin geometría inline en los botones de la vista móvil y Service Worker v22 con la cola de recaudación |
+| **RNF-03** Sistema de Diseño, Dogma Vanilla y PWA (`Art. IV`) | `RestockerRouteView.js`, `CoordinatorProductLoadingTab.js`, `public/sw.js`, tokens `vg-*` | `restocker_route_view.test.mjs` · `coordinator_product_loading_tab.test.mjs` · `CashCollectionLayoutBrowserTest` · `CoordinatorButtonVariantsGuardTest.mjs` · `FrontendTemplateCompileTest.mjs` · `DesignTokenDebtRatchetTest.mjs` · `OfflinePwaAssetsAndUiGuardTest.mjs` | ✅ 209/209 · 80/80 · **32/32 a `360 × 800` en Chromium real** · 23/23 · 15/15 · 3/3 · 45/45 — sin geometría inline, documento sin scroll horizontal y tabla de Coordinación con scroll interno; Service Worker v22 con la cola de recaudación |
 
 ---
 
@@ -89,9 +91,9 @@
 |---|---|
 | **1.** Tabla 49, tipo #42, `MACHINE_CASH_COLLECTION` en `audit_entity_type`, `CHECK`, anti-borrado, inmutabilidad y guarda sanitaria | `PostgresCashCollectionVaultAuditSchemaTest` 46/46 · `PostgresSchemaTest` 153/153 · `PostgresConstitutionalTest` 86/86 · `SchemaConvergenceParityTest` 39/39 |
 | **2.** Arqueo Ciego, primacía sanitaria, entrega en conserjería `≤ 10,00 €`, tolerancia `±1,00 €` y opacidad financiera | `MachineCashCollectionValidatorTest` 114/114 · `MachineCashCollectionServiceTest` 45/45 · `CashCollectionVaultAuditApiTest` 30/30 · `CashCollectionVaultAuditConstitutionalTest` 23/23 |
-| **3.** Captura integrada e independiente, conserjería, recibo opaco, cola Offline e historial sin claves privadas | `restocker_route_view.test.mjs` 209/209 · `OfflinePwaAssetsAndUiGuardTest.mjs` 45/45 · `FrontendTemplateCompileTest.mjs` 15/15 · `CoordinatorButtonVariantsGuardTest.mjs` 23/23 |
+| **3.** Captura integrada e independiente, conserjería, recibo opaco, cola Offline e historial sin claves privadas | `restocker_route_view.test.mjs` 209/209 · `CashCollectionLayoutBrowserTest` 32/32 · `OfflinePwaAssetsAndUiGuardTest.mjs` 45/45 · `FrontendTemplateCompileTest.mjs` 15/15 · `CoordinatorButtonVariantsGuardTest.mjs` 23/23 |
 | **4.** Sub-vista de Coordinación con 6 KPIs, filtros, recepción en cámara, modal de arqueo y CSV | `coordinator_product_loading_tab.test.mjs` 80/80 · `CashCollectionVaultAuditApiTest` 30/30 · `FrontendTemplateCompileTest.mjs` 15/15 |
-| **5.** Batería global y canal `new_engine` | `php tests/run_all.php` → **exit=0**, 0 fallos y `DocMetricsGuard` coherente; cifra viva solo en `README.md` y `docs/features_pendientes.md`. `php tests/run_new_engine.php` → 64 suites, 63 en verde, 1 no ejecutable por el contrato TLS local, 2.089 aserciones y 0 fallos, `exit=0`. Sin esquemas ni datos de prueba residuales. |
+| **5.** Batería global y canal `new_engine` | `php tests/run_all.php` → **exit=0**, 0 fallos y `DocMetricsGuard` coherente; cifra viva solo en `README.md` y `docs/features_pendientes.md`. `php tests/run_new_engine.php` → 65 suites, 64 en verde, 1 no ejecutable por el contrato TLS local, 2.121 aserciones y 0 fallos, `exit=0`. Sin esquemas ni datos de prueba residuales. |
 
 ---
 

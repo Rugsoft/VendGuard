@@ -800,21 +800,21 @@ Las suites que declaran `VENDGUARD_TEST_CATEGORY = 'new_engine'` exigen un Postg
 
 ```bash
 source deploy/local/postgres/.env.local     # motor local; .env.docker-tls para el TLS
-php tests/run_new_engine.php                # las 64 suites del canal
+php tests/run_new_engine.php                # las 65 suites del canal
 php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 ```
 
 El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla. La medición del pooler remoto sigue siendo la evidencia de RNF-01: si el enlace del proveedor incumple el presupuesto de 250 ms en alguna operación, el canal publica el fallo con su mediana y su p95, sin convertirlo en omisión.
 
-Corrida del 16 de noviembre de 2026 (canal cerrado · 63 en verde y una suite con contrato propio):
+Corrida del 16 de noviembre de 2026 (canal cerrado · 64 en verde y una suite con contrato propio):
 
 ```text
 ======================================================================
  RESUMEN DEL CANAL new_engine
- Suites evaluadas    : 64
- Suites en verde     : 63
+ Suites evaluadas    : 65
+ Suites en verde     : 64
  No ejecutables      : 1
- Aserciones          : 2.089
+ Aserciones          : 2.121
  Fallos              : 0
  RESULTADO: CANAL CERRADO · 1 suite(s) declararon otro contrato y se listan arriba (no se omiten en silencio).
 ======================================================================

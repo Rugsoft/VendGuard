@@ -6,7 +6,7 @@
 - **Contratos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../specs/technical/cash_collection_vault_audit_contracts.md)
 - **Sistema de Diseño:** [`docs/design.md`](design.md)
 - **Fecha de auditoría:** 2026-11-16
-- **Última actualización:** 2026-11-16 · `FIX-35-01` cerrado
+- **Última actualización:** 2026-11-16 · `FIX-35-02` cerrado
 - **Rama:** `feat/cash-collection-vault-audit` · Base auditada `000688b`
 - **Alcance:** auditoría estática y ejecución real de suites. Este documento recoge el orden de corrección propuesto y se actualiza al cerrar cada FIX.
 
@@ -16,9 +16,10 @@
 
 La implementación está operativa y la batería ejecutada pasa en verde:
 
-- Batería hermética global: **435/435 suites · 16.677 aserciones · 0 fallos · `exit=0`** (tras `FIX-35-01`).
+- Batería hermética global: **435/435 suites · 16.677 aserciones · 0 fallos · `exit=0`** (tras `FIX-35-02`).
 - Suites focales del Módulo 35: todas en verde, entre ellas `PostgresCashCollectionVaultAuditSchemaTest` 46/46, `MachineCashCollectionValidatorTest` 114/114, `MachineCashCollectionServiceTest` 45/45, `CashCollectionVaultAuditApiTest` 30/30 y `CashCollectionVaultAuditConstitutionalTest` 23/23.
 - Frontend: `restocker_route_view.test.mjs` 209/209 y `coordinator_product_loading_tab.test.mjs` 80/80.
+- Layout móvil: `CashCollectionLayoutBrowserTest` 32/32 a `360 × 800` en Chromium real, con `document.documentElement.scrollWidth = 360` en las cuatro superficies de recaudación y en Coordinación.
 - Guardas de diseño: `CoordinatorButtonVariantsGuardTest.mjs` 23/23, `FrontendTemplateCompileTest.mjs` 15/15, `LegacyButtonPaletteRetirementTest.mjs` 18/18 y `DesignTokenDebtRatchetTest.mjs` 3/3.
 - Tareas: **12/12** en [`tasks.md`](../specs/35-cash-collection-vault-audit/tasks.md) y **12/12** filas `✅ hecho` en [`odd/tasks/cash-collection-vault-audit.md`](../odd/tasks/cash-collection-vault-audit.md).
 - `DocMetricsGuard` coherente, base restablecida con semillas intactas y **0 esquemas `t_*` residuales**.
@@ -34,7 +35,7 @@ Sin embargo, **la Spec 35 no puede declararse cumplida al 100 % en sentido liter
 | Orden | ID | Prioridad | Brecha | Requisito afectado | Impacto | Estado |
 |---:|---|---|---|---|---|---|
 | **1** | **FIX-35-01** | **P0 · Bloqueante contractual** | El reenvío idempotente responde `201` con la clave `idempotent`; la spec exige `200` con `idempotent_replay = true` | `RF-01.2.3` | Contrato REST incumplido y test que certifica el comportamiento contrario; un cliente que implemente la spec no puede validar el reenvío | **Cerrada (2026-11-16)** |
-| **2** | **FIX-35-02** | **P1 · Alto** | No hay prueba real de layout a `360 px` para los nuevos bloques/modales de recaudación; las guardas solo validan plantillas, tokens y geometría inline | `RNF-03`, DoD 3 | Riesgo de desbordamiento horizontal o contenido clipped en móvil; el requisito no está certificado | **Abierta** |
+| **2** | **FIX-35-02** | **P1 · Alto** | No hay prueba real de layout a `360 px` para los nuevos bloques/modales de recaudación; las guardas solo validan plantillas, tokens y geometría inline | `RNF-03`, DoD 3 | Riesgo de desbordamiento horizontal o contenido clipped en móvil; el requisito no está certificado | **Cerrada (2026-11-16)** |
 | **3** | **FIX-35-03** | **P1 · Alto** | `RestockerCashCollectionViewDTO` no existe; la opacidad se resuelve con `MachineCashCollection::toRestockerArray()` | `RNF-02.3` | La conducta es correcta, pero el artefacto nombrado por la spec y por la matriz no existe; una auditoría literal no lo encuentra | **Abierta** |
 | **4** | **FIX-35-04** | **P1 · Alto** | El test de baja lógica comprueba snapshots de máquina y reponedor, pero no `vault_reconciled_by_name_snapshot` | `QA 1`, Art. III.3 | No está certificada la conservación del revisor de caja tras una baja lógica | **Abierta** |
 | **5** | **FIX-35-05** | **P1 · Alto** | El código registra `CASH_COLLECTION_DELIVERED_TO_VAULT`, pero ninguna suite lo asserta | `RF-04.1`, Art. III.3 | La trazabilidad de la recepción en cámara existe, pero no tiene regresión que la proteja | **Abierta** |
@@ -110,7 +111,7 @@ Evidencia focal: `MachineCashCollectionServiceTest` 45/45, `CashCollectionVaultA
 
 ---
 
-## FIX-35-02 · Certificación real de RNF-03 a 360 px · P1
+## FIX-35-02 · Certificación real de RNF-03 a 360 px · P1 · ✅ Cerrada
 
 ### Requisito
 
@@ -118,7 +119,7 @@ Evidencia focal: `MachineCashCollectionServiceTest` 45/45, `CashCollectionVaultA
 
 > «Implementación íntegra en PHP 8.2+ estricto y Vue 3 ES Modules nativos sin librerías externas, respetando el layout móvil a `360px` sin desbordamiento horizontal y los tokens `vg-*`.»
 
-### Evidencia actual
+### Evidencia previa (antes del cierre)
 
 - `tests/frontend/restocker_route_view.test.mjs` 209/209 valida estado, plantillas, cola Offline, recibo y opacidad, pero no abre un viewport ni mide desbordamiento.
 - `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` 23/23 valida la plantilla móvil y la geometría inline de los botones, pero no el layout renderizado.
@@ -145,10 +146,26 @@ La UI de recaudación añade un modal con varios campos, un bloque dentro del as
 
 ### Criterios de aceptación
 
-- [ ] Las cuatro superficies de recaudación se abren a 360 px sin desbordamiento horizontal.
-- [ ] `scrollWidth` del documento no supera el ancho del viewport.
-- [ ] Los modales y el recibo son legibles y operables sin scroll horizontal.
-- [ ] La evidencia queda registrada y la matriz deja de declarar `RNF-03` como cubierto solo por guardas de plantilla.
+- [x] Las cuatro superficies de recaudación se abren a 360 px sin desbordamiento horizontal.
+- [x] `scrollWidth` del documento no supera el ancho del viewport.
+- [x] Los modales y el recibo son legibles y operables sin scroll horizontal.
+- [x] La evidencia queda registrada y la matriz deja de declarar `RNF-03` como cubierto solo por guardas de plantilla.
+
+### Cierre
+
+Verificado el 2026-11-16 en Chromium real (`chromium-1228`), a `360 × 800`, con la barra de scroll oculta para emular el viewport móvil y sobre los componentes reales con los estilos de producción:
+
+| Superficie | Comprobación | Resultado |
+|---|---|---|
+| Historial «Mis Bolsas Precintadas y Cambios de Ruta» | Documento, sección y tarjeta dentro de `0..360` | ✅ sin scroll horizontal |
+| Modal rápido de recaudación / cambio | Diálogo `360 × 736`, `scrollWidth = 360`; acción principal alcanzable con scroll vertical | ✅ sin scroll horizontal |
+| Bloque de recaudación de la visita | Bloque visible tras scroll vertical, dentro de `0..360`; sin controles fuera del viewport | ✅ sin scroll horizontal |
+| Recibo de conserjería | Ocho filas visibles, `scrollWidth = 360`; botón de impresión dentro del viewport | ✅ sin scroll horizontal |
+| Coordinación (sub-vista y detalle) | Documento `360`; tabla `762 px` dentro de un contenedor con `overflow-x: auto`; modal de detalle `328 px` | ✅ scroll interno, nunca del documento |
+
+- La suite nueva es `tests/integration/CashCollectionLayoutBrowserTest.php` (`new_engine`) y su arnés `tests/Support/CashCollectionLayoutBrowserRunner.mjs`; monta `RestockerRouteView.js` y `CoordinatorProductLoadingTab.js` con `tests/Support/cash_collection_layout_restocker.html` y `tests/Support/cash_collection_layout_coordinator.html`.
+- Resultado: **32/32 aserciones · 0 fallos · `exit=0`**. El canal `new_engine` queda en **65 suites · 64 en verde · 1 no ejecutable por el contrato TLS local · 2.121 aserciones · 0 fallos**.
+- No se modificó código de producción: la medición no encontró ningún desbordamiento horizontal real que corregir. La evidencia queda protegida por una regresión de navegador, no solo por guardas de plantilla.
 
 ### Archivos previsibles
 
@@ -157,6 +174,10 @@ La UI de recaudación añade un modal con varios campos, un bloque dentro del as
 - `tests/frontend/restocker_route_view.test.mjs`
 - `tests/unit/CoordinatorButtonVariantsGuardTest.mjs`
 - `tests/unit/FrontendTemplateCompileTest.mjs`
+- `tests/integration/CashCollectionLayoutBrowserTest.php`
+- `tests/Support/CashCollectionLayoutBrowserRunner.mjs`
+- `tests/Support/cash_collection_layout_restocker.html`
+- `tests/Support/cash_collection_layout_coordinator.html`
 - `specs/35-cash-collection-vault-audit/traceability-matrix.md`
 
 ---
@@ -424,8 +445,8 @@ El DoD 5 exige que toda la batería de pruebas unitarias, de integración Postgr
 
 - Batería global: **435/435 suites · 16.677 aserciones · 0 fallos · `exit=0`**; `DocMetricsGuard` coherente.
 - Las suites del Módulo 35 se ejecutaron focalmente y están en verde.
-- La matriz y el ODD documentan para `new_engine` **64 suites, 63 en verde y 1 no ejecutable por el contrato TLS local**, 2.089 aserciones, 0 fallos, `exit=0`.
-- No se reejecutaron las 64 suites completas del canal `new_engine` en esta auditoría; sí las suites del módulo y las guardas solicitadas.
+- La matriz y el ODD documentan para `new_engine` **65 suites, 64 en verde y 1 no ejecutable por el contrato TLS local**, 2.121 aserciones, 0 fallos, `exit=0`.
+- Tras `FIX-35-02` se reejecutaron las 65 suites completas del canal `new_engine`; la única no ejecutable sigue siendo `PostgresTieredSlaMetricsPerformanceTest` por el contrato TLS local.
 
 ### Impacto
 
@@ -435,7 +456,7 @@ Cada nueva prueba o cambio de contrato modifica los recuentos. Si no se reejecut
 
 1. Ejecutar las suites focales afectadas por cada FIX.
 2. Ejecutar `php tests/run_all.php` con el entorno de batería.
-3. Ejecutar `php tests/run_new_engine.php` con el contrato TLS que permita completar las 64 suites; si no está disponible, dejar constancia explícita de la suite no ejecutable y no presentarla como verde.
+3. Ejecutar `php tests/run_new_engine.php` con el contrato TLS que permita completar las 65 suites; si no está disponible, dejar constancia explícita de la suite no ejecutable y no presentarla como verde.
 4. Verificar `DocMetricsGuard`, semillas restauradas y ausencia de esquemas `t_*`.
 5. Actualizar matriz, ODD, tareas, README y `docs/features_pendientes.md` solo con las cifras de la corrida final.
 6. Marcar este documento como cerrado y enlazar la corrida final.
@@ -444,7 +465,7 @@ Cada nueva prueba o cambio de contrato modifica los recuentos. Si no se reejecut
 
 - [ ] Todas las suites focales de los FIX anteriores están en verde.
 - [ ] La batería global queda en verde y con `DocMetricsGuard` coherente.
-- [ ] El canal `new_engine` queda en 64/64 o con una excepción documentada y aceptada; no se oculta una suite no ejecutable.
+- [ ] El canal `new_engine` queda en 65 suites (64 verdes) con una excepción documentada y aceptada; no se oculta una suite no ejecutable.
 - [ ] No quedan esquemas `t_*` ni datos de prueba residuales.
 - [ ] Las métricas de README, `features_pendientes.md`, matriz y ODD coinciden con la última corrida.
 - [ ] El estado de la Spec 35 se actualiza solo después de cerrar P0/P1.
