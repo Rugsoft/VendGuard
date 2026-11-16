@@ -3,7 +3,7 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)\
 **Módulo:** 35 · Recaudación de Efectivo, Carga de Tubos de Cambio y Arqueo de Caja (*Cash Collection, Coin Changer Refill & Vault Audit*)\
 **Documento Canónico:** `specs/35-cash-collection-vault-audit/spec.md` (y su espejo `specs/functional/cash_collection_vault_audit_spec.md`)\
-**Versión:** 2.0 · Incorpora las 4 Decisiones de Diseño (`D1`–`D4`), las 4 Reglas de Casos Límite e Invariantes (`C1`–`C4`) y las Resoluciones de Auditoría QA (`QA 1`–`QA 4`, cerrando los 17 puntos de revisión QA) consensuadas con el Product Owner\
+**Versión:** 2.1 · Incorpora las 4 Decisiones de Diseño (`D1`–`D4`), las 4 Reglas de Casos Límite e Invariantes (`C1`–`C4`) y las 4 Resoluciones de Auditoría QA agregadas (`QA 1`–`QA 4`) consensuadas con el Product Owner (enmienda aprobada el 2026-11-16 en `FIX-35-07`)\
 **Estado:** Especificación Funcional Aprobada por el Product Owner el 2026-11-16 · Puerta de Aprobación SDD Fase 1 y Fase 2 superadas\
 **Fecha:** Noviembre 2026\
 **Origen:** Funcionalidad 25 del catálogo [`docs/features_pendientes.md`](../../docs/features_pendientes.md) (Bloque 4 · Operativa de Carga, Reposición de Producto y Gestión de Reponedores)\
@@ -225,4 +225,4 @@ Quedan explícitamente excluidos del alcance de este Módulo 35 (reservados a la
 
 ## 9. Dudas Abiertas
 
-* Ninguna. Las 4 decisiones de diseño (`D1`–`D4`), las 4 reglas de casos límite (`C1`–`C4`), las 4 resoluciones QA (`QA 1`–`QA 4`) y los 17 puntos de la revisión QA profesional han sido consensuados con el Product Owner.
+* Ninguna. Las 4 decisiones de diseño (`D1`–`D4`), las 4 reglas de casos límite (`C1`–`C4`) y las 4 resoluciones de auditoría QA agregadas (`QA 1`–`QA 4`) han sido consensuadas con el Product Owner.

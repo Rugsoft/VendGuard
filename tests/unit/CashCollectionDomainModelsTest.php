@@ -617,6 +617,56 @@ try {
             'The reception receipt must not expose ' . $forbidden . ' (QA 2, Art. V.4)'
         );
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 8. Guarda documental FIX-35-07: paridad SDD y 4 resoluciones QA
+    // ─────────────────────────────────────────────────────────────────────────
+    $root = dirname(__DIR__, 2);
+    $specDocs = [
+        'spec' => (string)file_get_contents($root . '/specs/35-cash-collection-vault-audit/spec.md'),
+        'mirror' => (string)file_get_contents($root . '/specs/functional/cash_collection_vault_audit_spec.md'),
+        'contracts' => (string)file_get_contents($root . '/specs/technical/cash_collection_vault_audit_contracts.md'),
+        'plan' => (string)file_get_contents($root . '/specs/35-cash-collection-vault-audit/plan.md'),
+        'tasks' => (string)file_get_contents($root . '/specs/35-cash-collection-vault-audit/tasks.md'),
+        'matrix' => (string)file_get_contents($root . '/specs/35-cash-collection-vault-audit/traceability-matrix.md'),
+        'odd' => (string)file_get_contents($root . '/odd/tasks/cash-collection-vault-audit.md'),
+    ];
+
+    assertCashCondition(
+        $specDocs['spec'] !== '' && $specDocs['spec'] === $specDocs['mirror'],
+        'The canonical spec and functional mirror for Module 35 stay synchronized (FIX-35-07)'
+    );
+
+    foreach ($specDocs as $docKey => $content) {
+        assertCashCondition(
+            preg_match('/\b17\s+(?:puntos|resoluciones)\b/iu', $content) === 0,
+            'Module 35 document «' . $docKey . '» must not retain unverified 17-point QA claims (FIX-35-07)'
+        );
+    }
+
+    assertCashCondition(
+        !str_contains($specDocs['odd'], '3 resoluciones de auditoría QA'),
+        'The Module 35 ODD log must not retain the stale 3-resolution QA count (FIX-35-07)'
+    );
+
+    assertCashCondition(
+        str_contains($specDocs['spec'], '**Versión:** 2.1')
+            && str_contains($specDocs['plan'], '**Versión:** 2.1')
+            && str_contains($specDocs['tasks'], '**Versión:** 2.1')
+            && str_contains($specDocs['contracts'], '(v2.1')
+            && str_contains($specDocs['matrix'], '(v2.1')
+            && str_contains($specDocs['odd'], 'v2.1'),
+        'Module 35 SDD artifacts declare the amended v2.1 alignment (FIX-35-07)'
+    );
+
+    assertCashCondition(
+        str_contains($specDocs['spec'], 'QA 1')
+            && str_contains($specDocs['spec'], 'QA 2')
+            && str_contains($specDocs['spec'], 'QA 3')
+            && str_contains($specDocs['spec'], 'QA 4')
+            && str_contains($specDocs['spec'], '4 resoluciones de auditoría QA agregadas'),
+        'The Module 35 spec records the 4 aggregated QA resolutions consistently (FIX-35-07)'
+    );
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[FAIL] " . $exception->getMessage() . "\n");
     exit(1);

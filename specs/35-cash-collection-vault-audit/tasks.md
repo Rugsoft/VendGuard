@@ -1,8 +1,8 @@
 # Plan de Tareas de Implementación (`tasks.md`): Recaudación de Efectivo, Carga de Tubos de Cambio y Arqueo de Caja (`35-cash-collection-vault-audit`)
 
 **Módulo:** `35-cash-collection-vault-audit`\
-**Versión:** 2.0 (Alineado con `spec.md` v2.0, `cash_collection_vault_audit_contracts.md` v2.0 y `plan.md` v2.0)\
-**Estado:** Aprobado por el Product Owner el 2026-11-16 · Puerta SDD Fase 2 cerrada · Listo para iniciar en `T-CCV-01`\
+**Versión:** 2.1 (Alineado con `spec.md` v2.1, `cash_collection_vault_audit_contracts.md` y `plan.md` v2.1; 4 resoluciones QA agregadas `QA 1`–`QA 4`)\
+**Estado:** Aprobado por el Product Owner el 2026-11-16 (enmienda `FIX-35-07` el 2026-11-16) · Puerta SDD Fase 2 cerrada · Listo para iniciar en `T-CCV-01`\
 **Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño\
 **Ley Suprema:** [`constitution.md`](../../constitution.md), [`AGENTS.md`](../../AGENTS.md) y [`docs/design.md`](../../docs/design.md)
 

@@ -1,10 +1,10 @@
 # Plan de Implementación Técnica: Recaudación de Efectivo, Carga de Tubos de Cambio y Arqueo de Caja (`35-cash-collection-vault-audit`)
 
 **Módulo:** `35-cash-collection-vault-audit` (Feature 25 de `docs/features_pendientes.md`)\
-**Versión:** 2.0 (Alineado con `spec.md` v2.0 y `cash_collection_vault_audit_contracts.md` v2.0, incorporando los 17 puntos de revisión QA)\
-**Estado:** Plan Técnico Aprobado por el Product Owner el 2026-11-16 · Puerta SDD Fase 2 cerrada · Definitivo para Ejecución SDD\
+**Versión:** 2.1 (Alineado con `spec.md` v2.1 y `cash_collection_vault_audit_contracts.md`, incorporando las 4 resoluciones QA agregadas `QA 1`–`QA 4`)\
+**Estado:** Plan Técnico Aprobado por el Product Owner el 2026-11-16 (enmienda `FIX-35-07` el 2026-11-16) · Puerta SDD Fase 2 cerrada · Definitivo para Ejecución SDD\
 **Marco Normativo:** [`constitution.md`](../../constitution.md) · [`AGENTS.md`](../../AGENTS.md) · [`docs/design.md`](../../docs/design.md)\
-**Especificación Funcional:** [`specs/35-cash-collection-vault-audit/spec.md`](./spec.md) (v2.0) · [`specs/functional/cash_collection_vault_audit_spec.md`](../functional/cash_collection_vault_audit_spec.md)\
+**Especificación Funcional:** [`specs/35-cash-collection-vault-audit/spec.md`](./spec.md) (v2.1) · [`specs/functional/cash_collection_vault_audit_spec.md`](../functional/cash_collection_vault_audit_spec.md)\
 **Contratos Técnicos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../technical/cash_collection_vault_audit_contracts.md)
 
 ---

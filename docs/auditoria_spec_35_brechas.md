@@ -1,12 +1,12 @@
 # Auditoría de la Spec 35 · Brechas y Plan de Corrección Priorizado
 
 - **Módulo:** 35 · Recaudación de Efectivo, Carga de Tubos de Cambio y Arqueo de Caja
-- **Especificación auditada:** [`specs/35-cash-collection-vault-audit/spec.md`](../specs/35-cash-collection-vault-audit/spec.md) (v2.0)
+- **Especificación auditada:** [`specs/35-cash-collection-vault-audit/spec.md`](../specs/35-cash-collection-vault-audit/spec.md) (v2.1 · enmendada en `FIX-35-07` desde v2.0)
 - **Espejo funcional:** [`specs/functional/cash_collection_vault_audit_spec.md`](../specs/functional/cash_collection_vault_audit_spec.md) (idéntico a la especificación canónica)
 - **Contratos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../specs/technical/cash_collection_vault_audit_contracts.md)
 - **Sistema de Diseño:** [`docs/design.md`](design.md)
 - **Fecha de auditoría:** 2026-11-16
-- **Última actualización:** 2026-11-16 · `FIX-35-06` cerrado
+- **Última actualización:** 2026-11-16 · `FIX-35-07` cerrado
 - **Rama:** `feat/cash-collection-vault-audit` · Base auditada `000688b`
 - **Alcance:** auditoría estática y ejecución real de suites. Este documento recoge el orden de corrección propuesto y se actualiza al cerrar cada FIX.
 
@@ -16,8 +16,8 @@
 
 La implementación está operativa y la batería ejecutada pasa en verde:
 
-- Batería hermética global: **435/435 suites · 16.686 aserciones · 0 fallos · `exit=0`** (tras `FIX-35-03`).
-- Suites focales del Módulo 35: todas en verde, entre ellas `PostgresCashCollectionVaultAuditSchemaTest` 46/46, `MachineCashCollectionValidatorTest` 114/114, `MachineCashCollectionServiceTest` 45/45, `CashCollectionDomainModelsTest` 74/74, `CashCollectionVaultAuditApiTest` 33/33, `CashCollectionVaultAuditConstitutionalTest` 25/25 y `CashCollectionConcurrencyTest` 6/6 (`FOR UPDATE OF m` real sobre PostgreSQL).
+- Batería hermética global: **435/435 suites · 16.697 aserciones · 0 fallos · `exit=0`** (tras `FIX-35-07`).
+- Suites focales del Módulo 35: todas en verde, entre ellas `PostgresCashCollectionVaultAuditSchemaTest` 46/46, `MachineCashCollectionValidatorTest` 114/114, `MachineCashCollectionServiceTest` 45/45, `CashCollectionDomainModelsTest` 85/85 (incluye DTO y guarda documental `FIX-35-07`), `CashCollectionVaultAuditApiTest` 33/33, `CashCollectionVaultAuditConstitutionalTest` 25/25 y `CashCollectionConcurrencyTest` 6/6 (`FOR UPDATE OF m` real sobre PostgreSQL).
 - Proyección móvil: `RestockerCashCollectionViewDTO` publica una lista blanca de 18 campos y omite las cinco claves financieras privadas del Arqueo Ciego.
 - Frontend: `restocker_route_view.test.mjs` 209/209 y `coordinator_product_loading_tab.test.mjs` 80/80.
 - Layout móvil: `CashCollectionLayoutBrowserTest` 32/32 a `360 × 800` en Chromium real, con `document.documentElement.scrollWidth = 360` en las cuatro superficies de recaudación y en Coordinación.
@@ -41,7 +41,7 @@ Sin embargo, **la Spec 35 no puede declararse cumplida al 100 % en sentido liter
 | **4** | **FIX-35-04** | **P1 · Alto** | El test de baja lógica comprueba snapshots de máquina y reponedor, pero no `vault_reconciled_by_name_snapshot` | `QA 1`, Art. III.3 | No está certificada la conservación del revisor de caja tras una baja lógica | **Cerrada (2026-11-16)** |
 | **5** | **FIX-35-05** | **P1 · Alto** | El código registra `CASH_COLLECTION_DELIVERED_TO_VAULT`, pero ninguna suite lo asserta | `RF-04.1`, Art. III.3 | La trazabilidad de la recepción en cámara existe, pero no tiene regresión que la proteja | **Cerrada (2026-11-16)** |
 | **6** | **FIX-35-06** | **P2 · Medio** | No hay aserción específica de usuario/máquina inactivos ni del bloqueo `FOR UPDATE OF m` en la captura | `RF-02.1` | La defensa está en el código, pero no está certificada por una prueba del módulo | **Cerrada (2026-11-16)** |
-| **7** | **FIX-35-07** | **P2 · Medio** | La spec afirma haber cerrado 17 puntos QA, pero no los enumera; solo se documentan 4 resoluciones agregadas | `QA 1`–`QA 4`, §9 | No es posible verificar 17/17 ni auditar qué observación cerró cada cambio | **Abierta** |
+| **7** | **FIX-35-07** | **P2 · Medio** | La spec afirma haber cerrado 17 puntos QA, pero no los enumera; solo se documentan 4 resoluciones agregadas | `QA 1`–`QA 4`, §9 | No es posible verificar 17/17 ni auditar qué observación cerró cada cambio | **Cerrada (2026-11-16 · Vía B)** |
 | **8** | **FIX-35-08** | **P2 · Medio** | La matriz usa una subdivisión de `RF-05` distinta de la spec, cita el DTO inexistente y el ODD habla de 3 resoluciones frente a las 4 de la spec | Trazabilidad, DoD | La matriz no es un reflejo 1:1 de los EARS y puede inducir a error en la próxima auditoría | **Abierta** |
 | **9** | **FIX-35-09** | **P3 · Verificación** | La certificación final debe repetirse tras los cambios y cerrar la diferencia del canal `new_engine` | DoD 5 | Las cifras actuales quedarán obsoletas al añadir pruebas; además el canal registra 1 suite no ejecutable por TLS local | **Abierta** |
 
@@ -401,13 +401,13 @@ Cerrada el 2026-11-16 con pruebas HTTP y de concurrencia real en PostgreSQL:
 
 ---
 
-## FIX-35-07 · Enumerar o corregir los 17 puntos QA · P2
+## FIX-35-07 · Enumerar o corregir los 17 puntos QA · P2 · ✅ Cerrada
 
 ### Requisito
 
-La spec v2.0 afirma que `QA 1`–`QA 4` cierran «los 17 puntos de la revisión QA profesional». El §9 repite la cifra.
+La spec v2.0 afirmaba que `QA 1`–`QA 4` cerraban «los 17 puntos de la revisión QA profesional». El §9 repetía la cifra.
 
-### Evidencia actual
+### Evidencia previa (antes del cierre)
 
 - La spec solo enumera cuatro resoluciones agregadas (`QA 1`–`QA 4`).
 - Los 17 puntos no aparecen en `cash_collection_vault_audit_contracts.md`, `plan.md`, `tasks.md`, el ODD ni la matriz.
@@ -429,19 +429,29 @@ No modificar la spec sin consenso; la decisión debe quedar registrada.
 
 ### Criterios de aceptación
 
-- [ ] Existe una tabla con 17 filas verificables o se ha eliminado la afirmación de 17.
-- [ ] Cada fila enlaza un requisito, un cambio y una prueba.
-- [ ] La spec, el espejo, el plan, el ODD, las tareas y la matriz usan la misma cifra.
-- [ ] La matriz no declara `QA 1`–`QA 4` como cierre de 17 puntos sin evidencia.
+- [x] Existe una tabla con 17 filas verificables o se ha eliminado la afirmación de 17.
+- [x] Cada fila enlaza un requisito, un cambio y una prueba.
+- [x] La spec, el espejo, el plan, el ODD, las tareas y la matriz usan la misma cifra.
+- [x] La matriz no declara `QA 1`–`QA 4` como cierre de 17 puntos sin evidencia.
 
-### Archivos previsibles
+### Cierre
 
-- `specs/35-cash-collection-vault-audit/spec.md` y espejo (solo con aprobación)
+Cerrada el 2026-11-16 bajo **Opción B (Enmienda aprobada)** consensuada explícitamente con el Product Owner:
+
+- Al no disponerse del listado íntegro de los 17 puntos en el repositorio ni en Engram (`#201` solo resumía 7 puntos), se eliminó la cifra sin desglose y se estandarizó la redacción a **«4 resoluciones QA agregadas (`QA 1`–`QA 4`)»** en `specs/35-cash-collection-vault-audit/spec.md` (v2.1), `specs/functional/cash_collection_vault_audit_spec.md` (v2.1), `specs/technical/cash_collection_vault_audit_contracts.md` (v2.1), `specs/35-cash-collection-vault-audit/plan.md` (v2.1), `specs/35-cash-collection-vault-audit/tasks.md` (v2.1), `specs/35-cash-collection-vault-audit/traceability-matrix.md` y `odd/tasks/cash-collection-vault-audit.md` (`L2` y cabecera).
+- Añadida la guarda documental automática en `tests/unit/CashCollectionDomainModelsTest.php` (sección 8, 85 aserciones totales) que falla si el espejo funcional diverge del canónico, si reaparecen menciones sin desglose a `17 puntos` / `17 resoluciones` o a `3 resoluciones de auditoría QA`, o si algún artefacto SDD abandona la alineación v2.1 / `QA 1`–`QA 4`.
+- Evidencia focal: `php tests/unit/CashCollectionDomainModelsTest.php` → **85/85 · `exit=0`**.
+
+### Archivos
+
+- `specs/35-cash-collection-vault-audit/spec.md`
+- `specs/functional/cash_collection_vault_audit_spec.md`
 - `specs/technical/cash_collection_vault_audit_contracts.md`
 - `specs/35-cash-collection-vault-audit/plan.md`
 - `specs/35-cash-collection-vault-audit/tasks.md`
-- `odd/tasks/cash-collection-vault-audit.md`
 - `specs/35-cash-collection-vault-audit/traceability-matrix.md`
+- `odd/tasks/cash-collection-vault-audit.md`
+- `tests/unit/CashCollectionDomainModelsTest.php`
 
 ---
 
@@ -491,7 +501,7 @@ El DoD 5 exige que toda la batería de pruebas unitarias, de integración Postgr
 
 ### Evidencia actual
 
-- Batería global: **435/435 suites · 16.686 aserciones · 0 fallos · `exit=0`**; `DocMetricsGuard` coherente.
+- Batería global: **435/435 suites · 16.697 aserciones · 0 fallos · `exit=0`**; `DocMetricsGuard` coherente.
 - Las suites del Módulo 35 se ejecutaron focalmente y están en verde.
 - La matriz y el ODD documentan para `new_engine` **66 suites, 65 en verde y 1 no ejecutable por el contrato TLS local**, 2.132 aserciones, 0 fallos, `exit=0`.
 - Tras `FIX-35-06` se ejecutó el canal `new_engine` completo y la única no ejecutable sigue siendo `PostgresTieredSlaMetricsPerformanceTest` por el contrato TLS local.
@@ -566,7 +576,8 @@ La Spec 35 podrá volver a declararse cerrada cuando:
 - [x] FIX-35-03 esté resuelto por DTO o por enmienda aprobada.
 - [x] FIX-35-04 y FIX-35-05 tengan aserciones que fallen si se elimina la persistencia/auditoría.
 - [x] FIX-35-06 cubra los casos de actividad y, si se acepta, el bloqueo pesimista.
-- [ ] FIX-35-07 y FIX-35-08 hayan alineado spec, matriz, ODD y tareas.
+- [x] FIX-35-07 haya alineado spec, espejo, contratos, plan, matriz, ODD y tareas (4 resoluciones QA agregadas).
+- [ ] FIX-35-08 haya alineado la matriz de trazabilidad (`RF-05` 1:1 con la spec).
 - [ ] FIX-35-09 haya reejecutado la batería y actualizado las métricas.
 - [ ] La matriz no cite artefactos inexistentes ni declare `RNF-03` sin evidencia de viewport.
 

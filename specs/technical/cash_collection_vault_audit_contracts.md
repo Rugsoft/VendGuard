@@ -3,7 +3,7 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)\
 **Módulo:** `35-cash-collection-vault-audit` (Feature 25 de `docs/features_pendientes.md`)\
 **Documento Canónico:** `specs/technical/cash_collection_vault_audit_contracts.md`\
-**Referencia Funcional:** [`specs/35-cash-collection-vault-audit/spec.md`](../35-cash-collection-vault-audit/spec.md) y [`specs/functional/cash_collection_vault_audit_spec.md`](../functional/cash_collection_vault_audit_spec.md) (v2.0 · `RF-01` a `RF-05`, `D1`–`D4`, `C1`–`C4`, `QA 1`–`QA 4`, 17 resoluciones QA cerradas)\
+**Referencia Funcional:** [`specs/35-cash-collection-vault-audit/spec.md`](../35-cash-collection-vault-audit/spec.md) y [`specs/functional/cash_collection_vault_audit_spec.md`](../functional/cash_collection_vault_audit_spec.md) (v2.1 · `RF-01` a `RF-05`, `D1`–`D4`, `C1`–`C4`, 4 resoluciones QA agregadas `QA 1`–`QA 4`)\
 **Motor de Persistencia:** PostgreSQL 16+ (Supabase / Motor Local de Certificación) · Motor Único\
 **Protocolo:** HTTP/1.1 · JSON (`application/json; charset=utf-8`) y `text/csv; charset=utf-8` (con UTF-8 BOM para exportación de Coordinación)\
 **Conformidad Constitucional:** Artículos I, II (2.1, 2.2), III (3.1, 3.2, 3.3), IV, V (5.1, 5.4) y VI

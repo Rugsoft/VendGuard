@@ -1,6 +1,6 @@
 # MATRIZ DE TRAZABILIDAD · MÓDULO 35
 
-**Especificación:** [`spec.md`](spec.md) (v2.0) · **Contratos:** [`../technical/cash_collection_vault_audit_contracts.md`](../technical/cash_collection_vault_audit_contracts.md) · **Plan:** [`plan.md`](plan.md) · **Tareas:** [`tasks.md`](tasks.md)
+**Especificación:** [`spec.md`](spec.md) (v2.1 · 4 resoluciones QA agregadas `QA 1`–`QA 4`) · **Contratos:** [`../technical/cash_collection_vault_audit_contracts.md`](../technical/cash_collection_vault_audit_contracts.md) · **Plan:** [`plan.md`](plan.md) · **Tareas:** [`tasks.md`](tasks.md)
 
 **Esquema de referencia canónico:** `RF-01` Tabla 49 `machine_cash_collections`, tipo #42 y precinto único · `RF-02` captura en ruta y Arqueo Ciego · `RF-03` entrega en conserjería y transición atómica de reintegros · `RF-04` recepción en cámara y arqueo terminal · `RF-05` superficies de Reponedor y Coordinación.
 
@@ -12,13 +12,15 @@
 
 **FIX-35-02 (2026-11-16):** `RNF-03` queda certificado en navegador real a `360 × 800` por `CashCollectionLayoutBrowserTest` (32/32): historial, modal rápido, bloque de visita, recibo de conserjería y sub-vista/detalle de Coordinación sin desbordamiento horizontal del documento; la tabla ancha de Coordinación conserva su scroll interno.
 
-**FIX-35-03 (2026-11-16):** `RNF-02.3` queda enlazado a `RestockerCashCollectionViewDTO`, la clase real que construye la respuesta móvil con lista blanca de 18 campos; `CashCollectionDomainModelsTest` 74/74 verifica la ausencia de las cinco claves privadas y el recibo conserva sus nueve campos.
+**FIX-35-03 (2026-11-16):** `RNF-02.3` queda enlazado a `RestockerCashCollectionViewDTO`, la clase real que construye la respuesta móvil con lista blanca de 18 campos; `CashCollectionDomainModelsTest` 85/85 verifica la ausencia de las cinco claves privadas y el recibo conserva sus nueve campos.
 
 **FIX-35-04 (2026-11-16):** `QA 1` queda certificado también para `vault_reconciled_by_name_snapshot` en `CashCollectionVaultAuditConstitutionalTest` (`5.2`–`5.4`, 25/25): tras la baja lógica de máquina, reponedor y revisor —y el renombrado posterior del revisor en `users`—, tanto la fila de la Tabla 49 como `GET /api/coordinator/cash-collections/{id}` conservan los cuatro snapshots congelados.
 
 **FIX-35-05 (2026-11-16):** `RF-04.1` queda certificado también en `audit_log` por `CashCollectionVaultAuditConstitutionalTest` (`6.1` y `6.3`, 25/25): `CASH_COLLECTION_DELIVERED_TO_VAULT` queda enlazado a `entity_type = 'MACHINE_CASH_COLLECTION'` y al `entity_id` de la bolsa con el actor y el rol `COORDINATOR`.
 
 **FIX-35-06 (2026-11-16):** `RF-02.1` queda certificado también en actividad de actor, máquina y zona (`CashCollectionVaultAuditApiTest` `3.4d`–`3.4f`, 33/33) y en concurrencia real de PostgreSQL sobre `FOR UPDATE OF m` (`CashCollectionConcurrencyTest`, 6/6 con dos procesos observados en `pg_stat_activity.wait_event_type = 'Lock'`).
+
+**FIX-35-07 (2026-11-16):** Enmienda aprobada (Vía B): al no conservarse completo el desglose QA previo en el repositorio, `spec.md` (v2.1), el espejo funcional, los contratos, `plan.md`, `tasks.md`, el ODD y esta matriz sustituyen la referencia agregada sin desglose por **«4 resoluciones QA agregadas (`QA 1`–`QA 4`)»**, con guarda documental automática en `CashCollectionDomainModelsTest` (85/85).
 
 ---
 
@@ -29,7 +31,7 @@
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
 | **01.1** Tabla 49 `machine_cash_collections`, tipo nativo #42 `cash_collection_status`, `MACHINE_CASH_COLLECTION` en `audit_entity_type`, disparadores de inmutabilidad y guarda sanitaria (`D1`–`D4`, `C1`, `QA 1`, `Art. II.2`, `Art. III.1`, `Art. III.3`) | `031_cash_collection_vault_audit.sql`, `database/supabase_init.sql`, `SeedRunner::seedMachineCashCollections()` | `PostgresCashCollectionVaultAuditSchemaTest` · `PostgresSchemaTest` · `PostgresConstitutionalTest` · `SchemaConvergenceParityTest` | 46/46 ✅ · 153/153 ✅ · 86/86 ✅ · 39/39 ✅ |
-| **01.2** Precinto normalizado y único global, idempotencia `(restocker_id, client_mutation_id)` y cotas de importes (`C1`, `D4`) | `MachineCashCollection`, `MachineCashCollectionValidator`, `PdoMachineCashCollectionRepository`, `MachineCashCollectionService` | `CashCollectionDomainModelsTest` · `MachineCashCollectionValidatorTest` · `PdoMachineCashCollectionRepositoryTest` · `CashCollectionVaultAuditApiTest` | 74/74 ✅ · 114/114 ✅ · 45/45 ✅ · 33/33 ✅ |
+| **01.2** Precinto normalizado y único global, idempotencia `(restocker_id, client_mutation_id)` y cotas de importes (`C1`, `D4`) | `MachineCashCollection`, `MachineCashCollectionValidator`, `PdoMachineCashCollectionRepository`, `MachineCashCollectionService` | `CashCollectionDomainModelsTest` · `MachineCashCollectionValidatorTest` · `PdoMachineCashCollectionRepositoryTest` · `CashCollectionVaultAuditApiTest` | 85/85 ✅ · 114/114 ✅ · 45/45 ✅ · 33/33 ✅ |
 | **01.3** Prohibición de `DELETE`, congelación de la captura en ruta y bloqueo terminal tras el arqueo (`Art. III.1`, `Art. III.3`) | `prevent_hard_delete()`, `enforce_machine_cash_collections_immutability()`, `trg_no_delete_machine_cash_collections`, `trg_guard_machine_cash_collections` | `PostgresCashCollectionVaultAuditSchemaTest` · `PdoMachineCashCollectionRepositoryTest` · `CashCollectionVaultAuditConstitutionalTest` · `TestDataCleanerIsolationTest` | 46/46 ✅ · 45/45 ✅ · 25/25 ✅ · 50/50 ✅ |
 
 ### RF-02 · Captura en ruta, monotonía del contador y cálculo privado del Arqueo Ciego
@@ -44,7 +46,7 @@
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
 | **03.1** Entrega `≤ 10,00 €`, `has_physical_reception`, conserje obligatorio y transición atómica de `refund_requests` a `DEPOSITED_AT_RECEPTION` (`D3`) | `MachineCashCollectionValidator::validateReception`, `MachineCashCollectionService::registerCollectionInTransaction`, `PdoMachineCashCollectionGateway` | `MachineCashCollectionValidatorTest` · `MachineCashCollectionServiceTest` · `CashCollectionVaultAuditApiTest` · `CashCollectionVaultAuditConstitutionalTest` | 114/114 ✅ · 45/45 ✅ · 33/33 ✅ · 25/25 ✅ |
-| **03.2** Recibo de conserjería de nueve campos sin bolsa, importes privados, PII ni `pickup_pin` (`QA 2`, `Art. V.4`) | `MachineCashCollection::toReceptionReceiptArray`, `MachineCashCollectionService::receptionReceipt`, `RestockerRouteController`, `RestockerRouteView.js` | `CashCollectionDomainModelsTest` · `MachineCashCollectionServiceTest` · `CashCollectionVaultAuditApiTest` · `CashCollectionVaultAuditConstitutionalTest` · `restocker_route_view.test.mjs` | 74/74 ✅ · 45/45 ✅ · 33/33 ✅ · 25/25 ✅ · 209/209 ✅ |
+| **03.2** Recibo de conserjería de nueve campos sin bolsa, importes privados, PII ni `pickup_pin` (`QA 2`, `Art. V.4`) | `MachineCashCollection::toReceptionReceiptArray`, `MachineCashCollectionService::receptionReceipt`, `RestockerRouteController`, `RestockerRouteView.js` | `CashCollectionDomainModelsTest` · `MachineCashCollectionServiceTest` · `CashCollectionVaultAuditApiTest` · `CashCollectionVaultAuditConstitutionalTest` · `restocker_route_view.test.mjs` | 85/85 ✅ · 45/45 ✅ · 33/33 ✅ · 25/25 ✅ · 209/209 ✅ |
 
 ### RF-04 · Recepción en cámara y arqueo terminal
 
@@ -58,7 +60,7 @@
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
 | **05.1** Captura integrada e independiente, conserjería, recibo, historial opaco y cola Offline `IndexedDB` (`D1`, `D4`, `C2`, `C4`, `Art. V.4`) | `RestockerRouteView.js`, `CashCollectionOfflineQueue.js`, `api.js`, `public/sw.js` | `restocker_route_view.test.mjs` · `OfflinePwaAssetsAndUiGuardTest.mjs` · `FrontendTemplateCompileTest.mjs` · `CoordinatorButtonVariantsGuardTest.mjs` · `DesignTokenDebtRatchetTest.mjs` | 209/209 ✅ · 45/45 ✅ · 15/15 ✅ · 25/25 ✅ · 3/3 ✅ |
-| **05.2** Historial del reponedor sin las cinco claves privadas del arqueo y recibo imprimible (`C2`, `QA 2`) | `RestockerCashCollectionViewDTO`, `MachineCashCollection::toRestockerArray` (proyección interna), `RestockerRouteView.js`, `RestockerRouteController` | `CashCollectionDomainModelsTest` · `restocker_route_view.test.mjs` · `CashCollectionVaultAuditApiTest` · `CashCollectionVaultAuditConstitutionalTest` | 74/74 ✅ · 209/209 ✅ · 33/33 ✅ · 25/25 ✅ |
+| **05.2** Historial del reponedor sin las cinco claves privadas del arqueo y recibo imprimible (`C2`, `QA 2`) | `RestockerCashCollectionViewDTO`, `MachineCashCollection::toRestockerArray` (proyección interna), `RestockerRouteView.js`, `RestockerRouteController` | `CashCollectionDomainModelsTest` · `restocker_route_view.test.mjs` · `CashCollectionVaultAuditApiTest` · `CashCollectionVaultAuditConstitutionalTest` | 85/85 ✅ · 209/209 ✅ · 33/33 ✅ · 25/25 ✅ |
 | **05.3** Sub-vista de Coordinación con 6 KPIs reactivos, filtros, recepción, arqueo y CSV UTF-8 BOM neutralizado (`QA 3`, `QA 4`) | `CoordinatorProductLoadingTab.js`, `api.js`, `CoordinatorProductLoadingController` | `coordinator_product_loading_tab.test.mjs` · `CashCollectionVaultAuditApiTest` · `FrontendTemplateCompileTest.mjs` · `CoordinatorButtonVariantsGuardTest.mjs` | 80/80 ✅ · 33/33 ✅ · 15/15 ✅ · 25/25 ✅ |
 
 ---
@@ -86,7 +88,7 @@
 | **C3** Contador y reseteo | Regresión `422 SALES_COUNTER_REGRESSION`, reseteo con nota real y base inicial de la primera recaudación | `MachineCashCollectionValidatorTest` · `MachineCashCollectionServiceTest` · `CashCollectionVaultAuditApiTest` · `PostgresCashCollectionVaultAuditSchemaTest` | ✅ 114/114 · 45/45 · 33/33 · 46/46 |
 | **C4** Primacía sanitaria y conflicto Offline | Cuarentena, fuera de servicio, ticket `TEMPERATURE_COLD`, visita abortada y volcado del `409` en auditoría | `MachineCashCollectionValidatorTest` · `MachineCashCollectionServiceTest` · `CashCollectionVaultAuditConstitutionalTest` · `restocker_route_view.test.mjs` | ✅ 114/114 · 45/45 · 25/25 · 209/209 |
 | **QA 1** Snapshots históricos | Arqueo de bolsa en tránsito tras la baja lógica de máquina o reponedor y conservación de `machine_code_snapshot`, `restocker_name_snapshot`, `restocker_code_snapshot` y `vault_reconciled_by_name_snapshot` tras baja lógica y renombrado del revisor | `PdoMachineCashCollectionRepositoryTest` · `MachineCashCollectionServiceTest` · `CashCollectionVaultAuditConstitutionalTest` (`5.2`–`5.4`) | ✅ 45/45 · 45/45 · 25/25 |
-| **QA 2** Recibo opaco | Exactamente nueve campos, sin bolsa, contador, cambio, arqueo, PII ni `pickup_pin` | `CashCollectionDomainModelsTest` · `MachineCashCollectionServiceTest` · `CashCollectionVaultAuditApiTest` · `CashCollectionVaultAuditConstitutionalTest` · `restocker_route_view.test.mjs` | ✅ 65/65 · 45/45 · 33/33 · 25/25 · 209/209 |
+| **QA 2** Recibo opaco | Exactamente nueve campos, sin bolsa, contador, cambio, arqueo, PII ni `pickup_pin` | `CashCollectionDomainModelsTest` · `MachineCashCollectionServiceTest` · `CashCollectionVaultAuditApiTest` · `CashCollectionVaultAuditConstitutionalTest` · `restocker_route_view.test.mjs` | ✅ 85/85 · 45/45 · 33/33 · 25/25 · 209/209 |
 | **QA 3** Detalle de visita y 6 KPIs | `cash_collection_summary` en la visita del Módulo 34 y KPIs recalculados sobre el filtro activo | `MachineCashCollectionServiceTest` · `CashCollectionVaultAuditApiTest` · `coordinator_product_loading_tab.test.mjs` · `restocker_route_view.test.mjs` | ✅ 45/45 · 33/33 · 80/80 · 209/209 |
 | **QA 4** Exportación CSV | BOM UTF-8, delimitador `;`, neutralización de fórmulas y acceso exclusivo de Coordinación | `MachineCashCollectionServiceTest` · `CashCollectionVaultAuditApiTest` · `coordinator_product_loading_tab.test.mjs` | ✅ 45/45 · 33/33 · 80/80 |
 | **T-CCV-12** Cierre global | Semilla compatible con averías térmicas vivas, purga de 38 tablas, catálogo de auditoría completo, salida canónica de aserciones y geometría móvil sin `style` | `SeedDataTest` · `SeedRunnerSingleEngineTest` · `TestDataCleanerIsolationTest` · `AuditActionCatalogTest` · `CoordinatorButtonVariantsGuardTest.mjs` · `php tests/run_all.php` | ✅ 10/10 · 26/26 · 50/50 · 27/27 · 25/25 · exit=0 |
