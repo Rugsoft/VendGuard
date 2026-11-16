@@ -59,6 +59,11 @@ interface MachineCashCollectionRepositoryInterface
     public function findByBagSealCode(string $bagSealCode): ?MachineCashCollection;
 
     /**
+     * Recaudación vinculada a una visita in situ (`D1`), si existe.
+     */
+    public function findByRestockVisitId(int $restockVisitId): ?MachineCashCollection;
+
+    /**
      * Última lectura de contador de la máquina, sea cual sea su estado de
      * custodia: es la referencia privada del arqueo ciego (D2, C2).
      */

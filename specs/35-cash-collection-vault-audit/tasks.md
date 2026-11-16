@@ -64,9 +64,10 @@ flowchart LR
   - **Verificación:** `php tests/unit/MachineCashCollectionServiceTest.php`
   - **Cierre (2026-11-16):** `MachineCashCollectionService` con captura transaccional e idempotente, validación de rol/perímetro/cerrojos, cálculo privado del esperado, sinergia atómica con `refund_requests`, recepción en cámara, arqueo terminal, recibo de conserjería, volcado offline y CSV con BOM neutralizado. `MachineCashCollectionGatewayInterface` y `PdoMachineCashCollectionGateway` aportan los tres `FOR UPDATE` (máquina/sede, visita y reintegro). 44 aserciones unitarias.
 
-- [ ] **T-CCV-07 · Integrar `D1`, `C4` y `QA 3` en `MachineRestockVisitService` (registro atómico de `cash_collection` dentro de la visita `COMPLETED`, rechazo en `ABORTED_THERMAL_BREACH`, exposición de `cash_collection_summary` en detalle de visita y enriquecimiento de `/api/restocker/my-route`)**
+- [x] **T-CCV-07 · Integrar `D1`, `C4` y `QA 3` en `MachineRestockVisitService` (registro atómico de `cash_collection` dentro de la visita `COMPLETED`, rechazo en `ABORTED_THERMAL_BREACH`, exposición de `cash_collection_summary` en detalle de visita y enriquecimiento de `/api/restocker/my-route`)**
   - **Requisitos:** `RF-02.1`, `RF-05.2`, `RF-05.3`, `D1`, `D3`, `C4`, `QA 3`, `Art. II.2`, `Art. V.4`.
   - **Verificación:** `php tests/unit/MachineRestockVisitServiceTest.php`
+  - **Cierre (2026-11-16):** Puerto `CashCollectionRegistrarInterface` (`registerCollectionInTransaction`, `summarizeForVisit`, `routeCashContext`) implementado por `MachineCashCollectionService`, que ahora envuelve `registerCollection()` en la transacción del llamante. `MachineRestockVisitService` registra `cash_collection` dentro de la misma transacción de la visita `COMPLETED` con `restock_visit_id`, rechaza con `422 THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN` cualquier captura en `ABORTED_THERMAL_BREACH` antes de escribir y expone `cash_collection_summary` en `findVisitDetail()` y `recent_cash_collections`/`cash_route_summary` en `/api/restocker/my-route`. El repositorio añade `findByRestockVisitId()`. 50 aserciones unitarias.
 
 - [ ] **T-CCV-08 · Extender `RestockerRouteController`, `CoordinatorProductLoadingController` y registrar las nuevas rutas + guardas RBAC en `AppRouter`**
   - **Requisitos:** `RF-01` a `RF-05`, `Art. V.4`.

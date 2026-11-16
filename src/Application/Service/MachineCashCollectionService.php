@@ -14,6 +14,7 @@ use VendGuard\Core\Domain\Model\CashCustodyAction;
 use VendGuard\Core\Domain\Model\MachineCashCollection;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
+use VendGuard\Core\Domain\Repository\CashCollectionRegistrarInterface;
 use VendGuard\Core\Domain\Repository\MachineCashCollectionGatewayInterface;
 use VendGuard\Core\Domain\Repository\MachineCashCollectionRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
@@ -52,7 +53,7 @@ use VendGuard\Core\Service\MachineCashCollectionValidator;
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
  */
-final class MachineCashCollectionService
+final class MachineCashCollectionService implements CashCollectionRegistrarInterface
 {
     public const ACTION_CASH_COLLECTION_SEALED = 'CASH_COLLECTION_SEALED';
     public const ACTION_CASH_COLLECTION_DELIVERED_TO_VAULT = 'CASH_COLLECTION_DELIVERED_TO_VAULT';
@@ -101,6 +102,20 @@ final class MachineCashCollectionService
      */
     public function registerCollection(int $machineId, array $payload, array $actor): array
     {
+        return $this->transactions->runInTransaction(
+            fn (): array => $this->registerCollectionInTransaction($machineId, $payload, $actor)
+        );
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function registerCollectionInTransaction(
+        int $machineId,
+        array $payload,
+        array $actor,
+        ?int $restockVisitId = null
+    ): array {
         $restocker = $this->requireActor($actor, 'RESTOCKER');
         $mutationId = trim((string)($payload['client_mutation_id'] ?? ''));
 
@@ -116,8 +131,7 @@ final class MachineCashCollectionService
             return $existing->toRestockerArray() + ['idempotent' => true];
         }
 
-        $collection = $this->transactions->runInTransaction(function () use ($machineId, $payload, $actor, $restocker, $mutationId): MachineCashCollection {
-            $repeated = $this->collections->findByClientMutationId($restocker['id'], $mutationId);
+        $repeated = $this->collections->findByClientMutationId($restocker['id'], $mutationId);
             if ($repeated !== null) {
                 return $repeated;
             }
@@ -138,7 +152,11 @@ final class MachineCashCollectionService
                 $machineId
             );
 
-            $visitId = $this->nullablePositiveInt($payload['restock_visit_id'] ?? null);
+            $payloadVisitId = $this->nullablePositiveInt($payload['restock_visit_id'] ?? null);
+            if ($restockVisitId !== null && $payloadVisitId !== null && $payloadVisitId !== $restockVisitId) {
+                throw new InvalidArgumentException('La visita vinculada no coincide con la visita de la ruta.');
+            }
+            $visitId = $payloadVisitId ?? $restockVisitId;
             if ($visitId !== null) {
                 $visit = $this->gateway->lockRestockVisit($visitId, $machineId);
                 if ($visit === null) {
@@ -262,10 +280,49 @@ final class MachineCashCollectionService
                 ['machine_id' => $machineId, 'restock_visit_id' => $visitId]
             );
 
-            return $persisted;
-        });
+        return $persisted->toRestockerArray() + ['idempotent' => false];
+    }
 
-        return $collection->toRestockerArray() + ['idempotent' => false];
+    /**
+     * {@inheritdoc}
+     */
+    public function summarizeForVisit(int $restockVisitId): ?array
+    {
+        $collection = $this->collections->findByRestockVisitId($restockVisitId);
+        if ($collection === null) {
+            return null;
+        }
+
+        return [
+            'id' => $collection->getId(),
+            'collection_code' => $collection->getCollectionCode(),
+            'bag_seal_code' => $collection->getBagSealCode(),
+            'status' => $collection->getStatus()->publicRestockerStatus(),
+            'status_label' => $collection->getStatus()->publicRestockerLabel(),
+            'change_tubes_loaded_eur' => $collection->getChangeTubesLoadedEur(),
+            'reception_cash_delivered_eur' => $collection->getReceptionCashDeliveredEur(),
+            'has_reception_receipt' => $collection->hasReceptionDelivery(),
+        ];
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function routeCashContext(int $restockerId, int $limit = 5): array
+    {
+        if ($restockerId <= 0) {
+            throw new InvalidArgumentException('El contexto de ruta exige un reponedor positivo.');
+        }
+
+        $limit = max(1, min($limit, 50));
+
+        return [
+            'recent_cash_collections' => array_map(
+                static fn (MachineCashCollection $collection): array => $collection->toRestockerArray(),
+                $this->collections->listForRestocker($restockerId, ['limit' => $limit])
+            ),
+            'cash_route_summary' => $this->collections->summarizeForRestocker($restockerId),
+        ];
     }
 
     /**

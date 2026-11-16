@@ -9,11 +9,13 @@ use PDO;
 use Throwable;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\MachinePlanogramService;
+use VendGuard\Application\Service\MachineCashCollectionService;
 use VendGuard\Application\Service\MachineRestockVisitService;
 use VendGuard\Application\Service\ProductLoadingOrderService;
 use VendGuard\Application\Service\RestockerVanStockService;
 use VendGuard\Application\Service\ShiftLifecycleService;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
+use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineOutsideRestockerZonesException;
 use VendGuard\Core\Domain\Exception\MachineRestockVisitValidationException;
@@ -28,10 +30,13 @@ use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoInSituRestockVisitGateway;
+use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionGateway;
+use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionRepository;
 use VendGuard\Infrastructure\Repository\PdoMachinePlanogramRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRestockVisitRepository;
 use VendGuard\Infrastructure\Repository\PdoOperationalZoneRepository;
 use VendGuard\Infrastructure\Repository\PdoProductLoadingOrderRepository;
+use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
 use VendGuard\Infrastructure\Repository\PdoRestockerVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftLogRepository;
@@ -148,7 +153,15 @@ final class RestockerRouteController
                 notifications: NotificationOutboxEnqueuerFactory::create($pdo)
             ),
             new PdoTransactionManager($pdo),
-            new AuditLogger()
+            new AuditLogger(),
+            null,
+            new MachineCashCollectionService(
+                new PdoMachineCashCollectionRepository($pdo),
+                new PdoMachineCashCollectionGateway($pdo),
+                new PdoRefundRequestRepository($pdo),
+                new PdoTransactionManager($pdo),
+                new AuditLogger()
+            )
         );
     }
 
@@ -188,6 +201,7 @@ final class RestockerRouteController
             $machines = $this->planogramService->listRestockerMachines($restockerId);
             $loadingContext = $this->loadingOrderService->getRestockerLoadingContext($restockerId);
             $vanStock = $this->vanStockService->getOwnVanStock($restockerId);
+            $cashContext = $this->visitService->routeCashContext($restockerId);
 
             return Response::json([
                 'restocker' => [
@@ -215,6 +229,8 @@ final class RestockerRouteController
                 'van_stock_kpis' => $vanStock['kpis'],
                 'has_expired_van_lots' => $vanStock['has_expired_lots'],
                 'recent_visits' => $this->visitRepository->listForRestocker($restockerId, ['limit' => 5]),
+                'recent_cash_collections' => $cashContext['recent_cash_collections'],
+                'cash_route_summary' => $cashContext['cash_route_summary'],
             ], 200);
         } catch (Throwable $exception) {
             error_log('[vendguard] Fallo al construir la ruta de carga del reponedor: ' . $exception);
@@ -516,6 +532,17 @@ final class RestockerRouteController
         try {
             return $operation();
         } catch (MachineRestockVisitValidationException $exception) {
+            $details = $exception->getField() === null
+                ? null
+                : array_merge(['field' => $exception->getField()], $exception->getContext());
+
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $details
+            );
+        } catch (MachineCashCollectionValidationException $exception) {
             $details = $exception->getField() === null
                 ? null
                 : array_merge(['field' => $exception->getField()], $exception->getContext());

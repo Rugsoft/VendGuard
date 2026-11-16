@@ -225,6 +225,18 @@ final class PdoMachineCashCollectionRepository implements MachineCashCollectionR
     /**
      * {@inheritdoc}
      */
+    public function findByRestockVisitId(int $restockVisitId): ?MachineCashCollection
+    {
+        if ($restockVisitId <= 0) {
+            return null;
+        }
+
+        return $this->findOneBy('c.restock_visit_id = :restock_visit_id', [':restock_visit_id' => $restockVisitId]);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function findLastForMachine(int $machineId): ?MachineCashCollection
     {
         if ($machineId <= 0) {

@@ -193,6 +193,17 @@ final class CashTestRepository implements MachineCashCollectionRepositoryInterfa
         return null;
     }
 
+    public function findByRestockVisitId(int $restockVisitId): ?MachineCashCollection
+    {
+        foreach ($this->collections as $collection) {
+            if ($collection->getRestockVisitId() === $restockVisitId) {
+                return $collection;
+            }
+        }
+
+        return null;
+    }
+
     public function findLastForMachine(int $machineId): ?MachineCashCollection
     {
         $candidates = array_values(array_filter(
