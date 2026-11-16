@@ -6,7 +6,7 @@
 - **Contratos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../specs/technical/cash_collection_vault_audit_contracts.md)
 - **Sistema de Diseño:** [`docs/design.md`](design.md)
 - **Fecha de auditoría:** 2026-11-16
-- **Última actualización:** 2026-11-16 · `FIX-35-03` cerrado
+- **Última actualización:** 2026-11-16 · `FIX-35-04` cerrado
 - **Rama:** `feat/cash-collection-vault-audit` · Base auditada `000688b`
 - **Alcance:** auditoría estática y ejecución real de suites. Este documento recoge el orden de corrección propuesto y se actualiza al cerrar cada FIX.
 
@@ -17,7 +17,7 @@
 La implementación está operativa y la batería ejecutada pasa en verde:
 
 - Batería hermética global: **435/435 suites · 16.686 aserciones · 0 fallos · `exit=0`** (tras `FIX-35-03`).
-- Suites focales del Módulo 35: todas en verde, entre ellas `PostgresCashCollectionVaultAuditSchemaTest` 46/46, `MachineCashCollectionValidatorTest` 114/114, `MachineCashCollectionServiceTest` 45/45, `CashCollectionDomainModelsTest` 74/74, `CashCollectionVaultAuditApiTest` 30/30 y `CashCollectionVaultAuditConstitutionalTest` 23/23.
+- Suites focales del Módulo 35: todas en verde, entre ellas `PostgresCashCollectionVaultAuditSchemaTest` 46/46, `MachineCashCollectionValidatorTest` 114/114, `MachineCashCollectionServiceTest` 45/45, `CashCollectionDomainModelsTest` 74/74, `CashCollectionVaultAuditApiTest` 30/30 y `CashCollectionVaultAuditConstitutionalTest` 24/24 (con `QA 1` sobre máquina, reponedor y revisor de caja tras baja lógica y cambio de nombre).
 - Proyección móvil: `RestockerCashCollectionViewDTO` publica una lista blanca de 18 campos y omite las cinco claves financieras privadas del Arqueo Ciego.
 - Frontend: `restocker_route_view.test.mjs` 209/209 y `coordinator_product_loading_tab.test.mjs` 80/80.
 - Layout móvil: `CashCollectionLayoutBrowserTest` 32/32 a `360 × 800` en Chromium real, con `document.documentElement.scrollWidth = 360` en las cuatro superficies de recaudación y en Coordinación.
@@ -38,7 +38,7 @@ Sin embargo, **la Spec 35 no puede declararse cumplida al 100 % en sentido liter
 | **1** | **FIX-35-01** | **P0 · Bloqueante contractual** | El reenvío idempotente responde `201` con la clave `idempotent`; la spec exige `200` con `idempotent_replay = true` | `RF-01.2.3` | Contrato REST incumplido y test que certifica el comportamiento contrario; un cliente que implemente la spec no puede validar el reenvío | **Cerrada (2026-11-16)** |
 | **2** | **FIX-35-02** | **P1 · Alto** | No hay prueba real de layout a `360 px` para los nuevos bloques/modales de recaudación; las guardas solo validan plantillas, tokens y geometría inline | `RNF-03`, DoD 3 | Riesgo de desbordamiento horizontal o contenido clipped en móvil; el requisito no está certificado | **Cerrada (2026-11-16)** |
 | **3** | **FIX-35-03** | **P1 · Alto** | `RestockerCashCollectionViewDTO` no existe; la opacidad se resuelve con `MachineCashCollection::toRestockerArray()` | `RNF-02.3` | La conducta es correcta, pero el artefacto nombrado por la spec y por la matriz no existe; una auditoría literal no lo encuentra | **Cerrada (2026-11-16)** |
-| **4** | **FIX-35-04** | **P1 · Alto** | El test de baja lógica comprueba snapshots de máquina y reponedor, pero no `vault_reconciled_by_name_snapshot` | `QA 1`, Art. III.3 | No está certificada la conservación del revisor de caja tras una baja lógica | **Abierta** |
+| **4** | **FIX-35-04** | **P1 · Alto** | El test de baja lógica comprueba snapshots de máquina y reponedor, pero no `vault_reconciled_by_name_snapshot` | `QA 1`, Art. III.3 | No está certificada la conservación del revisor de caja tras una baja lógica | **Cerrada (2026-11-16)** |
 | **5** | **FIX-35-05** | **P1 · Alto** | El código registra `CASH_COLLECTION_DELIVERED_TO_VAULT`, pero ninguna suite lo asserta | `RF-04.1`, Art. III.3 | La trazabilidad de la recepción en cámara existe, pero no tiene regresión que la proteja | **Abierta** |
 | **6** | **FIX-35-06** | **P2 · Medio** | No hay aserción específica de usuario/máquina inactivos ni del bloqueo `FOR UPDATE OF m` en la captura | `RF-02.1` | La defensa está en el código, pero no está certificada por una prueba del módulo | **Abierta** |
 | **7** | **FIX-35-07** | **P2 · Medio** | La spec afirma haber cerrado 17 puntos QA, pero no los enumera; solo se documentan 4 resoluciones agregadas | `QA 1`–`QA 4`, §9 | No es posible verificar 17/17 ni auditar qué observación cerró cada cambio | **Abierta** |
@@ -242,13 +242,13 @@ Se eligió la **opción A** y se implementó el 2026-11-16:
 
 ---
 
-## FIX-35-04 · Snapshot del revisor de caja tras baja lógica · P1
+## FIX-35-04 · Snapshot del revisor de caja tras baja lógica · P1 · ✅ Cerrada
 
 ### Requisito
 
 La resolución `QA 1` exige que la Tabla 49 congele al arquear `vault_reconciled_by_name_snapshot`, «garantizando legibilidad histórica perpetua». El caso §6.5 exige que una bolsa en tránsito se pueda arquear aunque la máquina o el operario hayan causado baja después.
 
-### Evidencia actual
+### Evidencia previa (antes del cierre)
 
 - `tests/integration/CashCollectionVaultAuditConstitutionalTest.php:490-491` desactiva el reponedor y la máquina; `5.1` recepciona y `5.2` arquea correctamente.
 - `5.3` selecciona únicamente `machine_code_snapshot`, `restocker_name_snapshot` y `restocker_code_snapshot`; **no selecciona ni asserta `vault_reconciled_by_name_snapshot`**.
@@ -268,16 +268,27 @@ La trazabilidad histórica del revisor es una obligación de auditoría, no un d
 
 ### Criterios de aceptación
 
-- [ ] El test falla si se elimina la escritura de `vault_reconciled_by_name_snapshot`.
-- [ ] El snapshot del revisor sigue siendo legible después de `is_active = FALSE` del coordinador.
-- [ ] Los snapshots de máquina, reponedor y revisor se comprueban en la misma prueba de baja lógica.
-- [ ] La matriz enlaza la aserción concreta.
+- [x] El test falla si se elimina la escritura de `vault_reconciled_by_name_snapshot`.
+- [x] El snapshot del revisor sigue siendo legible después de `is_active = FALSE` del coordinador.
+- [x] Los snapshots de máquina, reponedor y revisor se comprueban en la misma prueba de baja lógica.
+- [x] La matriz enlaza la aserción concreta.
 
-### Archivos previsibles
+### Cierre
+
+Cerrada el 2026-11-16 sobre `tests/integration/CashCollectionVaultAuditConstitutionalTest.php`:
+
+- La prueba de `QA 1` arquea la bolsa en tránsito con un coordinador revisor dedicado (`Revisor Caja T-CCV-09`), después de dar de baja lógica al reponedor y a la máquina (`is_active = FALSE`).
+- Tras el arqueo, el revisor también pasa a `is_active = FALSE` y se renombra su fila en `users` (`Revisor Renombrado Tras Baja`) para demostrar que la lectura histórica no recalcula el nombre desde `users`.
+- `5.3` selecciona en PostgreSQL `machine_code_snapshot`, `restocker_name_snapshot`, `restocker_code_snapshot` y `vault_reconciled_by_name_snapshot` y verifica los cuatro valores congelados.
+- `5.4` consulta `GET /api/coordinator/cash-collections/{id}` con el coordinador titular y verifica por HTTP los cuatro snapshots históricos inmutables.
+- Si se elimina la escritura de `vault_reconciled_by_name_snapshot`, el bloque falla (además de la restricción `chk_machine_cash_collections_vault_lifecycle` en PostgreSQL y la validación del repositorio).
+- Evidencia focal: `php tests/integration/CashCollectionVaultAuditConstitutionalTest.php` → **24/24 aserciones · 0 fallos · `exit=0`**. Canal `new_engine`: **65 suites · 64 en verde · 1 no ejecutable por el contrato TLS local · 2.122 aserciones · 0 fallos**.
+
+### Archivos
 
 - `tests/integration/CashCollectionVaultAuditConstitutionalTest.php`
-- `src/Application/Service/MachineCashCollectionService.php` (solo si la prueba descubre que el snapshot no se persiste)
 - `specs/35-cash-collection-vault-audit/traceability-matrix.md`
+- `odd/tasks/cash-collection-vault-audit.md`
 
 ---
 
@@ -458,8 +469,8 @@ El DoD 5 exige que toda la batería de pruebas unitarias, de integración Postgr
 
 - Batería global: **435/435 suites · 16.686 aserciones · 0 fallos · `exit=0`**; `DocMetricsGuard` coherente.
 - Las suites del Módulo 35 se ejecutaron focalmente y están en verde.
-- La matriz y el ODD documentan para `new_engine` **65 suites, 64 en verde y 1 no ejecutable por el contrato TLS local**, 2.121 aserciones, 0 fallos, `exit=0`.
-- Tras `FIX-35-02` se reejecutaron las 65 suites completas del canal `new_engine`; la única no ejecutable sigue siendo `PostgresTieredSlaMetricsPerformanceTest` por el contrato TLS local.
+- La matriz y el ODD documentan para `new_engine` **65 suites, 64 en verde y 1 no ejecutable por el contrato TLS local**, 2.122 aserciones, 0 fallos, `exit=0`.
+- Tras `FIX-35-04` se ejecutó el canal `new_engine` completo y la única no ejecutable sigue siendo `PostgresTieredSlaMetricsPerformanceTest` por el contrato TLS local.
 
 ### Impacto
 

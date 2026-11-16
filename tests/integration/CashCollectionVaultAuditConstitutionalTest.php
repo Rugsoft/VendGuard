@@ -23,7 +23,8 @@ declare(strict_types=1);
  *      justificación se rechazan en aplicación y en el `CHECK` del motor.
  *   5. **QA 1 / Art. III.3.** Una bolsa en tránsito se recepciona y arquea
  *      incluso después de la baja lógica del reponedor y de la máquina,
- *      conservando los snapshots históricos.
+ *      conservando los snapshots históricos de máquina, reponedor y revisor de
+ *      caja incluso tras la baja lógica y cambio de nombre del revisor.
  *   6. **Art. III.3.** El alta y el arqueo dejan eventos auditables
  *      `MACHINE_CASH_COLLECTION` con actor de rol `COORDINATOR`.
  *
@@ -130,6 +131,7 @@ try {
     };
 
     $coordinatorId = $createUser('coord', 'COORDINATOR', 'Coordinación T-CCV-09');
+    $reviewerCoordinatorId = $createUser('reviewer', 'COORDINATOR', 'Revisor Caja T-CCV-09');
     $ownerId = $createUser('owner', 'RESTOCKER', 'Reposición Titular T-CCV-09');
     $otherId = $createUser('other', 'RESTOCKER', 'Reposición Ajena T-CCV-09');
     $technicianId = $createUser('sat', 'TECHNICIAN', 'Técnico SAT T-CCV-09');
@@ -199,6 +201,7 @@ try {
     $userRepo = new PdoUserRepository($pdo);
     $authService = new AuthService(null, $userRepo);
     $coordinatorToken = $authService->generateInternalToken($userRepo->findById($coordinatorId));
+    $reviewerToken = $authService->generateInternalToken($userRepo->findById($reviewerCoordinatorId));
     $ownerToken = $authService->generateInternalToken($userRepo->findById($ownerId));
     $otherToken = $authService->generateInternalToken($userRepo->findById($otherId));
     $technicianToken = $authService->generateInternalToken($userRepo->findById($technicianId));
@@ -492,25 +495,41 @@ try {
 
     $transitReconciled = $call('POST', '/api/coordinator/cash-collections/' . $transitId . '/reconcile', [
         'vault_counted_eur' => 100.00,
-    ], $coordinatorToken);
+    ], $reviewerToken);
     $assert(
         '5.2 Una bolsa en tránsito se arquea aunque máquina y reponedor estén de baja',
         $transitReconciled->getStatusCode() === 200
             && (($data($transitReconciled)['status'] ?? '') === 'RECONCILED_OK')
+            && (($data($transitReconciled)['vault_reconciled_by_name_snapshot'] ?? '') === 'Revisor Caja T-CCV-09')
     );
 
+    $pdo->prepare('UPDATE users SET is_active = FALSE, name = :renamed WHERE id = :id')
+        ->execute([':renamed' => 'Revisor Renombrado Tras Baja', ':id' => $reviewerCoordinatorId]);
+
     $snapshots = $pdo->prepare(
-        'SELECT machine_code_snapshot, restocker_name_snapshot, restocker_code_snapshot
+        'SELECT machine_code_snapshot, restocker_name_snapshot, restocker_code_snapshot, vault_reconciled_by_name_snapshot
            FROM machine_cash_collections WHERE id = :id'
     );
     $snapshots->execute([':id' => $transitId]);
     $snapshotRow = $snapshots->fetch(PDO::FETCH_ASSOC);
     $assert(
-        '5.3 Los snapshots de máquina y reponedor sobreviven a la baja lógica',
+        '5.3 Los snapshots de máquina, reponedor y revisor de caja sobreviven a la baja lógica y cambio de nombre',
         is_array($snapshotRow)
             && ($snapshotRow['machine_code_snapshot'] ?? '') === 'CCV9-SNACK-01'
-            && trim((string)($snapshotRow['restocker_name_snapshot'] ?? '')) !== ''
-            && trim((string)($snapshotRow['restocker_code_snapshot'] ?? '')) !== ''
+            && ($snapshotRow['restocker_name_snapshot'] ?? '') === 'Reposición Constitucional'
+            && ($snapshotRow['restocker_code_snapshot'] ?? '') === 'CCV9-R'
+            && ($snapshotRow['vault_reconciled_by_name_snapshot'] ?? '') === 'Revisor Caja T-CCV-09'
+    );
+
+    $historicalDetail = $call('GET', '/api/coordinator/cash-collections/' . $transitId, [], $coordinatorToken);
+    $historicalData = $data($historicalDetail);
+    $assert(
+        '5.4 La lectura histórica de Coordinación conserva el snapshot del revisor sin recalcularlo desde users',
+        $historicalDetail->getStatusCode() === 200
+            && ($historicalData['machine_code_snapshot'] ?? '') === 'CCV9-SNACK-01'
+            && ($historicalData['restocker_name_snapshot'] ?? '') === 'Reposición Constitucional'
+            && ($historicalData['restocker_code_snapshot'] ?? '') === 'CCV9-R'
+            && ($historicalData['vault_reconciled_by_name_snapshot'] ?? '') === 'Revisor Caja T-CCV-09'
     );
 
     // ─────────────────────────────────────────────────────────────────────

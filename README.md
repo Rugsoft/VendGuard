@@ -814,7 +814,7 @@ Corrida del 16 de noviembre de 2026 (canal cerrado · 64 en verde y una suite co
  Suites evaluadas    : 65
  Suites en verde     : 64
  No ejecutables      : 1
- Aserciones          : 2.121
+ Aserciones          : 2.122
  Fallos              : 0
  RESULTADO: CANAL CERRADO · 1 suite(s) declararon otro contrato y se listan arriba (no se omiten en silencio).
 ======================================================================
