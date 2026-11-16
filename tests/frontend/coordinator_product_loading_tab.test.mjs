@@ -10,6 +10,7 @@
  *   5. Stock por lote FEFO y ajuste auditado.
  *   6. Integración en el dashboard, cliente API y Service Worker.
  *   7. Visitas de reposición in situ, cinco KPIs y expediente FEFO.
+ *   8. Recaudación, cambio y arqueo de caja, seis KPIs, recepción y CSV.
  *
  * Dogma Vanilla: Node.js ESM nativo, sin dependencias externas.
  */
@@ -523,6 +524,166 @@ const visitDetail = {
   ]
 };
 
+const cashCollections = [
+  {
+    id: 9001,
+    collection_code: 'MCC-2026-9001',
+    restock_visit_id: 501,
+    machine_id: 1,
+    machine_code_snapshot: 'VEND-RVF10-01',
+    restocker_id: 7,
+    restocker_name_snapshot: 'Marta Reponedora',
+    restocker_code_snapshot: 'OP-07',
+    bag_seal_code: 'BAG-2026-009101',
+    change_tubes_loaded_eur: 10,
+    sales_counter_reading: 1350,
+    previous_sales_counter_reading: 1200,
+    initial_baseline_reading_eur: 0,
+    is_counter_reset: false,
+    counter_reset_notes: null,
+    expected_cashbox_eur: 150,
+    reception_cash_delivered_eur: 0,
+    receptionist_name: null,
+    linked_refund_request_id: null,
+    route_notes: null,
+    status: 'SEALED_IN_ROUTE',
+    status_label: 'Sellada en ruta',
+    collected_at: '2026-11-13 08:42:00+00',
+    delivered_to_vault_at: null,
+    vault_counted_eur: null,
+    discrepancy_eur: null,
+    vault_reconciled_by_name_snapshot: null,
+    vault_reconciled_at: null,
+    discrepancy_justification: null,
+    is_terminal: false,
+    location_code: 'SEDE-CENTRAL',
+    location_name: 'Sede Central · Hall'
+  },
+  {
+    id: 9002,
+    collection_code: 'MCC-2026-9002',
+    restock_visit_id: null,
+    machine_id: 2,
+    machine_code_snapshot: 'VEND-RVF10-02',
+    restocker_id: 8,
+    restocker_name_snapshot: 'Luis Cargador',
+    restocker_code_snapshot: 'OP-08',
+    bag_seal_code: 'BAG-2026-009102',
+    change_tubes_loaded_eur: 0,
+    sales_counter_reading: 1080,
+    previous_sales_counter_reading: 1000,
+    initial_baseline_reading_eur: 0,
+    is_counter_reset: false,
+    counter_reset_notes: null,
+    expected_cashbox_eur: 80,
+    reception_cash_delivered_eur: 2.5,
+    receptionist_name: 'Carlos Ruiz',
+    linked_refund_request_id: 44,
+    route_notes: null,
+    status: 'DELIVERED_TO_VAULT',
+    status_label: 'En cámara',
+    collected_at: '2026-11-13 09:30:00+00',
+    delivered_to_vault_at: '2026-11-13 10:00:00+00',
+    vault_counted_eur: null,
+    discrepancy_eur: null,
+    vault_reconciled_by_name_snapshot: null,
+    vault_reconciled_at: null,
+    discrepancy_justification: null,
+    is_terminal: false,
+    location_code: 'SEDE-NORTE',
+    location_name: 'Sede Norte · Cafetería'
+  },
+  {
+    id: 9003,
+    collection_code: 'MCC-2026-9003',
+    restock_visit_id: null,
+    machine_id: 1,
+    machine_code_snapshot: 'VEND-RVF10-01',
+    restocker_id: 7,
+    restocker_name_snapshot: 'Marta Reponedora',
+    restocker_code_snapshot: 'OP-07',
+    bag_seal_code: 'BAG-2026-009103',
+    change_tubes_loaded_eur: 5,
+    sales_counter_reading: 1200,
+    previous_sales_counter_reading: 1100,
+    initial_baseline_reading_eur: 0,
+    is_counter_reset: false,
+    counter_reset_notes: null,
+    expected_cashbox_eur: 100,
+    reception_cash_delivered_eur: 0,
+    receptionist_name: null,
+    linked_refund_request_id: null,
+    route_notes: null,
+    status: 'RECONCILED_OK',
+    status_label: 'Arqueada OK',
+    collected_at: '2026-11-12 08:00:00+00',
+    delivered_to_vault_at: '2026-11-12 09:00:00+00',
+    vault_counted_eur: 100,
+    discrepancy_eur: 0,
+    vault_reconciled_by_name_snapshot: 'Coordinación Central',
+    vault_reconciled_at: '2026-11-12 09:15:00+00',
+    discrepancy_justification: null,
+    is_terminal: true,
+    location_code: 'SEDE-CENTRAL',
+    location_name: 'Sede Central · Hall'
+  },
+  {
+    id: 9004,
+    collection_code: 'MCC-2026-9004',
+    restock_visit_id: null,
+    machine_id: 2,
+    machine_code_snapshot: 'VEND-RVF10-02',
+    restocker_id: 8,
+    restocker_name_snapshot: 'Luis Cargador',
+    restocker_code_snapshot: 'OP-08',
+    bag_seal_code: 'BAG-2026-009104',
+    change_tubes_loaded_eur: 0,
+    sales_counter_reading: 1210,
+    previous_sales_counter_reading: 1000,
+    initial_baseline_reading_eur: 0,
+    is_counter_reset: false,
+    counter_reset_notes: null,
+    expected_cashbox_eur: 210,
+    reception_cash_delivered_eur: 0,
+    receptionist_name: null,
+    linked_refund_request_id: null,
+    route_notes: null,
+    status: 'DISCREPANCY_FLAGGED',
+    status_label: 'Con descuadre',
+    collected_at: '2026-11-11 08:00:00+00',
+    delivered_to_vault_at: '2026-11-11 09:00:00+00',
+    vault_counted_eur: 205,
+    discrepancy_eur: -5,
+    vault_reconciled_by_name_snapshot: 'Coordinación Central',
+    vault_reconciled_at: '2026-11-11 09:15:00+00',
+    discrepancy_justification: 'Faltan cinco euros del cambio entregado en la ruta de la mañana.',
+    is_terminal: true,
+    location_code: 'SEDE-NORTE',
+    location_name: 'Sede Norte · Cafetería'
+  }
+];
+
+const cashKpis = {
+  pending_vault_bags_count: 2,
+  reconciled_ok_count: 1,
+  discrepancy_flagged_count: 1,
+  total_vault_counted_eur: 305.50,
+  net_discrepancy_eur: -5,
+  total_route_cash_deployed_eur: 17.50
+};
+
+const cashReceipt = {
+  collection_code: 'MCC-2026-9002',
+  collected_at: '2026-11-13 09:30:00+00',
+  location_code: 'SEDE-NORTE',
+  location_name: 'Sede Norte · Cafetería',
+  machine_code: 'VEND-RVF10-02',
+  restocker_name: 'Luis Cargador',
+  receptionist_name: 'Carlos Ruiz',
+  reception_cash_delivered_eur: 2.5,
+  linked_refund_request_id: 44
+};
+
 const calls = [];
 api.coordinator.getUsers = async (params) => {
   calls.push({ method: 'getUsers', params });
@@ -637,6 +798,54 @@ api.coordinator.getRestockVisit = async (visitId) => {
     throw new Error('No existe la visita de reposición solicitada.');
   }
   return { data: visitDetail };
+};
+api.coordinator.getCashCollections = async (params) => {
+  calls.push({ method: 'getCashCollections', params });
+  return { data: { cash_collections: cashCollections, kpis: cashKpis } };
+};
+api.coordinator.getCashCollection = async (collectionId) => {
+  calls.push({ method: 'getCashCollection', collectionId });
+  const collection = cashCollections.find((item) => String(item.id) === String(collectionId));
+  return { data: collection ? { ...collection } : null };
+};
+api.coordinator.deliverCashCollectionToVault = async (collectionId) => {
+  calls.push({ method: 'deliverCashCollectionToVault', collectionId });
+  return {
+    data: {
+      ...cashCollections[0],
+      id: Number(collectionId),
+      status: 'DELIVERED_TO_VAULT',
+      status_label: 'En cámara',
+      delivered_to_vault_at: '2026-11-13 10:00:00+00'
+    }
+  };
+};
+api.coordinator.reconcileCashCollection = async (collectionId, payload) => {
+  calls.push({ method: 'reconcileCashCollection', collectionId, payload });
+  const expected = Number(cashCollections.find((item) => String(item.id) === String(collectionId))?.expected_cashbox_eur || 0);
+  const discrepancy = Math.round((Number(payload.vault_counted_eur) - expected) * 100) / 100;
+  return {
+    data: {
+      ...cashCollections[0],
+      id: Number(collectionId),
+      status: Math.abs(discrepancy) <= 1 ? 'RECONCILED_OK' : 'DISCREPANCY_FLAGGED',
+      status_label: Math.abs(discrepancy) <= 1 ? 'Arqueada OK' : 'Con descuadre',
+      vault_counted_eur: Number(payload.vault_counted_eur),
+      discrepancy_eur: discrepancy,
+      discrepancy_justification: payload.discrepancy_justification || null,
+      vault_reconciled_by_name_snapshot: 'Coordinación Central',
+      vault_reconciled_at: '2026-11-13 10:15:00+00',
+      is_terminal: true
+    }
+  };
+};
+api.coordinator.getCashCollectionReceptionReceipt = async (collectionId) => {
+  calls.push({ method: 'getCashCollectionReceptionReceipt', collectionId });
+  return { data: cashReceipt };
+};
+api.coordinator.exportCashCollectionsCsv = async (params) => {
+  calls.push({ method: 'exportCashCollectionsCsv', params });
+  return true;
 };
 
 function buildInstance() {
@@ -913,10 +1122,11 @@ async function runTests() {
       && CoordinatorDashboardView.template.includes('@open-incident-detail="openIncidentDetailFromPreventive"')
   );
   assert(
-    '6.4 El panel ofrece las tres sub-vistas: órdenes, stock y visitas',
+    '6.4 El panel ofrece las cuatro sub-vistas: órdenes, stock, visitas y recaudación',
     CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-orders-section"')
       && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-stock-section"')
       && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-visits-section"')
+      && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-cash-section"')
   );
   assert(
     '6.5 El componente usa tokens CSS y no hexadecimales',
@@ -935,7 +1145,7 @@ async function runTests() {
   assert(
     '6.8 El Service Worker precachea el componente nuevo',
     swSource.includes('/assets/js/components/CoordinatorProductLoadingTab.js')
-      && swSource.includes('vendguard-app-shell-v20')
+      && swSource.includes('vendguard-app-shell-v21')
   );
 
   const apiMethods = [
@@ -952,10 +1162,16 @@ async function runTests() {
     'reconcileProductLoadingOrder',
     'cancelProductLoadingOrder',
     'getRestockVisits',
-    'getRestockVisit'
+    'getRestockVisit',
+    'getCashCollections',
+    'getCashCollection',
+    'deliverCashCollectionToVault',
+    'reconcileCashCollection',
+    'getCashCollectionReceptionReceipt',
+    'exportCashCollectionsCsv'
   ];
   assert(
-    '6.9 El API expone las catorce operaciones del módulo',
+    '6.9 El API expone las veinte operaciones del módulo',
     apiMethods.every((method) => typeof api.coordinator[method] === 'function')
   );
 
@@ -1078,10 +1294,181 @@ async function runTests() {
   visitsComponent.showVisitDetailModal = false;
   visitsComponent.visitDetailError = '';
 
+  // ─────────────────────────────────────────────────────────────────────
+  // 8. Recaudación, cambio y arqueo de caja
+  // ─────────────────────────────────────────────────────────────────────
+  console.log('\n--- 8. Recaudación, cambio y arqueo de caja ---');
+
+  const cashComponent = buildInstance();
+  await cashComponent.loadCashCollections();
+  assert(
+    '8.1 Carga las cuatro recaudaciones y los seis KPIs ejecutivos',
+    cashComponent.cashCollections.length === 4
+      && cashComponent.cashKpis.pending_vault_bags_count === 2
+      && cashComponent.cashKpis.reconciled_ok_count === 1
+      && cashComponent.cashKpis.discrepancy_flagged_count === 1
+      && cashComponent.cashKpis.total_vault_counted_eur === 305.5
+      && cashComponent.cashKpis.net_discrepancy_eur === -5
+      && cashComponent.cashKpis.total_route_cash_deployed_eur === 17.5
+  );
+  assert(
+    '8.2 El semáforo distingue los cuatro estados de custodia',
+    cashComponent.cashStatusTone('SEALED_IN_ROUTE').includes('vg-badge-warning')
+      && cashComponent.cashStatusTone('DELIVERED_TO_VAULT').includes('vg-badge-info')
+      && cashComponent.cashStatusTone('RECONCILED_OK').includes('vg-badge-success')
+      && cashComponent.cashStatusTone('DISCREPANCY_FLAGGED').includes('vg-badge-danger')
+  );
+
+  cashComponent.cashFilters = {
+    restocker_id: 7,
+    machine_id: 1,
+    status: 'DISCREPANCY_FLAGGED',
+    bag_seal_code: ' bag-2026-009104 ',
+    date_from: '2026-11-01',
+    date_to: ''
+  };
+  await cashComponent.loadCashCollections();
+  const cashCall = calls.filter((call) => call.method === 'getCashCollections').at(-1);
+  assert(
+    '8.3 Los filtros saneados viajan al API, incluido el precinto normalizado',
+    cashCall?.params?.restocker_id === 7
+      && cashCall?.params?.machine_id === 1
+      && cashCall?.params?.status === 'DISCREPANCY_FLAGGED'
+      && cashCall?.params?.bag_seal_code === 'BAG-2026-009104'
+      && cashCall?.params?.date_from === '2026-11-01'
+      && !Object.prototype.hasOwnProperty.call(cashCall.params, 'date_to')
+  );
+  cashComponent.cashFilters = {
+    restocker_id: '',
+    machine_id: '',
+    status: 'ALL',
+    bag_seal_code: '',
+    date_from: '',
+    date_to: ''
+  };
+  assert('8.4 El estado ALL no viaja al backend', Object.keys(cashComponent.cashFilterParams()).length === 0);
+
+  await cashComponent.openCashDetailModal(cashCollections[0]);
+  assert(
+    '8.5 El modal de arqueo carga lecturas, esperado y formulario vacío',
+    cashComponent.showCashDetailModal === true
+      && cashComponent.selectedCashId === 9001
+      && cashComponent.cashDetailCollection?.previous_sales_counter_reading === 1200
+      && cashComponent.cashDetailCollection?.expected_cashbox_eur === 150
+      && cashComponent.cashReconcileForm.vault_counted_eur === ''
+  );
+
+  cashComponent.cashReconcileForm.vault_counted_eur = '145.50';
+  assert(
+    '8.6 El descuadre se calcula en vivo y exige justificación',
+    cashComponent.cashLiveDiscrepancy === -4.5
+      && cashComponent.cashRequiresJustification === true
+  );
+  const callsBeforeInvalidCash = calls.filter((call) => call.method === 'reconcileCashCollection').length;
+  assert(
+    '8.7 Un descuadre sin justificación real no se envía al API',
+    cashComponent.validateCashReconciliation() === false
+      && cashComponent.cashReconcileError.includes('20')
+      && calls.filter((call) => call.method === 'reconcileCashCollection').length === callsBeforeInvalidCash
+  );
+  cashComponent.cashReconcileForm.discrepancy_justification = 'Faltan 4,50 € del cambio de la ruta de la mañana.';
+  assert('8.8 Una justificación real desbloquea el arqueo', cashComponent.validateCashReconciliation() === true);
+  await cashComponent.submitCashReconciliation();
+  const cashReconcileCall = calls.filter((call) => call.method === 'reconcileCashCollection').at(-1);
+  assert(
+    '8.9 El arqueo envía el contado y la justificación, y sella el descuadre',
+    cashReconcileCall?.collectionId === 9001
+      && cashReconcileCall?.payload?.vault_counted_eur === 145.5
+      && cashReconcileCall?.payload?.discrepancy_justification.length >= 20
+      && cashComponent.showCashDetailModal === false
+      && cashComponent.cashSuccess.includes('MCC-2026-9001')
+  );
+
+  const exactComponent = buildInstance();
+  await exactComponent.openCashDetailModal(cashCollections[0]);
+  exactComponent.cashReconcileForm.vault_counted_eur = '150.50';
+  assert(
+    '8.10 Un descuadre dentro de ±1,00 € no exige justificación',
+    exactComponent.cashLiveDiscrepancy === 0.5
+      && exactComponent.cashRequiresJustification === false
+      && exactComponent.validateCashReconciliation() === true
+  );
+  exactComponent.showCashDetailModal = false;
+
+  const deliveryComponent = buildInstance();
+  await deliveryComponent.loadCashCollections();
+  await deliveryComponent.deliverCashCollection(cashCollections[0]);
+  const deliveryCall = calls.filter((call) => call.method === 'deliverCashCollectionToVault').at(-1);
+  assert(
+    '8.11 La recepción en cámara se ejecuta en un toque',
+    deliveryCall?.collectionId === 9001
+      && deliveryComponent.cashSuccess.includes('recibida en Caja Central')
+  );
+
+  await cashComponent.openCashReceiptModal(cashCollections[1]);
+  assert(
+    '8.12 El recibo de conserjería expone exactamente nueve campos sin PII ni PIN',
+    cashComponent.showCashReceiptModal === true
+      && Object.keys(cashComponent.cashReceipt).length === 9
+      && cashComponent.cashReceipt.reception_cash_delivered_eur === 2.5
+      && !Object.prototype.hasOwnProperty.call(cashComponent.cashReceipt, 'bag_seal_code')
+      && !Object.prototype.hasOwnProperty.call(cashComponent.cashReceipt, 'pickup_pin')
+      && !Object.prototype.hasOwnProperty.call(cashComponent.cashReceipt, 'expected_cashbox_eur')
+  );
+  cashComponent.showCashReceiptModal = false;
+
+  await cashComponent.openCashVisit(cashCollections[0]);
+  assert(
+    '8.13 La visita de reposición vinculada se abre desde el arqueo',
+    cashComponent.showCashDetailModal === false
+      && cashComponent.visitDetailVisit?.visit_code === 'MRV-2026-0501'
+  );
+
+  await cashComponent.exportCashCollectionsCsv();
+  const exportCall = calls.filter((call) => call.method === 'exportCashCollectionsCsv').at(-1);
+  assert(
+    '8.14 La exportación CSV usa el mismo filtro activo',
+    Boolean(exportCall)
+      && exportCall.params.status === undefined
+      && cashComponent.cashSuccess.includes('CSV')
+  );
+
+  assert(
+    '8.15 La sub-vista publica KPIs, tabla, modal de arqueo, recibo y CSV',
+    CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-cash-section-button"')
+      && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-cash-kpis"')
+      && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-cash-table"')
+      && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-cash-detail-modal"')
+      && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-cash-detail-terminal"')
+      && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-cash-receipt-modal"')
+      && CoordinatorProductLoadingTab.template.includes('data-testid="product-loading-cash-export"')
+      && CoordinatorProductLoadingTab.template.includes('Bolsas en ruta / cámara (Pendientes)')
+      && CoordinatorProductLoadingTab.template.includes('Bolsas arqueadas OK')
+      && CoordinatorProductLoadingTab.template.includes('Arqueos con descuadre')
+      && CoordinatorProductLoadingTab.template.includes('Total recaudado en caja')
+      && CoordinatorProductLoadingTab.template.includes('Descuadre neto acumulado')
+      && CoordinatorProductLoadingTab.template.includes('Cambio cargado + Conserjería')
+  );
+  assert(
+    '8.16 El cliente API expone las seis operaciones de recaudación',
+    [
+      'getCashCollections',
+      'getCashCollection',
+      'deliverCashCollectionToVault',
+      'reconcileCashCollection',
+      'getCashCollectionReceptionReceipt',
+      'exportCashCollectionsCsv'
+    ].every((method) => typeof api.coordinator[method] === 'function')
+  );
+  assert(
+    '8.17 El módulo no ofrece ninguna operación de borrado',
+    !calls.some((call) => String(call.method).toLowerCase().includes('delete'))
+  );
+
   console.log('\n======================================================================');
   if (failures === 0) {
     console.log(` RESULTADO: ¡TODAS LAS PRUEBAS PASARON (${assertions} aserciones, 0 fallos)!`);
-    console.log(' PESTAÑA DE ÓRDENES DE CARGA, STOCK POR LOTE Y VISITAS IN SITU VERIFICADA.');
+    console.log(' PESTAÑA DE ÓRDENES, STOCK, VISITAS IN SITU Y ARQUEO DE CAJA VERIFICADA.');
   } else {
     console.error(` RESULTADO: ${failures} PRUEBA(S) FALLIDA(S) de ${assertions} evaluadas.`);
   }

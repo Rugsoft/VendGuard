@@ -1813,6 +1813,31 @@ export class ApiClient {
     getRestockVisit: (visitId) => {
       return this.get(`/coordinator/restock-visits/${encodeURIComponent(visitId)}`);
     },
+
+    // Recaudación, cambio y arqueo de caja (Módulo 35).
+    //
+    // La lectura financiera es exclusiva de Coordinación; las mutaciones de
+    // recepción y arqueo viajan separadas del listado para que el componente no
+    // conozca las rutas ni confunda una transición con una recarga de KPIs.
+    getCashCollections: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/cash-collections${q ? `?${q}` : ''}`);
+    },
+    getCashCollection: (collectionId) => {
+      return this.get(`/coordinator/cash-collections/${encodeURIComponent(collectionId)}`);
+    },
+    deliverCashCollectionToVault: (collectionId) => {
+      return this.post(`/coordinator/cash-collections/${encodeURIComponent(collectionId)}/deliver-to-vault`);
+    },
+    reconcileCashCollection: (collectionId, payload) => {
+      return this.post(`/coordinator/cash-collections/${encodeURIComponent(collectionId)}/reconcile`, payload);
+    },
+    getCashCollectionReceptionReceipt: (collectionId) => {
+      return this.get(`/coordinator/cash-collections/${encodeURIComponent(collectionId)}/reception-receipt`);
+    },
+    exportCashCollectionsCsv: (params = {}) => {
+      return this.downloadFile('/coordinator/cash-collections/export-csv', 'recaudaciones.csv', params);
+    },
     adjustRestockerVanStock: (restockerId, payload) => {
       return this.put(`/coordinator/restocker-van-stocks/${encodeURIComponent(restockerId)}`, payload);
     },

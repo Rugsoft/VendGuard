@@ -3,8 +3,8 @@
  *
  * Pestaña de Coordinación para las órdenes de carga de producto de las
  * furgonetas de reposición, el inventario por lote y las visitas in situ
- * (Módulos 33 y 34, RF-03.2, RF-05.1, RF-05.2, RNF-03, D1-D4, QA 1,
- * Art. V.4). Tres sub-vistas:
+ * (Módulos 33, 34 y 35, RF-03.2, RF-04.1, RF-04.2, RF-05.1–RF-05.3, RNF-03,
+ * D1-D4, QA 1, QA 3, QA 4, Art. V.1, Art. V.4). Cuatro sub-vistas:
  *
  *   1. «🚚 Órdenes de Carga de Producto y Cámara Frigorífica»: KPIs, propuesta
  *      individual con modo de demanda y colchón, emisión masiva, edición en
@@ -15,6 +15,9 @@
  *   3. «📋 Visitas de Reposición In Situ y Control FEFO»: cinco KPIs ejecutivos,
  *      filtros por reponedor, estado, máquina y rango de fechas, libro histórico
  *      y expediente carril a carril con checklist, foto y ticket SAT (`RF-05.2`).
+ *   4. «🪙 Recaudación, Cambio y Arqueo de Caja»: seis KPIs reactivos al filtro,
+ *      recepción en cámara, arqueo ciego con descuadre en vivo, recibo opaco y
+ *      exportación CSV (`RF-04.1`, `RF-04.2`, `RF-05.3`, `QA 3`, `QA 4`).
  *
  * La vista no decide ninguna regla sanitaria: el cerrojo térmico, la
  * obligatoriedad de lote/caducidad, el cuadre y la justificación mínima viven
@@ -56,6 +59,15 @@ const emptyVisitKpis = () => ({
   total_units_added: 0,
   total_units_withdrawn: 0,
   total_commercial_spoilage_loss_eur: 0
+});
+
+const emptyCashKpis = () => ({
+  pending_vault_bags_count: 0,
+  reconciled_ok_count: 0,
+  discrepancy_flagged_count: 0,
+  total_vault_counted_eur: 0,
+  net_discrepancy_eur: 0,
+  total_route_cash_deployed_eur: 0
 });
 
 const EUR_FORMATTER = new Intl.NumberFormat('es-ES', {
@@ -173,7 +185,35 @@ export const CoordinatorProductLoadingTab = {
       selectedVisitId: null,
       visitDetail: null,
       isLoadingVisitDetail: false,
-      visitDetailError: ''
+      visitDetailError: '',
+
+      cashCollections: [],
+      cashKpis: emptyCashKpis(),
+      cashFilters: {
+        restocker_id: '',
+        machine_id: '',
+        status: '',
+        bag_seal_code: '',
+        date_from: '',
+        date_to: ''
+      },
+      isLoadingCash: false,
+      cashError: '',
+      cashSuccess: '',
+
+      showCashDetailModal: false,
+      selectedCashId: null,
+      cashDetail: null,
+      isLoadingCashDetail: false,
+      cashDetailError: '',
+      cashReconcileForm: { vault_counted_eur: '', discrepancy_justification: '' },
+      cashReconcileError: '',
+      isReconcilingCash: false,
+
+      showCashReceiptModal: false,
+      cashReceipt: null,
+      isLoadingCashReceipt: false,
+      cashReceiptError: ''
     };
   },
   computed: {
@@ -258,6 +298,48 @@ export const CoordinatorProductLoadingTab = {
     visitItems() {
       return this.visitDetail?.items || [];
     },
+    cashStatusOptions() {
+      return [
+        { value: 'ALL', label: 'Todos los estados' },
+        { value: 'SEALED_IN_ROUTE', label: 'Sellada en ruta' },
+        { value: 'DELIVERED_TO_VAULT', label: 'En cámara' },
+        { value: 'RECONCILED_OK', label: 'Arqueada OK' },
+        { value: 'DISCREPANCY_FLAGGED', label: 'Con descuadre' }
+      ];
+    },
+    cashDetailCollection() {
+      if (this.cashDetail) {
+        return this.cashDetail.collection || this.cashDetail;
+      }
+      return this.cashCollections.find(
+        (collection) => String(collection.id) === String(this.selectedCashId)
+      ) || null;
+    },
+    cashDetailIsTerminal() {
+      const collection = this.cashDetailCollection;
+      return Boolean(collection)
+        && (collection.is_terminal === true
+          || collection.status === 'RECONCILED_OK'
+          || collection.status === 'DISCREPANCY_FLAGGED');
+    },
+    cashDetailCanDeliver() {
+      return this.cashDetailCollection?.status === 'SEALED_IN_ROUTE';
+    },
+    cashDetailCanReconcile() {
+      const status = this.cashDetailCollection?.status;
+      return status === 'SEALED_IN_ROUTE' || status === 'DELIVERED_TO_VAULT';
+    },
+    cashLiveDiscrepancy() {
+      const raw = this.cashReconcileForm.vault_counted_eur;
+      if (raw === '' || raw === null || raw === undefined) return null;
+      const counted = Number(raw);
+      const expected = Number(this.cashDetailCollection?.expected_cashbox_eur);
+      if (!Number.isFinite(counted) || !Number.isFinite(expected)) return null;
+      return Math.round((counted - expected) * 100) / 100;
+    },
+    cashRequiresJustification() {
+      return this.cashLiveDiscrepancy !== null && Math.abs(this.cashLiveDiscrepancy) > 1;
+    },
     visitHygieneItems() {
       const checklist = this.visitDetailVisit?.hygiene_checklist;
       if (!checklist || typeof checklist !== 'object') return [];
@@ -273,6 +355,7 @@ export const CoordinatorProductLoadingTab = {
     this.loadRestockers();
     this.loadVanStocks();
     this.loadVisits();
+    this.loadCashCollections();
   },
   methods: {
     unwrap,
@@ -425,6 +508,175 @@ export const CoordinatorProductLoadingTab = {
         this.visitError = error?.message || 'No se pudo cargar el libro de visitas de reposición in situ.';
       } finally {
         this.isLoadingVisits = false;
+      }
+    },
+
+    cashStatusTone(status) {
+      switch (status) {
+        case 'SEALED_IN_ROUTE':
+          return 'vg-badge vg-badge-warning';
+        case 'DELIVERED_TO_VAULT':
+          return 'vg-badge vg-badge-info';
+        case 'RECONCILED_OK':
+          return 'vg-badge vg-badge-success';
+        case 'DISCREPANCY_FLAGGED':
+          return 'vg-badge vg-badge-danger';
+        default:
+          return 'vg-badge vg-badge-neutral';
+      }
+    },
+
+    cashFilterParams() {
+      const params = {};
+      Object.entries(this.cashFilters).forEach(([key, value]) => {
+        if (value === '' || value === null || value === undefined) return;
+        if (key === 'status' && value === 'ALL') return;
+        params[key] = key === 'bag_seal_code' ? String(value).trim().toUpperCase() : value;
+      });
+      return params;
+    },
+
+    async loadCashCollections() {
+      this.isLoadingCash = true;
+      this.cashError = '';
+      try {
+        const data = unwrap(await api.coordinator.getCashCollections(this.cashFilterParams()));
+        this.cashKpis = { ...emptyCashKpis(), ...(data?.kpis || {}) };
+        this.cashCollections = Array.isArray(data?.cash_collections) ? data.cash_collections : [];
+      } catch (error) {
+        this.cashError = error?.message || 'No se pudo cargar el libro de recaudaciones.';
+      } finally {
+        this.isLoadingCash = false;
+      }
+    },
+
+    async exportCashCollectionsCsv() {
+      this.cashError = '';
+      this.cashSuccess = '';
+      try {
+        await api.coordinator.exportCashCollectionsCsv(this.cashFilterParams());
+        this.cashSuccess = 'Exportación CSV generada con los filtros activos.';
+      } catch (error) {
+        this.cashError = error?.message || 'No se pudo exportar el libro de recaudaciones.';
+      }
+    },
+
+    async deliverCashCollection(collection) {
+      const collectionId = Number(collection?.id ?? 0);
+      if (collectionId <= 0) return;
+      this.cashError = '';
+      this.cashSuccess = '';
+      try {
+        const updated = unwrap(await api.coordinator.deliverCashCollectionToVault(collectionId));
+        if (this.cashDetail && Number(this.selectedCashId) === collectionId) {
+          this.cashDetail = updated;
+        }
+        this.cashSuccess = `Bolsa ${collection.collection_code || collectionId} recibida en Caja Central.`;
+        await this.loadCashCollections();
+      } catch (error) {
+        this.cashError = error?.message || 'No se pudo recepcionar la bolsa en cámara.';
+      }
+    },
+
+    async openCashDetailModal(collection) {
+      const collectionId = Number(collection?.id ?? 0);
+      if (collectionId <= 0) return;
+      this.selectedCashId = collectionId;
+      this.cashDetail = collection;
+      this.cashDetailError = '';
+      this.cashReconcileError = '';
+      this.cashReconcileForm = { vault_counted_eur: '', discrepancy_justification: '' };
+      this.showCashDetailModal = true;
+      this.isLoadingCashDetail = true;
+      try {
+        const detail = unwrap(await api.coordinator.getCashCollection(collectionId));
+        this.cashDetail = detail || collection;
+        const current = this.cashDetail.collection || this.cashDetail;
+        this.cashReconcileForm = {
+          vault_counted_eur: current.vault_counted_eur === null || current.vault_counted_eur === undefined
+            ? ''
+            : current.vault_counted_eur,
+          discrepancy_justification: current.discrepancy_justification || ''
+        };
+      } catch (error) {
+        this.cashDetailError = error?.message || 'No se pudo cargar el expediente de la recaudación.';
+      } finally {
+        this.isLoadingCashDetail = false;
+      }
+    },
+
+    async openCashReceiptModal(collection) {
+      const collectionId = Number(collection?.id ?? 0);
+      if (collectionId <= 0) return;
+      this.showCashDetailModal = false;
+      this.showCashReceiptModal = true;
+      this.cashReceipt = null;
+      this.cashReceiptError = '';
+      this.isLoadingCashReceipt = true;
+      try {
+        this.cashReceipt = unwrap(await api.coordinator.getCashCollectionReceptionReceipt(collectionId)) || null;
+      } catch (error) {
+        this.cashReceiptError = error?.message || 'No se pudo cargar el recibo de conserjería.';
+      } finally {
+        this.isLoadingCashReceipt = false;
+      }
+    },
+
+    openCashVisit(collection) {
+      const visitId = Number(collection?.restock_visit_id ?? 0);
+      if (visitId <= 0) return;
+      this.showCashDetailModal = false;
+      this.openVisitDetailModal(visitId);
+    },
+
+    validateCashReconciliation() {
+      const raw = String(this.cashReconcileForm.vault_counted_eur ?? '').trim();
+      const counted = Number(raw);
+      if (raw === '' || !Number.isFinite(counted) || counted < 0 || counted > 10000) {
+        this.cashReconcileError = 'El importe contado debe estar entre 0,00 € y 10.000,00 €.';
+        return false;
+      }
+
+      const expected = Number(this.cashDetailCollection?.expected_cashbox_eur);
+      if (!Number.isFinite(expected)) {
+        this.cashReconcileError = 'No se pudo calcular el esperado del arqueo ciego.';
+        return false;
+      }
+
+      const discrepancy = Math.round((counted - expected) * 100) / 100;
+      if (Math.abs(discrepancy) > 1) {
+        const justification = String(this.cashReconcileForm.discrepancy_justification ?? '').trim();
+        const blocks = justification.match(/[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ]+/g) || [];
+        if (justification.length < 20 || justification.length > 1000 || blocks.length < 3) {
+          this.cashReconcileError = 'Un descuadre superior a ±1,00 € exige una justificación real de 20 a 1.000 caracteres y al menos 3 bloques alfanuméricos.';
+          return false;
+        }
+      }
+
+      this.cashReconcileError = '';
+      return true;
+    },
+
+    async submitCashReconciliation() {
+      const collectionId = Number(this.selectedCashId ?? this.cashDetailCollection?.id ?? 0);
+      if (collectionId <= 0 || !this.validateCashReconciliation()) return;
+
+      const payload = { vault_counted_eur: Number(this.cashReconcileForm.vault_counted_eur) };
+      const justification = String(this.cashReconcileForm.discrepancy_justification ?? '').trim();
+      if (justification !== '') payload.discrepancy_justification = justification;
+
+      this.isReconcilingCash = true;
+      this.cashReconcileError = '';
+      try {
+        const updated = unwrap(await api.coordinator.reconcileCashCollection(collectionId, payload));
+        this.cashDetail = updated;
+        this.showCashDetailModal = false;
+        this.cashSuccess = `Arqueo de ${this.cashDetailCollection?.collection_code || collectionId} sellado.`;
+        await this.loadCashCollections();
+      } catch (error) {
+        this.cashReconcileError = error?.message || 'No se pudo sellar el arqueo ciego.';
+      } finally {
+        this.isReconcilingCash = false;
       }
     },
 
@@ -929,10 +1181,10 @@ export const CoordinatorProductLoadingTab = {
       <div class="vg-action-group" style="margin-bottom: 16px; flex-wrap: wrap; justify-content: space-between;">
         <div>
           <h2 style="margin: 0; font-family: var(--font-display); font-size: var(--font-size-heading-lg); color: var(--color-ink-slate);">
-            🚚 Carga de Producto y Picking de Frío
+            🚚 Carga, Visitas y Arqueo de Caja
           </h2>
           <p style="margin: 4px 0 0; font-size: var(--font-size-caption); color: var(--color-ink-muted);">
-            Trazabilidad por lote, salida de cámara ≤ 4,0 °C y liquidación al cierre.
+            Trazabilidad por lote, control FEFO y custodia del efectivo con arqueo ciego.
           </p>
         </div>
         <div class="vg-action-group" style="gap: 6px;">
@@ -962,6 +1214,15 @@ export const CoordinatorProductLoadingTab = {
             @click="activeSection = 'visits'"
           >
             📋 Visitas In Situ y FEFO
+          </button>
+          <button
+            type="button"
+            class="vg-btn"
+            :class="activeSection === 'cash' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            data-testid="product-loading-cash-section-button"
+            @click="activeSection = 'cash'"
+          >
+            🪙 Recaudación y Arqueo
           </button>
         </div>
       </div>
@@ -1286,6 +1547,137 @@ export const CoordinatorProductLoadingTab = {
         </div>
       </section>
 
+      <!-- Sub-vista 4: recaudación, cambio y arqueo de caja -->
+      <section v-else-if="activeSection === 'cash'" data-testid="product-loading-cash-section">
+        <div v-if="cashSuccess" class="vg-alert vg-alert-success" role="status" data-testid="product-loading-cash-success" style="margin-bottom: 14px;">✅ {{ cashSuccess }}</div>
+        <div v-if="cashError" class="vg-alert vg-alert-error" role="alert" data-testid="product-loading-cash-error" style="margin-bottom: 14px;">⚠️ {{ cashError }}</div>
+
+        <div data-testid="product-loading-cash-kpis" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px;">
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">Bolsas en ruta / cámara (Pendientes)</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-warning-text);">{{ cashKpis.pending_vault_bags_count }}</div>
+          </div>
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">Bolsas arqueadas OK</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-success-text);">{{ cashKpis.reconciled_ok_count }}</div>
+          </div>
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">Arqueos con descuadre (&gt; ±1,00 €)</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-error-text);">{{ cashKpis.discrepancy_flagged_count }}</div>
+          </div>
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">Total recaudado en caja (€)</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-primary);">{{ formatCurrency(cashKpis.total_vault_counted_eur) }}</div>
+          </div>
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">Descuadre neto acumulado (€)</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm);" :style="{ color: Number(cashKpis.net_discrepancy_eur) === 0 ? 'var(--color-ink-slate)' : 'var(--color-error-text)' }">{{ formatCurrency(cashKpis.net_discrepancy_eur) }}</div>
+          </div>
+          <div class="vg-card" style="padding: 14px;">
+            <div class="vg-label">Cambio cargado + Conserjería (€)</div>
+            <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-ink-slate);">{{ formatCurrency(cashKpis.total_route_cash_deployed_eur) }}</div>
+          </div>
+        </div>
+
+        <div class="vg-card" style="padding: 14px; margin-bottom: 16px;">
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;">
+            <div>
+              <label class="vg-label" for="cash-filter-restocker">Reponedor</label>
+              <select id="cash-filter-restocker" v-model="cashFilters.restocker_id" class="vg-input" data-testid="product-loading-cash-filter-restocker" @change="loadCashCollections">
+                <option value="">Todos</option>
+                <option v-for="restocker in restockerOptions" :key="restocker.id" :value="restocker.id">{{ restocker.label }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="vg-label" for="cash-filter-status">Estado</label>
+              <select id="cash-filter-status" v-model="cashFilters.status" class="vg-input" data-testid="product-loading-cash-filter-status" @change="loadCashCollections">
+                <option v-for="status in cashStatusOptions" :key="status.value" :value="status.value">{{ status.label }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="vg-label" for="cash-filter-machine">Máquina (ID)</label>
+              <input id="cash-filter-machine" v-model="cashFilters.machine_id" class="vg-input" type="number" min="1" placeholder="Todas" data-testid="product-loading-cash-filter-machine" @change="loadCashCollections" />
+            </div>
+            <div>
+              <label class="vg-label" for="cash-filter-seal">Precinto</label>
+              <input id="cash-filter-seal" v-model="cashFilters.bag_seal_code" class="vg-input" placeholder="BAG-…" data-testid="product-loading-cash-filter-seal" @change="loadCashCollections" />
+            </div>
+            <div>
+              <label class="vg-label" for="cash-filter-date-from">Desde</label>
+              <input id="cash-filter-date-from" v-model="cashFilters.date_from" class="vg-input" type="date" data-testid="product-loading-cash-filter-date-from" @change="loadCashCollections" />
+            </div>
+            <div>
+              <label class="vg-label" for="cash-filter-date-to">Hasta</label>
+              <input id="cash-filter-date-to" v-model="cashFilters.date_to" class="vg-input" type="date" data-testid="product-loading-cash-filter-date-to" @change="loadCashCollections" />
+            </div>
+            <div class="vg-action-group ms-auto" style="gap: 6px;">
+              <button type="button" class="vg-btn vg-btn-secondary" data-testid="product-loading-cash-refresh" @click="loadCashCollections">
+                {{ isLoadingCash ? 'Cargando…' : '↻ Actualizar' }}
+              </button>
+              <button type="button" class="vg-btn vg-btn-primary" data-testid="product-loading-cash-export" @click="exportCashCollectionsCsv">
+                📥 Exportar CSV
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="vg-card" style="padding: 0; overflow-x: auto;">
+          <table class="vg-table" data-testid="product-loading-cash-table">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Fecha</th>
+                <th>Reponedor</th>
+                <th>Máquina / Sede</th>
+                <th>Precinto</th>
+                <th>Esperado</th>
+                <th>Estado</th>
+                <th>Contado</th>
+                <th>Descuadre</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="collection in cashCollections" :key="collection.id">
+                <td style="font-family: var(--font-display); font-weight: 700;">{{ collection.collection_code }}</td>
+                <td>{{ formatDateTime(collection.collected_at) }}</td>
+                <td>{{ collection.restocker_name_snapshot }}</td>
+                <td>
+                  <strong>{{ collection.machine_code_snapshot }}</strong>
+                  <div style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ collection.location_name }}</div>
+                </td>
+                <td style="font-family: monospace;">{{ collection.bag_seal_code }}</td>
+                <td>{{ formatCurrency(collection.expected_cashbox_eur) }}</td>
+                <td><span :class="cashStatusTone(collection.status)">{{ collection.status_label }}</span></td>
+                <td>{{ collection.vault_counted_eur === null || collection.vault_counted_eur === undefined ? '—' : formatCurrency(collection.vault_counted_eur) }}</td>
+                <td :style="{ color: Number(collection.discrepancy_eur) === 0 ? 'var(--color-ink-slate)' : 'var(--color-error-text)' }">{{ collection.discrepancy_eur === null || collection.discrepancy_eur === undefined ? '—' : formatCurrency(collection.discrepancy_eur) }}</td>
+                <td>
+                  <div class="vg-action-group" style="gap: 4px; flex-wrap: wrap;">
+                    <button type="button" class="vg-btn vg-btn-secondary" :data-testid="'product-loading-cash-detail-' + collection.id" @click="openCashDetailModal(collection)">
+                      {{ collection.is_terminal ? 'Ver' : '🔍 Arquear' }}
+                    </button>
+                    <button v-if="collection.status === 'SEALED_IN_ROUTE'" type="button" class="vg-btn vg-btn-primary" :data-testid="'product-loading-cash-deliver-' + collection.id" @click="deliverCashCollection(collection)">
+                      📥 Recibir
+                    </button>
+                    <button v-if="Number(collection.reception_cash_delivered_eur) > 0" type="button" class="vg-btn vg-btn-secondary" :data-testid="'product-loading-cash-receipt-' + collection.id" @click="openCashReceiptModal(collection)">
+                      🖨️ Recibo
+                    </button>
+                    <button v-if="collection.restock_visit_id" type="button" class="vg-btn vg-btn-secondary" :data-testid="'product-loading-cash-visit-' + collection.id" @click="openCashVisit(collection)">
+                      📋 Visita
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="!isLoadingCash && cashCollections.length === 0">
+                <td colspan="10" style="text-align: center; padding: 28px; color: var(--color-ink-muted);">
+                  No hay recaudaciones que coincidan con los filtros.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- Expediente de visita in situ -->
       <ModalDialog v-model="showVisitDetailModal" :title="visitDetailVisit ? visitDetailVisit.visit_code : 'Expediente de visita'" subtitle="Trazabilidad carril a carril, FEFO y triple cerrojo sanitario." size="xl">
         <div v-if="isLoadingVisitDetail" data-testid="product-loading-visit-detail-loading" style="padding: 24px; text-align: center; color: var(--color-ink-muted);">
@@ -1394,6 +1786,166 @@ export const CoordinatorProductLoadingTab = {
         </div>
         <template #footer>
           <button type="button" class="vg-btn vg-btn-secondary" data-testid="product-loading-visit-detail-close" @click="showVisitDetailModal = false">Cerrar</button>
+        </template>
+      </ModalDialog>
+
+      <!-- Arqueo ciego de una bolsa precintada -->
+      <ModalDialog v-model="showCashDetailModal" title="Arqueo de Bolsa Precintada" subtitle="El esperado se calcula en servidor; aquí solo se cuenta la bolsa y se justifica el descuadre (D2, Art. V.1)." size="lg">
+        <div v-if="isLoadingCashDetail" data-testid="product-loading-cash-detail-loading" style="padding: 24px; text-align: center; color: var(--color-ink-muted);">
+          Cargando expediente de recaudación…
+        </div>
+        <div v-else-if="cashDetailError" class="vg-alert vg-alert-error" role="alert" data-testid="product-loading-cash-detail-error">
+          ⚠️ {{ cashDetailError }}
+        </div>
+        <div v-else-if="cashDetailCollection" data-testid="product-loading-cash-detail-modal">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px;">
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Recaudación</div>
+              <div style="font-family: var(--font-display); font-weight: 700;">{{ cashDetailCollection.collection_code }}</div>
+              <div style="font-family: monospace; font-size: var(--font-size-caption);">{{ cashDetailCollection.bag_seal_code }}</div>
+            </div>
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Máquina / Sede</div>
+              <div><strong>{{ cashDetailCollection.machine_code_snapshot }}</strong></div>
+              <div style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ cashDetailCollection.location_name }}</div>
+            </div>
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Reponedor</div>
+              <div>{{ cashDetailCollection.restocker_name_snapshot }}</div>
+            </div>
+            <div class="vg-card" style="padding: 12px;">
+              <div class="vg-label">Estado de custodia</div>
+              <div><span :class="cashStatusTone(cashDetailCollection.status)">{{ cashDetailCollection.status_label }}</span></div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 16px;">
+            <div class="vg-card" style="padding: 14px;" data-testid="product-loading-cash-detail-readings">
+              <h4 style="margin: 0 0 10px; font-family: var(--font-display);">Contador de ventas</h4>
+              <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
+                <span class="vg-label">Lectura anterior</span>
+                <strong>{{ cashDetailCollection.previous_sales_counter_reading === null || cashDetailCollection.previous_sales_counter_reading === undefined ? '—' : formatCurrency(cashDetailCollection.previous_sales_counter_reading) }}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; gap: 12px;">
+                <span class="vg-label">Lectura actual</span>
+                <strong>{{ formatCurrency(cashDetailCollection.sales_counter_reading) }}</strong>
+              </div>
+              <div v-if="cashDetailCollection.is_counter_reset" class="vg-alert vg-alert-warning" role="status" style="margin-top: 10px; margin-bottom: 0;">
+                🔄 Reseteo declarado: {{ cashDetailCollection.counter_reset_notes }}
+              </div>
+            </div>
+
+            <div class="vg-card" style="padding: 14px;" data-testid="product-loading-cash-detail-expected">
+              <h4 style="margin: 0 0 10px; font-family: var(--font-display);">Esperado en caja</h4>
+              <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm); color: var(--color-primary);">{{ formatCurrency(cashDetailCollection.expected_cashbox_eur) }}</div>
+              <div style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">Calculado en servidor con la lectura previa, la base o el reseteo justificado.</div>
+            </div>
+
+            <div v-if="Number(cashDetailCollection.reception_cash_delivered_eur) > 0" class="vg-card" style="padding: 14px;" data-testid="product-loading-cash-detail-reception">
+              <h4 style="margin: 0 0 10px; font-family: var(--font-display);">Conserjería</h4>
+              <div>{{ formatCurrency(cashDetailCollection.reception_cash_delivered_eur) }} · {{ cashDetailCollection.receptionist_name }}</div>
+              <div style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">Recibo de nueve campos disponible.</div>
+            </div>
+          </div>
+
+          <div v-if="cashDetailIsTerminal" class="vg-card" style="padding: 14px; margin-bottom: 16px;" data-testid="product-loading-cash-detail-terminal">
+            <h4 style="margin: 0 0 10px; font-family: var(--font-display);">Arqueo terminal</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+              <div>
+                <div class="vg-label">Contado</div>
+                <div>{{ formatCurrency(cashDetailCollection.vault_counted_eur) }}</div>
+              </div>
+              <div>
+                <div class="vg-label">Descuadre</div>
+                <div :style="{ color: Number(cashDetailCollection.discrepancy_eur) === 0 ? 'var(--color-ink-slate)' : 'var(--color-error-text)' }">{{ formatCurrency(cashDetailCollection.discrepancy_eur) }}</div>
+              </div>
+              <div>
+                <div class="vg-label">Firmado por</div>
+                <div>{{ cashDetailCollection.vault_reconciled_by_name_snapshot || '—' }}</div>
+              </div>
+              <div>
+                <div class="vg-label">Fecha de arqueo</div>
+                <div>{{ formatDateTime(cashDetailCollection.vault_reconciled_at) }}</div>
+              </div>
+            </div>
+            <div v-if="cashDetailCollection.discrepancy_justification" class="vg-alert vg-alert-info" style="margin-top: 12px; margin-bottom: 0;">
+              📝 {{ cashDetailCollection.discrepancy_justification }}
+            </div>
+          </div>
+
+          <div v-else class="vg-card" style="padding: 14px;" data-testid="product-loading-cash-detail-reconcile-form">
+            <h4 style="margin: 0 0 10px; font-family: var(--font-display);">Arqueo ciego</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+              <div>
+                <label class="vg-label" for="cash-vault-counted">Efectivo contado (€)</label>
+                <input id="cash-vault-counted" v-model="cashReconcileForm.vault_counted_eur" class="vg-input" type="number" min="0" max="10000" step="0.01" data-testid="product-loading-cash-vault-counted" />
+              </div>
+              <div>
+                <div class="vg-label">Descuadre en vivo</div>
+                <div style="font-family: var(--font-display); font-size: var(--font-size-display-sm);" :style="{ color: cashLiveDiscrepancy === null || Math.abs(cashLiveDiscrepancy) <= 1 ? 'var(--color-success-text)' : 'var(--color-error-text)' }" data-testid="product-loading-cash-live-discrepancy">
+                  {{ cashLiveDiscrepancy === null ? '—' : formatCurrency(cashLiveDiscrepancy) }}
+                </div>
+                <div style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">Tolerancia ±1,00 €.</div>
+              </div>
+            </div>
+
+            <div v-if="cashRequiresJustification" style="margin-top: 12px;">
+              <div class="vg-alert vg-alert-warning" role="status" style="margin-bottom: 10px;">
+                ⚠️ El descuadre supera ±1,00 €: la justificación es obligatoria (20–1.000 caracteres reales y 3 bloques alfanuméricos).
+              </div>
+              <label class="vg-label" for="cash-discrepancy-justification">Justificación del descuadre</label>
+              <textarea id="cash-discrepancy-justification" v-model="cashReconcileForm.discrepancy_justification" class="vg-input" rows="3" maxlength="1000" data-testid="product-loading-cash-justification"></textarea>
+              <div style="margin-top: 4px; font-size: var(--font-size-caption); color: var(--color-ink-muted);">
+                {{ realLength(cashReconcileForm.discrepancy_justification) }} caracteres reales.
+              </div>
+            </div>
+
+            <div v-if="cashReconcileError" class="vg-alert vg-alert-error" role="alert" data-testid="product-loading-cash-reconcile-error" style="margin-top: 12px; margin-bottom: 0;">
+              ⚠️ {{ cashReconcileError }}
+            </div>
+          </div>
+        </div>
+        <template #footer>
+          <button type="button" class="vg-btn vg-btn-secondary" data-testid="product-loading-cash-detail-close" @click="showCashDetailModal = false">Cerrar</button>
+          <button v-if="cashDetailCanDeliver" type="button" class="vg-btn vg-btn-primary" data-testid="product-loading-cash-detail-deliver" @click="deliverCashCollection(cashDetailCollection)">
+            📥 Recibir en cámara
+          </button>
+          <button v-if="cashDetailCollection && Number(cashDetailCollection.reception_cash_delivered_eur) > 0" type="button" class="vg-btn vg-btn-secondary" data-testid="product-loading-cash-detail-receipt" @click="openCashReceiptModal(cashDetailCollection)">
+            🖨️ Recibo conserjería
+          </button>
+          <button v-if="cashDetailCollection?.restock_visit_id" type="button" class="vg-btn vg-btn-secondary" data-testid="product-loading-cash-detail-visit" @click="openCashVisit(cashDetailCollection)">
+            📋 Ver visita
+          </button>
+          <button v-if="cashDetailCanReconcile" type="button" class="vg-btn vg-btn-primary" :disabled="isReconcilingCash" data-testid="product-loading-cash-submit-reconcile" @click="submitCashReconciliation">
+            {{ isReconcilingCash ? 'Sellando…' : '🔐 Sellar arqueo' }}
+          </button>
+        </template>
+      </ModalDialog>
+
+      <!-- Recibo opaco de conserjería -->
+      <ModalDialog v-model="showCashReceiptModal" title="Recibo de Conserjería" subtitle="Nueve campos y nada más: sin bolsa, sin arqueo y sin PII del reclamante (QA 2, Art. V.4)." size="md">
+        <div v-if="isLoadingCashReceipt" data-testid="product-loading-cash-receipt-loading" style="padding: 24px; text-align: center; color: var(--color-ink-muted);">
+          Cargando recibo…
+        </div>
+        <div v-else-if="cashReceiptError" class="vg-alert vg-alert-error" role="alert" data-testid="product-loading-cash-receipt-error">
+          ⚠️ {{ cashReceiptError }}
+        </div>
+        <div v-else-if="cashReceipt" data-testid="product-loading-cash-receipt-modal">
+          <div class="vg-card" style="padding: 16px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+              <div><div class="vg-label">Recaudación</div><strong>{{ cashReceipt.collection_code }}</strong></div>
+              <div><div class="vg-label">Fecha</div>{{ formatDateTime(cashReceipt.collected_at) }}</div>
+              <div><div class="vg-label">Sede</div>{{ cashReceipt.location_code }} · {{ cashReceipt.location_name }}</div>
+              <div><div class="vg-label">Máquina</div>{{ cashReceipt.machine_code }}</div>
+              <div><div class="vg-label">Reponedor</div>{{ cashReceipt.restocker_name }}</div>
+              <div><div class="vg-label">Conserje</div>{{ cashReceipt.receptionist_name }}</div>
+              <div><div class="vg-label">Entregado</div><strong>{{ formatCurrency(cashReceipt.reception_cash_delivered_eur) }}</strong></div>
+              <div><div class="vg-label">Reintegro vinculado</div>{{ cashReceipt.linked_refund_request_id ?? '—' }}</div>
+            </div>
+          </div>
+        </div>
+        <template #footer>
+          <button type="button" class="vg-btn vg-btn-secondary" data-testid="product-loading-cash-receipt-close" @click="showCashReceiptModal = false">Cerrar</button>
         </template>
       </ModalDialog>
 
