@@ -25,8 +25,9 @@ declare(strict_types=1);
  *      incluso después de la baja lógica del reponedor y de la máquina,
  *      conservando los snapshots históricos de máquina, reponedor y revisor de
  *      caja incluso tras la baja lógica y cambio de nombre del revisor.
- *   6. **Art. III.3.** El alta y el arqueo dejan eventos auditables
- *      `MACHINE_CASH_COLLECTION` con actor de rol `COORDINATOR`.
+ *   6. **Art. III.3 / RF-04.1.** El alta, la recepción en cámara
+ *      (`CASH_COLLECTION_DELIVERED_TO_VAULT`) y el arqueo dejan eventos
+ *      auditables `MACHINE_CASH_COLLECTION` con actor y rol `COORDINATOR`.
  *
  * CATEGORÍA: `new_engine`. Exige PostgreSQL y trabaja en un esquema aislado; sin
  * motor responde código 2. El esquema se retira con `CASCADE` en el `finally`.
@@ -533,9 +534,9 @@ try {
     );
 
     // ─────────────────────────────────────────────────────────────────────
-    // 6. Art. III.3 · auditoría de alta y arqueo
+    // 6. Art. III.3 / RF-04.1 · auditoría de alta, recepción en cámara y arqueo
     // ─────────────────────────────────────────────────────────────────────
-    echo "\n--- 6. Trazabilidad en audit_log (Art. III.3) ---\n";
+    echo "\n--- 6. Trazabilidad en audit_log (Art. III.3, RF-04.1) ---\n";
 
     $actions = $pdo->query(
         "SELECT action, COUNT(*) AS total
@@ -544,8 +545,9 @@ try {
           GROUP BY action"
     )->fetchAll(PDO::FETCH_KEY_PAIR);
     $assert(
-        '6.1 El alta y el arqueo dejan eventos de auditoría del módulo',
+        '6.1 El alta, la recepción en cámara y el arqueo dejan eventos de auditoría del módulo',
         (int)($actions['CASH_COLLECTION_SEALED'] ?? 0) >= 1
+            && (int)($actions['CASH_COLLECTION_DELIVERED_TO_VAULT'] ?? 0) >= 1
             && (int)($actions['CASH_COLLECTION_RECONCILED'] ?? 0) >= 1
     );
 
@@ -556,6 +558,24 @@ try {
             AND user_role = 'COORDINATOR'"
     )->fetchColumn();
     $assert('6.2 El arqueo se audita con el rol COORDINATOR', (int)$coordinatorActor >= 1);
+
+    $deliveredAuditStmt = $pdo->prepare(
+        "SELECT user_id, user_role, user_name
+           FROM audit_log
+          WHERE entity_type = 'MACHINE_CASH_COLLECTION'
+            AND entity_id = :entity_id
+            AND action = 'CASH_COLLECTION_DELIVERED_TO_VAULT'
+          ORDER BY id DESC"
+    );
+    $deliveredAuditStmt->execute([':entity_id' => $transitId]);
+    $deliveredAuditRows = $deliveredAuditStmt->fetchAll(PDO::FETCH_ASSOC);
+    $assert(
+        '6.3 La recepción en cámara deja CASH_COLLECTION_DELIVERED_TO_VAULT con actor y rol COORDINATOR sobre la bolsa correcta',
+        count($deliveredAuditRows) === 1
+            && (int)($deliveredAuditRows[0]['user_id'] ?? 0) === $coordinatorId
+            && ($deliveredAuditRows[0]['user_role'] ?? '') === 'COORDINATOR'
+            && ($deliveredAuditRows[0]['user_name'] ?? '') === 'Coordinación T-CCV-09'
+    );
 
     // ─────────────────────────────────────────────────────────────────────
     // 7. V.1 · el CHECK del motor exige justificación en el descuadre
