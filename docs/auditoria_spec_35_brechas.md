@@ -6,7 +6,7 @@
 - **Contratos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../specs/technical/cash_collection_vault_audit_contracts.md)
 - **Sistema de Diseño:** [`docs/design.md`](design.md)
 - **Fecha de auditoría:** 2026-11-16
-- **Última actualización:** 2026-11-16 · `FIX-35-08` cerrado
+- **Última actualización:** 2026-11-16 · **Auditoría cerrada (FIX-35-01 a FIX-35-09)**
 - **Rama:** `feat/cash-collection-vault-audit` · Base auditada `000688b`
 - **Alcance:** auditoría estática y ejecución real de suites. Este documento recoge el orden de corrección propuesto y se actualiza al cerrar cada FIX.
 
@@ -16,7 +16,8 @@
 
 La implementación está operativa y la batería ejecutada pasa en verde:
 
-- Batería hermética global: **435/435 suites · 16.735 aserciones · 0 fallos · `exit=0`** (tras `FIX-35-08`).
+- Batería hermética global: **435/435 suites · 16.735 aserciones · 0 fallos · `exit=0`**.
+- Canal `new_engine` (`.env.docker-tls`): **66/66 suites en verde · 0 no ejecutables · 2.166 aserciones · 0 fallos · `exit=0`** (incluida `PostgresTieredSlaMetricsPerformanceTest` `34/34`).
 - Suites focales del Módulo 35: todas en verde, entre ellas `PostgresCashCollectionVaultAuditSchemaTest` 46/46, `MachineCashCollectionValidatorTest` 114/114, `MachineCashCollectionServiceTest` 45/45, `CashCollectionDomainModelsTest` 123/123 (incluye DTO y guardas documentales `FIX-35-07`/`FIX-35-08`), `CashCollectionVaultAuditApiTest` 33/33, `CashCollectionVaultAuditConstitutionalTest` 25/25 y `CashCollectionConcurrencyTest` 6/6 (`FOR UPDATE OF m` real sobre PostgreSQL).
 - Proyección móvil: `RestockerCashCollectionViewDTO` publica una lista blanca de 18 campos y omite las cinco claves financieras privadas del Arqueo Ciego.
 - Frontend: `restocker_route_view.test.mjs` 209/209 y `coordinator_product_loading_tab.test.mjs` 80/80.
@@ -25,9 +26,9 @@ La implementación está operativa y la batería ejecutada pasa en verde:
 - Tareas: **12/12** en [`tasks.md`](../specs/35-cash-collection-vault-audit/tasks.md) y **12/12** filas `✅ hecho` en [`odd/tasks/cash-collection-vault-audit.md`](../odd/tasks/cash-collection-vault-audit.md).
 - `DocMetricsGuard` coherente, base restablecida con semillas intactas y **0 esquemas `t_*` residuales**.
 
-Sin embargo, **la Spec 35 no puede declararse cumplida al 100 % en sentido literal**. El P0 contractual y el artefacto nominal `RestockerCashCollectionViewDTO` ya están corregidos; quedan varios huecos de certificación P1/P2. La implementación funcional es sólida; lo que falta es alinear el resto de la trazabilidad y demostrar lo que la especificación exige.
+- **Spec 35 cerrada al 100 %:** las 9 brechas (`FIX-35-01` a `FIX-35-09`) quedan cerradas con evidencia reproducible en `specs/35-cash-collection-vault-audit/traceability-matrix.md`.
 
-> **Conclusión corta:** el módulo funciona y las suites existentes pasan, pero la certificación literal aún no está cerrada. El P0 y `FIX-35-03` ya están corregidos; los puntos P1 restantes deben resolverse antes de volver a declarar la Spec 35 como cerrada.
+> **Conclusión corta:** las 9 brechas P0/P1/P2/P3 están cerradas y la Spec 35 v2.1 queda certificada al **100 % en verde** tanto en la batería hermética (`435/435 · 16.735`) como en el canal `new_engine` (`66/66 · 2.166`).
 
 ---
 
@@ -43,7 +44,7 @@ Sin embargo, **la Spec 35 no puede declararse cumplida al 100 % en sentido liter
 | **6** | **FIX-35-06** | **P2 · Medio** | No hay aserción específica de usuario/máquina inactivos ni del bloqueo `FOR UPDATE OF m` en la captura | `RF-02.1` | La defensa está en el código, pero no está certificada por una prueba del módulo | **Cerrada (2026-11-16)** |
 | **7** | **FIX-35-07** | **P2 · Medio** | La spec afirma haber cerrado 17 puntos QA, pero no los enumera; solo se documentan 4 resoluciones agregadas | `QA 1`–`QA 4`, §9 | No es posible verificar 17/17 ni auditar qué observación cerró cada cambio | **Cerrada (2026-11-16 · Vía B)** |
 | **8** | **FIX-35-08** | **P2 · Medio** | La matriz usa una subdivisión de `RF-05` distinta de la spec, cita el DTO inexistente y el ODD habla de 3 resoluciones frente a las 4 de la spec | Trazabilidad, DoD | La matriz no es un reflejo 1:1 de los EARS y puede inducir a error en la próxima auditoría | **Cerrada (2026-11-16)** |
-| **9** | **FIX-35-09** | **P3 · Verificación** | La certificación final debe repetirse tras los cambios y cerrar la diferencia del canal `new_engine` | DoD 5 | Las cifras actuales quedarán obsoletas al añadir pruebas; además el canal registra 1 suite no ejecutable por TLS local | **Abierta** |
+| **9** | **FIX-35-09** | **P3 · Verificación** | La certificación final debe repetirse tras los cambios y cerrar la diferencia del canal `new_engine` | DoD 5 | Las cifras actuales quedarán obsoletas al añadir pruebas; además el canal registra 1 suite no ejecutable por TLS local | **Cerrada (2026-11-16)** |
 
 ### Lectura de prioridades
 
@@ -500,49 +501,50 @@ Cerrada el 2026-11-16 alineando 1:1 `specs/35-cash-collection-vault-audit/tracea
 
 ---
 
-## FIX-35-09 · Verificación final, `new_engine` y métricas · P3
+## FIX-35-09 · Verificación final, `new_engine` y métricas · P3 · ✅ Cerrada
 
 ### Requisito
 
 El DoD 5 exige que toda la batería de pruebas unitarias, de integración PostgreSQL/HTTP, de frontend y de blindaje constitucional pase al 100 % en verde.
 
-### Evidencia actual
+### Evidencia previa (antes del cierre)
 
 - Batería global: **435/435 suites · 16.735 aserciones · 0 fallos · `exit=0`**; `DocMetricsGuard` coherente.
 - Las suites del Módulo 35 se ejecutaron focalmente y están en verde.
-- La matriz y el ODD documentan para `new_engine` **66 suites, 65 en verde y 1 no ejecutable por el contrato TLS local**, 2.132 aserciones, 0 fallos, `exit=0`.
-- Tras `FIX-35-06` se ejecutó el canal `new_engine` completo y la única no ejecutable sigue siendo `PostgresTieredSlaMetricsPerformanceTest` por el contrato TLS local.
+- La matriz y el ODD documentaban para `new_engine` con `.env.local` **66 suites, 65 en verde y 1 no ejecutable por el contrato TLS local**, 2.132 aserciones, 0 fallos, `exit=0`.
 
 ### Impacto
 
-Cada nueva prueba o cambio de contrato modifica los recuentos. Si no se reejecuta la certificación, `DocMetricsGuard` puede quedar desincronizado y la matriz volverá a citar cifras obsoletas. Además, para certificar el DoD 5 literalmente hay que resolver o documentar la suite no ejecutable del canal TLS.
+Cada nueva prueba o cambio de contrato modifica los recuentos. Además, para certificar el DoD 5 al 100 % había que reejecutar tanto la batería hermética como el canal `new_engine` completo con soporte TLS local y verificar ausencia de esquemas residuales.
 
-### Corrección propuesta
+### Corrección aplicada
 
-1. Ejecutar las suites focales afectadas por cada FIX.
-2. Ejecutar `php tests/run_all.php` con el entorno de batería.
-3. Ejecutar `php tests/run_new_engine.php` con el contrato TLS que permita completar las 65 suites; si no está disponible, dejar constancia explícita de la suite no ejecutable y no presentarla como verde.
-4. Verificar `DocMetricsGuard`, semillas restauradas y ausencia de esquemas `t_*`.
-5. Actualizar matriz, ODD, tareas, README y `docs/features_pendientes.md` solo con las cifras de la corrida final.
-6. Marcar este documento como cerrado y enlazar la corrida final.
+1. Reejecutada la batería global `php tests/run_all.php` tras el cierre de `FIX-35-01`–`FIX-35-08`.
+2. Reejecutado el canal completo `php tests/run_new_engine.php` con `deploy/local/postgres/.env.docker-tls` (puerto 55433 con TLS), completando **66/66 suites** incluida `PostgresTieredSlaMetricsPerformanceTest` (`34/34`).
+3. Comprobado `DocMetricsGuard`, semillas intactas y `information_schema.schemata` sin esquemas `t_*` residuales en `.env.docker-tls`, `.env.local` y `.env.battery` (tras limpiar los tres esquemas previos ajenos al Módulo 35 `t_zone05_repository`, `t_zone06_transfer` y `t_workshop27_service`).
+4. Actualizados `specs/35-cash-collection-vault-audit/traceability-matrix.md`, `specs/35-cash-collection-vault-audit/tasks.md`, `odd/tasks/cash-collection-vault-audit.md`, `README.md`, `docs/features_pendientes.md` y este informe.
 
 ### Criterios de aceptación
 
-- [ ] Todas las suites focales de los FIX anteriores están en verde.
-- [ ] La batería global queda en verde y con `DocMetricsGuard` coherente.
-- [ ] El canal `new_engine` queda en 65 suites (64 verdes) con una excepción documentada y aceptada; no se oculta una suite no ejecutable.
-- [ ] No quedan esquemas `t_*` ni datos de prueba residuales.
-- [ ] Las métricas de README, `features_pendientes.md`, matriz y ODD coinciden con la última corrida.
-- [ ] El estado de la Spec 35 se actualiza solo después de cerrar P0/P1.
+- [x] Todas las suites focales de los FIX anteriores están en verde.
+- [x] La batería global queda en verde y con `DocMetricsGuard` coherente (`435/435 suites · 16.735 aserciones · 0 fallos · exit=0`).
+- [x] El canal `new_engine` queda al 100 % en verde bajo `.env.docker-tls` (**66/66 suites · 0 no ejecutables · 2.166 aserciones · 0 fallos**).
+- [x] No quedan esquemas `t_*` ni datos de prueba residuales (`[]` en `.env.docker-tls`, `.env.local` y `.env.battery`).
+- [x] Las métricas de README, `features_pendientes.md`, matriz, `tasks.md` y ODD coinciden con la última corrida.
+- [x] El estado de la Spec 35 se actualiza tras cerrar P0/P1/P2 y completar la verificación final.
 
-### Archivos previsibles
+### Cierre
+
+Cerrada el 2026-11-16: todas las brechas de la auditoría (`FIX-35-01` a `FIX-35-09`) quedan resueltas y verificadas al 100 % en verde.
+
+### Archivos
 
 - `specs/35-cash-collection-vault-audit/traceability-matrix.md`
 - `odd/tasks/cash-collection-vault-audit.md`
 - `specs/35-cash-collection-vault-audit/tasks.md`
 - `README.md`
 - `docs/features_pendientes.md`
-- `docs/auditoria_spec_35_brechas.md` (este documento)
+- `docs/auditoria_spec_35_brechas.md`
 
 ---
 
@@ -585,10 +587,10 @@ La Spec 35 podrá volver a declararse cerrada cuando:
 - [x] FIX-35-06 cubra los casos de actividad y, si se acepta, el bloqueo pesimista.
 - [x] FIX-35-07 haya alineado spec, espejo, contratos, plan, matriz, ODD y tareas (4 resoluciones QA agregadas).
 - [x] FIX-35-08 haya alineado la matriz de trazabilidad (`RF-05` 1:1 con la spec).
-- [ ] FIX-35-09 haya reejecutado la batería y actualizado las métricas.
-- [ ] La matriz no cite artefactos inexistentes ni declare `RNF-03` sin evidencia de viewport.
+- [x] FIX-35-09 haya reejecutado la batería y actualizado las métricas.
+- [x] La matriz no cite artefactos inexistentes ni declare `RNF-03` sin evidencia de viewport.
 
-Mientras cualquiera de los P0/P1 siga abierto, **la Spec 35 no está al 100 %**.
+Con los nueve FIX (`FIX-35-01` a `FIX-35-09`) cerrados, **la Spec 35 v2.1 queda certificada al 100 %**.
 
 ---
 

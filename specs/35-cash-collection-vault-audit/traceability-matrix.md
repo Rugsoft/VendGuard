@@ -4,11 +4,11 @@
 
 **Esquema de referencia canónico:** `RF-01` Tabla 49 `machine_cash_collections`, tipo #42 y precinto único · `RF-02` captura en ruta y Arqueo Ciego · `RF-03` entrega en conserjería y transición atómica de reintegros · `RF-04` recepción en cámara y arqueo terminal · `RF-05` superficies de Reponedor y Coordinación.
 
-**Corrida de certificación:** 2026-11-16 (PostgreSQL 16+ local, batería global y canal `new_engine`).
+**Corrida de certificación:** 2026-11-16 (PostgreSQL 16.15 local + TLS en contenedor `.env.docker-tls`, batería global y canal `new_engine` 66/66).
 
 **Actualización T-CCV-12:** 2026-11-16 · cierre de la certificación global. Se corrigieron las deudas reales descubiertas por la batería: el catálogo del visor de auditoría no cubría la entidad `MACHINE_CASH_COLLECTION` ni la acción `OFFLINE_CASH_COLLECTION_CONFLICT_DUMP`; cuatro suites del Módulo 35 no publicaban el formato canónico de aserciones; la vista móvil conservaba geometría en línea en cuatro botones; el plan de purga seguía declarando 37 tablas transitorias cuando la Tabla 49 eleva el total a 38; y la semilla de recaudaciones podía abortar la siembra completa si una máquina tenía una avería térmica viva. La semilla ahora omite el corte demo bloqueado sin vulnerar el Art. II y lo recupera cuando la máquina vuelve a estar disponible.
 
-**Estado:** ✅ Módulo 35 cerrado · 12/12 tareas (`T-CCV-01` a `T-CCV-12`) · batería global en verde y `DocMetricsGuard` coherente.
+**Estado:** ✅ Módulo 35 cerrado al 100 % · 12/12 tareas (`T-CCV-01` a `T-CCV-12`) + 9/9 remediaciones (`FIX-35-01` a `FIX-35-09`) · batería global y canal `new_engine` 66/66 en verde y `DocMetricsGuard` coherente.
 
 **FIX-35-02 (2026-11-16):** `RNF-03` queda certificado en navegador real a `360 × 800` por `CashCollectionLayoutBrowserTest` (32/32): historial, modal rápido, bloque de visita, recibo de conserjería y sub-vista/detalle de Coordinación sin desbordamiento horizontal del documento; la tabla ancha de Coordinación conserva su scroll interno.
 
@@ -23,6 +23,8 @@
 **FIX-35-07 (2026-11-16):** Enmienda aprobada (Vía B): al no conservarse completo el desglose QA previo en el repositorio, `spec.md` (v2.1), el espejo funcional, los contratos, `plan.md`, `tasks.md`, el ODD y esta matriz sustituyen la referencia agregada sin desglose por **«4 resoluciones QA agregadas (`QA 1`–`QA 4`)»**, con guarda documental automática en `CashCollectionDomainModelsTest` (123/123).
 
 **FIX-35-08 (2026-11-16):** `RF-05` queda alineado 1:1 con los tres criterios EARS de `spec.md` (`05.1` cola Offline y volcado de conflictos, `05.2` superficie móvil con captura integrada/independiente, indicador de conserjería e historial opaco, `05.3` sub-vista de Coordinación) y todas las cifras medidas de la matriz quedan actualizadas a la corrida verificada (`CashCollectionDomainModelsTest` `123/123`, `CoordinatorButtonVariantsGuardTest` `23/23`, `RNF-02` con `123/123` y `T-CCV-12` con `SeedDataTest` + `23/23`).
+
+**FIX-35-09 (2026-11-16):** Verificación final completa tras el cierre de `FIX-35-01`–`FIX-35-08`: batería global `php tests/run_all.php` en verde (`DocMetricsGuard` coherente, semillas intactas), canal `new_engine` con `.env.docker-tls` al 100 % en verde (**66/66 suites · 0 no ejecutables · 2.166 aserciones · 0 fallos**, incluida `PostgresTieredSlaMetricsPerformanceTest` `34/34`) y cero esquemas `t_*` residuales en los motores verificados.
 
 ---
 
@@ -105,7 +107,7 @@
 | **2.** Arqueo Ciego, primacía sanitaria, entrega en conserjería `≤ 10,00 €`, tolerancia `±1,00 €` y opacidad financiera | `MachineCashCollectionValidatorTest` 114/114 · `MachineCashCollectionServiceTest` 45/45 · `CashCollectionVaultAuditApiTest` 33/33 · `CashCollectionVaultAuditConstitutionalTest` 25/25 |
 | **3.** Captura integrada e independiente, conserjería, recibo opaco, cola Offline e historial sin claves privadas | `restocker_route_view.test.mjs` 209/209 · `CashCollectionLayoutBrowserTest` 32/32 · `OfflinePwaAssetsAndUiGuardTest.mjs` 45/45 · `FrontendTemplateCompileTest.mjs` 15/15 · `CoordinatorButtonVariantsGuardTest.mjs` 23/23 |
 | **4.** Sub-vista de Coordinación con 6 KPIs, filtros, recepción en cámara, modal de arqueo y CSV | `coordinator_product_loading_tab.test.mjs` 80/80 · `CashCollectionVaultAuditApiTest` 33/33 · `FrontendTemplateCompileTest.mjs` 15/15 |
-| **5.** Batería global y canal `new_engine` | `php tests/run_all.php` → **exit=0**, 0 fallos y `DocMetricsGuard` coherente; cifra viva solo en `README.md` y `docs/features_pendientes.md`. `php tests/run_new_engine.php` → 66 suites, 65 en verde, 1 no ejecutable por el contrato TLS local, 2.132 aserciones y 0 fallos, `exit=0`. Sin esquemas ni datos de prueba residuales. |
+| **5.** Batería global y canal `new_engine` | `php tests/run_all.php` → **exit=0**, 0 fallos y `DocMetricsGuard` coherente; cifra viva solo en `README.md` y `docs/features_pendientes.md`. `php tests/run_new_engine.php` (`.env.docker-tls`) → **66/66 suites en verde · 0 no ejecutables · 2.166 aserciones · 0 fallos · `exit=0`**. Sin esquemas `t_*` ni datos de prueba residuales. |
 
 ---
 

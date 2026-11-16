@@ -806,21 +806,21 @@ php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 
 El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla. La medición del pooler remoto sigue siendo la evidencia de RNF-01: si el enlace del proveedor incumple el presupuesto de 250 ms en alguna operación, el canal publica el fallo con su mediana y su p95, sin convertirlo en omisión.
 
-Corrida del 16 de noviembre de 2026 (canal cerrado · 65 en verde y una suite con contrato propio):
+Corrida del 16 de noviembre de 2026 (canal cerrado · **66/66 suites en verde**, 0 no ejecutables bajo `.env.docker-tls`):
 
 ```text
 ======================================================================
  RESUMEN DEL CANAL new_engine
  Suites evaluadas    : 66
- Suites en verde     : 65
- No ejecutables      : 1
- Aserciones          : 2.132
+ Suites en verde     : 66
+ No ejecutables      : 0
+ Aserciones          : 2.166
  Fallos              : 0
- RESULTADO: CANAL CERRADO · 1 suite(s) declararon otro contrato y se listan arriba (no se omiten en silencio).
+ RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 ======================================================================
 ```
 
-La única suite no ejecutable es `PostgresTieredSlaMetricsPerformanceTest`: declara su propio contrato de entorno (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`), cuyo DSN exige TLS contra el motor local del puerto 5432, que en este puesto no lo ofrece; el canal la publica con su causa exacta (`SQLSTATE[08006] · server does not support SSL`) y sale con código `0`, sin contarla como fallo ni omitirla en silencio.
+`PostgresTieredSlaMetricsPerformanceTest` declara un contrato de entorno propio (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`) cuyo DSN exige TLS (`sslmode=verify-full`): bajo `.env.local` (puerto 5432, sin TLS) el canal la enumera como no ejecutable (`SQLSTATE[08006]`), mientras que con `.env.docker-tls` (puerto 55433 con TLS local) completa sus **34/34 aserciones** y cierra las **66/66 suites** en verde.
 
 El pooler remoto queda en verde y estable: `PoolerLatencyMeasurementTest` completa sus 20 rondas y pasa 30/30 aserciones en tres corridas. La optimización de `asignar` integró el cierre y la apertura de custodia en el CTE atómico y trasladó la revalidación de estado, titular y urgencia al propio `UPDATE` condicionado, eliminando en PostgreSQL la lectura bloqueada previa. Las medianas de «asignar» fueron **166,8 ms**, **165,6 ms** y **174,3 ms** (p95 194,2 / 224,6 / 241,1 ms) frente al presupuesto de 250 ms; el enlace base se mantuvo en 43,8–44,1 ms.
 
