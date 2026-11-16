@@ -526,6 +526,7 @@ try {
 
 echo "======================================================================\n";
 echo " VENDGUARD · T-CCV-04 · Validador de la recaudación y el arqueo\n";
-echo " Aserciones: {$assertions} | Resultado: 100% EN VERDE\n";
+echo " Total Aserciones: {$assertions}\n";
+echo " RESULTADO: 100% EN VERDE\n";
 echo "======================================================================\n";
 exit(0);

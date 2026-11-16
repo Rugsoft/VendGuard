@@ -8,7 +8,7 @@ use DateTimeImmutable;
 use Exception;
 use InvalidArgumentException;
 use JsonSerializable;
-use LogicException;
+use DomainException;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
 
 /**
@@ -643,12 +643,12 @@ final class MachineCashCollection implements JsonSerializable
      *
      * @return array<string, mixed>
      *
-     * @throws LogicException Si la recaudación no tiene entrega que justificar.
+     * @throws DomainException Si la recaudación no tiene entrega que justificar.
      */
     public function toReceptionReceiptArray(): array
     {
         if (!$this->hasReceptionDelivery()) {
-            throw new LogicException(
+            throw new DomainException(
                 'La recaudación no tiene entrega en conserjería: no existe comprobante que emitir (QA 2).'
             );
         }

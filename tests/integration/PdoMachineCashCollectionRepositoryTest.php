@@ -630,7 +630,7 @@ try {
     );
 
     echo "\n--- Resultado ---\n";
-    echo " Aserciones: {$assertions} · Fallos: {$failures}\n";
+    echo " Total Aserciones: {$assertions} | Fallos: {$failures}\n";
 } catch (Throwable $exception) {
     $crash = $exception;
 } finally {

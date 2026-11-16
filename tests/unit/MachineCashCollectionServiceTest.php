@@ -844,7 +844,8 @@ try {
     );
 
     echo "\n--- Resultado ---\n";
-    echo " Aserciones: {$GLOBALS['assertions']} · Resultado: 100% EN VERDE\n";
+    echo " Total Aserciones: {$GLOBALS['assertions']}\n";
+    echo " RESULTADO: 100% EN VERDE\n";
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[FAIL] " . $exception::class . ': ' . $exception->getMessage() . "\n");
     exit(1);

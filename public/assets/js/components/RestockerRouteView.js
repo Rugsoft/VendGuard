@@ -3050,9 +3050,8 @@ export const RestockerRouteView = {
               <button
                 v-if="collection.has_reception_receipt && collection.id && !collection.is_offline_pending"
                 type="button"
-                class="vg-btn vg-btn-ghost vg-btn-sm"
+                class="vg-btn vg-btn-ghost vg-btn-sm mt-1"
                 data-testid="btn-open-cash-receipt"
-                style="margin-top: 6px;"
                 @click="openCashReceipt(collection)"
               >
                 🧾 Ver Recibo de Conserjería
@@ -3405,9 +3404,8 @@ export const RestockerRouteView = {
             </div>
             <button
               type="button"
-              class="vg-btn vg-btn-primary vg-btn-lg"
+              class="vg-btn vg-btn-primary vg-btn-lg w-100 mt-2"
               data-testid="btn-print-cash-receipt"
-              style="width: 100%; margin-top: 12px;"
               @click="printCashReceipt"
             >
               🖨️ Imprimir recibo
@@ -3641,9 +3639,8 @@ export const RestockerRouteView = {
                     </span>
                     <button
                       type="button"
-                      class="vg-btn vg-btn-ghost vg-btn-sm"
+                      class="vg-btn vg-btn-ghost vg-btn-sm mt-1"
                       data-testid="btn-edit-visit-cash"
-                      style="margin-top: 4px;"
                       @click="openCashCollection(visitMachine, 'VISIT')"
                     >
                       Editar recaudación
@@ -3652,9 +3649,8 @@ export const RestockerRouteView = {
                   <button
                     v-else-if="visitCashEnabled"
                     type="button"
-                    class="vg-btn vg-btn-secondary vg-btn-sm"
+                    class="vg-btn vg-btn-secondary vg-btn-sm mt-2"
                     data-testid="btn-configure-visit-cash"
-                    style="margin-top: 8px;"
                     @click="openCashCollection(visitMachine, 'VISIT')"
                   >
                     Configurar recaudación

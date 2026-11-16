@@ -3253,7 +3253,7 @@ class SeedRunner
                 bag_seal_code, change_tubes_loaded_eur, sales_counter_reading,
                 previous_sales_counter_reading, initial_baseline_reading_eur,
                 is_counter_reset, counter_reset_notes, expected_cashbox_eur,
-                reception_cash_delivered_eur, receptionist_name, linked_refund_request_id,
+                reception_cash_delivered_eur, receptionist_name,
                 route_notes, status, collected_at, delivered_to_vault_at,
                 delivered_to_vault_by, vault_counted_eur, discrepancy_eur,
                 vault_reconciled_by, vault_reconciled_by_name_snapshot, vault_reconciled_at,
@@ -3269,7 +3269,7 @@ class SeedRunner
                 :bag_seal_code, :change_tubes_loaded_eur, :sales_counter_reading,
                 :previous_sales_counter_reading, :initial_baseline_reading_eur,
                 :is_counter_reset, :counter_reset_notes, :expected_cashbox_eur,
-                :reception_cash_delivered_eur, :receptionist_name, NULL,
+                :reception_cash_delivered_eur, :receptionist_name,
                 :route_notes, :status, :collected_at, :delivered_to_vault_at,
                 (SELECT id FROM users WHERE %1$s = :delivered_by_email LIMIT 1),
                 :vault_counted_eur, :discrepancy_eur,
@@ -3281,7 +3281,30 @@ class SeedRunner
             $this->dialect->upsertDoNothing(['collection_code'])
         ));
 
+        $available = $this->pdo->prepare(
+            "SELECT 1
+               FROM machines m
+              WHERE m.code = :machine_code
+                AND m.is_active = TRUE
+                AND m.sanitary_status <> 'QUARANTINE'
+                AND m.is_blocked_no_access = FALSE
+                AND NOT EXISTS (
+                    SELECT 1 FROM incidents i
+                     WHERE i.machine_id = m.id
+                       AND i.category = 'TEMPERATURE_COLD'
+                       AND i.status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED')
+                )"
+        );
+
         foreach (self::canonicalCashCollectionRows() as $collection) {
+            // El corte demo no puede imponer un estado que el Art. II prohíbe:
+            // si la máquina está bloqueada en este instante, se omite y la
+            // siguiente siembra lo recupera cuando vuelva a estar disponible.
+            $available->execute([':machine_code' => $collection['machine_code']]);
+            if ($available->fetchColumn() === false) {
+                continue;
+            }
+
             $collectedAt = date('Y-m-d H:i:s', time() + $collection['collected_offset_hours'] * 3600);
             $deliveredAt = $collection['delivered_offset_hours'] === null
                 ? null
@@ -3900,8 +3923,10 @@ class SeedRunner
      * previa) y un arqueo conforme dentro de ±1,00 €; la segunda declara una
      * entrega de 2,50 € en conserjería y un descuadre de -5,50 € con la
      * justificación real del Art. V.1; la tercera ya está recibida en cámara y
-     * la cuarta sigue sellada en ruta. Ninguna toca una máquina en cuarentena ni
-     * una visita abortada: el cerrojo del Art. II se certifica en las suites.
+     * la cuarta sigue sellada en ruta. El alta respeta el cerrojo sanitario del
+     * Art. II: si una suite dejó viva una avería térmica en una de esas máquinas,
+     * el corte demo se omite en esa pasada en lugar de abortar toda la siembra, y
+     * vuelve a entrar cuando la máquina queda disponible.
      *
      * @return list<array<string, mixed>>
      */
@@ -3910,9 +3935,9 @@ class SeedRunner
         return [
             [
                 'collection_code' => 'MCC-2026-0001',
-                'machine_code' => 'VEND-0101',
+                'machine_code' => 'VEND-0401',
                 'restocker_email' => 'lucia.repostaje@vendguard.internal',
-                'visit_code' => 'MRV-2026-0001',
+                'visit_code' => null,
                 'bag_seal_code' => 'BAG-2026-000101',
                 'change_tubes_loaded_eur' => '40.00',
                 'sales_counter_reading' => '1350.00',
@@ -3985,7 +4010,7 @@ class SeedRunner
             ],
             [
                 'collection_code' => 'MCC-2026-0004',
-                'machine_code' => 'VEND-0301',
+                'machine_code' => 'VEND-0501',
                 'restocker_email' => 'oscar.repostaje@vendguard.internal',
                 'visit_code' => null,
                 'bag_seal_code' => 'BAG-2026-000104',

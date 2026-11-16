@@ -2146,16 +2146,16 @@ WHERE NOT EXISTS (
 -- ============================================================================
 -- QUÉ SIEMBRA
 --   Cuatro cortes de bolsa que cubren los cuatro estados del ciclo de custodia:
---     · `MCC-2026-0001` — primera recaudación histórica de `VEND-0101`, ligada a
---       la visita `MRV-2026-0001` del Módulo 34, con base inicial declarada
---       (`1.200,00 €`) y arqueo conforme: se contaron `149,50 €` frente a los
---       `150,00 €` esperados, dentro de la tolerancia de ±1,00 €.
+--     · `MCC-2026-0001` — primera recaudación histórica de `VEND-0401`, con base
+--       inicial declarada (`1.200,00 €`) y arqueo conforme: se contaron
+--       `149,50 €` frente a los `150,00 €` esperados, dentro de la tolerancia
+--       de ±1,00 €.
 --     · `MCC-2026-0002` — bolsa de `VEND-0601` sellada en parada rápida, con
 --       `2,50 €` entregados en conserjería y arqueo con descuadre de `-5,50 €`
 --       justificado por el atasco de monedas en el canal de recogida.
 --     · `MCC-2026-0003` — bolsa de `VEND-0201` ya recibida en cámara, pendiente
 --       de arqueo.
---     · `MCC-2026-0004` — bolsa de `VEND-0301` recién sellada en ruta.
+--     · `MCC-2026-0004` — bolsa de `VEND-0501` recién sellada en ruta.
 --
 -- POR QUÉ ESTOS CUATRO Y NO OTROS
 --   El arqueo ciego se demuestra con datos: la primera fila ejercita la rama de
@@ -2216,7 +2216,7 @@ SELECT
     v.discrepancy_justification,
     v.client_mutation_id
 FROM (VALUES
-    ('MCC-2026-0001', 'VEND-0101', 'lucia.repostaje@vendguard.internal', 'MRV-2026-0001',
+    ('MCC-2026-0001', 'VEND-0401', 'lucia.repostaje@vendguard.internal', NULL,
      'BAG-2026-000101', 40.00, 1350.00, NULL, 1200.00, FALSE, NULL, 150.00,
      0.00, NULL, 'Corte de hucha tras la retirada FEFO; bolsa sellada sin incidencias.',
      'RECONCILED_OK', INTERVAL '2 days', INTERVAL '1 day', 149.50, -0.50, INTERVAL '12 hours',
@@ -2231,7 +2231,7 @@ FROM (VALUES
      0.00, NULL, 'Bolsa recibida en cámara; pendiente de abrir en Caja Central.',
      'DELIVERED_TO_VAULT', INTERVAL '1 day', INTERVAL '6 hours', NULL, NULL, NULL,
      NULL, 'seed-mutation-cash-0003'),
-    ('MCC-2026-0004', 'VEND-0301', 'oscar.repostaje@vendguard.internal', NULL,
+    ('MCC-2026-0004', 'VEND-0501', 'oscar.repostaje@vendguard.internal', NULL,
      'BAG-2026-000104', 0.00, 365.50, 300.00, 0.00, FALSE, NULL, 65.50,
      0.00, NULL, 'Bolsa recién sellada en ruta; viaja en la furgoneta al cierre.',
      'SEALED_IN_ROUTE', INTERVAL '4 hours', NULL, NULL, NULL, NULL,
@@ -2242,7 +2242,17 @@ FROM (VALUES
        expected_cashbox_eur, reception_cash_delivered_eur, receptionist_name,
        route_notes, status, collected_age, delivered_age, vault_counted_eur,
        discrepancy_eur, reconciled_age, discrepancy_justification, client_mutation_id)
-INNER JOIN machines m ON m.code = v.machine_code
+INNER JOIN machines m
+        ON m.code = v.machine_code
+       AND m.is_active = TRUE
+       AND m.sanitary_status <> 'QUARANTINE'
+       AND m.is_blocked_no_access = FALSE
+       AND NOT EXISTS (
+           SELECT 1 FROM incidents i
+            WHERE i.machine_id = m.id
+              AND i.category = 'TEMPERATURE_COLD'
+              AND i.status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED')
+       )
 INNER JOIN users u ON u.email_key = v.restocker_email
 INNER JOIN users c ON c.email_key = 'coordinacion@vendguard.internal'
 LEFT JOIN machine_restock_visits vis ON vis.visit_code = v.visit_code
