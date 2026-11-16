@@ -26,7 +26,8 @@ interface CashCollectionRegistrarInterface
      * @param array<string, mixed> $payload
      * @param array<string, mixed> $actor
      *
-     * @return array<string, mixed> Proyección del reponedor
+     * @return array<string, mixed> Proyección del reponedor; `idempotent_replay`
+     *                              indica si la captura ya existía
      */
     public function registerCollectionInTransaction(
         int $machineId,

@@ -293,6 +293,7 @@ try {
         $created->getStatusCode() === 201
             && $collectionId > 0
             && ($createdData['status'] ?? '') === 'SEALED_IN_ROUTE'
+            && ($createdData['idempotent_replay'] ?? null) === false
             && !in_array('expected_cashbox_eur', $collectKeys($createdData), true)
             && !in_array('previous_sales_counter_reading', $collectKeys($createdData), true)
             && !in_array('vault_counted_eur', $collectKeys($createdData), true)
@@ -302,9 +303,9 @@ try {
     $repeatedData = $data($repeated);
     $assert(
         '3.2 El reenvío idempotente devuelve la misma recaudación',
-        $repeated->getStatusCode() === 201
+        $repeated->getStatusCode() === 200
             && (int)($repeatedData['id'] ?? 0) === $collectionId
-            && ($repeatedData['idempotent'] ?? false) === true
+            && ($repeatedData['idempotent_replay'] ?? false) === true
     );
 
     $regression = $call(

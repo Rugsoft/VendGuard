@@ -29,6 +29,17 @@
 | `POST` | `/api/coordinator/cash-collections/{id}/reconcile` | `InternalAuthMiddleware(COORDINATOR)` | Ejecuta el Arqueo Ciego en Caja Central introduciendo `vault_counted_eur`, calculando `discrepancy_eur` y sellando el estado terminal inmutable `RECONCILED_OK` ($\le \pm 1,00\,\text{€}$) o `DISCREPANCY_FLAGGED` ($> \pm 1,00\,\text{€}$, exigiendo `discrepancy_justification` $\ge 20$ caracteres reales con $\ge 3$ bloques alfanuméricos, `RF-04.2`, `D2`, `Art. V.1`). Si parte de `SEALED_IN_ROUTE`, sella también `delivered_to_vault_at` y `delivered_to_vault_by`. |
 | `GET` | `/api/coordinator/cash-collections/{id}/reception-receipt` | `InternalAuthMiddleware(COORDINATOR)` | Devuelve el comprobante limpio de entrega en conserjería ($\le 10,00\,\text{€}$, `QA 2`, `Art. V.4`). |
 
+### 1.1. Contrato de idempotencia de la captura independiente (`RF-01.2.3`)
+
+La respuesta de `POST /api/restocker/machines/{machineId}/cash-collections` usa la envolvente canónica `{ success, data, message }`. El alta nueva y el reenvío comparten la proyección del reponedor; solo cambian el código HTTP y `data.idempotent_replay`.
+
+| Caso | Condición | HTTP | `data.idempotent_replay` | Efectos |
+| :--- | :--- | :---: | :---: | :--- |
+| **Alta nueva** | No existe una fila para `(restocker_id, client_mutation_id)` | `201` | `false` | Inserta una fila, transiciona el reintegro si aplica y audita `CASH_COLLECTION_SEALED` |
+| **Replay idempotente** | Ya existe una fila para `(restocker_id, client_mutation_id)` | `200` | `true` | Devuelve la misma fila; no inserta, no transiciona el reintegro y no vuelve a auditar |
+
+La clave canónica es `data.idempotent_replay`. No se publica la clave heredada `data.idempotent`. Un precinto ya usado por otra mutación sigue respondiendo `409 BAG_SEAL_CODE_ALREADY_USED`.
+
 ---
 
 ## 2. Contrato de Esquema de Base de Datos (PostgreSQL 16+ / Supabase)

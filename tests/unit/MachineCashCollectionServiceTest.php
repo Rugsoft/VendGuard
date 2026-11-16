@@ -588,7 +588,7 @@ try {
     assertCash(
         $first['bag_seal_code'] === 'BAG-2026-060001'
             && $first['status'] === 'SEALED_IN_ROUTE'
-            && $first['idempotent'] === false,
+            && $first['idempotent_replay'] === false,
         'El alta normaliza el precinto y nace sellada'
     );
     assertCash(
@@ -686,12 +686,14 @@ try {
 
     echo "\n--- Idempotencia (D4) ---\n";
 
+    $auditEventsBeforeRepeat = count($auditLog->events);
     $repeat = $service->registerCollection(1, $basePayload('bag-2026-060006', 'mutation-ccv06-009', 815.00), $restocker);
     assertCash(
-        $repeat['id'] === $refundCollection['id'] && $repeat['idempotent'] === true,
+        $repeat['id'] === $refundCollection['id'] && $repeat['idempotent_replay'] === true,
         'La mutación repetida devuelve el corte ya registrado'
     );
     assertCash(count($repository->insertedCodes) === 4, 'La repetición no inserta una segunda bolsa');
+    assertCash(count($auditLog->events) === $auditEventsBeforeRepeat, 'La repetición no duplica la auditoría del sellado');
 
     echo "\n--- Recepción en cámara y arqueo (RF-04, D2, D4) ---\n";
 

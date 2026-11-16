@@ -429,17 +429,22 @@ final class RestockerRouteController
 
     /**
      * POST /api/restocker/machines/{machineId}/cash-collections
+     *
+     * Alta nueva: 201. Reenvío de la misma mutación: 200 con
+     * `idempotent_replay = true` (RF-01.2.3).
      */
     public function registerCashCollection(Request $request): Response
     {
         return $this->executeCashCollection(function () use ($request): Response {
+            $collection = $this->cashCollections->registerCollection(
+                $this->positiveMachineId($request),
+                $request->getParsedBody(),
+                $this->actor($request)
+            );
+
             return Response::json(
-                $this->cashCollections->registerCollection(
-                    $this->positiveMachineId($request),
-                    $request->getParsedBody(),
-                    $this->actor($request)
-                ),
-                201,
+                $collection,
+                ($collection['idempotent_replay'] ?? false) === true ? 200 : 201,
                 'Recaudación en bolsa precintada registrada.'
             );
         });

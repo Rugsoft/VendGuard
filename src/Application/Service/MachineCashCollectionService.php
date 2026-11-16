@@ -39,7 +39,7 @@ use VendGuard\Core\Service\MachineCashCollectionValidator;
  *      y se transiciona atómicamente a `DEPOSITED_AT_RECEPTION`; si la
  *      transición pierde la carrera, la recaudación entera se revierte.
  *   3. **Idempotencia (`D4`).** Una mutación repetida devuelve el corte ya
- *      registrado sin volver a escribir ni auditar.
+ *      registrado con `idempotent_replay = true` y sin volver a escribir ni auditar.
  *   4. **Ciclo de custodia.** Recepción en cámara (`DELIVERED_TO_VAULT`) y
  *      arqueo terminal con la tolerancia de ±1,00 € (`RECONCILED_OK` o
  *      `DISCREPANCY_FLAGGED`). Una fila terminal no se reescribe.
@@ -96,7 +96,8 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
      * @param array<string, mixed> $payload
      * @param array<string, mixed> $actor
      *
-     * @return array<string, mixed> Proyección del reponedor, sin datos financieros privados
+     * @return array<string, mixed> Proyección del reponedor, sin datos financieros privados,
+     *                              con `idempotent_replay` para distinguir alta nueva y replay
      *
      * @throws MachineCashCollectionValidationException
      */
@@ -128,12 +129,12 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
 
         $existing = $this->collections->findByClientMutationId($restocker['id'], $mutationId);
         if ($existing !== null) {
-            return $existing->toRestockerArray() + ['idempotent' => true];
+            return $existing->toRestockerArray() + ['idempotent_replay' => true];
         }
 
         $repeated = $this->collections->findByClientMutationId($restocker['id'], $mutationId);
             if ($repeated !== null) {
-                return $repeated;
+                return $repeated->toRestockerArray() + ['idempotent_replay' => true];
             }
 
             $context = $this->gateway->lockMachineContext($machineId, $restocker['id']);
@@ -280,7 +281,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                 ['machine_id' => $machineId, 'restock_visit_id' => $visitId]
             );
 
-        return $persisted->toRestockerArray() + ['idempotent' => false];
+        return $persisted->toRestockerArray() + ['idempotent_replay' => false];
     }
 
     /**
