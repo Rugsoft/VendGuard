@@ -1,0 +1,83 @@
+# Plan de Tareas de Implementación (`tasks.md`): Recaudación de Efectivo, Carga de Tubos de Cambio y Arqueo de Caja (`35-cash-collection-vault-audit`)
+
+**Módulo:** `35-cash-collection-vault-audit`\
+**Versión:** 2.0 (Alineado con `spec.md` v2.0, `cash_collection_vault_audit_contracts.md` v2.0 y `plan.md` v2.0)\
+**Estado:** Aprobado por el Product Owner el 2026-11-16 · Puerta SDD Fase 2 cerrada · Listo para iniciar en `T-CCV-01`\
+**Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño\
+**Ley Suprema:** [`constitution.md`](../../constitution.md), [`AGENTS.md`](../../AGENTS.md) y [`docs/design.md`](../../docs/design.md)
+
+---
+
+## Resumen de Fases y Grafo de Dependencias
+
+```mermaid
+flowchart LR
+    P1["Fase 1: Esquema PostgreSQL\n(T-CCV-01 y 02)"] --> P2["Fase 2: Dominio y Validador\n(T-CCV-03 y 04)"]
+    P2 --> P3["Fase 3: Repositorio PDO\n(T-CCV-05)"]
+    P3 --> P4["Fase 4: Servicios de Aplicación\n(T-CCV-06 y 07)"]
+    P4 --> P5["Fase 5: API REST y Guardas\n(T-CCV-08 y 09)"]
+    P5 --> P6["Fase 6: Frontend Vue 3 + Offline\n(T-CCV-10 y 11)"]
+    P6 --> P7["Fase 7: Batería Global y Cierre\n(T-CCV-12)"]
+```
+
+| Fase | Rango de Tareas | Descripción | Tiempo Estimado |
+| :--- | :--- | :--- | :--- |
+| **Fase 1** | `T-CCV-01` .. `T-CCV-02` | Migración `031_cash_collection_vault_audit.sql`, Tabla 49 `machine_cash_collections` y enum #42 `cash_collection_status`, convergencia en `supabase_init.sql`, semillas, contratos a 49 tablas / 42 enums y suite de esquema PostgreSQL | ~45 min |
+| **Fase 2** | `T-CCV-03` .. `T-CCV-04` | Enum `CashCollectionStatus`, entidad `MachineCashCollection` (proyecciones segregadas `Art. V.4`) y `MachineCashCollectionValidator` (`D2`, `D3`, `C1`, `C3`, `C4`, `Art. II.2`, `Art. V.1`) + tests unitarios | ~45 min |
+| **Fase 3** | `T-CCV-05` | Implementación de `PdoMachineCashCollectionRepository` (alta en ruta, idempotencia `client_mutation_id`, lectura de último contador, recepción en cámara, arqueo terminal, 6 KPIs y resumen del reponedor) + tests de integración | ~45 min |
+| **Fase 4** | `T-CCV-06` .. `T-CCV-07` | Servicio `MachineCashCollectionService` (captura en ruta, sinergia con `refund_requests` `D3`, arqueo ciego `D2`/`D4`, recibo opaco `QA 2`, volcado offline `C4` y CSV `QA 4`) e integración `D1`/`QA 3` en `MachineRestockVisitService` + tests unitarios | ~55 min |
+| **Fase 5** | `T-CCV-08` .. `T-CCV-09` | Extensión de `RestockerRouteController`, `CoordinatorProductLoadingController` y `AppRouter`, y suites de integración HTTP y blindaje constitucional (`CashCollectionVaultAuditApiTest.php` y `CashCollectionVaultAuditConstitutionalTest.php`) | ~55 min |
+| **Fase 6** | `T-CCV-10` .. `T-CCV-11` | Frontend Vue 3: cuarta sub-vista en `CoordinatorProductLoadingTab.js` (`RF-05.3`, `QA 4`) y captura integrada/independiente + conserjería + recibo + cola Offline en `RestockerRouteView.js` (`RF-05.1`, `RF-05.2`, `Art. V.4`) + tests `.mjs` | ~55 min |
+| **Fase 7** | `T-CCV-12` | Ejecución de batería global (`php tests/run_all.php`), sincronización `DocMetricsGuard`, matriz de trazabilidad `traceability-matrix.md` y actualización de `docs/features_pendientes.md` | ~25 min |
+
+---
+
+## Detalle de Tareas
+
+- [ ] **T-CCV-01 · Crear migración `031_cash_collection_vault_audit.sql`, converger `supabase_init.sql` y sembrar recaudaciones y arqueos en `supabase_seeds.sql` y `SeedRunner`**
+  - **Requisitos:** `RF-01.1`–`RF-01.3`, `RNF-01`, `D1`–`D4`, `C1`, `C3`, `C4`, `QA 1`, `Art. II.2`, `Art. III.1`, `Art. III.3`.
+  - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
+
+- [ ] **T-CCV-02 · Actualizar contratos de esquema (49 tablas, 42 enums), `PostgresFixtureBuilder`, `TestDataCleaner` y crear `PostgresCashCollectionVaultAuditSchemaTest.php`**
+  - **Requisitos:** `RF-01.1`–`RF-01.3`, `RNF-01`, `D4`, `C1`, `C3`, `C4`, `Art. II.2`, `Art. III.1`, `Art. III.3`.
+  - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresCashCollectionVaultAuditSchemaTest.php`
+
+- [ ] **T-CCV-03 · Crear `CashCollectionStatus` y `MachineCashCollection` con proyecciones segregadas (`toRestockerArray`, `toCoordinatorArray`, `toReceptionReceiptArray` — `C2`, `QA 2`, `Art. V.4`)**
+  - **Requisitos:** `RF-01.1`, `RF-03.2`, `RNF-02`, `D2`–`D4`, `C2`, `QA 1`, `QA 2`, `Art. V.4`.
+  - **Verificación:** `php tests/unit/CashCollectionDomainModelsTest.php`
+
+- [ ] **T-CCV-04 · Crear `MachineCashCollectionValidator` y `MachineCashCollectionValidationException` (precinto `C1`, monotonía y reseteo de contador `C3`, entrega en conserjería `D3`, guarda térmica `C4` y tolerancia $\pm 1,00\,\text{€}$ con justificación $\ge 20$ chars `D2`/`Art. V.1`)**
+  - **Requisitos:** `RF-01.2`, `RF-02.1`, `RF-02.2`, `RF-03.1`, `RF-04.2`, `D2`, `D3`, `C1`, `C3`, `C4`, `Art. II.2`, `Art. V.1`.
+  - **Verificación:** `php tests/unit/MachineCashCollectionValidatorTest.php`
+
+- [ ] **T-CCV-05 · Implementar `PdoMachineCashCollectionRepository` (alta en Tabla 49, idempotencia `client_mutation_id`, lectura de último contador por máquina, recepción en cámara, arqueo terminal, 6 KPIs de Coordinación y resumen del reponedor)**
+  - **Requisitos:** `RF-01.1`–`RF-01.3`, `RF-02.2`, `RF-04.1`, `RF-04.2`, `RF-05.2`, `RF-05.3`, `D1`, `D2`, `D4`, `C1`, `QA 1`, `QA 3`, `Art. III.1`, `Art. III.3`, `Art. V.4`.
+  - **Verificación:** `php tests/integration/PdoMachineCashCollectionRepositoryTest.php`
+
+- [ ] **T-CCV-06 · Implementar `MachineCashCollectionService` (captura en ruta con cálculo privado `expected_cashbox_eur`, transición atómica de `refund_requests` a `DEPOSITED_AT_RECEPTION` `D3`, recepción en cámara, arqueo ciego `D2`/`D4`, recibo de conserjería `QA 2`, volcado offline `C4` y exportación CSV `QA 4`)**
+  - **Requisitos:** `RF-02.1`, `RF-02.2`, `RF-03.1`, `RF-03.2`, `RF-04.1`, `RF-04.2`, `RF-05.1`, `RF-05.3`, `D1`–`D4`, `C1`–`C4`, `QA 1`–`QA 4`, `Art. II.2`, `Art. III.3`, `Art. V.1`, `Art. V.4`.
+  - **Verificación:** `php tests/unit/MachineCashCollectionServiceTest.php`
+
+- [ ] **T-CCV-07 · Integrar `D1`, `C4` y `QA 3` en `MachineRestockVisitService` (registro atómico de `cash_collection` dentro de la visita `COMPLETED`, rechazo en `ABORTED_THERMAL_BREACH`, exposición de `cash_collection_summary` en detalle de visita y enriquecimiento de `/api/restocker/my-route`)**
+  - **Requisitos:** `RF-02.1`, `RF-05.2`, `RF-05.3`, `D1`, `D3`, `C4`, `QA 3`, `Art. II.2`, `Art. V.4`.
+  - **Verificación:** `php tests/unit/MachineRestockVisitServiceTest.php`
+
+- [ ] **T-CCV-08 · Extender `RestockerRouteController`, `CoordinatorProductLoadingController` y registrar las nuevas rutas + guardas RBAC en `AppRouter`**
+  - **Requisitos:** `RF-01` a `RF-05`, `Art. V.4`.
+  - **Verificación:** `php tests/integration/CashCollectionVaultAuditApiTest.php`
+
+- [ ] **T-CCV-09 · Certificar suites de integración HTTP y blindaje constitucional (`CashCollectionVaultAuditApiTest.php` y `CashCollectionVaultAuditConstitutionalTest.php`)**
+  - **Requisitos:** `RF-01` a `RF-05`, `D1`–`D4`, `C1`–`C4`, `QA 1`–`QA 4`, `Art. II.2`, `Art. III.1`, `Art. III.3`, `Art. V.1`, `Art. V.4`.
+  - **Verificación:** `php tests/integration/CashCollectionVaultAuditApiTest.php && php tests/integration/CashCollectionVaultAuditConstitutionalTest.php`
+
+- [ ] **T-CCV-10 · Extender `CoordinatorProductLoadingTab.js` con la cuarta sub-vista «🪙 Recaudación, Cambio y Arqueo de Caja» (6 KPIs, filtros, recepción en cámara, modal de arqueo ciego y exportación CSV)**
+  - **Requisitos:** `RF-04.1`, `RF-04.2`, `RF-05.3`, `RNF-03`, `D2`, `D4`, `QA 3`, `QA 4`, `Art. V.1`, `Art. V.4`.
+  - **Verificación:** `node tests/frontend/coordinator_product_loading_tab.test.mjs`
+
+- [ ] **T-CCV-11 · Extender `RestockerRouteView.js` con el bloque opcional de recaudación en la visita in situ (`D1`), el modal rápido de recaudación/cambio en máquina, entrega en conserjería ($\le 10,00\,\text{€}$, `D3`), recibo opaco (`QA 2`), cola Offline (`D4`, `C4`) e historial con Arqueo Ciego (`C2`, `Art. V.4`)**
+  - **Requisitos:** `RF-02`, `RF-03`, `RF-05.1`, `RF-05.2`, `RNF-02`, `RNF-03`, `D1`–`D4`, `C1`–`C4`, `QA 2`, `Art. II.2`, `Art. V.4`.
+  - **Verificación:** `node tests/frontend/restocker_route_view.test.mjs`
+
+- [ ] **T-CCV-12 · Ejecutar batería global (`php tests/run_all.php`), sincronizar `DocMetricsGuard`, generar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
+  - **Requisitos:** `DoD 1`–`DoD 5`.
+  - **Verificación:** `php tests/run_all.php`
