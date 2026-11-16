@@ -31,6 +31,7 @@ import { api } from '../../public/assets/js/api.js';
 import { store } from '../../public/assets/js/store.js';
 import { RestockerRouteView } from '../../public/assets/js/components/RestockerRouteView.js';
 import { RestockVisitOfflineQueue } from '../../public/assets/js/utils/RestockVisitOfflineQueue.js';
+import { CashCollectionOfflineQueue } from '../../public/assets/js/utils/CashCollectionOfflineQueue.js';
 import { createFakeIndexedDb } from '../Support/FakeIndexedDb.mjs';
 
 console.log('======================================================================');
@@ -1083,6 +1084,515 @@ assert('La cola offline usa IndexedDB, clave idempotente e índice por reponedor
 assert('La vista exige foto de 5 MB y techo térmico explícito', viewSource.includes('5 * 1024 * 1024') && viewSource.includes('PERISHABLE_FOOD: 4') && viewSource.includes('COLD_DRINKS: 8'));
 assert('El modal de visita no publica costes ni márgenes', !/unit_cost|unit_margin|margin_eur|coste interno/i.test(visitModalSource));
 assert('El service worker precachea la cola offline de visitas', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8').includes('/assets/js/utils/RestockVisitOfflineQueue.js'));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. Recaudación, cambio y conserjería (T-CCV-11, D1–D4, C1–C4, QA 2)
+// ─────────────────────────────────────────────────────────────────────────────
+const cashQueueSource = readFileSync(
+  new URL('../../public/assets/js/utils/CashCollectionOfflineQueue.js', import.meta.url),
+  'utf8'
+);
+const cashHistorySource = viewSource.slice(
+  viewSource.indexOf('data-testid="restocker-cash-history"'),
+  viewSource.indexOf('data-testid="modal-restocker-planogram"')
+);
+const cashModalSource = viewSource.slice(
+  viewSource.indexOf('data-testid="modal-cash-collection"'),
+  viewSource.indexOf('data-testid="cash-reception-receipt-modal"')
+);
+const cashReceiptSource = viewSource.slice(
+  viewSource.indexOf('data-testid="cash-reception-receipt-modal"'),
+  viewSource.indexOf('data-testid="modal-restock-visit"')
+);
+
+const originalCreateCashCollection = api.restocker.createCashCollection;
+const originalCashReceipt = api.restocker.getCashCollectionReceptionReceipt;
+const originalDumpCashConflict = api.restocker.dumpCashCollectionConflict;
+const originalCashGet = api.get;
+
+const cashRefund = {
+  id: 501,
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  claimed_amount: 4.5,
+  created_at: '2026-11-14T08:00:00+00:00'
+};
+const cashCollectionRow = {
+  id: 901,
+  collection_code: 'MCC-2026-0901',
+  restock_visit_id: null,
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  bag_seal_code: 'BAG-CCV11-0001',
+  sales_counter_reading: 120,
+  change_tubes_loaded_eur: 10,
+  is_counter_reset: false,
+  counter_reset_notes: null,
+  reception_cash_delivered_eur: 2.5,
+  receptionist_name: 'Conserje Recepción',
+  linked_refund_request_id: null,
+  has_reception_receipt: true,
+  status: 'SEALED_IN_ROUTE',
+  status_label: 'Precintada en ruta',
+  collected_at: '2026-11-14T09:00:00+00:00',
+  created_at: '2026-11-14T09:00:00+00:00',
+  previous_sales_counter_reading: 80,
+  expected_cashbox_eur: 40,
+  vault_counted_eur: 40,
+  discrepancy_eur: 0,
+  discrepancy_justification: 'Dato privado que jamás debe llegar al reponedor.'
+};
+const cashBootstrap = JSON.parse(JSON.stringify(bootstrapPayload));
+cashBootstrap.data.machines[0].has_physical_reception = true;
+cashBootstrap.data.machines[0].has_prior_cash_collection = false;
+cashBootstrap.data.machines[0].pending_reception_refunds = [cashRefund];
+cashBootstrap.data.machines[0].pending_reception_refunds_count = 1;
+cashBootstrap.data.pending_reception_refunds = [cashRefund];
+cashBootstrap.data.recent_cash_collections = [cashCollectionRow];
+cashBootstrap.data.cash_route_summary = {
+  total_collections_count: 1,
+  total_change_tubes_loaded_eur: 10,
+  total_reception_cash_delivered_eur: 2.5,
+  pending_vault_bags_count: 1,
+  last_collected_at: '2026-11-14T09:00:00+00:00'
+};
+
+api.get = async (url) => {
+  if (url === '/restocker/my-route') return cashBootstrap;
+  throw new Error('URL inesperada: ' + url);
+};
+const cashRouteVm = buildVm({
+  visitQueue: new RestockVisitOfflineQueue({ indexedDB: createFakeIndexedDb() }),
+  cashQueue: new CashCollectionOfflineQueue({ indexedDB: createFakeIndexedDb() })
+});
+await cashRouteVm.loadMyRoute();
+
+assert(
+  'El bootstrap móvil publica resumen, historial y reintegros de conserjería',
+  cashRouteVm.cashRouteSummary.total_collections_count === 1
+    && cashRouteVm.recentCashCollections.length === 1
+    && cashRouteVm.pendingReceptionRefunds.length === 1
+    && cashRouteVm.machinePendingRefundsCount(cashRouteVm.machines[0]) === 1
+    && cashRouteVm.machinePendingRefundsCount(cashRouteVm.machines[1]) === 0
+);
+assert(
+  'El historial descarta las cinco claves privadas del Arqueo Ciego',
+  cashRouteVm.recentCashCollections.length === 1
+    && !('previous_sales_counter_reading' in cashRouteVm.recentCashCollections[0])
+    && !('expected_cashbox_eur' in cashRouteVm.recentCashCollections[0])
+    && !('vault_counted_eur' in cashRouteVm.recentCashCollections[0])
+    && !('discrepancy_eur' in cashRouteVm.recentCashCollections[0])
+    && !('discrepancy_justification' in cashRouteVm.recentCashCollections[0])
+);
+assert(
+  'La tarjeta de máquina anuncia la recaudación rápida y sus reintegros',
+  viewSource.includes('data-testid="btn-quick-cash-collection"')
+    && viewSource.includes('data-testid="restocker-machine-pending-refunds"')
+    && viewSource.includes(':data-pending-refunds-count="machinePendingRefundsCount(machine)"')
+);
+
+cashRouteVm.openCashCollection(cashRouteVm.machines[0]);
+assert(
+  'El modal rápido abre una captura independiente con mutación propia',
+  cashRouteVm.showCashModal === true
+    && cashRouteVm.cashContext === 'INDEPENDENT'
+    && cashRouteVm.cashForm.client_mutation_id.length > 8
+    && cashRouteVm.cashForm.collected_at.length > 10
+);
+
+cashRouteVm.cashForm.bag_seal_code = 'BAG';
+let cashValidation = cashRouteVm.validateCashForm(cashRouteVm.cashForm, cashRouteVm.cashModalMachine);
+assert(
+  'El precinto exige patrón, longitud y al menos tres dígitos (C1)',
+  cashValidation.ok === false && cashValidation.error.includes('precinto')
+);
+
+cashRouteVm.cashForm.bag_seal_code = 'bag-ccv11-0002';
+cashRouteVm.cashForm.sales_counter_reading = 120;
+cashRouteVm.cashForm.change_tubes_loaded_eur = 10;
+cashRouteVm.selectCashRefund(cashRefund);
+assert(
+  'Seleccionar un reintegro en un toque fija importe y expediente',
+  cashRouteVm.cashForm.linked_refund_request_id === 501
+    && cashRouteVm.cashForm.reception_cash_delivered_eur === 4.5
+    && cashRouteVm.cashSelectedRefund?.claimed_amount === 4.5
+);
+
+cashRouteVm.cashForm.receptionist_name = '';
+cashValidation = cashRouteVm.validateCashForm(cashRouteVm.cashForm, cashRouteVm.cashModalMachine);
+assert(
+  'La entrega en conserjería exige el nombre del conserje (D3)',
+  cashValidation.ok === false && cashValidation.error.includes('conserje')
+);
+
+cashRouteVm.cashForm.receptionist_name = 'Conserje Recepción';
+cashValidation = cashRouteVm.validateCashForm(cashRouteVm.cashForm, cashRouteVm.cashModalMachine);
+assert(
+  'La recaudación válida normaliza el precinto y respeta el Arqueo Ciego',
+  cashValidation.ok === true
+    && cashValidation.payload.bag_seal_code === 'BAG-CCV11-0002'
+    && cashValidation.payload.linked_refund_request_id === 501
+    && cashValidation.payload.reception_cash_delivered_eur === 4.5
+    && !('expected_cashbox_eur' in cashValidation.payload)
+    && !('previous_sales_counter_reading' in cashValidation.payload)
+);
+
+const overLimit = cashRouteVm.validateCashForm({
+  ...cashRouteVm.cashForm,
+  linked_refund_request_id: null,
+  reception_cash_delivered_eur: 10.01
+}, cashRouteVm.cashModalMachine);
+assert(
+  'La entrega en conserjería nunca supera 10,00 € (D3, QA 2)',
+  overLimit.ok === false && overLimit.error.includes('10,00')
+);
+const shortReset = cashRouteVm.validateCashForm({
+  ...cashRouteVm.cashForm,
+  is_counter_reset: true,
+  counter_reset_notes: 'corto'
+}, cashRouteVm.cashModalMachine);
+assert(
+  'El reseteo exige nota real con tres bloques alfanuméricos (C3, Art. V.1)',
+  shortReset.ok === false && shortReset.error.includes('20 caracteres')
+);
+const validReset = cashRouteVm.validateCashForm({
+  ...cashRouteVm.cashForm,
+  is_counter_reset: true,
+  counter_reset_notes: 'Reseteo autorizado tras sustituir la placa del contador.'
+}, cashRouteVm.cashModalMachine);
+assert('Una nota de reseteo suficiente valida la captura', validReset.ok === true);
+
+const cashCreateCalls = [];
+const cashReceiptCalls = [];
+api.restocker.createCashCollection = async (machineId, payload) => {
+  cashCreateCalls.push({ machineId, payload });
+  return {
+    data: {
+      ...cashCollectionRow,
+      id: 902,
+      collection_code: 'MCC-2026-0902',
+      machine_id: 7,
+      bag_seal_code: payload.bag_seal_code,
+      change_tubes_loaded_eur: payload.change_tubes_loaded_eur,
+      reception_cash_delivered_eur: payload.reception_cash_delivered_eur,
+      receptionist_name: payload.receptionist_name,
+      linked_refund_request_id: payload.linked_refund_request_id,
+      has_reception_receipt: true
+    }
+  };
+};
+api.restocker.getCashCollectionReceptionReceipt = async (collectionId) => {
+  cashReceiptCalls.push(collectionId);
+  return {
+    data: {
+      collection_code: 'MCC-2026-0902',
+      collected_at: '2026-11-14T10:00:00+00:00',
+      location_code: 'HOSP-MAR',
+      location_name: 'Hospital del Mar',
+      machine_code: 'VEND-0701',
+      restocker_name: 'Lucía Gómez',
+      receptionist_name: 'Conserje Recepción',
+      reception_cash_delivered_eur: 4.5,
+      linked_refund_request_id: 501,
+      bag_seal_code: 'BAG-CCV11-0002',
+      pickup_pin: '1234',
+      expected_cashbox_eur: 9999
+    }
+  };
+};
+
+await cashRouteVm.saveCashFromModal();
+assert(
+  'La captura online llama al endpoint independiente con la mutación',
+  cashCreateCalls.length === 1
+    && cashCreateCalls[0].machineId === 7
+    && cashCreateCalls[0].payload.client_mutation_id === cashRouteVm.cashForm.client_mutation_id
+    && cashCreateCalls[0].payload.linked_refund_request_id === 501
+);
+assert(
+  'El alta exitosa retira el reintegro y abre el recibo de conserjería',
+  cashRouteVm.showCashModal === false
+    && cashRouteVm.machinePendingRefundsCount(cashRouteVm.machines[0]) === 0
+    && cashReceiptCalls.length === 1
+    && cashReceiptCalls[0] === 902
+    && cashRouteVm.showCashReceiptModal === true
+);
+assert(
+  'El recibo proyecta exactamente nueve campos y descarta bolsa, PIN y arqueo',
+  Object.keys(cashRouteVm.cashReceipt).length === 9
+    && cashRouteVm.cashReceipt.reception_cash_delivered_eur === 4.5
+    && !('bag_seal_code' in cashRouteVm.cashReceipt)
+    && !('pickup_pin' in cashRouteVm.cashReceipt)
+    && !('expected_cashbox_eur' in cashRouteVm.cashReceipt)
+);
+assert(
+  'El historial y el resumen reflejan la recaudación recién precintada',
+  cashRouteVm.recentCashCollections[0].id === 902
+    && cashRouteVm.cashRouteSummary.total_collections_count === 2
+    && cashRouteVm.cashRouteSummary.total_reception_cash_delivered_eur === 7
+);
+cashRouteVm.closeCashReceipt();
+
+api.restocker.createCashCollection = async () => {
+  const error = new Error('Sin cobertura');
+  error.status = 0;
+  error.code = 'NETWORK_ERROR';
+  throw error;
+};
+cashRouteVm.openCashCollection(cashRouteVm.machines[0]);
+cashRouteVm.cashForm.bag_seal_code = 'BAG-CCV11-0003';
+cashRouteVm.cashForm.sales_counter_reading = 130;
+cashRouteVm.cashForm.change_tubes_loaded_eur = 5;
+await cashRouteVm.saveCashFromModal();
+assert(
+  'Sin red, la recaudación cae en la cola offline y cierra el modal',
+  cashRouteVm.showCashModal === false
+    && cashRouteVm.pendingCashMutations.length === 1
+    && cashRouteVm.pendingCashMutations[0].status === 'PENDING'
+);
+assert(
+  'La cola IndexedDB aísla la recaudación por restocker_id',
+  (await cashRouteVm.cashQueue.list(12)).length === 1
+    && (await cashRouteVm.cashQueue.list(13)).length === 0
+);
+assert(
+  'La captura offline se refleja de inmediato en el historial local',
+  cashRouteVm.recentCashCollections[0].status === 'PENDING_SYNC'
+    && cashRouteVm.recentCashCollections[0].bag_seal_code === 'BAG-CCV11-0003'
+);
+
+const cashQueue = new CashCollectionOfflineQueue({ indexedDB: createFakeIndexedDb() });
+const cashQueueRecord = (id, sequence) => ({
+  client_mutation_id: id,
+  restocker_id: 12,
+  machine_id: 7,
+  payload: {
+    client_mutation_id: id,
+    bag_seal_code: 'BAG-' + id.toUpperCase() + '-0001',
+    sales_counter_reading: 140,
+    change_tubes_loaded_eur: 0,
+    reception_cash_delivered_eur: 0
+  },
+  created_at: '2026-11-14T11:00:00+00:00',
+  sequence_order: sequence
+});
+await cashQueue.clear(12);
+await cashQueue.enqueue(cashQueueRecord('cash-2', 2));
+await cashQueue.enqueue(cashQueueRecord('cash-1', 1));
+await cashQueue.enqueue({ ...cashQueueRecord('cash-other', 3), restocker_id: 13 });
+assert(
+  'La cola FIFO ordena por secuencia y no mezcla reponedores',
+  (await cashQueue.list(12)).map((item) => item.client_mutation_id).join(',') === 'cash-1,cash-2'
+    && (await cashQueue.list(13)).length === 1
+);
+await cashQueue.markConflict('cash-1', 'OFFLINE_CASH_COLLECTION_CONFLICT');
+assert(
+  'Marcar conflicto conserva la recaudación con su motivo',
+  (await cashQueue.list(12, ['CONFLICT']))[0].conflict_reason === 'OFFLINE_CASH_COLLECTION_CONFLICT'
+);
+await cashQueue.remove('cash-2');
+await cashQueue.clear(12);
+assert(
+  'Vaciar la cola respeta el aislamiento del reponedor',
+  (await cashQueue.list(12)).length === 0 && (await cashQueue.list(13)).length === 1
+);
+const memoryCashQueue = new CashCollectionOfflineQueue({ indexedDB: null });
+await memoryCashQueue.enqueue(cashQueueRecord('memory-cash', 1));
+assert(
+  'La cola de recaudaciones degrada a memoria sin IndexedDB',
+  memoryCashQueue.isMemoryBacked() === true && (await memoryCashQueue.list(12)).length === 1
+);
+
+const syncCashQueue = new CashCollectionOfflineQueue({ indexedDB: createFakeIndexedDb() });
+await syncCashQueue.enqueue(cashQueueRecord('sync-cash-1', 1));
+await syncCashQueue.enqueue(cashQueueRecord('sync-cash-2', 2));
+const syncCashVm = buildVm({
+  restocker: bootstrapPayload.data.restocker,
+  cashQueue: syncCashQueue
+});
+const syncCashCalls = [];
+api.restocker.createCashCollection = async (machineId, payload) => {
+  syncCashCalls.push({ machineId, payload });
+  if (payload.client_mutation_id === 'sync-cash-2') {
+    const error = new Error('OFFLINE_CASH_COLLECTION_CONFLICT');
+    error.status = 409;
+    error.code = 'OFFLINE_CASH_COLLECTION_CONFLICT';
+    throw error;
+  }
+  return {
+    data: {
+      ...cashCollectionRow,
+      id: 903,
+      collection_code: 'MCC-2026-0903',
+      bag_seal_code: payload.bag_seal_code,
+      reception_cash_delivered_eur: 0,
+      receptionist_name: null,
+      has_reception_receipt: false
+    }
+  };
+};
+await syncCashVm.syncPendingCashCollections();
+assert(
+  'La sincronización FIFO respeta el orden de la cola de recaudaciones',
+  syncCashCalls.length === 2
+    && syncCashCalls[0].payload.client_mutation_id === 'sync-cash-1'
+    && syncCashCalls[1].payload.client_mutation_id === 'sync-cash-2'
+);
+assert(
+  'Un 409 de recaudación se conserva como conflicto sin bucle',
+  (await syncCashQueue.list(12)).length === 1
+    && (await syncCashQueue.list(12, ['CONFLICT']))[0].client_mutation_id === 'sync-cash-2'
+    && syncCashVm.cashSyncMessage.includes('1 recaudación(es) sincronizada(s)')
+    && syncCashVm.cashSyncMessage.includes('1 conflicto(s)')
+);
+
+const dumpCashCalls = [];
+api.restocker.dumpCashCollectionConflict = async (payload) => {
+  dumpCashCalls.push(payload);
+  return { logged: true, action: 'OFFLINE_CASH_COLLECTION_CONFLICT_DUMP' };
+};
+const conflictedCash = (await syncCashQueue.list(12, ['CONFLICT']))[0];
+await syncCashVm.archiveCashConflict(conflictedCash);
+assert(
+  'Archivar el conflicto de recaudación llama a auditoría con su precinto',
+  dumpCashCalls.length === 1
+    && dumpCashCalls[0].machine_id === 7
+    && dumpCashCalls[0].client_mutation_id === 'sync-cash-2'
+    && dumpCashCalls[0].bag_seal_code === 'BAG-SYNC-CASH-2-0001'
+    && (await syncCashQueue.list(12)).length === 0
+);
+
+api.restocker.getMachinePlanogram = async () => visitPlanogramPayload;
+const cashVisitVm = buildVm({
+  restocker: bootstrapPayload.data.restocker,
+  machines: JSON.parse(JSON.stringify([{
+    ...visitMachine,
+    has_physical_reception: true,
+    pending_reception_refunds: [cashRefund],
+    pending_reception_refunds_count: 1
+  }])),
+  vanProductStocks: JSON.parse(JSON.stringify(visitStocks)),
+  visitQueue: new RestockVisitOfflineQueue({ indexedDB: createFakeIndexedDb() }),
+  cashQueue: new CashCollectionOfflineQueue({ indexedDB: createFakeIndexedDb() })
+});
+await cashVisitVm.openVisitAssistant(cashVisitVm.machines[0]);
+cashVisitVm.visitForm.cabin_temp_celsius = 3.5;
+cashVisitVm.markHygieneComplete();
+cashVisitVm.visitCashEnabled = true;
+cashVisitVm.onVisitCashToggle();
+assert(
+  'El bloque de la visita abre la misma captura en contexto atómico',
+  cashVisitVm.showCashModal === true && cashVisitVm.cashContext === 'VISIT'
+);
+cashVisitVm.cashForm.bag_seal_code = 'BAG-CCV11-0004';
+cashVisitVm.cashForm.sales_counter_reading = 150;
+cashVisitVm.cashForm.change_tubes_loaded_eur = 8;
+cashVisitVm.cashForm.reception_cash_delivered_eur = 4.5;
+cashVisitVm.cashForm.receptionist_name = 'Conserje Visita';
+await cashVisitVm.saveCashFromModal();
+assert(
+  'Guardar el bloque prepara la recaudación sin enviarla por separado',
+  cashVisitVm.showCashModal === false
+    && cashVisitVm.visitCashConfigured === true
+    && cashVisitVm.visitCashForm.bag_seal_code === 'BAG-CCV11-0004'
+);
+const integratedVisitPayload = cashVisitVm.buildVisitPayload();
+assert(
+  'El payload de la visita incorpora la recaudación integral (D1)',
+  integratedVisitPayload.cash_collection?.bag_seal_code === 'BAG-CCV11-0004'
+    && integratedVisitPayload.cash_collection.reception_cash_delivered_eur === 4.5
+    && integratedVisitPayload.cash_collection.receptionist_name === 'Conserje Visita'
+    && !('expected_cashbox_eur' in integratedVisitPayload.cash_collection)
+);
+
+cashVisitVm.visitForm.cabin_temp_celsius = 4.1;
+const thermalVisitPayload = cashVisitVm.buildVisitPayload();
+const thermalCashValidation = cashVisitVm.validateCashForm(
+  cashVisitVm.visitCashForm,
+  cashVisitVm.visitMachine,
+  true
+);
+assert(
+  'El aborto térmico excluye y bloquea cualquier recaudación (Art. II.2)',
+  thermalVisitPayload.status === 'ABORTED_THERMAL_BREACH'
+    && !('cash_collection' in thermalVisitPayload)
+    && thermalCashValidation.ok === false
+    && thermalCashValidation.error.includes('Art. II.2')
+);
+assert(
+  'El bloque de efectivo queda oculto cuando la visita aborta por temperatura',
+  viewSource.includes('data-testid="visit-cash-block"')
+    && /v-if="!visitIsThermalAbort"[\s\S]{0,80}data-testid="visit-cash-block"/.test(viewSource)
+);
+
+assert(
+  'El cliente API expone las cuatro operaciones móviles de recaudación',
+  typeof api.restocker.createCashCollection === 'function'
+    && typeof api.restocker.getCashCollections === 'function'
+    && typeof api.restocker.getCashCollectionReceptionReceipt === 'function'
+    && typeof api.restocker.dumpCashCollectionConflict === 'function'
+);
+assert(
+  'Las rutas móviles son las del contrato de recaudación',
+  apiSource.includes('/restocker/machines/${encodeURIComponent(machineId)}/cash-collections')
+    && apiSource.includes('cash-collections${q ? `?${q}`')
+    && apiSource.includes('/restocker/cash-collections/${encodeURIComponent(collectionId)}/reception-receipt')
+    && apiSource.includes('/restocker/cash-collections/conflict-dump')
+);
+assert(
+  'El modal rápido declara precinto, contador, cambio, conserjería y cola offline',
+  cashModalSource.includes('data-testid="cash-bag-seal"')
+    && cashModalSource.includes('data-testid="cash-counter-reading"')
+    && cashModalSource.includes('data-testid="cash-change-tubes"')
+    && cashModalSource.includes('data-testid="cash-refund-option"')
+    && cashModalSource.includes('data-testid="cash-reception-amount"')
+    && cashModalSource.includes('data-testid="cash-receptionist-name"')
+    && cashModalSource.includes('cola IndexedDB FIFO')
+);
+assert(
+  'El historial usa el copy canónico y no publica las cinco claves privadas',
+  cashHistorySource.includes('🪙 Mis Bolsas Precintadas y Cambios de Ruta')
+    && !cashHistorySource.includes('expected_cashbox_eur')
+    && !cashHistorySource.includes('previous_sales_counter_reading')
+    && !cashHistorySource.includes('vault_counted_eur')
+    && !cashHistorySource.includes('discrepancy_eur')
+    && !cashHistorySource.includes('discrepancy_justification')
+);
+assert(
+  'El recibo muestra los nueve campos sin bolsa, PIN ni arqueo',
+  cashReceiptSource.includes('data-testid="cash-reception-receipt-modal"')
+    && cashReceiptSource.includes('linked_refund_request_id')
+    && !cashReceiptSource.includes('bag_seal_code')
+    && !cashReceiptSource.includes('pickup_pin')
+    && !cashReceiptSource.includes('expected_cashbox_eur')
+);
+assert(
+  'La cola de recaudaciones usa IndexedDB, clave idempotente e índice por reponedor',
+  cashQueueSource.includes('indexedDB')
+    && cashQueueSource.includes('client_mutation_id')
+    && cashQueueSource.includes('by_restocker')
+    && cashQueueSource.includes('vendguard-cash-collections')
+);
+assert(
+  'El Service Worker precachea la cola de recaudaciones y sube la versión',
+  readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
+    .includes('/assets/js/utils/CashCollectionOfflineQueue.js')
+    && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
+      .includes('vendguard-app-shell-v22')
+);
+assert(
+  'La vista completa no expone ninguna de las cinco claves del Arqueo Ciego',
+  !viewSource.includes('previous_sales_counter_reading')
+    && !viewSource.includes('expected_cashbox_eur')
+    && !viewSource.includes('vault_counted_eur')
+    && !viewSource.includes('discrepancy_eur')
+    && !viewSource.includes('discrepancy_justification')
+);
+
+api.restocker.createCashCollection = originalCreateCashCollection;
+api.restocker.getCashCollectionReceptionReceipt = originalCashReceipt;
+api.restocker.dumpCashCollectionConflict = originalDumpCashConflict;
+api.get = originalCashGet;
 
 api.restocker.getMachinePlanogram = originalVisitPlanogram;
 api.restocker.createRestockVisit = originalCreateRestockVisit;
