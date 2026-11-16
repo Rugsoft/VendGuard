@@ -49,9 +49,10 @@ flowchart LR
   - **Verificación:** `php tests/unit/CashCollectionDomainModelsTest.php`
   - **Cierre (2026-11-16):** `CashCollectionStatus` con los cuatro estados, estado público `PROCESSED_IN_VAULT` para los arqueos terminales y predicados de ciclo de vida. `MachineCashCollection` inmutable, con las identidades del motor en el borde (código `MCC-AAAA-NNNN`, precinto normalizado, cotas, aritmética del contador, conserjería y ciclo de vida con tolerancia de ±1,00 €) y tres proyecciones segregadas: Arqueo Ciego del reponedor, vista financiera de Coordinación y recibo de conserjería de nueve campos sin PII. 65 aserciones unitarias.
 
-- [ ] **T-CCV-04 · Crear `MachineCashCollectionValidator` y `MachineCashCollectionValidationException` (precinto `C1`, monotonía y reseteo de contador `C3`, entrega en conserjería `D3`, guarda térmica `C4` y tolerancia $\pm 1,00\,\text{€}$ con justificación $\ge 20$ chars `D2`/`Art. V.1`)**
+- [x] **T-CCV-04 · Crear `MachineCashCollectionValidator` y `MachineCashCollectionValidationException` (precinto `C1`, monotonía y reseteo de contador `C3`, entrega en conserjería `D3`, guarda térmica `C4` y tolerancia $\pm 1,00\,\text{€}$ con justificación $\ge 20$ chars `D2`/`Art. V.1`)**
   - **Requisitos:** `RF-01.2`, `RF-02.1`, `RF-02.2`, `RF-03.1`, `RF-04.2`, `D2`, `D3`, `C1`, `C3`, `C4`, `Art. II.2`, `Art. V.1`.
   - **Verificación:** `php tests/unit/MachineCashCollectionValidatorTest.php`
+  - **Cierre (2026-11-16):** `MachineCashCollectionValidationException` con los códigos exactos del contrato (precinto, contador, cotas, conserjería, bloqueo sanitario, aborto térmico, justificación y arqueo terminal) y `MachineCashCollectionValidator`, que normaliza el precinto, aplica la primacía sanitaria y de la visita, calcula en privado `expected_cashbox_eur` en los tres caminos del contador, valida la entrega en conserjería y resuelve el arqueo con la tolerancia de ±1,00 €. 114 aserciones unitarias.
 
 - [ ] **T-CCV-05 · Implementar `PdoMachineCashCollectionRepository` (alta en Tabla 49, idempotencia `client_mutation_id`, lectura de último contador por máquina, recepción en cámara, arqueo terminal, 6 KPIs de Coordinación y resumen del reponedor)**
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `RF-02.2`, `RF-04.1`, `RF-04.2`, `RF-05.2`, `RF-05.3`, `D1`, `D2`, `D4`, `C1`, `QA 1`, `QA 3`, `Art. III.1`, `Art. III.3`, `Art. V.4`.
