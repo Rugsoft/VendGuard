@@ -34,9 +34,10 @@ flowchart LR
 
 ## Detalle de Tareas
 
-- [ ] **T-CCV-01 · Crear migración `031_cash_collection_vault_audit.sql`, converger `supabase_init.sql` y sembrar recaudaciones y arqueos en `supabase_seeds.sql` y `SeedRunner`**
+- [x] **T-CCV-01 · Crear migración `031_cash_collection_vault_audit.sql`, converger `supabase_init.sql` y sembrar recaudaciones y arqueos en `supabase_seeds.sql` y `SeedRunner`**
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `RNF-01`, `D1`–`D4`, `C1`, `C3`, `C4`, `QA 1`, `Art. II.2`, `Art. III.1`, `Art. III.3`.
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
+  - **Cierre (2026-11-16):** `SchemaConvergenceParityTest` 39/39 (`exit=0`) con 49 tablas, 48 columnas `ENUM`, 42 tipos y 31 migraciones; `SeedRunnerSingleEngineTest` 26/26 y `SeedDataTest` en verde; `bin/migrate.php` aplica `031` y declara el esquema convergido. Las semillas crean las cuatro recaudaciones (una por estado de custodia) y son idempotentes. `PostgresSchemaTest` y `PostgresConstitutionalTest` se actualizan en `T-CCV-02`, que es su criterio de verificación declarado.
 
 - [ ] **T-CCV-02 · Actualizar contratos de esquema (49 tablas, 42 enums), `PostgresFixtureBuilder`, `TestDataCleaner` y crear `PostgresCashCollectionVaultAuditSchemaTest.php`**
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `RNF-01`, `D4`, `C1`, `C3`, `C4`, `Art. II.2`, `Art. III.1`, `Art. III.3`.

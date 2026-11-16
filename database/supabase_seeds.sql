@@ -2140,6 +2140,118 @@ WHERE NOT EXISTS (
 );
 
 
+
+-- ============================================================================
+-- SECCIÓN 26 · machine_cash_collections — recaudaciones y arqueos demo (Módulo 35)
+-- ============================================================================
+-- QUÉ SIEMBRA
+--   Cuatro cortes de bolsa que cubren los cuatro estados del ciclo de custodia:
+--     · `MCC-2026-0001` — primera recaudación histórica de `VEND-0101`, ligada a
+--       la visita `MRV-2026-0001` del Módulo 34, con base inicial declarada
+--       (`1.200,00 €`) y arqueo conforme: se contaron `149,50 €` frente a los
+--       `150,00 €` esperados, dentro de la tolerancia de ±1,00 €.
+--     · `MCC-2026-0002` — bolsa de `VEND-0601` sellada en parada rápida, con
+--       `2,50 €` entregados en conserjería y arqueo con descuadre de `-5,50 €`
+--       justificado por el atasco de monedas en el canal de recogida.
+--     · `MCC-2026-0003` — bolsa de `VEND-0201` ya recibida en cámara, pendiente
+--       de arqueo.
+--     · `MCC-2026-0004` — bolsa de `VEND-0301` recién sellada en ruta.
+--
+-- POR QUÉ ESTOS CUATRO Y NO OTROS
+--   El arqueo ciego se demuestra con datos: la primera fila ejercita la rama de
+--   base inicial (sin lectura previa), la segunda la tolerancia rota y la
+--   justificación real del Art. V.1, la tercera la recepción en cámara y la
+--   cuarta el estado inicial. Ninguna toca una máquina con avería térmica ni
+--   visita abortada: la primacía sanitaria del Art. II se certifica en las
+--   suites, no sembrando un estado imposible.
+--
+-- POR QUÉ SE INSERTA SOLO SI NO EXISTE
+--   La recaudación es un hecho histórico: el arqueo terminal es inmutable
+--   (Art. III.3) y una resemilla no lo reescribe ni lo duplica. Las referencias
+--   se resuelven por `collection_code`, `machine_code`, `email_key` y
+--   `visit_code`, nunca por identificadores de secuencia.
+-- ============================================================================
+
+INSERT INTO machine_cash_collections (
+    collection_code, restock_visit_id, machine_id, machine_code_snapshot,
+    restocker_id, restocker_name_snapshot, restocker_code_snapshot,
+    bag_seal_code, change_tubes_loaded_eur, sales_counter_reading,
+    previous_sales_counter_reading, initial_baseline_reading_eur,
+    is_counter_reset, counter_reset_notes, expected_cashbox_eur,
+    reception_cash_delivered_eur, receptionist_name, linked_refund_request_id,
+    route_notes, status, collected_at, delivered_to_vault_at,
+    delivered_to_vault_by, vault_counted_eur, discrepancy_eur,
+    vault_reconciled_by, vault_reconciled_by_name_snapshot, vault_reconciled_at,
+    discrepancy_justification, client_mutation_id
+)
+SELECT
+    v.collection_code,
+    vis.id,
+    m.id,
+    m.code,
+    u.id,
+    u.name,
+    COALESCE(NULLIF(btrim(u.operator_code), ''), 'SIN-CODIGO'),
+    v.bag_seal_code,
+    v.change_tubes_loaded_eur,
+    v.sales_counter_reading,
+    v.previous_sales_counter_reading,
+    v.initial_baseline_reading_eur,
+    v.is_counter_reset,
+    v.counter_reset_notes,
+    v.expected_cashbox_eur,
+    v.reception_cash_delivered_eur,
+    v.receptionist_name,
+    NULL,
+    v.route_notes,
+    v.status::cash_collection_status,
+    CURRENT_TIMESTAMP - v.collected_age,
+    CASE WHEN v.delivered_age IS NULL THEN NULL ELSE CURRENT_TIMESTAMP - v.delivered_age END,
+    CASE WHEN v.delivered_age IS NULL THEN NULL ELSE c.id END,
+    v.vault_counted_eur,
+    v.discrepancy_eur,
+    CASE WHEN v.reconciled_age IS NULL THEN NULL ELSE c.id END,
+    CASE WHEN v.reconciled_age IS NULL THEN NULL ELSE c.name END,
+    CASE WHEN v.reconciled_age IS NULL THEN NULL ELSE CURRENT_TIMESTAMP - v.reconciled_age END,
+    v.discrepancy_justification,
+    v.client_mutation_id
+FROM (VALUES
+    ('MCC-2026-0001', 'VEND-0101', 'lucia.repostaje@vendguard.internal', 'MRV-2026-0001',
+     'BAG-2026-000101', 40.00, 1350.00, NULL, 1200.00, FALSE, NULL, 150.00,
+     0.00, NULL, 'Corte de hucha tras la retirada FEFO; bolsa sellada sin incidencias.',
+     'RECONCILED_OK', INTERVAL '2 days', INTERVAL '1 day', 149.50, -0.50, INTERVAL '12 hours',
+     NULL, 'seed-mutation-cash-0001'),
+    ('MCC-2026-0002', 'VEND-0601', 'oscar.repostaje@vendguard.internal', NULL,
+     'BAG-2026-000102', 60.00, 700.00, 480.00, 0.00, FALSE, NULL, 220.00,
+     2.50, 'Carlos Ruiz', 'Recaudación rápida en parada con entrega de cambio de ruta en conserjería.',
+     'DISCREPANCY_FLAGGED', INTERVAL '3 days', INTERVAL '2 days', 214.50, -5.50, INTERVAL '30 hours',
+     'Faltan 5,50 € por atasco de monedas en el canal de recogida.', 'seed-mutation-cash-0002'),
+    ('MCC-2026-0003', 'VEND-0201', 'lucia.repostaje@vendguard.internal', NULL,
+     'BAG-2026-000103', 45.00, 1080.00, 950.00, 0.00, FALSE, NULL, 130.00,
+     0.00, NULL, 'Bolsa recibida en cámara; pendiente de abrir en Caja Central.',
+     'DELIVERED_TO_VAULT', INTERVAL '1 day', INTERVAL '6 hours', NULL, NULL, NULL,
+     NULL, 'seed-mutation-cash-0003'),
+    ('MCC-2026-0004', 'VEND-0301', 'oscar.repostaje@vendguard.internal', NULL,
+     'BAG-2026-000104', 0.00, 365.50, 300.00, 0.00, FALSE, NULL, 65.50,
+     0.00, NULL, 'Bolsa recién sellada en ruta; viaja en la furgoneta al cierre.',
+     'SEALED_IN_ROUTE', INTERVAL '4 hours', NULL, NULL, NULL, NULL,
+     NULL, 'seed-mutation-cash-0004')
+) AS v(collection_code, machine_code, restocker_email, visit_code, bag_seal_code,
+       change_tubes_loaded_eur, sales_counter_reading, previous_sales_counter_reading,
+       initial_baseline_reading_eur, is_counter_reset, counter_reset_notes,
+       expected_cashbox_eur, reception_cash_delivered_eur, receptionist_name,
+       route_notes, status, collected_age, delivered_age, vault_counted_eur,
+       discrepancy_eur, reconciled_age, discrepancy_justification, client_mutation_id)
+INNER JOIN machines m ON m.code = v.machine_code
+INNER JOIN users u ON u.email_key = v.restocker_email
+INNER JOIN users c ON c.email_key = 'coordinacion@vendguard.internal'
+LEFT JOIN machine_restock_visits vis ON vis.visit_code = v.visit_code
+WHERE NOT EXISTS (
+    SELECT 1 FROM machine_cash_collections existing
+     WHERE existing.collection_code = v.collection_code
+);
+
+
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante técnico · 3 vinculaciones de cuadrante de carga (M31) ·
 --       5 saldos de stock de furgoneta · 1 configuración de ruta ·
@@ -2176,4 +2288,9 @@ WHERE NOT EXISTS (
 --       ellos en `EXPIRING_SOON`, y 2 visitas de reposición in situ —una
 --       completada con retirada FEFO de 6 unidades y otra abortada por rotura de
 --       frío a 7,5 °C— con sus 3 líneas de desglose carril a carril.
+--       4 recaudaciones de efectivo (Módulo 35) que cubren los cuatro estados de
+--       custodia: una bolsa sellada en ruta, otra recibida en cámara, un arqueo
+--       conforme dentro de ±1,00 € y un descuadre de -5,50 € justificado; la
+--       primera ejercita además la base inicial del contador y una de ellas
+--       declara la entrega de 2,50 € en conserjería.
 -- =============================================================================
