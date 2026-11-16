@@ -141,6 +141,17 @@ final class CashTestGateway implements MachineCashCollectionGatewayInterface
     {
         return $this->refunds[$refundRequestId] ?? null;
     }
+
+    public function routeBootstrap(int $restockerId): array
+    {
+        $machines = [];
+        $refunds = [];
+        foreach ($this->machines as $machineId => $machine) {
+            $machines[(int)$machineId] = (bool)($machine['has_physical_reception'] ?? false);
+        }
+
+        return ['machines' => $machines, 'refunds' => $refunds];
+    }
 }
 
 final class CashTestRepository implements MachineCashCollectionRepositoryInterface

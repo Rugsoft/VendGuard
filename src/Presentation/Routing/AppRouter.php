@@ -402,6 +402,15 @@ class AppRouter
         // la lectura de la visita incluye el snapshot contable completo.
         $router->get('/api/coordinator/restock-visits', [CoordinatorProductLoadingController::class, 'listRestockVisits'], [$coordinatorAuth]);
         $router->get('/api/coordinator/restock-visits/{id}', [CoordinatorProductLoadingController::class, 'getRestockVisit'], [$coordinatorAuth]);
+        // Recaudación, cambio y arqueo de caja (Módulo 35: T-CCV-08, RF-04,
+        // RF-05.3, D2, D4, QA 3, QA 4, Art. V.1, Art. V.4). La exportación
+        // estática se registra antes del segmento dinámico `{id}`.
+        $router->get('/api/coordinator/cash-collections/export-csv', [CoordinatorProductLoadingController::class, 'exportCashCollectionsCsv'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/cash-collections', [CoordinatorProductLoadingController::class, 'listCashCollections'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/cash-collections/{id}', [CoordinatorProductLoadingController::class, 'getCashCollection'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/cash-collections/{id}/reception-receipt', [CoordinatorProductLoadingController::class, 'cashReceptionReceipt'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/cash-collections/{id}/deliver-to-vault', [CoordinatorProductLoadingController::class, 'deliverCashCollectionToVault'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/cash-collections/{id}/reconcile', [CoordinatorProductLoadingController::class, 'reconcileCashCollection'], [$coordinatorAuth]);
 
         // Actas de Merma APPCC (Módulo 29: T-SPOILAGE-10).
         // Los endpoints compartidos por Técnico y Coordinación se autentican como
@@ -562,6 +571,13 @@ class AppRouter
         $router->post('/api/restocker/visits/photo', [RestockerRouteController::class, 'uploadVisitPhoto'], [$restockerAuth]);
         $router->post('/api/restocker/visits/conflict-dump', [RestockerRouteController::class, 'dumpVisitConflict'], [$restockerAuth]);
         $router->post('/api/restocker/machines/{machineId}/visits', [RestockerRouteController::class, 'registerVisit'], [$restockerAuth]);
+        // Captura independiente de recaudación y consulta bajo Arqueo Ciego
+        // (Módulo 35: T-CCV-08, RF-01 a RF-03, D1–D4, C2, C4, QA 2, Art. V.4).
+        // `conflict-dump` se registra antes de `{id}`.
+        $router->get('/api/restocker/cash-collections', [RestockerRouteController::class, 'listCashCollections'], [$restockerAuth]);
+        $router->post('/api/restocker/cash-collections/conflict-dump', [RestockerRouteController::class, 'dumpCashCollectionConflict'], [$restockerAuth]);
+        $router->get('/api/restocker/cash-collections/{id}/reception-receipt', [RestockerRouteController::class, 'cashReceptionReceipt'], [$restockerAuth]);
+        $router->post('/api/restocker/machines/{machineId}/cash-collections', [RestockerRouteController::class, 'registerCashCollection'], [$restockerAuth]);
 
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)

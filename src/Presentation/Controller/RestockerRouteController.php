@@ -14,6 +14,7 @@ use VendGuard\Application\Service\MachineRestockVisitService;
 use VendGuard\Application\Service\ProductLoadingOrderService;
 use VendGuard\Application\Service\RestockerVanStockService;
 use VendGuard\Application\Service\ShiftLifecycleService;
+use VendGuard\Core\Domain\Enum\CashCollectionStatus;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
@@ -83,6 +84,8 @@ final class RestockerRouteController
 
     private MachineRestockVisitRepositoryInterface $visitRepository;
 
+    private MachineCashCollectionService $cashCollections;
+
     public function __construct(
         ?PDO $pdo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -92,7 +95,8 @@ final class RestockerRouteController
         ?ProductLoadingOrderService $loadingOrderService = null,
         ?RestockerVanStockService $vanStockService = null,
         ?MachineRestockVisitService $visitService = null,
-        ?MachineRestockVisitRepositoryInterface $visitRepository = null
+        ?MachineRestockVisitRepositoryInterface $visitRepository = null,
+        ?MachineCashCollectionService $cashCollections = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $this->userRepo = $userRepo ?? new PdoUserRepository($pdo);
@@ -117,6 +121,13 @@ final class RestockerRouteController
         $productRepository = new PdoVendingProductRepository($pdo);
 
         $this->visitRepository = $visitRepository ?? new PdoMachineRestockVisitRepository($pdo);
+        $this->cashCollections = $cashCollections ?? new MachineCashCollectionService(
+            new PdoMachineCashCollectionRepository($pdo),
+            new PdoMachineCashCollectionGateway($pdo),
+            new PdoRefundRequestRepository($pdo),
+            new PdoTransactionManager($pdo),
+            new AuditLogger()
+        );
 
         $this->planogramService = $planogramService ?? new MachinePlanogramService(
             new PdoMachinePlanogramRepository($pdo),
@@ -155,13 +166,7 @@ final class RestockerRouteController
             new PdoTransactionManager($pdo),
             new AuditLogger(),
             null,
-            new MachineCashCollectionService(
-                new PdoMachineCashCollectionRepository($pdo),
-                new PdoMachineCashCollectionGateway($pdo),
-                new PdoRefundRequestRepository($pdo),
-                new PdoTransactionManager($pdo),
-                new AuditLogger()
-            )
+            $this->cashCollections
         );
     }
 
@@ -201,7 +206,7 @@ final class RestockerRouteController
             $machines = $this->planogramService->listRestockerMachines($restockerId);
             $loadingContext = $this->loadingOrderService->getRestockerLoadingContext($restockerId);
             $vanStock = $this->vanStockService->getOwnVanStock($restockerId);
-            $cashContext = $this->visitService->routeCashContext($restockerId);
+            $cashRoute = $this->cashCollections->enrichRestockerRoute($restockerId, $machines);
 
             return Response::json([
                 'restocker' => [
@@ -221,7 +226,7 @@ final class RestockerRouteController
                     'started_at' => $shift->startedAt,
                     'today_effective_seconds' => (int)($shift->todaySummary['effective_seconds'] ?? 0),
                 ],
-                'machines' => $machines,
+                'machines' => $cashRoute['machines'],
                 'route_stops' => [],
                 'active_loading_order' => $loadingContext['active_loading_order'],
                 'last_reconciled_order' => $loadingContext['last_reconciled_order'],
@@ -229,8 +234,9 @@ final class RestockerRouteController
                 'van_stock_kpis' => $vanStock['kpis'],
                 'has_expired_van_lots' => $vanStock['has_expired_lots'],
                 'recent_visits' => $this->visitRepository->listForRestocker($restockerId, ['limit' => 5]),
-                'recent_cash_collections' => $cashContext['recent_cash_collections'],
-                'cash_route_summary' => $cashContext['cash_route_summary'],
+                'pending_reception_refunds' => $cashRoute['pending_reception_refunds'],
+                'recent_cash_collections' => $cashRoute['recent_cash_collections'],
+                'cash_route_summary' => $cashRoute['cash_route_summary'],
             ], 200);
         } catch (Throwable $exception) {
             error_log('[vendguard] Fallo al construir la ruta de carga del reponedor: ' . $exception);
@@ -422,6 +428,69 @@ final class RestockerRouteController
     }
 
     /**
+     * POST /api/restocker/machines/{machineId}/cash-collections
+     */
+    public function registerCashCollection(Request $request): Response
+    {
+        return $this->executeCashCollection(function () use ($request): Response {
+            return Response::json(
+                $this->cashCollections->registerCollection(
+                    $this->positiveMachineId($request),
+                    $request->getParsedBody(),
+                    $this->actor($request)
+                ),
+                201,
+                'Recaudación en bolsa precintada registrada.'
+            );
+        });
+    }
+
+    /**
+     * GET /api/restocker/cash-collections
+     */
+    public function listCashCollections(Request $request): Response
+    {
+        return $this->executeCashCollection(function () use ($request): Response {
+            return Response::json(
+                $this->cashCollections->listForRestocker(
+                    $this->actor($request),
+                    $this->cashCollectionFilters($request)
+                ),
+                200
+            );
+        });
+    }
+
+    /**
+     * GET /api/restocker/cash-collections/{id}/reception-receipt
+     */
+    public function cashReceptionReceipt(Request $request): Response
+    {
+        return $this->executeCashCollection(function () use ($request): Response {
+            return Response::json(
+                $this->cashCollections->receptionReceipt(
+                    $this->positiveCashCollectionId($request),
+                    $this->actor($request)
+                ),
+                200
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/cash-collections/conflict-dump
+     */
+    public function dumpCashCollectionConflict(Request $request): Response
+    {
+        return $this->executeCashCollection(function () use ($request): Response {
+            return Response::json(
+                $this->cashCollections->dumpConflict($request->getParsedBody(), $this->actor($request)),
+                201
+            );
+        });
+    }
+
+    /**
      * POST /api/restocker/visits/photo
      *
      * Evidencia fotográfica por `multipart/form-data` o base64 seguro. El
@@ -578,6 +647,30 @@ final class RestockerRouteController
         return (int)$raw;
     }
 
+    private function executeCashCollection(callable $operation): Response
+    {
+        try {
+            return $operation();
+        } catch (MachineCashCollectionValidationException $exception) {
+            $details = $exception->getField() === null
+                ? null
+                : array_merge(['field' => $exception->getField()], $exception->getContext());
+
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $details
+            );
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('VALIDATION_ERROR', $exception->getMessage(), 400);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo en la recaudación del reponedor: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo completar la recaudación.', 500);
+        }
+    }
+
     private function executeLoadingOrder(callable $operation): Response
     {
         try {
@@ -634,6 +727,52 @@ final class RestockerRouteController
         }
 
         return (int)$raw;
+    }
+
+    private function positiveCashCollectionId(Request $request): int
+    {
+        $raw = (string)($request->getRouteParam('id') ?? '');
+        if ($raw === '' || !ctype_digit($raw) || (int)$raw <= 0) {
+            throw new InvalidArgumentException('El identificador de recaudación debe ser un número entero positivo.');
+        }
+
+        return (int)$raw;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function cashCollectionFilters(Request $request): array
+    {
+        $query = $request->getQueryParams();
+        $filters = [];
+
+        if (isset($query['machine_id']) && trim((string)$query['machine_id']) !== '') {
+            if (!ctype_digit((string)$query['machine_id']) || (int)$query['machine_id'] <= 0) {
+                throw new InvalidArgumentException('El filtro machine_id debe ser un entero positivo.');
+            }
+            $filters['machine_id'] = (int)$query['machine_id'];
+        }
+
+        if (isset($query['status']) && trim((string)$query['status']) !== '') {
+            $status = strtoupper(trim((string)$query['status']));
+            if (CashCollectionStatus::tryFrom($status) === null) {
+                throw new InvalidArgumentException('El filtro status no es un estado de recaudación válido.');
+            }
+            $filters['status'] = $status;
+        }
+
+        foreach (['limit' => 100, 'offset' => 0] as $key => $default) {
+            if (!isset($query[$key]) || trim((string)$query[$key]) === '') {
+                continue;
+            }
+            if (!ctype_digit((string)$query[$key])) {
+                throw new InvalidArgumentException(sprintf('El filtro %s debe ser un entero no negativo.', $key));
+            }
+            $filters[$key] = (int)$query[$key] ?: $default;
+        }
+
+        return $filters;
     }
 
     private function positiveRouteId(Request $request): int

@@ -171,6 +171,78 @@ final class PdoMachineCashCollectionGateway implements MachineCashCollectionGate
         ];
     }
 
+    /**
+     * {@inheritdoc}
+     */
+    public function routeBootstrap(int $restockerId): array
+    {
+        if ($restockerId <= 0) {
+            return ['machines' => [], 'refunds' => []];
+        }
+
+        $flags = $this->pdo->prepare("
+            SELECT DISTINCT
+                m.id,
+                l.has_physical_reception
+            FROM machines m
+            INNER JOIN locations l ON l.id = m.location_id
+            INNER JOIN restocker_zone_assignments rza ON rza.zone_id = l.zone_id
+            INNER JOIN operational_zones oz ON oz.id = rza.zone_id
+            WHERE rza.restocker_id = :restocker_id
+              AND rza.removed_at IS NULL
+              AND oz.is_active = TRUE
+              AND m.is_active = TRUE
+              AND m.deleted_at IS NULL
+        ");
+        $flags->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        $flags->execute();
+
+        $machines = [];
+        foreach ($flags->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $machines[(int)$row['id']] = self::toBool($row['has_physical_reception']);
+        }
+
+        $refunds = $this->pdo->prepare("
+            SELECT
+                rr.id,
+                rr.machine_id,
+                m.code AS machine_code,
+                rr.claimed_amount,
+                rr.created_at
+            FROM refund_requests rr
+            INNER JOIN machines m ON m.id = rr.machine_id
+            INNER JOIN locations l ON l.id = rr.location_id
+            INNER JOIN restocker_zone_assignments rza ON rza.zone_id = l.zone_id
+            INNER JOIN operational_zones oz ON oz.id = rza.zone_id
+            WHERE rza.restocker_id = :restocker_id
+              AND rza.removed_at IS NULL
+              AND oz.is_active = TRUE
+              AND rr.status = 'PENDING_INSPECTION'
+              AND rr.compensation_method = 'EN_MANO_SEDE'
+              AND rr.is_active = TRUE
+              AND rr.deleted_at IS NULL
+              AND l.has_physical_reception = TRUE
+              AND m.is_active = TRUE
+              AND m.deleted_at IS NULL
+            ORDER BY rr.created_at DESC, rr.id DESC
+        ");
+        $refunds->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        $refunds->execute();
+
+        $pending = [];
+        foreach ($refunds->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $pending[] = [
+                'id' => (int)$row['id'],
+                'machine_id' => (int)$row['machine_id'],
+                'machine_code' => (string)$row['machine_code'],
+                'claimed_amount' => round((float)$row['claimed_amount'], 2),
+                'created_at' => (string)$row['created_at'],
+            ];
+        }
+
+        return ['machines' => $machines, 'refunds' => $pending];
+    }
+
     private static function toBool(mixed $value): bool
     {
         if (is_bool($value)) {

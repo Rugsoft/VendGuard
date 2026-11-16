@@ -13,8 +13,10 @@ namespace VendGuard\Core\Domain\Repository;
  * El servicio pide la fotografía bloqueada de la máquina (estado sanitario,
  * cobertura territorial, conserjería física y snapshots del reponedor), la
  * visita in situ vinculada y el expediente de reintegro que se va a liquidar en
- * conserjería. La implementación PDO concentra los `SELECT ... FOR UPDATE` y no
- * conoce ninguna regla de negocio: quien decide es el servicio.
+ * conserjería. También resuelve la lectura no bloqueante del bootstrap móvil:
+ * qué máquinas de la ruta tienen conserjería física y qué reintegros
+ * `EN_MANO_SEDE` están pendientes. La implementación PDO concentra el acceso y
+ * no conoce ninguna regla de negocio: quien decide es el servicio.
  *
  * Claves del contexto de máquina:
  *   `id`, `machine_code`, `location_id`, `sanitary_status`,
@@ -49,4 +51,20 @@ interface MachineCashCollectionGatewayInterface
      * @return array{id: int, machine_id: int, status: string, compensation_method: string, claimed_amount: float, is_active: bool}|null
      */
     public function lockRefundForReception(int $refundRequestId): ?array;
+
+    /**
+     * Contexto de efectivo no bloqueante para `GET /api/restocker/my-route`.
+     *
+     * Devuelve, por una parte, el mapa `machine_id => has_physical_reception`
+     * de las máquinas de las zonas vivas del reponedor y, por otra, los
+     * reintegros `EN_MANO_SEDE` pendientes de inspección cuya sede sí tiene
+     * conserjería física. Los reintegros se proyectan sin `pickup_pin`, sin
+     * datos de contacto y sin PII del reclamante (`D3`, `Art. V.4`).
+     *
+     * @return array{
+     *     machines: array<int, bool>,
+     *     refunds: list<array{id: int, machine_id: int, machine_code: string, claimed_amount: float, created_at: string}>
+     * }
+     */
+    public function routeBootstrap(int $restockerId): array;
 }

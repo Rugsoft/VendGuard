@@ -306,6 +306,51 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
     }
 
     /**
+     * Bootstrap móvil de efectivo: enriquece las máquinas de la ruta con los
+     * flags de conserjería e historial y agrupa los reintegros elegibles.
+     *
+     * La consulta no expone `previous_sales_counter_reading` ni ninguna
+     * magnitud del arqueo ciego (`C2`, `Art. V.4`).
+     *
+     * @param list<array<string, mixed>> $machines
+     *
+     * @return array{machines: list<array<string, mixed>>, pending_reception_refunds: list<array<string, mixed>>, recent_cash_collections: list<array<string, mixed>>, cash_route_summary: array<string, mixed>}
+     */
+    public function enrichRestockerRoute(int $restockerId, array $machines): array
+    {
+        if ($restockerId <= 0) {
+            throw new InvalidArgumentException('La ruta exige un reponedor positivo.');
+        }
+
+        $bootstrap = $this->gateway->routeBootstrap($restockerId);
+
+        $refundsByMachine = [];
+        foreach ($bootstrap['refunds'] as $refund) {
+            $refundsByMachine[(int)$refund['machine_id']][] = $refund;
+        }
+
+        $enriched = [];
+        foreach ($machines as $machine) {
+            $machineId = (int)($machine['id'] ?? 0);
+            $machine['has_physical_reception'] = (bool)($bootstrap['machines'][$machineId] ?? false);
+            $machine['has_prior_cash_collection'] = $machineId > 0
+                && $this->collections->findLastForMachine($machineId) !== null;
+            $machine['pending_reception_refunds'] = $refundsByMachine[$machineId] ?? [];
+            $enriched[] = $machine;
+        }
+
+        return [
+            'machines' => $enriched,
+            'pending_reception_refunds' => $bootstrap['refunds'],
+            'recent_cash_collections' => array_map(
+                static fn (MachineCashCollection $collection): array => $collection->toRestockerArray(),
+                $this->collections->listForRestocker($restockerId, ['limit' => 5])
+            ),
+            'cash_route_summary' => $this->collections->summarizeForRestocker($restockerId),
+        ];
+    }
+
+    /**
      * {@inheritdoc}
      */
     public function routeCashContext(int $restockerId, int $limit = 5): array
@@ -492,6 +537,25 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
             'cash_collections' => $collections,
             'summary' => $this->collections->summarizeForRestocker($restocker['id'], $filters),
         ];
+    }
+
+    /**
+     * Expediente completo de una recaudación para Caja Central.
+     *
+     * @param array<string, mixed> $actor
+     *
+     * @return array<string, mixed>
+     */
+    public function findForCoordinator(int $collectionId, array $actor): array
+    {
+        $this->requireActor($actor, 'COORDINATOR');
+
+        $collection = $this->collections->findById($collectionId);
+        if ($collection === null) {
+            throw MachineCashCollectionValidationException::cashCollectionNotFound($collectionId);
+        }
+
+        return $collection->toCoordinatorArray();
     }
 
     /**
