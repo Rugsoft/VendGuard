@@ -44,9 +44,10 @@ flowchart LR
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresCashCollectionVaultAuditSchemaTest.php`
   - **Cierre (2026-11-16):** Contratos de esquema elevados a 49 tablas y 42 tipos en `schema_correspondence_contract.md` y `database_schema.md`. `PostgresFixtureBuilder` sintetiza los formatos cerrados `MCC-AAAA-NNNN` y `BAG-...` de la Tabla 49, y el expediente genérico nace como `PAYMENT_SYSTEM` para no dejar un ticket térmico abierto que el cerrojo sanitario convirtiera en un rechazo legítimo. `TestDataCleaner` incorpora `machine_cash_collections` como raíz de purga. Creada `PostgresCashCollectionVaultAuditSchemaTest.php` (46 aserciones).
 
-- [ ] **T-CCV-03 · Crear `CashCollectionStatus` y `MachineCashCollection` con proyecciones segregadas (`toRestockerArray`, `toCoordinatorArray`, `toReceptionReceiptArray` — `C2`, `QA 2`, `Art. V.4`)**
+- [x] **T-CCV-03 · Crear `CashCollectionStatus` y `MachineCashCollection` con proyecciones segregadas (`toRestockerArray`, `toCoordinatorArray`, `toReceptionReceiptArray` — `C2`, `QA 2`, `Art. V.4`)**
   - **Requisitos:** `RF-01.1`, `RF-03.2`, `RNF-02`, `D2`–`D4`, `C2`, `QA 1`, `QA 2`, `Art. V.4`.
   - **Verificación:** `php tests/unit/CashCollectionDomainModelsTest.php`
+  - **Cierre (2026-11-16):** `CashCollectionStatus` con los cuatro estados, estado público `PROCESSED_IN_VAULT` para los arqueos terminales y predicados de ciclo de vida. `MachineCashCollection` inmutable, con las identidades del motor en el borde (código `MCC-AAAA-NNNN`, precinto normalizado, cotas, aritmética del contador, conserjería y ciclo de vida con tolerancia de ±1,00 €) y tres proyecciones segregadas: Arqueo Ciego del reponedor, vista financiera de Coordinación y recibo de conserjería de nueve campos sin PII. 65 aserciones unitarias.
 
 - [ ] **T-CCV-04 · Crear `MachineCashCollectionValidator` y `MachineCashCollectionValidationException` (precinto `C1`, monotonía y reseteo de contador `C3`, entrega en conserjería `D3`, guarda térmica `C4` y tolerancia $\pm 1,00\,\text{€}$ con justificación $\ge 20$ chars `D2`/`Art. V.1`)**
   - **Requisitos:** `RF-01.2`, `RF-02.1`, `RF-02.2`, `RF-03.1`, `RF-04.2`, `D2`, `D3`, `C1`, `C3`, `C4`, `Art. II.2`, `Art. V.1`.
