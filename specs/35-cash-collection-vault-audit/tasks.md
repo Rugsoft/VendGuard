@@ -39,9 +39,10 @@ flowchart LR
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
   - **Cierre (2026-11-16):** `SchemaConvergenceParityTest` 39/39 (`exit=0`) con 49 tablas, 48 columnas `ENUM`, 42 tipos y 31 migraciones; `SeedRunnerSingleEngineTest` 26/26 y `SeedDataTest` en verde; `bin/migrate.php` aplica `031` y declara el esquema convergido. Las semillas crean las cuatro recaudaciones (una por estado de custodia) y son idempotentes. `PostgresSchemaTest` y `PostgresConstitutionalTest` se actualizan en `T-CCV-02`, que es su criterio de verificación declarado.
 
-- [ ] **T-CCV-02 · Actualizar contratos de esquema (49 tablas, 42 enums), `PostgresFixtureBuilder`, `TestDataCleaner` y crear `PostgresCashCollectionVaultAuditSchemaTest.php`**
+- [x] **T-CCV-02 · Actualizar contratos de esquema (49 tablas, 42 enums), `PostgresFixtureBuilder`, `TestDataCleaner` y crear `PostgresCashCollectionVaultAuditSchemaTest.php`**
   - **Requisitos:** `RF-01.1`–`RF-01.3`, `RNF-01`, `D4`, `C1`, `C3`, `C4`, `Art. II.2`, `Art. III.1`, `Art. III.3`.
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresCashCollectionVaultAuditSchemaTest.php`
+  - **Cierre (2026-11-16):** Contratos de esquema elevados a 49 tablas y 42 tipos en `schema_correspondence_contract.md` y `database_schema.md`. `PostgresFixtureBuilder` sintetiza los formatos cerrados `MCC-AAAA-NNNN` y `BAG-...` de la Tabla 49, y el expediente genérico nace como `PAYMENT_SYSTEM` para no dejar un ticket térmico abierto que el cerrojo sanitario convirtiera en un rechazo legítimo. `TestDataCleaner` incorpora `machine_cash_collections` como raíz de purga. Creada `PostgresCashCollectionVaultAuditSchemaTest.php` (46 aserciones).
 
 - [ ] **T-CCV-03 · Crear `CashCollectionStatus` y `MachineCashCollection` con proyecciones segregadas (`toRestockerArray`, `toCoordinatorArray`, `toReceptionReceiptArray` — `C2`, `QA 2`, `Art. V.4`)**
   - **Requisitos:** `RF-01.1`, `RF-03.2`, `RNF-02`, `D2`–`D4`, `C2`, `QA 1`, `QA 2`, `Art. V.4`.
