@@ -7,6 +7,7 @@ namespace VendGuard\Application\Service;
 use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
+use VendGuard\Application\DTO\RestockerCashCollectionViewDTO;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
 use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
 use VendGuard\Core\Domain\Model\AuditEvent;
@@ -129,12 +130,12 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
 
         $existing = $this->collections->findByClientMutationId($restocker['id'], $mutationId);
         if ($existing !== null) {
-            return $existing->toRestockerArray() + ['idempotent_replay' => true];
+            return RestockerCashCollectionViewDTO::fromMachineCashCollection($existing)->toArray() + ['idempotent_replay' => true];
         }
 
         $repeated = $this->collections->findByClientMutationId($restocker['id'], $mutationId);
             if ($repeated !== null) {
-                return $repeated->toRestockerArray() + ['idempotent_replay' => true];
+                return RestockerCashCollectionViewDTO::fromMachineCashCollection($repeated)->toArray() + ['idempotent_replay' => true];
             }
 
             $context = $this->gateway->lockMachineContext($machineId, $restocker['id']);
@@ -281,7 +282,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                 ['machine_id' => $machineId, 'restock_visit_id' => $visitId]
             );
 
-        return $persisted->toRestockerArray() + ['idempotent_replay' => false];
+        return RestockerCashCollectionViewDTO::fromMachineCashCollection($persisted)->toArray() + ['idempotent_replay' => false];
     }
 
     /**
@@ -344,7 +345,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
             'machines' => $enriched,
             'pending_reception_refunds' => $bootstrap['refunds'],
             'recent_cash_collections' => array_map(
-                static fn (MachineCashCollection $collection): array => $collection->toRestockerArray(),
+                static fn (MachineCashCollection $collection): array => RestockerCashCollectionViewDTO::fromMachineCashCollection($collection)->toArray(),
                 $this->collections->listForRestocker($restockerId, ['limit' => 5])
             ),
             'cash_route_summary' => $this->collections->summarizeForRestocker($restockerId),
@@ -364,7 +365,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
 
         return [
             'recent_cash_collections' => array_map(
-                static fn (MachineCashCollection $collection): array => $collection->toRestockerArray(),
+                static fn (MachineCashCollection $collection): array => RestockerCashCollectionViewDTO::fromMachineCashCollection($collection)->toArray(),
                 $this->collections->listForRestocker($restockerId, ['limit' => $limit])
             ),
             'cash_route_summary' => $this->collections->summarizeForRestocker($restockerId),
@@ -530,7 +531,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
         $restocker = $this->requireActor($actor, 'RESTOCKER');
 
         $collections = array_map(
-            static fn (MachineCashCollection $collection): array => $collection->toRestockerArray(),
+            static fn (MachineCashCollection $collection): array => RestockerCashCollectionViewDTO::fromMachineCashCollection($collection)->toArray(),
             $this->collections->listForRestocker($restocker['id'], $filters)
         );
 

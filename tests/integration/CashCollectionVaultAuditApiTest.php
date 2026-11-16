@@ -297,6 +297,8 @@ try {
             && !in_array('expected_cashbox_eur', $collectKeys($createdData), true)
             && !in_array('previous_sales_counter_reading', $collectKeys($createdData), true)
             && !in_array('vault_counted_eur', $collectKeys($createdData), true)
+            && !in_array('discrepancy_eur', $collectKeys($createdData), true)
+            && !in_array('discrepancy_justification', $collectKeys($createdData), true)
     );
 
     $repeated = $call('POST', '/api/restocker/machines/' . $machineId . '/cash-collections', $capturePayload, $ownerToken);
@@ -414,6 +416,9 @@ try {
             && count($historyData['cash_collections'] ?? []) === 1
             && !in_array('expected_cashbox_eur', $collectKeys($historyData), true)
             && !in_array('previous_sales_counter_reading', $collectKeys($historyData), true)
+            && !in_array('vault_counted_eur', $collectKeys($historyData), true)
+            && !in_array('discrepancy_eur', $collectKeys($historyData), true)
+            && !in_array('discrepancy_justification', $collectKeys($historyData), true)
     );
 
     $conflict = $call('POST', '/api/restocker/cash-collections/conflict-dump', [

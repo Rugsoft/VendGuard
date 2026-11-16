@@ -6,7 +6,7 @@
 - **Contratos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../specs/technical/cash_collection_vault_audit_contracts.md)
 - **Sistema de Diseño:** [`docs/design.md`](design.md)
 - **Fecha de auditoría:** 2026-11-16
-- **Última actualización:** 2026-11-16 · `FIX-35-02` cerrado
+- **Última actualización:** 2026-11-16 · `FIX-35-03` cerrado
 - **Rama:** `feat/cash-collection-vault-audit` · Base auditada `000688b`
 - **Alcance:** auditoría estática y ejecución real de suites. Este documento recoge el orden de corrección propuesto y se actualiza al cerrar cada FIX.
 
@@ -16,17 +16,18 @@
 
 La implementación está operativa y la batería ejecutada pasa en verde:
 
-- Batería hermética global: **435/435 suites · 16.677 aserciones · 0 fallos · `exit=0`** (tras `FIX-35-02`).
-- Suites focales del Módulo 35: todas en verde, entre ellas `PostgresCashCollectionVaultAuditSchemaTest` 46/46, `MachineCashCollectionValidatorTest` 114/114, `MachineCashCollectionServiceTest` 45/45, `CashCollectionVaultAuditApiTest` 30/30 y `CashCollectionVaultAuditConstitutionalTest` 23/23.
+- Batería hermética global: **435/435 suites · 16.686 aserciones · 0 fallos · `exit=0`** (tras `FIX-35-03`).
+- Suites focales del Módulo 35: todas en verde, entre ellas `PostgresCashCollectionVaultAuditSchemaTest` 46/46, `MachineCashCollectionValidatorTest` 114/114, `MachineCashCollectionServiceTest` 45/45, `CashCollectionDomainModelsTest` 74/74, `CashCollectionVaultAuditApiTest` 30/30 y `CashCollectionVaultAuditConstitutionalTest` 23/23.
+- Proyección móvil: `RestockerCashCollectionViewDTO` publica una lista blanca de 18 campos y omite las cinco claves financieras privadas del Arqueo Ciego.
 - Frontend: `restocker_route_view.test.mjs` 209/209 y `coordinator_product_loading_tab.test.mjs` 80/80.
 - Layout móvil: `CashCollectionLayoutBrowserTest` 32/32 a `360 × 800` en Chromium real, con `document.documentElement.scrollWidth = 360` en las cuatro superficies de recaudación y en Coordinación.
 - Guardas de diseño: `CoordinatorButtonVariantsGuardTest.mjs` 23/23, `FrontendTemplateCompileTest.mjs` 15/15, `LegacyButtonPaletteRetirementTest.mjs` 18/18 y `DesignTokenDebtRatchetTest.mjs` 3/3.
 - Tareas: **12/12** en [`tasks.md`](../specs/35-cash-collection-vault-audit/tasks.md) y **12/12** filas `✅ hecho` en [`odd/tasks/cash-collection-vault-audit.md`](../odd/tasks/cash-collection-vault-audit.md).
 - `DocMetricsGuard` coherente, base restablecida con semillas intactas y **0 esquemas `t_*` residuales**.
 
-Sin embargo, **la Spec 35 no puede declararse cumplida al 100 % en sentido literal**. Las brechas se concentran en una contradicción contractual, un artefacto nominal inexistente y varios huecos de certificación. La implementación funcional es sólida; lo que falta es alinear el contrato y demostrar lo que la especificación exige.
+Sin embargo, **la Spec 35 no puede declararse cumplida al 100 % en sentido literal**. El P0 contractual y el artefacto nominal `RestockerCashCollectionViewDTO` ya están corregidos; quedan varios huecos de certificación P1/P2. La implementación funcional es sólida; lo que falta es alinear el resto de la trazabilidad y demostrar lo que la especificación exige.
 
-> **Conclusión corta:** el módulo funciona y las suites existentes pasan, pero la certificación literal no está cerrada. El P0 ya está corregido; los puntos P1 deben resolverse antes de volver a declarar la Spec 35 como cerrada.
+> **Conclusión corta:** el módulo funciona y las suites existentes pasan, pero la certificación literal aún no está cerrada. El P0 y `FIX-35-03` ya están corregidos; los puntos P1 restantes deben resolverse antes de volver a declarar la Spec 35 como cerrada.
 
 ---
 
@@ -36,7 +37,7 @@ Sin embargo, **la Spec 35 no puede declararse cumplida al 100 % en sentido liter
 |---:|---|---|---|---|---|---|
 | **1** | **FIX-35-01** | **P0 · Bloqueante contractual** | El reenvío idempotente responde `201` con la clave `idempotent`; la spec exige `200` con `idempotent_replay = true` | `RF-01.2.3` | Contrato REST incumplido y test que certifica el comportamiento contrario; un cliente que implemente la spec no puede validar el reenvío | **Cerrada (2026-11-16)** |
 | **2** | **FIX-35-02** | **P1 · Alto** | No hay prueba real de layout a `360 px` para los nuevos bloques/modales de recaudación; las guardas solo validan plantillas, tokens y geometría inline | `RNF-03`, DoD 3 | Riesgo de desbordamiento horizontal o contenido clipped en móvil; el requisito no está certificado | **Cerrada (2026-11-16)** |
-| **3** | **FIX-35-03** | **P1 · Alto** | `RestockerCashCollectionViewDTO` no existe; la opacidad se resuelve con `MachineCashCollection::toRestockerArray()` | `RNF-02.3` | La conducta es correcta, pero el artefacto nombrado por la spec y por la matriz no existe; una auditoría literal no lo encuentra | **Abierta** |
+| **3** | **FIX-35-03** | **P1 · Alto** | `RestockerCashCollectionViewDTO` no existe; la opacidad se resuelve con `MachineCashCollection::toRestockerArray()` | `RNF-02.3` | La conducta es correcta, pero el artefacto nombrado por la spec y por la matriz no existe; una auditoría literal no lo encuentra | **Cerrada (2026-11-16)** |
 | **4** | **FIX-35-04** | **P1 · Alto** | El test de baja lógica comprueba snapshots de máquina y reponedor, pero no `vault_reconciled_by_name_snapshot` | `QA 1`, Art. III.3 | No está certificada la conservación del revisor de caja tras una baja lógica | **Abierta** |
 | **5** | **FIX-35-05** | **P1 · Alto** | El código registra `CASH_COLLECTION_DELIVERED_TO_VAULT`, pero ninguna suite lo asserta | `RF-04.1`, Art. III.3 | La trazabilidad de la recepción en cámara existe, pero no tiene regresión que la proteja | **Abierta** |
 | **6** | **FIX-35-06** | **P2 · Medio** | No hay aserción específica de usuario/máquina inactivos ni del bloqueo `FOR UPDATE OF m` en la captura | `RF-02.1` | La defensa está en el código, pero no está certificada por una prueba del módulo | **Abierta** |
@@ -182,7 +183,7 @@ Verificado el 2026-11-16 en Chromium real (`chromium-1228`), a `360 × 800`, con
 
 ---
 
-## FIX-35-03 · Artefacto `RestockerCashCollectionViewDTO` · P1
+## FIX-35-03 · Artefacto `RestockerCashCollectionViewDTO` · P1 · ✅ Cerrada
 
 ### Requisito
 
@@ -190,7 +191,7 @@ Verificado el 2026-11-16 en Chromium real (`chromium-1228`), a `360 × 800`, con
 
 > «`RestockerCashCollectionViewDTO` omitirá siempre `previous_sales_counter_reading`, `expected_cashbox_eur`, `vault_counted_eur`, `discrepancy_eur` y `discrepancy_justification`…»
 
-### Evidencia actual
+### Evidencia previa (antes del cierre)
 
 - No existe ninguna clase `RestockerCashCollectionViewDTO` en `src/` ni en `tests/`.
 - La proyección móvil real es `MachineCashCollection::toRestockerArray()`, que ya omite las cinco claves privadas.
@@ -213,18 +214,30 @@ La opción A es la más conservadora si se quiere preservar el texto aprobado; l
 
 ### Criterios de aceptación
 
-- [ ] Existe una decisión explícita: DTO implementado o enmienda aprobada.
-- [ ] La prueba de opacidad verifica las cinco claves privadas, no solo el estado de la respuesta.
-- [ ] La matriz ya no cita un artefacto inexistente.
-- [ ] El recibo sigue exponiendo exactamente nueve campos y no incorpora `bag_seal_code`, `pickup_pin` ni `expected_cashbox_eur`.
+- [x] Existe una decisión explícita: DTO implementado o enmienda aprobada.
+- [x] La prueba de opacidad verifica las cinco claves privadas, no solo el estado de la respuesta.
+- [x] La matriz ya no cita un artefacto inexistente.
+- [x] El recibo sigue exponiendo exactamente nueve campos y no incorpora `bag_seal_code`, `pickup_pin` ni `expected_cashbox_eur`.
 
-### Archivos previsibles
+### Cierre
 
-- `src/Application/DTO/RestockerCashCollectionViewDTO.php` (si se elige A)
+Se eligió la **opción A** y se implementó el 2026-11-16:
+
+- Creado `src/Application/DTO/RestockerCashCollectionViewDTO.php`, una clase `final readonly` con lista blanca de 18 campos y fábrica `fromMachineCashCollection()`. Las cinco claves privadas del `RNF-02.3` no existen en el DTO, ni siquiera como propiedades privadas.
+- `MachineCashCollectionService` construye la respuesta móvil del alta, el replay idempotente, el bootstrap de ruta, el contexto de ruta y el historial con el DTO. `MachineCashCollection::toRestockerArray()` queda como proyección interna del dominio, no como contrato del borde móvil.
+- `CashCollectionDomainModelsTest` instancia el DTO y verifica la lista exacta de claves, la igualdad con la proyección pública y la ausencia de las cinco claves privadas (`74/74` aserciones).
+- `CashCollectionVaultAuditApiTest` refuerza la captura y el historial para comprobar las cinco claves privadas en la respuesta HTTP real (`30/30`).
+- El recibo de conserjería conserva exactamente nueve campos y sigue sin `bag_seal_code`, `pickup_pin` ni `expected_cashbox_eur`.
+- Evidencia focal: `php tests/unit/CashCollectionDomainModelsTest.php` 74/74, `php tests/unit/MachineCashCollectionServiceTest.php` 45/45 y `php tests/integration/CashCollectionVaultAuditApiTest.php` 30/30, todas con `exit=0`.
+- No se modificó la especificación: el DTO implementa el artefacto que `RNF-02.3` ya exigía.
+
+### Archivos
+
+- `src/Application/DTO/RestockerCashCollectionViewDTO.php`
 - `src/Core/Domain/Model/MachineCashCollection.php`
 - `src/Application/Service/MachineCashCollectionService.php`
 - `tests/unit/CashCollectionDomainModelsTest.php`
-- `specs/35-cash-collection-vault-audit/spec.md` y espejo (si se elige B, con aprobación)
+- `tests/integration/CashCollectionVaultAuditApiTest.php`
 - `specs/35-cash-collection-vault-audit/traceability-matrix.md`
 
 ---
@@ -402,9 +415,9 @@ No modificar la spec sin consenso; la decisión debe quedar registrada.
 ### Evidencia actual
 
 - La matriz agrupa en `RF-05.1` captura integrada/independiente, conserjería, recibo, historial y cola Offline; la spec separa `RF-05.1` (cola Offline y conflictos), `RF-05.2` (superficie móvil) y `RF-05.3` (sub-vista de Coordinación). La numeración no es 1:1.
-- La fila `RNF-02` cita `RestockerCashCollectionViewDTO`, inexistente.
+- La fila `RNF-02` ya cita el `RestockerCashCollectionViewDTO` real creado en `FIX-35-03`; la deuda restante es la numeración de `RF-05`.
 - El ODD (`L2`) habla de «3 resoluciones de auditoría QA»; la spec define 4 (`QA 1`–`QA 4`).
-- La matriz declara `RNF-03` cubierto sin una prueba de viewport.
+- La matriz ya enlaza `RNF-03` con la verificación real a 360 px de `FIX-35-02`.
 
 ### Impacto
 
@@ -413,9 +426,9 @@ La matriz es el artefacto que se usa para certificar el módulo. Si su numeraci�
 ### Corrección propuesta
 
 1. Renumerar las filas de `RF-05` para que coincidan exactamente con los EARS de la spec.
-2. Sustituir la referencia al DTO por el artefacto real, o mantenerla solo después de FIX-35-03.
+2. Mantener la referencia al DTO real; `FIX-35-03` ya la resolvió.
 3. Corregir el ODD para hablar de 4 resoluciones, salvo que FIX-35-07 recupere el listado completo.
-4. Añadir la evidencia de 360 px cuando FIX-35-02 esté cerrado.
+4. Mantener la evidencia de 360 px enlazada; `FIX-35-02` ya la resolvió.
 5. Revisar que cada fila tenga un test concreto y un resultado reproducible; no usar `✅` sin suite o evidencia manual enlazada.
 
 ### Criterios de aceptación
@@ -443,7 +456,7 @@ El DoD 5 exige que toda la batería de pruebas unitarias, de integración Postgr
 
 ### Evidencia actual
 
-- Batería global: **435/435 suites · 16.677 aserciones · 0 fallos · `exit=0`**; `DocMetricsGuard` coherente.
+- Batería global: **435/435 suites · 16.686 aserciones · 0 fallos · `exit=0`**; `DocMetricsGuard` coherente.
 - Las suites del Módulo 35 se ejecutaron focalmente y están en verde.
 - La matriz y el ODD documentan para `new_engine` **65 suites, 64 en verde y 1 no ejecutable por el contrato TLS local**, 2.121 aserciones, 0 fallos, `exit=0`.
 - Tras `FIX-35-02` se reejecutaron las 65 suites completas del canal `new_engine`; la única no ejecutable sigue siendo `PostgresTieredSlaMetricsPerformanceTest` por el contrato TLS local.

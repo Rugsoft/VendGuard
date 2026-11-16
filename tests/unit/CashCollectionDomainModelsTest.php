@@ -37,10 +37,11 @@ declare(strict_types=1);
  *      `DISCREPANCY_FLAGGED`, que exige justificación real.
  *
  *   6. **Proyecciones segregadas (C2, QA 2, Art. V.4).** La vista del reponedor
- *      omite las cinco claves financieras privadas; la de Coordinación las
- *      incluye; el recibo de conserjería expone exactamente los nueve campos del
- *      contrato y ni un dato de la bolsa, de recaudación o PII del reclamante.
- *      `toArray()` y `jsonSerialize()` son la vista de mínimo privilegio.
+ *      omite las cinco claves financieras privadas; el DTO de aplicación publica
+ *      solo su lista blanca; la de Coordinación las incluye; el recibo de
+ *      conserjería expone exactamente los nueve campos del contrato y ni un dato
+ *      de la bolsa, de recaudación o PII del reclamante. `toArray()` y
+ *      `jsonSerialize()` son la vista de mínimo privilegio.
  *
  * CATEGORÍA: hermética (`tests/unit/`). No toca la base de datos ni el reloj del
  * sistema: todos los instantes se declaran como argumento explícito.
@@ -51,6 +52,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/autoload.php';
 
+use VendGuard\Application\DTO\RestockerCashCollectionViewDTO;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
 use VendGuard\Core\Domain\Model\MachineCashCollection;
 
@@ -479,6 +481,46 @@ try {
         assertCashCondition(
             !array_key_exists($key, $restockerView),
             'The restocker projection must never contain ' . $key . ' (C2)'
+        );
+    }
+
+    $dto = RestockerCashCollectionViewDTO::fromMachineCashCollection($flagged);
+    assertCashCondition(
+        $dto instanceof RestockerCashCollectionViewDTO,
+        'The mobile boundary exposes a concrete RestockerCashCollectionViewDTO (RNF-02.3)'
+    );
+    $dtoView = $dto->toArray();
+    assertCashCondition(
+        array_keys($dtoView) === [
+            'id',
+            'collection_code',
+            'restock_visit_id',
+            'machine_id',
+            'machine_code',
+            'bag_seal_code',
+            'sales_counter_reading',
+            'change_tubes_loaded_eur',
+            'is_counter_reset',
+            'counter_reset_notes',
+            'reception_cash_delivered_eur',
+            'receptionist_name',
+            'linked_refund_request_id',
+            'has_reception_receipt',
+            'status',
+            'status_label',
+            'collected_at',
+            'created_at',
+        ],
+        'The DTO publishes exactly its whitelist of public fields (RNF-02.3)'
+    );
+    assertCashCondition(
+        $dtoView === $restockerView,
+        'The DTO and the domain projection agree on the mobile payload (RNF-02.3)'
+    );
+    foreach ($privateKeys as $key) {
+        assertCashCondition(
+            !array_key_exists($key, $dtoView),
+            'The DTO must never contain ' . $key . ' (RNF-02.3, Art. V.4)'
         );
     }
 
