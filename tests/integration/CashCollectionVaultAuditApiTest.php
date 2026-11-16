@@ -125,6 +125,7 @@ try {
     $coordinatorId = $createUser('coord', 'COORDINATOR', 'Coordinación T-CCV-08');
     $ownerId = $createUser('owner', 'RESTOCKER', 'Reposición Titular T-CCV-08');
     $otherId = $createUser('other', 'RESTOCKER', 'Reposición Ajena T-CCV-08');
+    $inactiveRestockerId = $createUser('inactive', 'RESTOCKER', 'Reposición Inactiva T-CCV-08');
     $technicianId = $createUser('sat', 'TECHNICIAN', 'Técnico SAT T-CCV-08');
 
     $zoneId = (int)$pdo->query(
@@ -166,6 +167,7 @@ try {
     );
     $assignStmt->execute([':restocker_id' => $ownerId, ':zone_id' => $zoneId]);
     $assignStmt->execute([':restocker_id' => $otherId, ':zone_id' => $zoneId]);
+    $assignStmt->execute([':restocker_id' => $inactiveRestockerId, ':zone_id' => $zoneId]);
     $pdo->prepare(
         'UPDATE restocker_zone_assignments
             SET removed_at = CURRENT_TIMESTAMP
@@ -192,7 +194,12 @@ try {
     $coordinatorToken = $authService->generateInternalToken($userRepo->findById($coordinatorId));
     $ownerToken = $authService->generateInternalToken($userRepo->findById($ownerId));
     $otherToken = $authService->generateInternalToken($userRepo->findById($otherId));
+    $inactiveRestockerToken = $authService->generateInternalToken($userRepo->findById($inactiveRestockerId));
     $technicianToken = $authService->generateInternalToken($userRepo->findById($technicianId));
+
+    $pdo->prepare('UPDATE users SET is_active = FALSE WHERE id = :id')
+        ->execute([':id' => $inactiveRestockerId]);
+    PdoUserRepository::clearCache();
 
     $router = AppRouter::create();
 
@@ -394,6 +401,80 @@ try {
         $noReception->getStatusCode() === 409
             && $errorCode($noReception) === 'LOCATION_HAS_NO_PHYSICAL_RECEPTION',
         $errorCode($noReception)
+    );
+
+    $countCollections = static fn () => (int)$pdo->query('SELECT COUNT(*) FROM machine_cash_collections')->fetchColumn();
+    $beforeActivityChecksCount = $countCollections();
+
+    $pdo->prepare('UPDATE operational_zones SET is_active = FALSE WHERE id = :id')
+        ->execute([':id' => $zoneId]);
+    $inactiveZone = $call(
+        'POST',
+        '/api/restocker/machines/' . $machineId . '/cash-collections',
+        array_merge($capturePayload, [
+            'client_mutation_id' => 'ccv08-cash-inactive-zone-0001',
+            'bag_seal_code' => 'BAG-CCV8-0011',
+            'sales_counter_reading' => 130.00,
+            'reception_cash_delivered_eur' => 0.00,
+            'receptionist_name' => null,
+            'linked_refund_request_id' => null,
+        ]),
+        $ownerToken
+    );
+    $pdo->prepare('UPDATE operational_zones SET is_active = TRUE WHERE id = :id')
+        ->execute([':id' => $zoneId]);
+    $assert(
+        '3.4d Una zona operativa inactiva responde 403 MACHINE_OUTSIDE_RESTOCKER_ZONES sin insertar fila (RF-02.1)',
+        $inactiveZone->getStatusCode() === 403
+            && $errorCode($inactiveZone) === 'MACHINE_OUTSIDE_RESTOCKER_ZONES'
+            && $countCollections() === $beforeActivityChecksCount,
+        $errorCode($inactiveZone)
+    );
+
+    $pdo->prepare('UPDATE machines SET is_active = FALSE WHERE id = :id')
+        ->execute([':id' => $machineId]);
+    $inactiveMachine = $call(
+        'POST',
+        '/api/restocker/machines/' . $machineId . '/cash-collections',
+        array_merge($capturePayload, [
+            'client_mutation_id' => 'ccv08-cash-inactive-machine-0001',
+            'bag_seal_code' => 'BAG-CCV8-0012',
+            'sales_counter_reading' => 130.00,
+            'reception_cash_delivered_eur' => 0.00,
+            'receptionist_name' => null,
+            'linked_refund_request_id' => null,
+        ]),
+        $ownerToken
+    );
+    $pdo->prepare('UPDATE machines SET is_active = TRUE WHERE id = :id')
+        ->execute([':id' => $machineId]);
+    $assert(
+        '3.4e Una máquina inactiva responde 404 MACHINE_NOT_FOUND sin insertar fila (RF-02.1)',
+        $inactiveMachine->getStatusCode() === 404
+            && $errorCode($inactiveMachine) === 'MACHINE_NOT_FOUND'
+            && $countCollections() === $beforeActivityChecksCount,
+        $errorCode($inactiveMachine)
+    );
+
+    $inactiveUser = $call(
+        'POST',
+        '/api/restocker/machines/' . $machineId . '/cash-collections',
+        array_merge($capturePayload, [
+            'client_mutation_id' => 'ccv08-cash-inactive-user-0001',
+            'bag_seal_code' => 'BAG-CCV8-0013',
+            'sales_counter_reading' => 130.00,
+            'reception_cash_delivered_eur' => 0.00,
+            'receptionist_name' => null,
+            'linked_refund_request_id' => null,
+        ]),
+        $inactiveRestockerToken
+    );
+    $assert(
+        '3.4f Un usuario RESTOCKER inactivo recibe 401 UNAUTHORIZED sin insertar fila (RF-02.1)',
+        $inactiveUser->getStatusCode() === 401
+            && $errorCode($inactiveUser) === 'UNAUTHORIZED'
+            && $countCollections() === $beforeActivityChecksCount,
+        $errorCode($inactiveUser)
     );
 
     $receipt = $call('GET', '/api/restocker/cash-collections/' . $collectionId . '/reception-receipt', [], $ownerToken);

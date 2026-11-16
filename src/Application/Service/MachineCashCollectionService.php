@@ -133,15 +133,15 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
             return RestockerCashCollectionViewDTO::fromMachineCashCollection($existing)->toArray() + ['idempotent_replay' => true];
         }
 
-        $repeated = $this->collections->findByClientMutationId($restocker['id'], $mutationId);
-            if ($repeated !== null) {
-                return RestockerCashCollectionViewDTO::fromMachineCashCollection($repeated)->toArray() + ['idempotent_replay' => true];
-            }
+        $context = $this->gateway->lockMachineContext($machineId, $restocker['id']);
+        if ($context === null) {
+            throw MachineCashCollectionValidationException::machineNotFound($machineId);
+        }
 
-            $context = $this->gateway->lockMachineContext($machineId, $restocker['id']);
-            if ($context === null) {
-                throw MachineCashCollectionValidationException::machineNotFound($machineId);
-            }
+        $repeated = $this->collections->findByClientMutationId($restocker['id'], $mutationId);
+        if ($repeated !== null) {
+            return RestockerCashCollectionViewDTO::fromMachineCashCollection($repeated)->toArray() + ['idempotent_replay' => true];
+        }
 
             if (($context['is_covered'] ?? false) !== true) {
                 throw MachineCashCollectionValidationException::machineOutsideRestockerZones($machineId, $restocker['id']);
