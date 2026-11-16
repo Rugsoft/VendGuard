@@ -6,7 +6,7 @@
 - **Contratos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../specs/technical/cash_collection_vault_audit_contracts.md)
 - **Sistema de Diseño:** [`docs/design.md`](design.md)
 - **Fecha de auditoría:** 2026-11-16
-- **Última actualización:** 2026-11-16 · `FIX-35-07` cerrado
+- **Última actualización:** 2026-11-16 · `FIX-35-08` cerrado
 - **Rama:** `feat/cash-collection-vault-audit` · Base auditada `000688b`
 - **Alcance:** auditoría estática y ejecución real de suites. Este documento recoge el orden de corrección propuesto y se actualiza al cerrar cada FIX.
 
@@ -16,8 +16,8 @@
 
 La implementación está operativa y la batería ejecutada pasa en verde:
 
-- Batería hermética global: **435/435 suites · 16.697 aserciones · 0 fallos · `exit=0`** (tras `FIX-35-07`).
-- Suites focales del Módulo 35: todas en verde, entre ellas `PostgresCashCollectionVaultAuditSchemaTest` 46/46, `MachineCashCollectionValidatorTest` 114/114, `MachineCashCollectionServiceTest` 45/45, `CashCollectionDomainModelsTest` 85/85 (incluye DTO y guarda documental `FIX-35-07`), `CashCollectionVaultAuditApiTest` 33/33, `CashCollectionVaultAuditConstitutionalTest` 25/25 y `CashCollectionConcurrencyTest` 6/6 (`FOR UPDATE OF m` real sobre PostgreSQL).
+- Batería hermética global: **435/435 suites · 16.735 aserciones · 0 fallos · `exit=0`** (tras `FIX-35-08`).
+- Suites focales del Módulo 35: todas en verde, entre ellas `PostgresCashCollectionVaultAuditSchemaTest` 46/46, `MachineCashCollectionValidatorTest` 114/114, `MachineCashCollectionServiceTest` 45/45, `CashCollectionDomainModelsTest` 123/123 (incluye DTO y guardas documentales `FIX-35-07`/`FIX-35-08`), `CashCollectionVaultAuditApiTest` 33/33, `CashCollectionVaultAuditConstitutionalTest` 25/25 y `CashCollectionConcurrencyTest` 6/6 (`FOR UPDATE OF m` real sobre PostgreSQL).
 - Proyección móvil: `RestockerCashCollectionViewDTO` publica una lista blanca de 18 campos y omite las cinco claves financieras privadas del Arqueo Ciego.
 - Frontend: `restocker_route_view.test.mjs` 209/209 y `coordinator_product_loading_tab.test.mjs` 80/80.
 - Layout móvil: `CashCollectionLayoutBrowserTest` 32/32 a `360 × 800` en Chromium real, con `document.documentElement.scrollWidth = 360` en las cuatro superficies de recaudación y en Coordinación.
@@ -42,7 +42,7 @@ Sin embargo, **la Spec 35 no puede declararse cumplida al 100 % en sentido liter
 | **5** | **FIX-35-05** | **P1 · Alto** | El código registra `CASH_COLLECTION_DELIVERED_TO_VAULT`, pero ninguna suite lo asserta | `RF-04.1`, Art. III.3 | La trazabilidad de la recepción en cámara existe, pero no tiene regresión que la proteja | **Cerrada (2026-11-16)** |
 | **6** | **FIX-35-06** | **P2 · Medio** | No hay aserción específica de usuario/máquina inactivos ni del bloqueo `FOR UPDATE OF m` en la captura | `RF-02.1` | La defensa está en el código, pero no está certificada por una prueba del módulo | **Cerrada (2026-11-16)** |
 | **7** | **FIX-35-07** | **P2 · Medio** | La spec afirma haber cerrado 17 puntos QA, pero no los enumera; solo se documentan 4 resoluciones agregadas | `QA 1`–`QA 4`, §9 | No es posible verificar 17/17 ni auditar qué observación cerró cada cambio | **Cerrada (2026-11-16 · Vía B)** |
-| **8** | **FIX-35-08** | **P2 · Medio** | La matriz usa una subdivisión de `RF-05` distinta de la spec, cita el DTO inexistente y el ODD habla de 3 resoluciones frente a las 4 de la spec | Trazabilidad, DoD | La matriz no es un reflejo 1:1 de los EARS y puede inducir a error en la próxima auditoría | **Abierta** |
+| **8** | **FIX-35-08** | **P2 · Medio** | La matriz usa una subdivisión de `RF-05` distinta de la spec, cita el DTO inexistente y el ODD habla de 3 resoluciones frente a las 4 de la spec | Trazabilidad, DoD | La matriz no es un reflejo 1:1 de los EARS y puede inducir a error en la próxima auditoría | **Cerrada (2026-11-16)** |
 | **9** | **FIX-35-09** | **P3 · Verificación** | La certificación final debe repetirse tras los cambios y cerrar la diferencia del canal `new_engine` | DoD 5 | Las cifras actuales quedarán obsoletas al añadir pruebas; además el canal registra 1 suite no ejecutable por TLS local | **Abierta** |
 
 ### Lectura de prioridades
@@ -455,9 +455,9 @@ Cerrada el 2026-11-16 bajo **Opción B (Enmienda aprobada)** consensuada explíc
 
 ---
 
-## FIX-35-08 · Alineación de la matriz de trazabilidad · P2
+## FIX-35-08 · Alineación de la matriz de trazabilidad · P2 · ✅ Cerrada
 
-### Evidencia actual
+### Evidencia previa (antes del cierre)
 
 - La matriz agrupa en `RF-05.1` captura integrada/independiente, conserjería, recibo, historial y cola Offline; la spec separa `RF-05.1` (cola Offline y conflictos), `RF-05.2` (superficie móvil) y `RF-05.3` (sub-vista de Coordinación). La numeración no es 1:1.
 - La fila `RNF-02` ya cita el `RestockerCashCollectionViewDTO` real creado en `FIX-35-03`; la deuda restante es la numeración de `RF-05`.
@@ -478,18 +478,25 @@ La matriz es el artefacto que se usa para certificar el módulo. Si su numeraci�
 
 ### Criterios de aceptación
 
-- [ ] Cada fila de `RF-05` coincide con un EARS de la spec.
-- [ ] No se cita ningún artefacto inexistente.
-- [ ] El ODD y la spec usan la misma cifra de resoluciones QA.
-- [ ] `RNF-03` enlaza la verificación real a 360 px.
-- [ ] La matriz no duplica la cifra viva de la batería; la referencia al README/`features_pendientes` se mantiene.
+- [x] Cada fila de `RF-05` coincide con un EARS de la spec.
+- [x] No se cita ningún artefacto inexistente.
+- [x] El ODD y la spec usan la misma cifra de resoluciones QA.
+- [x] `RNF-03` enlaza la verificación real a 360 px.
+- [x] La matriz no duplica la cifra viva de la batería; la referencia al README/`features_pendientes` se mantiene.
 
-### Archivos previsibles
+### Cierre
+
+Cerrada el 2026-11-16 alineando 1:1 `specs/35-cash-collection-vault-audit/traceability-matrix.md` con `specs/35-cash-collection-vault-audit/spec.md` (v2.1):
+
+- **`RF-05` 1:1 con los EARS de `spec.md`:** `05.1` cubre la cola Offline PWA (`CashCollectionOfflineQueue.js`, `IndexedDB` FIFO y `POST /api/restocker/cash-collections/conflict-dump`); `05.2` cubre la superficie móvil en `RestockerRouteView.js` (bloque de visita oculto en `ABORTED_THERMAL_BREACH`, botón rápido con `pending_reception_refunds_count`, recibo e historial bajo Arqueo Ciego); `05.3` cubre la sub-vista de Coordinación en `CoordinatorProductLoadingTab.js`.
+- **Revisión completa de evidencias y cifras medidas:** corregidas las cifras desactualizadas de `CoordinatorButtonVariantsGuardTest.mjs` (`23/23` en lugar de `25/25`), `RNF-02` (`CashCollectionDomainModelsTest` `123/123` en lugar de `74/74`) y `T-CCV-12` (`SeedDataTest` `T-04 OK` en lugar de `10/10`); mantenidos `RestockerCashCollectionViewDTO`, `CashCollectionLayoutBrowserTest` (`32/32` a `360 × 800`), las 4 resoluciones QA en el ODD (ya alineadas en `FIX-35-07`) y la ausencia de la frase canónica viva en la matriz.
+- **Guarda documental (`tests/unit/CashCollectionDomainModelsTest.php`, sección 9):** verifica las 12 filas EARS `01.1`–`05.3`, la correspondencia exacta de `05.1`–`05.3`, la presencia de `RestockerCashCollectionViewDTO` y `CashCollectionLayoutBrowserTest` (`360 × 800`), la no duplicación de `DocMetricsGuard::CANONICAL_PATTERN` y la existencia en disco de las 24 suites referenciadas (**123/123 · `exit=0`**).
+
+### Archivos
 
 - `specs/35-cash-collection-vault-audit/traceability-matrix.md`
+- `tests/unit/CashCollectionDomainModelsTest.php`
 - `odd/tasks/cash-collection-vault-audit.md`
-- `specs/35-cash-collection-vault-audit/tasks.md` (si se añade una tarea de corrección)
-- `docs/features_pendientes.md` (solo si cambia el estado de cierre)
 
 ---
 
@@ -501,7 +508,7 @@ El DoD 5 exige que toda la batería de pruebas unitarias, de integración Postgr
 
 ### Evidencia actual
 
-- Batería global: **435/435 suites · 16.697 aserciones · 0 fallos · `exit=0`**; `DocMetricsGuard` coherente.
+- Batería global: **435/435 suites · 16.735 aserciones · 0 fallos · `exit=0`**; `DocMetricsGuard` coherente.
 - Las suites del Módulo 35 se ejecutaron focalmente y están en verde.
 - La matriz y el ODD documentan para `new_engine` **66 suites, 65 en verde y 1 no ejecutable por el contrato TLS local**, 2.132 aserciones, 0 fallos, `exit=0`.
 - Tras `FIX-35-06` se ejecutó el canal `new_engine` completo y la única no ejecutable sigue siendo `PostgresTieredSlaMetricsPerformanceTest` por el contrato TLS local.
@@ -577,7 +584,7 @@ La Spec 35 podrá volver a declararse cerrada cuando:
 - [x] FIX-35-04 y FIX-35-05 tengan aserciones que fallen si se elimina la persistencia/auditoría.
 - [x] FIX-35-06 cubra los casos de actividad y, si se acepta, el bloqueo pesimista.
 - [x] FIX-35-07 haya alineado spec, espejo, contratos, plan, matriz, ODD y tareas (4 resoluciones QA agregadas).
-- [ ] FIX-35-08 haya alineado la matriz de trazabilidad (`RF-05` 1:1 con la spec).
+- [x] FIX-35-08 haya alineado la matriz de trazabilidad (`RF-05` 1:1 con la spec).
 - [ ] FIX-35-09 haya reejecutado la batería y actualizado las métricas.
 - [ ] La matriz no cite artefactos inexistentes ni declare `RNF-03` sin evidencia de viewport.
 

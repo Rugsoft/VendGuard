@@ -51,6 +51,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/../../src/autoload.php';
+require_once __DIR__ . '/../Support/DocMetricsGuard.php';
 
 use VendGuard\Application\DTO\RestockerCashCollectionViewDTO;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
@@ -667,6 +668,74 @@ try {
             && str_contains($specDocs['spec'], '4 resoluciones de auditoría QA agregadas'),
         'The Module 35 spec records the 4 aggregated QA resolutions consistently (FIX-35-07)'
     );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 9. Guarda documental FIX-35-08: alineación 1:1 de la matriz con spec.md
+    // ─────────────────────────────────────────────────────────────────────────
+    $matrix = $specDocs['matrix'];
+
+    foreach ([
+        '**01.1**', '**01.2**', '**01.3**',
+        '**02.1**', '**02.2**',
+        '**03.1**', '**03.2**',
+        '**04.1**', '**04.2**',
+        '**05.1**', '**05.2**', '**05.3**',
+    ] as $earsRow) {
+        assertCashCondition(
+            str_contains($matrix, $earsRow),
+            'The traceability matrix includes criterion ' . $earsRow . ' (FIX-35-08)'
+        );
+    }
+
+    assertCashCondition(
+        str_contains($matrix, '| **05.1** Cola Offline PWA de recaudaciones')
+            && str_contains($matrix, 'POST /api/restocker/cash-collections/conflict-dump')
+            && str_contains($matrix, '| **05.2** Superficie móvil en `RestockerRouteView.js`')
+            && str_contains($matrix, 'pending_reception_refunds_count')
+            && str_contains($matrix, '| **05.3** Sub-vista «🪙 Recaudación, Cambio y Arqueo de Caja»'),
+        'RF-05 rows in the traceability matrix align 1:1 with spec EARS 05.1, 05.2 and 05.3 (FIX-35-08)'
+    );
+
+    assertCashCondition(
+        str_contains($matrix, 'RestockerCashCollectionViewDTO')
+            && str_contains($matrix, 'CashCollectionLayoutBrowserTest')
+            && str_contains($matrix, '360 × 800')
+            && preg_match(DocMetricsGuard::CANONICAL_PATTERN, $matrix) === 0,
+        'The traceability matrix links real artifacts without duplicating the live global battery count (FIX-35-08)'
+    );
+
+    $referencedTests = [
+        'tests/unit/CashCollectionDomainModelsTest.php',
+        'tests/unit/MachineCashCollectionValidatorTest.php',
+        'tests/unit/MachineCashCollectionServiceTest.php',
+        'tests/unit/MachineRestockVisitServiceTest.php',
+        'tests/unit/AuditActionCatalogTest.php',
+        'tests/unit/CoordinatorButtonVariantsGuardTest.mjs',
+        'tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs',
+        'tests/unit/FrontendTemplateCompileTest.mjs',
+        'tests/unit/DesignTokenDebtRatchetTest.mjs',
+        'tests/integration/PostgresCashCollectionVaultAuditSchemaTest.php',
+        'tests/integration/PostgresSchemaTest.php',
+        'tests/integration/PostgresConstitutionalTest.php',
+        'tests/integration/SchemaConvergenceParityTest.php',
+        'tests/integration/PdoMachineCashCollectionRepositoryTest.php',
+        'tests/integration/CashCollectionVaultAuditApiTest.php',
+        'tests/integration/CashCollectionVaultAuditConstitutionalTest.php',
+        'tests/integration/CashCollectionConcurrencyTest.php',
+        'tests/integration/CashCollectionLayoutBrowserTest.php',
+        'tests/integration/RestockerRbacConstitutionalTest.php',
+        'tests/integration/TestDataCleanerIsolationTest.php',
+        'tests/integration/SeedRunnerSingleEngineTest.php',
+        'tests/integration/SeedDataTest.php',
+        'tests/frontend/restocker_route_view.test.mjs',
+        'tests/frontend/coordinator_product_loading_tab.test.mjs',
+    ];
+    foreach ($referencedTests as $testRelativePath) {
+        assertCashCondition(
+            is_file($root . '/' . $testRelativePath),
+            'Referenced test suite exists on disk: ' . $testRelativePath . ' (FIX-35-08)'
+        );
+    }
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[FAIL] " . $exception->getMessage() . "\n");
     exit(1);
