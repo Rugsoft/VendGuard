@@ -657,6 +657,67 @@ try {
             && str_contains($csvFlagged->getBody(), "'=HYPERLINK")
     );
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 5.11–5.14 · «Recepcionar y Arquear» en un solo paso (EARS 04.2, D4)
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 5b. Arqueo directo desde SEALED_IN_ROUTE ---\n";
+
+    $directCapture = $call('POST', '/api/restocker/machines/' . $machineId . '/cash-collections', [
+        'client_mutation_id' => 'ccv08-cash-direct-0001',
+        'bag_seal_code' => 'BAG-CCV8-0003',
+        'sales_counter_reading' => 150.00,
+        'change_tubes_loaded_eur' => 0.00,
+    ], $ownerToken);
+    $directId = (int)($data($directCapture)['id'] ?? 0);
+
+    $directBefore = $call('GET', '/api/coordinator/cash-collections/' . $directId, [], $coordinatorToken);
+    $directBeforeData = $data($directBefore);
+    $directExpected = (float)($directBeforeData['expected_cashbox_eur'] ?? 0);
+
+    $assert(
+        '5.11 La bolsa arranca en SEALED_IN_ROUTE, sin sello de cámara y con esperado propio',
+        $directCapture->getStatusCode() === 201
+            && $directBefore->getStatusCode() === 200
+            && ($directBeforeData['status'] ?? '') === 'SEALED_IN_ROUTE'
+            && ($directBeforeData['delivered_to_vault_at'] ?? null) === null
+            && ($directBeforeData['delivered_to_vault_by'] ?? null) === null
+            && $directExpected > 0
+    );
+
+    $directReconcile = $call('POST', '/api/coordinator/cash-collections/' . $directId . '/reconcile', [
+        'vault_counted_eur' => $directExpected,
+    ], $coordinatorToken);
+    $directReconciled = $data($directReconcile);
+
+    $assert(
+        '5.12 EARS 04.2: el arqueo directo desde SEALED_IN_ROUTE responde 200 y sella RECONCILED_OK',
+        $directReconcile->getStatusCode() === 200
+            && ($directReconciled['status'] ?? '') === 'RECONCILED_OK'
+            && (float)($directReconciled['discrepancy_eur'] ?? 1) === 0.0
+    );
+
+    $deliveredAtTs = strtotime((string)($directReconciled['delivered_to_vault_at'] ?? ''));
+    $reconciledAtTs = strtotime((string)($directReconciled['vault_reconciled_at'] ?? ''));
+
+    $assert(
+        '5.13 El arqueo directo sella a la vez delivered_to_vault_at y delivered_to_vault_by',
+        $deliveredAtTs !== false
+            && (int)($directReconciled['delivered_to_vault_by'] ?? 0) === $coordinatorId
+            && $reconciledAtTs !== false
+            && $reconciledAtTs >= $deliveredAtTs
+    );
+
+    $directAfter = $call('GET', '/api/coordinator/cash-collections/' . $directId, [], $coordinatorToken);
+    $directAfterData = $data($directAfter);
+
+    $assert(
+        '5.14 El doble sello del arqueo directo persiste en la lectura posterior',
+        $directAfter->getStatusCode() === 200
+            && ($directAfterData['status'] ?? '') === 'RECONCILED_OK'
+            && !empty($directAfterData['delivered_to_vault_at'])
+            && (int)($directAfterData['delivered_to_vault_by'] ?? 0) === $coordinatorId
+    );
+
     $ok = $failures === 0;
     echo "\n======================================================================\n";
     echo ' Total Aserciones: ' . $assertions . ' | Fallidas: ' . $failures . "\n";

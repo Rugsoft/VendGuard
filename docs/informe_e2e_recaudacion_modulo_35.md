@@ -5,7 +5,7 @@
 - **Contratos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../specs/technical/cash_collection_vault_audit_contracts.md)
 - **Fecha de la corrida:** 2026-11-17 · **Rama:** `feat/cash-collection-vault-audit` · **HEAD:** `ba4c097`
 - **Alcance:** recorrido manual en navegador real (Chromium del panel) sobre el servidor de desarrollo con el contrato del banco de la batería, más sondas HTTP directas para las invariantes que la interfaz no expone.
-- **Estado:** H-1, H-2 y H-3 corregidos el 2026-11-17 con sus guardas de regresión (ver la nota de cada hallazgo). Quedan abiertos H-4 a H-6, ninguno bloqueante para la rama.
+- **Estado:** H-1, H-2, H-3 y H-6 corregidos el 2026-11-17 con sus guardas de regresión (ver la nota de cada hallazgo). Quedan abiertos H-4 y H-5, decisiones de producto no bloqueantes para la rama.
 - **Adenda (2026-11-17):** los arreglos vuelven a medir el mismo caso que reprodujo el defecto y suben la caché del App Shell a `vendguard-app-shell-v23` para que una PWA instalada reciba la hoja corregida.
 
 ---
@@ -80,6 +80,8 @@ Recorrido ejecutado: acceso de los cuatro perfiles → sub-vista «🪙 Recaudac
 
 **Por qué importa.** Es el camino que fabrica la traza de custodia en una sola escritura; una aserción explícita lo blindaría frente a futuras refactorizaciones del repositorio.
 
+**Estado: corregido.** `CashCollectionVaultAuditApiTest` incorpora el bloque 5.11–5.14 sobre una bolsa nueva: nace `SEALED_IN_ROUTE` sin sello de cámara, el arqueo directo responde `200` y sella `RECONCILED_OK` con descuadre cero, `delivered_to_vault_at` y `delivered_to_vault_by` quedan firmados en la misma escritura (con `vault_reconciled_at` no anterior al sello) y la lectura posterior conserva ambos. La suite pasa de 33 a 37 aserciones en verde.
+
 ---
 
 ## 3. Falso positivo descartado
@@ -127,5 +129,5 @@ Las pruebas mutaron el banco (una bolsa sellada, un arqueo, un alta del reponedo
 1. ✅ **H-1** (P2): aislar el puntero del widget o reservar el pasillo inferior derecho. Es el único defecto que un usuario nota bloqueando una acción. *Corregido: puntero aislado y pasillo de 88 px.*
 2. ✅ **H-2** (P3): filtrar el montaje del asistente por rol, tal como exige su contrato; corrige también la causa de H-1 en la vista del reponedor. *Corregido: emisión condicionada en el servidor y guarda en el cliente.*
 3. ✅ **H-3** (P3): sacar CDN y webhook del código y de la ruta crítica de arranque. *Corregido: configuración validada, montaje diferido y techo de espera.*
-4. **H-6** (cobertura): aserción del arqueo directo desde `SEALED_IN_ROUTE`.
+4. ✅ **H-6** (cobertura): aserción del arqueo directo desde `SEALED_IN_ROUTE`. *Corregido: bloque 5.11–5.14 de `CashCollectionVaultAuditApiTest`.*
 5. **H-4** y **H-5** (P3): etiquetas en el CSV y criterio de numeración, cuando el Product Owner lo decida.

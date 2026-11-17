@@ -806,7 +806,7 @@ php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 
 El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla. La medición del pooler remoto sigue siendo la evidencia de RNF-01: si el enlace del proveedor incumple el presupuesto de 250 ms en alguna operación, el canal publica el fallo con su mediana y su p95, sin convertirlo en omisión.
 
-Corrida del 16 de noviembre de 2026 (canal cerrado · **66/66 suites en verde**, 0 no ejecutables bajo `.env.docker-tls`):
+Corrida del 17 de noviembre de 2026 (canal cerrado · **66/66 suites en verde**, 0 no ejecutables bajo `.env.docker-tls`):
 
 ```text
 ======================================================================
@@ -814,7 +814,7 @@ Corrida del 16 de noviembre de 2026 (canal cerrado · **66/66 suites en verde**,
  Suites evaluadas    : 66
  Suites en verde     : 66
  No ejecutables      : 0
- Aserciones          : 2.166
+ Aserciones          : 2.170
  Fallos              : 0
  RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 ======================================================================
