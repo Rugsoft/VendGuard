@@ -9,6 +9,7 @@ use DateTimeZone;
 use InvalidArgumentException;
 use VendGuard\Application\DTO\RestockerCashCollectionViewDTO;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
+use VendGuard\Core\Domain\Exception\MachineCashCollectionUniqueViolationException;
 use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\CashCustodyAction;
@@ -266,7 +267,21 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                 $mutationId
             );
 
-            $persisted = $this->collections->insert($collection);
+            try {
+                $persisted = $this->collections->insert($collection);
+            } catch (MachineCashCollectionUniqueViolationException $exception) {
+                if ($exception->isDuplicateMutation() && $exception->getExistingCollection() !== null) {
+                    return RestockerCashCollectionViewDTO::fromMachineCashCollection(
+                        $exception->getExistingCollection()
+                    )->toArray() + ['idempotent_replay' => true];
+                }
+
+                if ($exception->isDuplicateSeal()) {
+                    throw MachineCashCollectionValidationException::bagSealCodeAlreadyUsed($seal);
+                }
+
+                throw $exception;
+            }
 
             if ($refundId !== null) {
                 $transitioned = $this->refunds->transitionStatus(

@@ -5,7 +5,7 @@
 - **HEAD revisado:** `09d0f3f` · **Base:** `47ba599` (sin commits nuevos en `main` desde la bifurcación)
 - **Fecha de la revisión:** 2026-11-17
 - **Alcance:** revisión estática del diff completo (76 archivos, +20.345/−155): migración 031 y convergencia con `supabase_init.sql`, dominio, servicio y repositorios, controladores y RBAC, proyección móvil, cola offline, exportación CSV y coherencia documental. Contraste con la spec v2.1, los contratos técnicos y las suites del módulo.
-- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01, PR-02 y PR-03 corregidos el 2026-11-17** con sus pruebas de regresión; quedan **8 hallazgos abiertos** (2 media y 6 baja).
+- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01, PR-02, PR-03 y PR-04 corregidos el 2026-11-17** con sus pruebas de regresión; quedan **7 hallazgos abiertos** (1 media y 6 baja).
 
 ---
 
@@ -22,7 +22,7 @@ Los defectos se concentran en los bordes del contrato: la exportación financier
 | 1 | `PR-01` | **Alta** | La exportación CSV se corta en 100 filas sin avisar | Pérdida silenciosa de datos en el libro contable exportado | Corregido (2026-11-17) |
 | 2 | `PR-02` | **Alta** | La vía independiente acepta `restock_visit_id` de cualquier visita y de cualquier reponedor | Vínculo cruzado fuera de spec, bloqueo del índice único y 500 al dueño legítimo | Corregido (2026-11-17) |
 | 3 | `PR-03` | Media | `collected_at` viaja del cliente sin validar formato ni ventana temporal | 500 ante un valor malformado y alteración de la cadena de contador y del esperado | Corregido (2026-11-17) |
-| 4 | `PR-04` | Media | Las carreras de unicidad (precinto o mutación) acaban en 500 | Un conflicto de negocio se presenta como fallo interno y no se reintenta como replay | Abierto |
+| 4 | `PR-04` | Media | Las carreras de unicidad (precinto o mutación) acaban en 500 | Un conflicto de negocio se presenta como fallo interno y no se reintenta como replay | Corregido (2026-11-17) |
 | 5 | `PR-05` | Media | La cola offline marca como conflicto irreversible cualquier 401, 403 o 5xx | Capturas válidas quedan bloqueadas tras caducar la sesión o un fallo transitorio | Abierto |
 | 6 | `PR-06` | Baja | El replay idempotente no está acotado por máquina | Un identificador reutilizado devuelve otra bolsa con 200 y pierde la captura | Abierto |
 | 7 | `PR-07` | Baja | El KPI de bolsas pendientes del reponedor ignora los filtros activos | La tarjeta discrepa del listado filtrado | Abierto |
@@ -80,7 +80,7 @@ Rechazar `restock_visit_id` en el endpoint independiente (400/422) y, en la vía
 
 **Corrección aplicada (2026-11-17)**
 
-La vía independiente responde `422 RESTOCK_VISIT_NOT_ALLOWED` ante cualquier `restock_visit_id`, sin insertar fila (`3.4g`). La vía integrada valida, tras bloquear la visita, que `restocker_id` coincide con el actor (`403 RESTOCK_VISIT_NOT_OWNED`) y que el estado es `COMPLETED` (`422 RESTOCK_VISIT_NOT_COMPLETED`); ambas guardas se cubren en `MachineCashCollectionServiceTest`, que pasa a 53/53.
+La vía independiente responde `422 RESTOCK_VISIT_NOT_ALLOWED` ante cualquier `restock_visit_id`, sin insertar fila (`3.4g`). La vía integrada valida, tras bloquear la visita, que `restocker_id` coincide con el actor (`403 RESTOCK_VISIT_NOT_OWNED`) y que el estado es `COMPLETED` (`422 RESTOCK_VISIT_NOT_COMPLETED`); ambas guardas se cubren en `MachineCashCollectionServiceTest`, que pasa a 56/56.
 
 ---
 
@@ -104,7 +104,7 @@ Parsear con `DateTimeImmutable` en el modelo, devolver `422 VALIDATION_ERROR` co
 
 **Corrección aplicada (2026-11-17)**
 
-`MachineCashCollection` valida el formato con `DateTimeImmutable` y `MachineCashCollectionService::resolveCollectedAt()` responde `422 VALIDATION_ERROR` con `field = collected_at` cuando la marca es ilegible, supera la hora del servidor en más de 5 minutos o retrocede por detrás de la última captura de la máquina. Las regresiones `3.4h`–`3.4j` de `CashCollectionVaultAuditApiTest` (46/46) y `MachineCashCollectionServiceTest` (53/53) comprueban el estado, el campo y que no se inserta fila. La cota queda documentada en el contrato técnico; los criterios de aceptación de la spec no cambian.
+`MachineCashCollection` valida el formato con `DateTimeImmutable` y `MachineCashCollectionService::resolveCollectedAt()` responde `422 VALIDATION_ERROR` con `field = collected_at` cuando la marca es ilegible, supera la hora del servidor en más de 5 minutos o retrocede por detrás de la última captura de la máquina. Las regresiones `3.4h`–`3.4j` de `CashCollectionVaultAuditApiTest` (46/46) y `MachineCashCollectionServiceTest` (56/56) comprueban el estado, el campo y que no se inserta fila. La cota queda documentada en el contrato técnico; los criterios de aceptación de la spec no cambian.
 
 ---
 
@@ -125,6 +125,10 @@ Dos dispositivos con el mismo precinto, o el mismo `client_mutation_id` en máqu
 **Corrección propuesta**
 
 Capturar `SQLSTATE 23505` en el servicio: mutación duplicada → devolver la fila existente con `idempotent_replay = true` (200); precinto duplicado → `409` con `INVALID_BAG_SEAL_CODE`. Añadir una prueba de dos procesos con el mismo precinto y otra con la misma mutación.
+
+**Corrección aplicada (2026-11-17)**
+
+El `INSERT` usa `ON CONFLICT DO NOTHING` para no abortar la transacción; si no inserta, el repositorio localiza la fila ganadora y lanza `MachineCashCollectionUniqueViolationException`. El servicio devuelve esa fila con `idempotent_replay = true` cuando la mutación ya existía y `409 BAG_SEAL_CODE_ALREADY_USED` cuando el precinto estaba consumido. La suite de concurrencia añade dos carreras reales entre máquinas (`4.1` mutación y `4.2` precinto; 10/10), la unitaria simula ambas pérdidas (56/56) y el repositorio comprueba la traducción.
 
 ---
 
@@ -263,11 +267,11 @@ Derivar el año con `DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'))
 ## Verificado y correcto
 
 - **Integración con `main`:** `MERGEABLE`/`CLEAN`, sin commits nuevos en la base desde la bifurcación y sin archivos de solape; la migración 031 es la siguiente libre tras la 030.
-- **Cifras:** batería hermética **436 suites · 16.789 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.181 aserciones · 0 fallos**. Suites del módulo: API 46/46, constitucional 25/25, concurrencia 8/8, layout 32/32, esquema 46/46, repositorio 45/45, dominio 123/123, validador 114/114 y servicio 53/53.
+- **Cifras:** batería hermética **436 suites · 16.792 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.183 aserciones · 0 fallos**. Suites del módulo: API 46/46, constitucional 25/25, concurrencia 10/10, layout 32/32, esquema 46/46, repositorio 45/45, dominio 123/123, validador 114/114 y servicio 56/56.
 - **Opacidad:** el DTO del reponedor publica 18 campos y omite las cinco claves del Arqueo Ciego; el recibo de conserjería expone exactamente nueve campos, sin precinto, PIN ni importes calculados.
 - **Integridad:** ocho `CHECK`, inmutabilidad por etapas con `45000`, guarda sanitaria en aplicación y motor, reserva del código con cerrojo transaccional y arqueo concurrente protegido por `UPDATE` condicionado.
 - **Seguridad:** rutas con `COORDINATOR`/`RESTOCKER`, CSV neutralizado contra fórmulas, sin secretos ni archivos de entorno en el diff.
-- **Documentación:** la matriz de trazabilidad actualizó solo las filas de la suite de API (46/46 y 8/8) y del servicio (53/53); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
+- **Documentación:** la matriz de trazabilidad actualizó solo las filas de la suite de API (46/46 y 10/10) y del servicio (56/56); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
 - **Cota inferior:** se usa la última captura de la máquina; el puerto `lockRestockVisit()` no expone la hora de inicio de la visita, así que no se emplea como cota adicional.
 
 ## Límites de esta revisión

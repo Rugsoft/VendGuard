@@ -34,6 +34,7 @@ require_once __DIR__ . '/../../src/autoload.php';
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\MachineCashCollectionService;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
+use VendGuard\Core\Domain\Exception\MachineCashCollectionUniqueViolationException;
 use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\MachineCashCollection;
@@ -164,6 +165,8 @@ final class CashTestRepository implements MachineCashCollectionRepositoryInterfa
 
     public ?array $lastReconcileArgs = null;
 
+    public ?MachineCashCollectionUniqueViolationException $uniqueViolationOnInsert = null;
+
     private int $nextId = 1;
 
     private int $nextCode = 1;
@@ -175,6 +178,13 @@ final class CashTestRepository implements MachineCashCollectionRepositoryInterfa
 
     public function insert(MachineCashCollection $collection): MachineCashCollection
     {
+        if ($this->uniqueViolationOnInsert !== null) {
+            $violation = $this->uniqueViolationOnInsert;
+            $this->uniqueViolationOnInsert = null;
+
+            throw $violation;
+        }
+
         $persisted = $collection->withId($this->nextId++);
         $this->collections[(int)$persisted->getId()] = $persisted;
         $this->insertedCodes[] = $persisted->getCollectionCode();
@@ -670,6 +680,33 @@ try {
         $staleCollectedAt->getField() === 'collected_at'
             && count($repository->collections) === $insertedBeforeStale,
         'collected_at no puede retroceder por detrás de la última captura de la máquina (D2, C3)'
+    );
+
+    $raceWinner = $repository->collections[(int)$first['id']]->withId(900);
+    $rowsBeforeReplay = count($repository->collections);
+    $repository->uniqueViolationOnInsert = MachineCashCollectionUniqueViolationException::duplicateMutation($raceWinner);
+    $replayed = $service->registerCollection(
+        1,
+        $basePayload('BAG-2026-060008', 'mutation-ccv06-race-001', 130.00),
+        $restocker
+    );
+    assertCash(
+        (int)$replayed['id'] === 900
+            && ($replayed['idempotent_replay'] ?? false) === true
+            && count($repository->collections) === $rowsBeforeReplay,
+        'Una carrera de mutación perdida devuelve la fila ganadora como replay idempotente (D4)'
+    );
+
+    $repository->uniqueViolationOnInsert = MachineCashCollectionUniqueViolationException::duplicateSeal('BAG-2026-060009');
+    $rowsBeforeSealRace = count($repository->collections);
+    assertCashRejects(
+        static fn () => $service->registerCollection(1, $basePayload('BAG-2026-060009', 'mutation-ccv06-race-002', 130.00), $restocker),
+        MachineCashCollectionValidationException::BAG_SEAL_CODE_ALREADY_USED,
+        409
+    );
+    assertCash(
+        count($repository->collections) === $rowsBeforeSealRace,
+        'Una carrera de precinto perdida responde 409 sin insertar una segunda fila (C1)'
     );
 
     assertCashRejects(

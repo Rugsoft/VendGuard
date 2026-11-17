@@ -9,6 +9,7 @@ use InvalidArgumentException;
 use PDO;
 use PDOStatement;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
+use VendGuard\Core\Domain\Exception\MachineCashCollectionUniqueViolationException;
 use VendGuard\Core\Domain\Model\MachineCashCollection;
 use VendGuard\Core\Domain\Repository\MachineCashCollectionRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -177,6 +178,7 @@ final class PdoMachineCashCollectionRepository implements MachineCashCollectionR
                 CAST(:collected_at AS timestamptz),
                 :client_mutation_id
             )
+            ON CONFLICT DO NOTHING
             RETURNING id
         ");
 
@@ -206,7 +208,19 @@ final class PdoMachineCashCollectionRepository implements MachineCashCollectionR
 
         $id = (int)$stmt->fetchColumn();
         if ($id <= 0) {
-            throw new \RuntimeException('La recaudación se insertó pero el motor no devolvió su identificador.');
+            $existing = $this->findByClientMutationId(
+                $collection->getRestockerId(),
+                $collection->getClientMutationId()
+            );
+            if ($existing !== null) {
+                throw MachineCashCollectionUniqueViolationException::duplicateMutation($existing);
+            }
+
+            if ($this->findByBagSealCode($collection->getBagSealCode()) !== null) {
+                throw MachineCashCollectionUniqueViolationException::duplicateSeal($collection->getBagSealCode());
+            }
+
+            throw new \RuntimeException('La recaudación no se insertó por un conflicto de unicidad no identificado.');
         }
 
         return $this->findById($id) ?? $collection->withId($id);

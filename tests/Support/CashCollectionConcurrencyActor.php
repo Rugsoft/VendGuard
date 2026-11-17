@@ -136,6 +136,7 @@ try {
             'id' => (int)($created['id'] ?? 0),
             'status' => (string)($created['status'] ?? ''),
             'bag_seal_code' => (string)($created['bag_seal_code'] ?? ''),
+            'idempotent_replay' => (bool)($created['idempotent_replay'] ?? false),
         ]);
     }
 

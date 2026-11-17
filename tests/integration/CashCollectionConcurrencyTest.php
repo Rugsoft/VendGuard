@@ -622,6 +622,182 @@ try {
             && substr($seqCodes[0], 0, 8) === substr($seqCodes[1], 0, 8),
         json_encode($seqCodes)
     );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 4. Carreras de unicidad entre máquinas distintas (PR-04)
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 4. Mutación y precinto duplicados entre máquinas distintas ---\n";
+
+    $runCrossMachineRace = static function (array $payloadBySlot) use (
+        $projectRoot,
+        $machineId,
+        $machine2Id,
+        $restockerId
+    ): array {
+        $prefix = tempnam(sys_get_temp_dir(), 'vendguard_ccv_unique_');
+        if ($prefix === false) {
+            throw new RuntimeException('No se pudo crear el prefijo temporal de unicidad.');
+        }
+        @unlink($prefix);
+
+        $startFile = $prefix . '.start';
+        file_put_contents($startFile, 'go');
+
+        $paths = [];
+        $processes = [];
+        $results = [];
+
+        try {
+            foreach (['a' => $machineId, 'b' => $machine2Id] as $slot => $raceMachineId) {
+                $paths[$slot] = [
+                    'ready' => $prefix . '.' . $slot . '.ready',
+                    'result' => $prefix . '.' . $slot . '.result.json',
+                    'stdout' => $prefix . '.' . $slot . '.out',
+                    'stderr' => $prefix . '.' . $slot . '.err',
+                ];
+
+                $process = proc_open(
+                    [
+                        PHP_BINARY,
+                        __DIR__ . '/../Support/CashCollectionConcurrencyActor.php',
+                        CASH_CONCURRENCY_SCHEMA,
+                        'register',
+                        (string)$raceMachineId,
+                        (string)$restockerId,
+                        'Reponedor Concurrencia CCV',
+                        'vendguard-ccv-unique-' . $slot,
+                        CASH_CONCURRENCY_PARENT_APP,
+                        $paths[$slot]['ready'],
+                        $startFile,
+                        $paths[$slot]['result'],
+                        json_encode($payloadBySlot[$slot], JSON_THROW_ON_ERROR),
+                    ],
+                    [
+                        1 => ['file', $paths[$slot]['stdout'], 'w'],
+                        2 => ['file', $paths[$slot]['stderr'], 'w'],
+                    ],
+                    $pipes,
+                    $projectRoot
+                );
+
+                if (!is_resource($process)) {
+                    throw new RuntimeException('No se pudo abrir el actor de unicidad ' . $slot . '.');
+                }
+
+                $processes[$slot] = $process;
+            }
+
+            $deadline = microtime(true) + 20.0;
+            foreach ($processes as $slot => $process) {
+                $status = proc_get_status($process);
+                while ($status['running'] && microtime(true) < $deadline) {
+                    usleep(20_000);
+                    $status = proc_get_status($process);
+                }
+                if ($status['running']) {
+                    proc_terminate($process);
+                }
+                proc_close($process);
+                unset($processes[$slot]);
+
+                $raw = is_file($paths[$slot]['result']) ? (string)file_get_contents($paths[$slot]['result']) : '';
+                $decoded = $raw !== '' ? json_decode($raw, true) : null;
+                $results[$slot] = is_array($decoded) ? $decoded : [];
+            }
+        } finally {
+            foreach ($processes as $process) {
+                if (is_resource($process)) {
+                    proc_terminate($process);
+                    proc_close($process);
+                }
+            }
+            foreach ($paths as $group) {
+                foreach ($group as $file) {
+                    if (is_file($file)) {
+                        @unlink($file);
+                    }
+                }
+            }
+            if (is_file($startFile)) {
+                @unlink($startFile);
+            }
+        }
+
+        return $results;
+    };
+
+    $countByMutation = static function (string $mutation) use ($pgPdo): int {
+        $stmt = $pgPdo->prepare(
+            'SELECT COUNT(*) FROM machine_cash_collections WHERE client_mutation_id = :mutation'
+        );
+        $stmt->execute([':mutation' => $mutation]);
+
+        return (int)$stmt->fetchColumn();
+    };
+
+    $countBySeal = static function (string $seal) use ($pgPdo): int {
+        $stmt = $pgPdo->prepare(
+            'SELECT COUNT(*) FROM machine_cash_collections WHERE bag_seal_code = :seal'
+        );
+        $stmt->execute([':seal' => $seal]);
+
+        return (int)$stmt->fetchColumn();
+    };
+
+    $duplicateMutationPayloads = [
+        'a' => [
+            'client_mutation_id' => 'ccv-conc-dup-mutation-0001',
+            'bag_seal_code' => 'BAG-CCV-CONC-0021',
+            'sales_counter_reading' => 300.00,
+            'change_tubes_loaded_eur' => 0.00,
+        ],
+        'b' => [
+            'client_mutation_id' => 'ccv-conc-dup-mutation-0001',
+            'bag_seal_code' => 'BAG-CCV-CONC-0022',
+            'sales_counter_reading' => 200.00,
+            'change_tubes_loaded_eur' => 0.00,
+        ],
+    ];
+    $mutationRace = $runCrossMachineRace($duplicateMutationPayloads);
+
+    $assert(
+        '4.1 La misma mutación en dos máquinas devuelve un único id, un replay idempotente y una sola fila (D4)',
+        ($mutationRace['a']['ok'] ?? false) === true
+            && ($mutationRace['b']['ok'] ?? false) === true
+            && (int)($mutationRace['a']['id'] ?? 0) > 0
+            && (int)($mutationRace['a']['id'] ?? 0) === (int)($mutationRace['b']['id'] ?? -1)
+            && (($mutationRace['a']['idempotent_replay'] ?? false) !== ($mutationRace['b']['idempotent_replay'] ?? false))
+            && $countByMutation('ccv-conc-dup-mutation-0001') === 1,
+        json_encode(['results' => $mutationRace, 'rows' => $countByMutation('ccv-conc-dup-mutation-0001')])
+    );
+
+    $duplicateSealPayloads = [
+        'a' => [
+            'client_mutation_id' => 'ccv-conc-dup-seal-a-0001',
+            'bag_seal_code' => 'BAG-CCV-CONC-0023',
+            'sales_counter_reading' => 400.00,
+            'change_tubes_loaded_eur' => 0.00,
+        ],
+        'b' => [
+            'client_mutation_id' => 'ccv-conc-dup-seal-b-0001',
+            'bag_seal_code' => 'BAG-CCV-CONC-0023',
+            'sales_counter_reading' => 200.00,
+            'change_tubes_loaded_eur' => 0.00,
+        ],
+    ];
+    $sealRace = $runCrossMachineRace($duplicateSealPayloads);
+    $sealWinner = ($sealRace['a']['ok'] ?? false) === true ? 'a' : 'b';
+    $sealLoser = $sealWinner === 'a' ? 'b' : 'a';
+
+    $assert(
+        '4.2 El mismo precinto en dos máquinas responde 409 BAG_SEAL_CODE_ALREADY_USED sin 500 ni segunda fila (C1)',
+        ($sealRace[$sealWinner]['ok'] ?? false) === true
+            && ($sealRace[$sealLoser]['ok'] ?? true) === false
+            && (int)($sealRace[$sealLoser]['http'] ?? 0) === 409
+            && ($sealRace[$sealLoser]['code'] ?? '') === 'BAG_SEAL_CODE_ALREADY_USED'
+            && $countBySeal('BAG-CCV-CONC-0023') === 1,
+        json_encode(['results' => $sealRace, 'rows' => $countBySeal('BAG-CCV-CONC-0023')])
+    );
 } catch (Throwable $exception) {
     $crash = $exception;
 } finally {

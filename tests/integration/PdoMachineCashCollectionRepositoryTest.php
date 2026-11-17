@@ -14,8 +14,9 @@ declare(strict_types=1);
  *      conserva tal cual; el código, la mutación y el precinto son únicos; la
  *      fila devuelta trae `id`, sellos del motor y la sede resuelta.
  *   2. **Idempotencia (D4).** La misma mutación del mismo reponedor devuelve la
- *      misma recaudación; la de otro reponedor no colisiona; el motor rechaza
- *      con `23505` una segunda fila con la misma mutación o el mismo precinto.
+ *      misma recaudación; la de otro reponedor no colisiona; el repositorio
+ *      traduce la carrera de unicidad a la fila ganadora o al conflicto de
+ *      precinto, sin dejar escapar el `23505`.
  *   3. **Último contador (D2, C2).** `findLastForMachine()` devuelve el corte más
  *      reciente de esa máquina, sea cual sea su estado de custodia.
  *   4. **Ciclo de custodia (D4, Art. III.3).** `SEALED_IN_ROUTE → DELIVERED_TO_VAULT`
@@ -49,6 +50,7 @@ require_once __DIR__ . '/../../src/Infrastructure/Database/SqlScriptSplitter.php
 require_once __DIR__ . '/../../src/Infrastructure/Database/PostgresMigrationRunner.php';
 
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
+use VendGuard\Core\Domain\Exception\MachineCashCollectionUniqueViolationException;
 use VendGuard\Core\Domain\Model\MachineCashCollection;
 use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionRepository;
 
@@ -77,6 +79,18 @@ $expectInvalidArgument = static function (callable $operation): bool {
     }
 
     return false;
+};
+
+$expectUniqueViolation = static function (callable $operation): ?MachineCashCollectionUniqueViolationException {
+    try {
+        $operation();
+    } catch (MachineCashCollectionUniqueViolationException $exception) {
+        return $exception;
+    } catch (Throwable $exception) {
+        return null;
+    }
+
+    return null;
 };
 
 echo "======================================================================\n";
@@ -251,7 +265,7 @@ try {
         $repo->findByBagSealCode('BAG-2026-999999') === null
     );
 
-    $duplicateMutation = PostgresFixtureBuilder::expectRejection(static fn () => $repo->insert($makeCollection(
+    $duplicateMutation = $expectUniqueViolation(static fn () => $repo->insert($makeCollection(
         'MCC-2026-000102',
         'BAG-2026-000102',
         'mutation-ccv05-a-001',
@@ -263,12 +277,14 @@ try {
         0.00
     )));
     $assert(
-        'Una segunda fila con la misma mutación se rechaza con 23505 (D4)',
-        $duplicateMutation !== null && $duplicateMutation['state'] === '23505',
-        (string)($duplicateMutation['state'] ?? 'sin rechazo')
+        'Una segunda fila con la misma mutación se traduce a la fila ganadora (D4)',
+        $duplicateMutation !== null
+            && $duplicateMutation->getReason() === MachineCashCollectionUniqueViolationException::DUPLICATE_MUTATION
+            && $duplicateMutation->getExistingCollection()?->getId() === $first->getId(),
+        $duplicateMutation?->getReason() ?? 'sin rechazo'
     );
 
-    $duplicateSeal = PostgresFixtureBuilder::expectRejection(static fn () => $repo->insert($makeCollection(
+    $duplicateSeal = $expectUniqueViolation(static fn () => $repo->insert($makeCollection(
         'MCC-2026-000102',
         'BAG-2026-000101',
         'mutation-ccv05-a-002',
@@ -280,9 +296,10 @@ try {
         0.00
     )));
     $assert(
-        'Un precinto ya consumido se rechaza con 23505 (C1)',
-        $duplicateSeal !== null && $duplicateSeal['state'] === '23505',
-        (string)($duplicateSeal['state'] ?? 'sin rechazo')
+        'Un precinto ya consumido se traduce a un conflicto de negocio (C1)',
+        $duplicateSeal !== null
+            && $duplicateSeal->getReason() === MachineCashCollectionUniqueViolationException::DUPLICATE_SEAL,
+        $duplicateSeal?->getReason() ?? 'sin rechazo'
     );
 
     // ─────────────────────────────────────────────────────────────────────
