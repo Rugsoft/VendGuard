@@ -24,13 +24,21 @@ use VendGuard\Presentation\Http\Response;
  * Respuestas:
  * - 401 Unauthorized si el token falta, es inválido o está caducado.
  * - 403 Forbidden si el rol del usuario no tiene permisos suficientes.
+ *
+ * **Resolución perezosa de sus colaboradores.** `AuthService` y `PdoUserRepository`
+ * construyen repositorios PDO y, por tanto, abren conexión con el motor. `AppRouter::create()`
+ * instancia este middleware al montar la tabla de rutas: resolverlos en el constructor
+ * convertía el arranque del enrutador en una operación dependiente del motor, y con la base
+ * caída el proceso moría con un fatal en HTML antes de despachar siquiera una petición. Se
+ * resuelven en el primer uso, de modo que una petición sin credencial se rechaza con `401`
+ * sin tocar la base. Mismo criterio que en `SiteAuthMiddleware` y `CronAuthMiddleware`.
  */
 class InternalAuthMiddleware
 {
     /** @var list<UserRole> Roles admitidos; lista vacía = cualquier personal interno. */
     private array $allowedRoles;
-    private AuthService $authService;
-    private UserRepositoryInterface $userRepo;
+    private ?AuthService $authService;
+    private ?UserRepositoryInterface $userRepo;
 
     /**
      * @param UserRole|string|array<int, UserRole|string>|null $requiredRole Rol o roles que superan el middleware.
@@ -57,8 +65,8 @@ class InternalAuthMiddleware
             }
         }
 
-        $this->authService = $authService ?? new AuthService();
-        $this->userRepo = $userRepo ?? new PdoUserRepository();
+        $this->authService = $authService;
+        $this->userRepo = $userRepo;
     }
 
     /**
@@ -78,7 +86,7 @@ class InternalAuthMiddleware
         }
 
         // 2. Validar firma y caducidad del token
-        $payload = $this->authService->validateInternalToken($bearerToken);
+        $payload = $this->authService()->validateInternalToken($bearerToken);
         if ($payload === null) {
             return Response::error(
                 'UNAUTHORIZED',
@@ -88,7 +96,7 @@ class InternalAuthMiddleware
         }
 
         // 3. Verificar que el usuario sigue existiendo en base de datos (y activo si no se permite inactivo)
-        $user = $this->userRepo->findById((int)$payload['user_id'], onlyActive: !$this->allowInactive);
+        $user = $this->userRepo()->findById((int)$payload['user_id'], onlyActive: !$this->allowInactive);
         if ($user === null) {
             return Response::error(
                 'UNAUTHORIZED',
@@ -124,5 +132,24 @@ class InternalAuthMiddleware
         $request->setAttribute('user_email', $user->getEmail());
 
         return $next($request);
+    }
+
+    /**
+     * Validador de sesiones internas, resuelto en el primer uso.
+     *
+     * No se construye en el constructor porque construirlo abre conexión con el motor (ver
+     * el bloque de la clase): el arranque del enrutador no puede depender del motor.
+     */
+    private function authService(): AuthService
+    {
+        return $this->authService ??= new AuthService();
+    }
+
+    /**
+     * Repositorio de usuarios, resuelto en el primer uso y por el mismo motivo.
+     */
+    private function userRepo(): UserRepositoryInterface
+    {
+        return $this->userRepo ??= new PdoUserRepository();
     }
 }
