@@ -35,6 +35,7 @@ final class MachineCashCollectionValidationException extends DomainException
     // ── 403 · rol y perímetro territorial ────────────────────────────────
     public const MACHINE_OUTSIDE_RESTOCKER_ZONES = 'MACHINE_OUTSIDE_RESTOCKER_ZONES';
     public const CASH_COLLECTION_FORBIDDEN_FOR_ROLE = 'CASH_COLLECTION_FORBIDDEN_FOR_ROLE';
+    public const RESTOCK_VISIT_NOT_OWNED = 'RESTOCK_VISIT_NOT_OWNED';
 
     // ── 404 · máquina o recaudación inexistente ──────────────────────────
     public const MACHINE_NOT_FOUND = 'MACHINE_NOT_FOUND';
@@ -58,6 +59,8 @@ final class MachineCashCollectionValidationException extends DomainException
     public const THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN = 'THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN';
     public const DISCREPANCY_JUSTIFICATION_REQUIRED = 'DISCREPANCY_JUSTIFICATION_REQUIRED';
     public const REFUND_AMOUNT_MISMATCH = 'REFUND_AMOUNT_MISMATCH';
+    public const RESTOCK_VISIT_NOT_ALLOWED = 'RESTOCK_VISIT_NOT_ALLOWED';
+    public const RESTOCK_VISIT_NOT_COMPLETED = 'RESTOCK_VISIT_NOT_COMPLETED';
 
     private string $errorCode;
 
@@ -129,6 +132,17 @@ final class MachineCashCollectionValidationException extends DomainException
             403,
             'machine_id',
             ['machine_id' => $machineId, 'restocker_id' => $restockerId]
+        );
+    }
+
+    public static function restockVisitNotOwnedByRestocker(int $visitId): self
+    {
+        return new self(
+            self::RESTOCK_VISIT_NOT_OWNED,
+            sprintf('La visita de reposición %d pertenece a otro reponedor y no puede vincularse a esta recaudación (D1).', $visitId),
+            403,
+            'restock_visit_id',
+            ['restock_visit_id' => $visitId]
         );
     }
 
@@ -334,6 +348,27 @@ final class MachineCashCollectionValidationException extends DomainException
             409,
             'machine_id',
             ['machine_id' => $machineId, 'reasons' => $reasons]
+        );
+    }
+
+    public static function restockVisitNotAllowedForStandalone(): self
+    {
+        return new self(
+            self::RESTOCK_VISIT_NOT_ALLOWED,
+            'La recaudación independiente no admite restock_visit_id: la visita solo se vincula al registrar la visita de reposición (D1).',
+            422,
+            'restock_visit_id'
+        );
+    }
+
+    public static function restockVisitNotCompleted(int $visitId, string $status): self
+    {
+        return new self(
+            self::RESTOCK_VISIT_NOT_COMPLETED,
+            sprintf('La visita de reposición %d debe estar COMPLETED para vincular la recaudación; está en «%s» (D1).', $visitId, $status),
+            422,
+            'restock_visit_id',
+            ['restock_visit_id' => $visitId, 'status' => $status]
         );
     }
 

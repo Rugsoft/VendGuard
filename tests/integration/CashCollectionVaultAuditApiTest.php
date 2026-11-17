@@ -412,6 +412,24 @@ try {
     $countCollections = static fn () => (int)$pdo->query('SELECT COUNT(*) FROM machine_cash_collections')->fetchColumn();
     $beforeActivityChecksCount = $countCollections();
 
+    $standaloneVisit = $call(
+        'POST',
+        '/api/restocker/machines/' . $machineId . '/cash-collections',
+        array_merge($capturePayload, [
+            'client_mutation_id' => 'ccv08-cash-standalone-visit-0001',
+            'bag_seal_code' => 'BAG-CCV8-0014',
+            'restock_visit_id' => 999999,
+        ]),
+        $ownerToken
+    );
+    $assert(
+        '3.4g La vía independiente rechaza restock_visit_id sin insertar fila (D1)',
+        $standaloneVisit->getStatusCode() === 422
+            && $errorCode($standaloneVisit) === 'RESTOCK_VISIT_NOT_ALLOWED'
+            && $countCollections() === $beforeActivityChecksCount,
+        $errorCode($standaloneVisit) . ' · filas=' . $countCollections()
+    );
+
     $pdo->prepare('UPDATE operational_zones SET is_active = FALSE WHERE id = :id')
         ->execute([':id' => $zoneId]);
     $inactiveZone = $call(
@@ -777,6 +795,58 @@ try {
             && ($flaggedCells[6] ?? '') === 'Arqueada con descuadre'
             && ($flaggedCells[9] ?? '') !== ''
             && ($flaggedCells[11] ?? '') === 'DISCREPANCY_FLAGGED'
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 5.17 · Exportación completa del filtro, sin el tope de página (PR-01)
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 5d. Exportación completa del filtro ---\n";
+
+    $bulkInsert = $pdo->prepare(
+        "INSERT INTO machine_cash_collections (
+            collection_code, machine_id, machine_code_snapshot, restocker_id,
+            restocker_name_snapshot, restocker_code_snapshot, bag_seal_code,
+            sales_counter_reading, previous_sales_counter_reading, expected_cashbox_eur,
+            client_mutation_id, collected_at
+         ) VALUES (
+            :code, :machine_id, :machine_code, :restocker_id,
+            :restocker_name, :restocker_code, :seal,
+            1.00, 0.00, 1.00,
+            :mutation, CAST(:collected_at AS timestamptz)
+         )"
+    );
+    for ($i = 1; $i <= 105; $i++) {
+        $bulkInsert->execute([
+            ':code' => sprintf('MCC-2026-%04d', 8000 + $i),
+            ':machine_id' => $machineId,
+            ':machine_code' => 'CCV8-SNACK-01',
+            ':restocker_id' => $ownerId,
+            ':restocker_name' => 'Reposición Titular T-CCV-08',
+            ':restocker_code' => 'CCV8-OWNER',
+            ':seal' => sprintf('BULKCCV8%04d', $i),
+            ':mutation' => sprintf('bulk-ccv8-%04d', $i),
+            ':collected_at' => '2026-11-01 10:00:00+00',
+        ]);
+    }
+
+    $bulkCsv = $call('GET', '/api/coordinator/cash-collections/export-csv', [], $coordinatorToken, [
+        'date_from' => '2026-11-01',
+        'date_to' => '2026-11-01',
+    ]);
+    $bulkBody = $bulkCsv->getBody();
+    $bulkLines = array_values(array_filter(
+        explode("\n", $bulkBody),
+        static fn (string $line): bool => trim($line) !== ''
+    ));
+    $bulkDataRows = max(0, count($bulkLines) - 1);
+
+    $assert(
+        '5.17 La exportación entrega todas las filas del filtro y no se corta en 100 (PR-01)',
+        $bulkCsv->getStatusCode() === 200
+            && $bulkDataRows === 105
+            && str_contains($bulkBody, 'MCC-2026-8001')
+            && str_contains($bulkBody, 'MCC-2026-8105'),
+        'filas=' . $bulkDataRows
     );
 
     $ok = $failures === 0;

@@ -5,7 +5,7 @@
 - **HEAD revisado:** `09d0f3f` · **Base:** `47ba599` (sin commits nuevos en `main` desde la bifurcación)
 - **Fecha de la revisión:** 2026-11-17
 - **Alcance:** revisión estática del diff completo (76 archivos, +20.345/−155): migración 031 y convergencia con `supabase_init.sql`, dominio, servicio y repositorios, controladores y RBAC, proyección móvil, cola offline, exportación CSV y coherencia documental. Contraste con la spec v2.1, los contratos técnicos y las suites del módulo.
-- **Estado:** PR `MERGEABLE`/`CLEAN`, con **11 hallazgos abiertos** (2 de prioridad alta, 3 media y 6 baja). Ninguno se ha corregido en esta revisión.
+- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 y PR-02 corregidos el 2026-11-17** con sus pruebas de regresión; quedan **9 hallazgos abiertos** (3 media y 6 baja).
 
 ---
 
@@ -19,8 +19,8 @@ Los defectos se concentran en los bordes del contrato: la exportación financier
 
 | # | ID | Prioridad | Hallazgo | Impacto | Estado |
 |---:|:---:|:---:|---|---|---|
-| 1 | `PR-01` | **Alta** | La exportación CSV se corta en 100 filas sin avisar | Pérdida silenciosa de datos en el libro contable exportado | Abierto |
-| 2 | `PR-02` | **Alta** | La vía independiente acepta `restock_visit_id` de cualquier visita y de cualquier reponedor | Vínculo cruzado fuera de spec, bloqueo del índice único y 500 al dueño legítimo | Abierto |
+| 1 | `PR-01` | **Alta** | La exportación CSV se corta en 100 filas sin avisar | Pérdida silenciosa de datos en el libro contable exportado | Corregido (2026-11-17) |
+| 2 | `PR-02` | **Alta** | La vía independiente acepta `restock_visit_id` de cualquier visita y de cualquier reponedor | Vínculo cruzado fuera de spec, bloqueo del índice único y 500 al dueño legítimo | Corregido (2026-11-17) |
 | 3 | `PR-03` | Media | `collected_at` viaja del cliente sin validar formato ni ventana temporal | 500 ante un valor malformado y alteración de la cadena de contador y del esperado | Abierto |
 | 4 | `PR-04` | Media | Las carreras de unicidad (precinto o mutación) acaban en 500 | Un conflicto de negocio se presenta como fallo interno y no se reintenta como replay | Abierto |
 | 5 | `PR-05` | Media | La cola offline marca como conflicto irreversible cualquier 401, 403 o 5xx | Capturas válidas quedan bloqueadas tras caducar la sesión o un fallo transitorio | Abierto |
@@ -52,6 +52,10 @@ Con más de 100 bolsas en el filtro (un mes normal de un parque mediano), el CSV
 
 Exportar con una consulta dedicada sin `LIMIT` (o un bucle de páginas con `MAX_LIMIT` y `OFFSET`) y mantener el `LIMIT` solo para la consola. Añadir una prueba de integración con 101+ filas que cuente las líneas del CSV y verifique el BOM y la cabecera.
 
+**Corrección aplicada (2026-11-17)**
+
+`MachineCashCollectionRepositoryInterface::listAllForCoordinator()` entrega el libro filtrado sin `LIMIT` ni `OFFSET`; `MachineCashCollectionService::exportCsv()` lo consume y la consola mantiene su tope de página. La prueba `5.17` de `CashCollectionVaultAuditApiTest` inserta 105 filas y comprueba que el CSV devuelve las 105, incluidas `MCC-2026-8001` y `MCC-2026-8105`.
+
 ---
 
 ## 2. `PR-02` · La vía independiente acepta visitas ajenas y no completadas
@@ -73,6 +77,10 @@ Un `RESTOCKER` puede enlazar su captura a la visita de otro reponedor de la mism
 **Corrección propuesta**
 
 Rechazar `restock_visit_id` en el endpoint independiente (400/422) y, en la vía integrada, validar que `visit.restocker_id === actor.id` y que `status === 'COMPLETED'` antes de insertar. Añadir dos pruebas de regresión: visita de otro reponedor y visita en estado distinto de `COMPLETED`.
+
+**Corrección aplicada (2026-11-17)**
+
+La vía independiente responde `422 RESTOCK_VISIT_NOT_ALLOWED` ante cualquier `restock_visit_id`, sin insertar fila (`3.4g`). La vía integrada valida, tras bloquear la visita, que `restocker_id` coincide con el actor (`403 RESTOCK_VISIT_NOT_OWNED`) y que el estado es `COMPLETED` (`422 RESTOCK_VISIT_NOT_COMPLETED`); ambas guardas se cubren en `MachineCashCollectionServiceTest`, que pasa a 48/48.
 
 ---
 
@@ -251,14 +259,14 @@ Derivar el año con `DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'))
 ## Verificado y correcto
 
 - **Integración con `main`:** `MERGEABLE`/`CLEAN`, sin commits nuevos en la base desde la bifurcación y sin archivos de solape; la migración 031 es la siguiente libre tras la 030.
-- **Cifras:** batería hermética **436 suites · 16.781 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.176 aserciones · 0 fallos**. Suites del módulo: API 41/41, constitucional 25/25, concurrencia 8/8, layout 32/32, esquema 46/46, repositorio 45/45, dominio 123/123, validador 114/114 y servicio 45/45.
+- **Cifras:** batería hermética **436 suites · 16.784 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.178 aserciones · 0 fallos**. Suites del módulo: API 43/43, constitucional 25/25, concurrencia 8/8, layout 32/32, esquema 46/46, repositorio 45/45, dominio 123/123, validador 114/114 y servicio 48/48.
 - **Opacidad:** el DTO del reponedor publica 18 campos y omite las cinco claves del Arqueo Ciego; el recibo de conserjería expone exactamente nueve campos, sin precinto, PIN ni importes calculados.
 - **Integridad:** ocho `CHECK`, inmutabilidad por etapas con `45000`, guarda sanitaria en aplicación y motor, reserva del código con cerrojo transaccional y arqueo concurrente protegido por `UPDATE` condicionado.
 - **Seguridad:** rutas con `COORDINATOR`/`RESTOCKER`, CSV neutralizado contra fórmulas, sin secretos ni archivos de entorno en el diff.
-- **Documentación:** la matriz de trazabilidad actualizó solo las filas de la suite de API (41/41 y 8/8); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
+- **Documentación:** la matriz de trazabilidad actualizó solo las filas de la suite de API (43/43 y 8/8) y del servicio (48/48); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
 
 ## Límites de esta revisión
 
 - No hay CI configurado en la PR (`statusCheckRollup` vacío): toda la evidencia de pruebas procede de ejecuciones locales.
 - La revisión es estática sobre `09d0f3f`; no se ha vuelto a ejecutar la batería porque el último commit solo modifica `CHANGELOG.md`.
-- No se ha probado el truncamiento del CSV ni el cruce de visitas contra una base real con datos; ambos hallazgos se derivan del código y del contrato.
+- Las correcciones de `PR-01` y `PR-02` sí se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17` y la vía independiente rechaza la visita en `3.4g`; las guardas de dueño y `COMPLETED` se cubren en `MachineCashCollectionServiceTest`, sin reproducir el cruce por HTTP porque la vía independiente ya lo rechaza antes.

@@ -104,6 +104,20 @@ interface MachineCashCollectionRepositoryInterface
     public function listForCoordinator(array $filters = []): array;
 
     /**
+     * Libro completo de Caja Central para la exportación CSV, sin paginación.
+     *
+     * `listForCoordinator()` conserva el tope de página de la consola; la
+     * exportación debe entregar todas las filas del filtro activo (QA 4), sin
+     * que el tamaño de la página recorte el fichero en silencio. Los filtros
+     * `limit` y `offset` se ignoran a propósito.
+     *
+     * @param array<string, mixed> $filters Los mismos filtros del libro
+     *
+     * @return list<MachineCashCollection>
+     */
+    public function listAllForCoordinator(array $filters = []): array;
+
+    /**
      * Resumen de efectivo movilizado en la ruta del reponedor (`QA 3`).
      *
      * Solo suma magnitudes que el propio reponedor declaró (cambio cargado y

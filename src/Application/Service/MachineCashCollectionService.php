@@ -155,6 +155,9 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
             );
 
             $payloadVisitId = $this->nullablePositiveInt($payload['restock_visit_id'] ?? null);
+            if ($restockVisitId === null && $payloadVisitId !== null) {
+                throw MachineCashCollectionValidationException::restockVisitNotAllowedForStandalone();
+            }
             if ($restockVisitId !== null && $payloadVisitId !== null && $payloadVisitId !== $restockVisitId) {
                 throw new InvalidArgumentException('La visita vinculada no coincide con la visita de la ruta.');
             }
@@ -174,6 +177,17 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                     $machineId,
                     $visitId
                 );
+
+                if ((int)($visit['restocker_id'] ?? 0) !== $restocker['id']) {
+                    throw MachineCashCollectionValidationException::restockVisitNotOwnedByRestocker($visitId);
+                }
+
+                if (strtoupper(trim((string)$visit['status'])) !== 'COMPLETED') {
+                    throw MachineCashCollectionValidationException::restockVisitNotCompleted(
+                        $visitId,
+                        (string)$visit['status']
+                    );
+                }
             }
 
             $seal = MachineCashCollectionValidator::normalizeBagSeal((string)($payload['bag_seal_code'] ?? ''));
@@ -649,7 +663,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
     {
         $this->requireActor($actor, 'COORDINATOR');
 
-        $book = $this->collections->listForCoordinator($filters);
+        $collections = $this->collections->listAllForCoordinator($filters);
 
         $handle = fopen('php://temp', 'r+');
         if ($handle === false) {
@@ -671,7 +685,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
             'Código de estado',
         ], ';');
 
-        foreach ($book['collections'] as $collection) {
+        foreach ($collections as $collection) {
             fputcsv($handle, array_map(
                 fn (mixed $value): string => $this->neutralizeCsvCell($value),
                 [

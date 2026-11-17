@@ -390,6 +390,31 @@ final class PdoMachineCashCollectionRepository implements MachineCashCollectionR
     /**
      * {@inheritdoc}
      */
+    public function listAllForCoordinator(array $filters = []): array
+    {
+        $params = [];
+        $where = ' WHERE 1 = 1' . $this->buildFilterClause($filters, $params);
+
+        $stmt = $this->pdo->prepare(
+            'SELECT ' . self::COLLECTION_SELECT
+            . ' FROM machine_cash_collections c'
+            . ' INNER JOIN machines m ON m.id = c.machine_id'
+            . ' INNER JOIN locations l ON l.id = m.location_id'
+            . $where
+            . ' ORDER BY c.collected_at DESC, c.id DESC'
+        );
+        $this->bindParams($stmt, $params);
+        $stmt->execute();
+
+        return array_map(
+            fn (array $row): MachineCashCollection => $this->hydrate($row),
+            $stmt->fetchAll(PDO::FETCH_ASSOC)
+        );
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function summarizeForRestocker(int $restockerId, array $filters = []): array
     {
         if ($restockerId <= 0) {

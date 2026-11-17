@@ -302,6 +302,11 @@ final class CashTestRepository implements MachineCashCollectionRepositoryInterfa
         ];
     }
 
+    public function listAllForCoordinator(array $filters = []): array
+    {
+        return $this->listForCoordinator($filters)['collections'];
+    }
+
     public function summarizeForRestocker(int $restockerId, array $filters = []): array
     {
         $rows = $this->listForRestocker($restockerId, $filters);
@@ -519,6 +524,8 @@ $gateway->machines[4] = array_merge($gateway->machines[1], ['id' => 4, 'machine_
 
 $gateway->visits[9] = ['id' => 9, 'machine_id' => 1, 'restocker_id' => 10, 'status' => 'COMPLETED'];
 $gateway->visits[10] = ['id' => 10, 'machine_id' => 1, 'restocker_id' => 10, 'status' => 'ABORTED_THERMAL_BREACH'];
+$gateway->visits[11] = ['id' => 11, 'machine_id' => 1, 'restocker_id' => 11, 'status' => 'COMPLETED'];
+$gateway->visits[12] = ['id' => 12, 'machine_id' => 1, 'restocker_id' => 10, 'status' => 'PENDING_INSPECTION'];
 
 $gateway->refunds[300] = ['id' => 300, 'machine_id' => 1, 'status' => 'PENDING_INSPECTION', 'compensation_method' => 'EN_MANO_SEDE', 'claimed_amount' => 4.50, 'is_active' => true];
 $gateway->refunds[301] = ['id' => 301, 'machine_id' => 1, 'status' => 'VERIFIED_PENDING_PAYMENT', 'compensation_method' => 'EN_MANO_SEDE', 'claimed_amount' => 4.50, 'is_active' => true];
@@ -576,10 +583,25 @@ try {
         409
     );
 
-    $thermalPayload = $basePayload('BAG-2026-060001', 'mutation-ccv06-001', 100.00) + ['restock_visit_id' => 10];
+    $thermalPayload = $basePayload('BAG-2026-060001', 'mutation-ccv06-001', 100.00);
     assertCashRejects(
-        static fn () => $service->registerCollection(1, $thermalPayload, $restocker),
+        static fn () => $service->registerCollectionInTransaction(1, $thermalPayload, $restocker, 10),
         MachineCashCollectionValidationException::THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN,
+        422
+    );
+    assertCashRejects(
+        static fn () => $service->registerCollection(1, $basePayload('BAG-2026-060002', 'mutation-ccv06-visit-001', 100.00) + ['restock_visit_id' => 9], $restocker),
+        MachineCashCollectionValidationException::RESTOCK_VISIT_NOT_ALLOWED,
+        422
+    );
+    assertCashRejects(
+        static fn () => $service->registerCollectionInTransaction(1, $basePayload('BAG-2026-060003', 'mutation-ccv06-visit-002', 100.00), $restocker, 11),
+        MachineCashCollectionValidationException::RESTOCK_VISIT_NOT_OWNED,
+        403
+    );
+    assertCashRejects(
+        static fn () => $service->registerCollectionInTransaction(1, $basePayload('BAG-2026-060004', 'mutation-ccv06-visit-003', 100.00), $restocker, 12),
+        MachineCashCollectionValidationException::RESTOCK_VISIT_NOT_COMPLETED,
         422
     );
 
