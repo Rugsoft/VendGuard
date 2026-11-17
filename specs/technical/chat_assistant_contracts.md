@@ -107,8 +107,8 @@ Se extiende el payload de respuesta exitosa (`200 OK`) añadiendo el campo `chat
 
 | ID | Criterio | Verificación |
 | :--- | :--- | :--- |
-| **CA-01** | `AuthService::generateChatToken(User $user)` emite un JWT válido con 3 segmentos separados por punto. | Test unitario verificando estructura `base64(header).base64(payload).base64(hmac)`. |
+| **CA-01** | `AuthService::generateChatToken(User $user)` emite un JWT válido con 3 segmentos separados por punto **para Coordinación y Técnico de Ruta**; cualquier otro rol recibe `null`. | Test unitario verificando estructura `base64(header).base64(payload).base64(hmac)` y alcance por rol en `ChatTokenServiceTest.php` (§5). |
 | **CA-02** | Los claims `sub`, `name`, `role`, `exp` se corresponden fielmente con la entidad `User`. | Test unitario de decodificación y aserción de claims. |
 | **CA-03** | `POST /api/auth/login` devuelve tanto `token` tradicional como `chat_token`. | Test de integración en `AuthControllerTest.php`. |
 | **CA-04** | El secreto HMAC empleado por el backend coincide con `SecretProvider::authSecret()`. | Test criptográfico de verificación cruzada con `hash_hmac`. |
-| **CA-05** | El frontend monta el widget únicamente ante login interno exitoso y lo remueve en logout. | Verificación de ciclo de vida en `store.js` / interfaz web. |
+| **CA-05** | El frontend monta el widget únicamente ante login interno exitoso **cuyo rol esté en `CHAT_ALLOWED_ROLES`** y lo remueve en logout o si la sesión pasa a un rol sin derecho. | Verificación de ciclo de vida en `store.js` / interfaz web y `N8nChatScopeTest.mjs` (guarda de rol y de puntero). |

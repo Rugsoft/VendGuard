@@ -247,11 +247,19 @@ class AuthService
     }
 
     /**
-    /**
      * Genera un token JWT estándar RFC 7519 firmado con HS256 para el widget n8n.
+     *
+     * El asistente es una superficie de Coordinación y Técnico de Ruta
+     * (`specs/technical/chat_assistant_contracts.md` §1). Cualquier otro rol —el
+     * reponedor incluido— recibe `null`: sin token no hay widget, y el claim `role`
+     * del JWT nunca certifica una identidad que el contrato no contempla.
      */
-    public function generateChatToken(User $user, int $ttlSeconds = 28800): string
+    public function generateChatToken(User $user, int $ttlSeconds = 28800): ?string
     {
+        if (!in_array($user->getRole(), [UserRole::COORDINATOR, UserRole::TECHNICIAN], true)) {
+            return null;
+        }
+
         $header = [
             'alg' => 'HS256',
             'typ' => 'JWT',

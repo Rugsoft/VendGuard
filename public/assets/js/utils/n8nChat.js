@@ -16,6 +16,25 @@ let isChatMounted = false;
 let currentToken = null;
 
 /**
+ * Roles con derecho al asistente (`specs/technical/chat_assistant_contracts.md` §1).
+ *
+ * El contrato lo limita a Coordinadores y Técnicos de Ruta; el reponedor y el
+ * responsable de sede quedan fuera. El backend ya no emite `chat_token` a esos
+ * roles, y esta lista es la segunda orilla: un token antiguo en el almacén no
+ * debe montar el widget en una sesión que el contrato no contempla.
+ */
+export const CHAT_ALLOWED_ROLES = Object.freeze(['COORDINATOR', 'TECHNICIAN']);
+
+/**
+ * ¿Puede este rol recibir el asistente?
+ * @param {string|null|undefined} role - Rol del usuario autenticado
+ * @returns {boolean}
+ */
+export function isChatRoleAllowed(role) {
+  return CHAT_ALLOWED_ROLES.includes(String(role || '').trim().toUpperCase());
+}
+
+/**
  * Inyecta la hoja de estilos del widget si no está ya presente en el <head>.
  */
 function ensureStyle() {
@@ -36,6 +55,13 @@ function ensureStyle() {
  */
 export async function mountChatWidget(token, user = null) {
   if (!token || typeof window === 'undefined' || typeof document === 'undefined') {
+    return;
+  }
+
+  // Defensa en profundidad (H-2): si la sesión no es de Coordinación ni de Técnico
+  // —o cambió a un rol sin derecho—, el widget se retira en lugar de montarse.
+  if (user !== null && !isChatRoleAllowed(user?.role)) {
+    unmountChatWidget();
     return;
   }
 

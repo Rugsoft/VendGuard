@@ -1621,7 +1621,7 @@ export const CoordinatorProductLoadingTab = {
           </div>
         </div>
 
-        <div class="vg-card" style="padding: 0; overflow-x: auto;">
+        <div class="vg-card vg-cash-table-scroll">
           <table class="vg-table" data-testid="product-loading-cash-table">
             <thead>
               <tr>

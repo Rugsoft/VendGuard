@@ -187,6 +187,59 @@ $assert("Respuesta contiene 'chat_token' firmado", isset($body['data']['chat_tok
 $validatedFromController = $authService->validateChatToken($body['data']['chat_token']);
 $assert("chat_token retornado por AuthController es válido", $validatedFromController !== null && ($validatedFromController['name'] ?? '') === 'Carlos Coordinador');
 
+// ---------------------------------------------------------------------
+// 5. Alcance por rol del asistente (H-2 del informe E2E del Módulo 35)
+// ---------------------------------------------------------------------
+echo "\n--- 5. El asistente solo se emite a Coordinación y Técnico ---\n";
+
+$restocker = new User(
+    id: 303,
+    name: 'Lucía Reponedora',
+    email: 'lucia@vendguard.internal',
+    passwordHash: password_hash('Password123!', PASSWORD_BCRYPT),
+    role: UserRole::RESTOCKER,
+    phone: '+34600555666'
+);
+
+$assert(
+    "Un reponedor no recibe chat_token (el widget no debe montarse fuera de su contrato)",
+    $authService->generateChatToken($restocker) === null
+);
+
+$dummyUserRepo->setStoredUser($restocker);
+$restockerLogin = $controller->login(new Request('POST', '/api/auth/login', [], [
+    'email' => 'lucia@vendguard.internal',
+    'password' => 'Password123!',
+]));
+$restockerBody = $restockerLogin->getDecodedBody();
+
+$assert(
+    "El login del reponedor sigue emitiendo sesión interna",
+    $restockerLogin->getStatusCode() === 200
+        && isset($restockerBody['data']['token'])
+        && str_starts_with($restockerBody['data']['token'], 'auth_token_')
+);
+
+$assert(
+    "El login del reponedor devuelve chat_token nulo",
+    array_key_exists('chat_token', $restockerBody['data'])
+        && $restockerBody['data']['chat_token'] === null
+);
+
+$assert(
+    "El coordinador y el técnico conservan su token (sin regresión)",
+    is_string($authService->generateChatToken($coordinator))
+        && is_string($authService->generateChatToken($technician))
+);
+
+$assert(
+    "El claim role solo publica las dos identidades del contrato",
+    in_array($payload['role'] ?? '', ['coordinador', 'tecnico'], true)
+        && in_array($techPayload['role'] ?? '', ['coordinador', 'tecnico'], true)
+);
+
+$dummyUserRepo->setStoredUser($coordinator);
+
 echo "\n======================================================================\n";
 if ($failures === 0) {
     echo " RESULTADO: Todas las pruebas unitarias pasaron con éxito.\n";

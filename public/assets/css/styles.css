@@ -2135,3 +2135,33 @@ details.vg-guide-accordion__disclosure:not([open]) .vg-guide-accordion__body {
     padding-right: 88px;
   }
 }
+
+/* --------------------------------------------------------------------------
+   H-1 · El lanzador del asistente n8n es fijo en la esquina inferior derecha.
+   El contrato del widget es un círculo de 64 px, pero su contenedor es un
+   cuadrado transparente con `pointer-events: auto` que robaba clics a la
+   columna «Acciones» de la tabla de recaudación en anchos estrechos. Solo la
+   burbuja y el panel deben capturar el puntero; el resto del contenedor, no.
+   -------------------------------------------------------------------------- */
+.chat-window-wrapper {
+  pointer-events: none !important;
+}
+
+.chat-window-wrapper .chat-window,
+.chat-window-wrapper .chat-window-toggle {
+  pointer-events: auto !important;
+}
+
+/* …y la tabla de recaudación reserva el pasillo del lanzador (64 px + margen)
+   para que, al desplazarla en horizontal, la columna de acciones se pueda
+   llevar fuera de la burbuja. Mismo criterio que `.vg-triage-table-card`. */
+.vg-cash-table-scroll {
+  padding: 0;
+  overflow-x: auto;
+}
+
+@media (max-width: 1024px) {
+  .vg-cash-table-scroll {
+    padding-right: 88px;
+  }
+}
