@@ -255,6 +255,12 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'RESTOCK_VISIT_ABORTED_THERMAL_BREACH', label: 'Visita Abortada por Rotura de Cadena de Frío', tone: 'danger', group: 'sanitary' },
   { code: 'OFFLINE_RESTOCK_VISIT_CONFLICT_DUMP', label: 'Conflicto Offline Archivado en Auditoría', tone: 'warning', group: 'restock' },
   { code: 'OFFLINE_CASH_COLLECTION_CONFLICT_DUMP', label: 'Conflicto Offline de Recaudación Archivado', tone: 'warning', group: 'restock' },
+  // Módulo 35: el ciclo de vida de la bolsa precintada se audita con tres acciones
+  // propias. Sin catálogo, el visor mostraba el código crudo y el filtro no permitía
+  // localizar el sellado, la recepción en cámara ni el arqueo terminal (Art. III.3).
+  { code: 'CASH_COLLECTION_SEALED', label: 'Recaudación Sellada en Ruta', tone: 'primary', group: 'restock' },
+  { code: 'CASH_COLLECTION_DELIVERED_TO_VAULT', label: 'Bolsa Precintada Recibida en Caja Central', tone: 'info', group: 'restock' },
+  { code: 'CASH_COLLECTION_RECONCILED', label: 'Arqueo Ciego de Caja Central', tone: 'success', group: 'restock' },
   { code: 'NOTIFICATION_MANUAL_RETRY', label: 'Reintento Manual de Notificación', tone: 'warning', group: 'notification' },
   { code: 'NOTIFICATION_MANUAL_CANCEL', label: 'Cancelación Manual de Notificación', tone: 'danger', group: 'notification' },
   { code: 'NOTIFICATION_PERMANENT_FAILURE', label: 'Fallo Definitivo de Notificación', tone: 'danger', group: 'notification' },

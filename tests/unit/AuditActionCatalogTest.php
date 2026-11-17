@@ -103,6 +103,12 @@ const AUDIT_WRITER_METHODS = [
     // Sin estas firmas, sus nueve acciones quedaban fuera del vocabulario.
     'auditOrder',
     'auditStock',
+    // Módulo 35: el ciclo de vida de la bolsa precintada delega en un helper propio
+    // —distinto de `AuditLogger::logEvent()`, que recibe el `AuditEvent` ya compuesto—
+    // con la acción nombrada `action:`. Sin esta firma, `CASH_COLLECTION_SEALED`,
+    // `CASH_COLLECTION_DELIVERED_TO_VAULT` y `CASH_COLLECTION_RECONCILED` se escribían
+    // en `audit_log` sin etiqueta ni filtro en la consola de auditoría.
+    'logCashCollectionEvent',
 ];
 
 /**

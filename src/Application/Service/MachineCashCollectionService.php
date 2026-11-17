@@ -273,13 +273,13 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                 }
             }
 
-            $this->logEvent(
-                self::ACTION_CASH_COLLECTION_SEALED,
-                $persisted,
-                $actor,
-                null,
-                $persisted->toCoordinatorArray(),
-                ['machine_id' => $machineId, 'restock_visit_id' => $visitId]
+            $this->logCashCollectionEvent(
+                action: self::ACTION_CASH_COLLECTION_SEALED,
+                collection: $persisted,
+                actor: $actor,
+                previousState: null,
+                newState: $persisted->toCoordinatorArray(),
+                metadata: ['machine_id' => $machineId, 'restock_visit_id' => $visitId]
             );
 
         return RestockerCashCollectionViewDTO::fromMachineCashCollection($persisted)->toArray() + ['idempotent_replay' => false];
@@ -404,12 +404,12 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                 );
             }
 
-            $this->logEvent(
-                self::ACTION_CASH_COLLECTION_DELIVERED_TO_VAULT,
-                $delivered,
-                $actor,
-                $collection->toCoordinatorArray(),
-                $delivered->toCoordinatorArray()
+            $this->logCashCollectionEvent(
+                action: self::ACTION_CASH_COLLECTION_DELIVERED_TO_VAULT,
+                collection: $delivered,
+                actor: $actor,
+                previousState: $collection->toCoordinatorArray(),
+                newState: $delivered->toCoordinatorArray()
             );
 
             return $delivered;
@@ -471,13 +471,13 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                 );
             }
 
-            $this->logEvent(
-                self::ACTION_CASH_COLLECTION_RECONCILED,
-                $reconciled,
-                $actor,
-                $collection->toCoordinatorArray(),
-                $reconciled->toCoordinatorArray(),
-                ['tolerance_eur' => MachineCashCollection::RECONCILIATION_TOLERANCE_EUR]
+            $this->logCashCollectionEvent(
+                action: self::ACTION_CASH_COLLECTION_RECONCILED,
+                collection: $reconciled,
+                actor: $actor,
+                previousState: $collection->toCoordinatorArray(),
+                newState: $reconciled->toCoordinatorArray(),
+                metadata: ['tolerance_eur' => MachineCashCollection::RECONCILIATION_TOLERANCE_EUR]
             );
 
             return $reconciled;
@@ -818,12 +818,21 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
     }
 
     /**
+     * Auditoría del ciclo de vida de la bolsa precintada (Módulo 35).
+     *
+     * La acción viaja como argumento nombrado `action:` y el método lleva nombre propio
+     * —no el genérico `logEvent()` de `AuditLogger`, cuya firma recibe el `AuditEvent` ya
+     * compuesto— para que la guarda de vocabulario del visor pueda enumerar los tres
+     * hechos: sin una firma reconocible, `CASH_COLLECTION_SEALED`,
+     * `CASH_COLLECTION_DELIVERED_TO_VAULT` y `CASH_COLLECTION_RECONCILED` se escribían en
+     * `audit_log` sin etiqueta ni filtro en la consola de auditoría (Art. III.3).
+     *
      * @param array<string, mixed> $actor
      * @param array<string, mixed>|null $previousState
      * @param array<string, mixed> $newState
      * @param array<string, mixed>|null $metadata
      */
-    private function logEvent(
+    private function logCashCollectionEvent(
         string $action,
         MachineCashCollection $collection,
         array $actor,
