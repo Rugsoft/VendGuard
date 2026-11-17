@@ -718,6 +718,48 @@ try {
             && (int)($directAfterData['delivered_to_vault_by'] ?? 0) === $coordinatorId
     );
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 5.15–5.16 · Etiquetas legibles en el CSV (H-4)
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 5c. CSV con etiquetas legibles ---\n";
+
+    $csvBody = $csvFlagged->getBody();
+    // `fputcsv` entrecomilla la cabecera nueva porque contiene espacios.
+    $csvHeaderOk = str_contains($csvBody, 'Justificación;"Código de estado"');
+    $csvLabelFlagged = str_contains($csvBody, 'Arqueada con descuadre');
+    $csvLabelOk = str_contains($csvBody, 'Arqueada sin descuadre');
+    $csvCodeFlagged = str_contains($csvBody, ';DISCREPANCY_FLAGGED');
+    $csvCodeOk = str_contains($csvBody, ';RECONCILED_OK');
+
+    $assert(
+        '5.15 El CSV publica la etiqueta del estado como la consola y conserva el código técnico',
+        $csvHeaderOk && $csvLabelFlagged && $csvLabelOk && $csvCodeFlagged && $csvCodeOk,
+        sprintf(
+            'header=%d label_flagged=%d label_ok=%d code_flagged=%d code_ok=%d',
+            $csvHeaderOk,
+            $csvLabelFlagged,
+            $csvLabelOk,
+            $csvCodeFlagged,
+            $csvCodeOk
+        )
+    );
+
+    $flaggedLine = '';
+    foreach (explode("\n", $csvFlagged->getBody()) as $csvLine) {
+        if (str_contains($csvLine, 'DISCREPANCY_FLAGGED')) {
+            $flaggedLine = trim($csvLine);
+        }
+    }
+    $flaggedCells = $flaggedLine === '' ? [] : str_getcsv($flaggedLine, ';', '"', '');
+
+    $assert(
+        '5.16 La etiqueta ocupa «Estado» y el código cierra la fila, sin mover las columnas de dinero',
+        count($flaggedCells) === 12
+            && ($flaggedCells[6] ?? '') === 'Arqueada con descuadre'
+            && ($flaggedCells[9] ?? '') !== ''
+            && ($flaggedCells[11] ?? '') === 'DISCREPANCY_FLAGGED'
+    );
+
     $ok = $failures === 0;
     echo "\n======================================================================\n";
     echo ' Total Aserciones: ' . $assertions . ' | Fallidas: ' . $failures . "\n";

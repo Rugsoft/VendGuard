@@ -637,6 +637,11 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
     /**
      * Exportación CSV de Coordinación con BOM y neutralización (QA 4).
      *
+     * La columna «Estado» publica la etiqueta legible del ciclo de custodia —la
+     * misma que pinta la consola (`CashCollectionStatus::label()`, H-4)— y la
+     * columna final «Código de estado» conserva el valor técnico del `ENUM` para
+     * las integraciones que ya leían el código.
+     *
      * @param array<string, mixed> $actor
      * @param array<string, mixed> $filters
      */
@@ -663,6 +668,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
             'Contado (EUR)',
             'Descuadre (EUR)',
             'Justificación',
+            'Código de estado',
         ], ';');
 
         foreach ($book['collections'] as $collection) {
@@ -675,7 +681,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                     $collection->getMachineCodeSnapshot(),
                     (string)($collection->getLocationName() ?? ''),
                     $collection->getBagSealCode(),
-                    $collection->getStatus()->value,
+                    $collection->getStatus()->label(),
                     number_format($collection->getChangeTubesLoadedEur(), 2, '.', ''),
                     $collection->getVaultCountedEur() === null
                         ? ''
@@ -684,6 +690,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                         ? ''
                         : number_format($collection->getDiscrepancyEur(), 2, '.', ''),
                     (string)($collection->getDiscrepancyJustification() ?? ''),
+                    $collection->getStatus()->value,
                 ]
             ), ';');
         }

@@ -5,7 +5,7 @@
 - **Contratos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../specs/technical/cash_collection_vault_audit_contracts.md)
 - **Fecha de la corrida:** 2026-11-17 · **Rama:** `feat/cash-collection-vault-audit` · **HEAD:** `ba4c097`
 - **Alcance:** recorrido manual en navegador real (Chromium del panel) sobre el servidor de desarrollo con el contrato del banco de la batería, más sondas HTTP directas para las invariantes que la interfaz no expone.
-- **Estado:** H-1, H-2, H-3 y H-6 corregidos el 2026-11-17 con sus guardas de regresión (ver la nota de cada hallazgo). Quedan abiertos H-4 y H-5, decisiones de producto no bloqueantes para la rama.
+- **Estado:** H-1, H-2, H-3, H-4 y H-6 corregidos el 2026-11-17 con sus guardas de regresión (ver la nota de cada hallazgo). Solo queda abierto H-5, una decisión de producto no bloqueante para la rama.
 - **Adenda (2026-11-17):** los arreglos vuelven a medir el mismo caso que reprodujo el defecto y suben la caché del App Shell a `vendguard-app-shell-v23` para que una PWA instalada reciba la hoja corregida.
 
 ---
@@ -68,7 +68,9 @@ Recorrido ejecutado: acceso de los cuatro perfiles → sub-vista «🪙 Recaudac
 
 **Qué ocurre.** La columna «Estado» del libro exportado contiene `DISCREPANCY_FLAGGED`, mientras la consola muestra «Arqueada con descuadre». El resto del contrato se cumple: BOM `EF BB BF`, separador `;`, fechas en `Europe/Madrid`, nombre `recaudaciones.csv` y neutralización de fórmulas.
 
-**Matiz.** El contrato del endpoint **no fija etiquetas**, así que no hay incumplimiento; es una pérdida de legibilidad del documento que va a tesorería. La neutralización de importes negativos (`'-5.50`) sí está exigida por `QA 4` y es un efecto conocido, no un defecto.
+**Matiz.** El contrato del endpoint **no fijaba etiquetas**, así que no había incumplimiento; era una pérdida de legibilidad del documento que va a tesorería. La neutralización de importes negativos (`'-5.50`) sí está exigida por `QA 4` y es un efecto conocido, no un defecto.
+
+**Estado: corregido.** La columna `Estado` publica ahora `CashCollectionStatus::label()`, la misma etiqueta que pinta la consola («Sellada en ruta», «Arqueada con descuadre»…), y la nueva columna final `Código de estado` conserva el valor técnico del `ENUM` para las integraciones que ya leían el código. Las columnas de dinero no se mueven, el BOM, el separador `;` y la neutralización de fórmulas siguen intactos, y el contrato del endpoint documenta ambas columnas. Guarda de regresión en `CashCollectionVaultAuditApiTest` `5.15`–`5.16` (etiqueta, código, cabecera y reparto exacto de las 12 celdas).
 
 ### H-5 · P3 · Códigos de recaudación no correlativos
 
@@ -130,4 +132,5 @@ Las pruebas mutaron el banco (una bolsa sellada, un arqueo, un alta del reponedo
 2. ✅ **H-2** (P3): filtrar el montaje del asistente por rol, tal como exige su contrato; corrige también la causa de H-1 en la vista del reponedor. *Corregido: emisión condicionada en el servidor y guarda en el cliente.*
 3. ✅ **H-3** (P3): sacar CDN y webhook del código y de la ruta crítica de arranque. *Corregido: configuración validada, montaje diferido y techo de espera.*
 4. ✅ **H-6** (cobertura): aserción del arqueo directo desde `SEALED_IN_ROUTE`. *Corregido: bloque 5.11–5.14 de `CashCollectionVaultAuditApiTest`.*
-5. **H-4** y **H-5** (P3): etiquetas en el CSV y criterio de numeración, cuando el Product Owner lo decida.
+5. ✅ **H-4** (P3): etiquetas en el CSV. *Corregido: `Estado` legible y `Código de estado` técnico al final.*
+6. **H-5** (P3): criterio de numeración de los códigos, cuando el Product Owner lo decida.
