@@ -87,13 +87,14 @@ Se extiende el payload de respuesta exitosa (`200 OK`) añadiendo el campo `chat
   * Se limpia `chatToken` del estado y del almacenamiento local.
   * Se dispara la destrucción o limpieza del widget de n8n del DOM.
 
-### 4.2 Carga y Montaje del Widget (`public/assets/js/components/ChatWidget.js` o integración en `app.js`)
-* **Condición de renderizado:** Solo se instancia si `state.user` está activo y existe `state.chatToken` vigente.
-* **Webhook destino:** `https://rugsoft.app.n8n.cloud/webhook/a6c77576-7554-4138-8605-ea2f72c0505e/chat`.
+### 4.2 Carga y Montaje del Widget (`public/assets/js/utils/n8nChat.js`)
+* **Configuración de destinos (H-3):** la hoja de estilos, el bundle y el webhook viven en `public/assets/js/config/chatAssistant.js` (`CHAT_ASSISTANT_DEFAULTS`) y admiten sobrescritura por despliegue mediante `window.VENDGUARD_CHAT_CONFIG` antes de cargar `app.js`. Solo se aceptan URLs absolutas `https://` y números positivos; una sobrescritura inválida se descarta y prevalecen los valores por defecto, de modo que una configuración rota degrada el asistente, nunca la consola. `enabled: false` lo retira por completo. Ningún otro módulo del cliente fija estas URLs.
+* **Condición de renderizado:** Solo se instancia si `state.user` está activo, existe `state.chatToken` vigente y el rol del usuario pertenece a `CHAT_ALLOWED_ROLES` (Coordinación y Técnico de Ruta).
+* **Arranque libre de CDN:** el montaje se programa en el primer hueco de inactividad (`requestIdleCallback`, con `setTimeout(mountDelayMs)` de respaldo) y la importación del bundle se resuelve con techo de espera (`loadTimeoutMs`, 8 s por defecto). Un CDN lento o caído no retrasa el arranque: en el peor caso el asistente no aparece y se avisa por `console.warn`. Cerrar sesión cancela un montaje pendiente y retira la hoja inyectada.
 * **Configuración del cliente n8n:**
   ```javascript
   createChat({
-    webhookUrl: 'https://rugsoft.app.n8n.cloud/webhook/a6c77576-7554-4138-8605-ea2f72c0505e/chat',
+    webhookUrl: config.webhookUrl,
     metadata: {
       token: state.chatToken
     }
@@ -112,3 +113,4 @@ Se extiende el payload de respuesta exitosa (`200 OK`) añadiendo el campo `chat
 | **CA-03** | `POST /api/auth/login` devuelve tanto `token` tradicional como `chat_token`. | Test de integración en `AuthControllerTest.php`. |
 | **CA-04** | El secreto HMAC empleado por el backend coincide con `SecretProvider::authSecret()`. | Test criptográfico de verificación cruzada con `hash_hmac`. |
 | **CA-05** | El frontend monta el widget únicamente ante login interno exitoso **cuyo rol esté en `CHAT_ALLOWED_ROLES`** y lo remueve en logout o si la sesión pasa a un rol sin derecho. | Verificación de ciclo de vida en `store.js` / interfaz web y `N8nChatScopeTest.mjs` (guarda de rol y de puntero). |
+| **CA-06** | Los destinos externos del asistente (hoja, bundle y webhook) se resuelven por configuración y ningún módulo del cliente los fija en el código; el montaje es diferido y con techo de espera, así que la indisponibilidad del CDN no retrasa el arranque de la consola. | `N8nChatScopeTest.mjs` §3–§4 (validación de la configuración, ausencia de literales en `n8nChat.js`, techo de espera con un bundle que nunca responde y cancelación del montaje pendiente al cerrar sesión). |

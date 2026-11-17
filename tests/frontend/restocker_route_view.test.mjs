@@ -1578,7 +1578,7 @@ assert(
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/CashCollectionOfflineQueue.js')
     && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
-      .includes('vendguard-app-shell-v23')
+      .includes('vendguard-app-shell-v24')
 );
 assert(
   'La vista completa no expone ninguna de las cinco claves del Arqueo Ciego',

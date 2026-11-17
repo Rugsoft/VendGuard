@@ -22,7 +22,7 @@
 'use strict';
 
 /** Nombre de caché versionado (contratos §2.2). Subirlo es lo que invalida el shell. */
-const CACHE_NAME = 'vendguard-app-shell-v23';
+const CACHE_NAME = 'vendguard-app-shell-v24';
 
 /** Prefijo de la superficie HTTP que jamás entra en caché (Art. V.4). */
 const API_PATH_PREFIX = '/api/';
@@ -53,6 +53,7 @@ const APP_SHELL_ASSETS = [
   // Núcleo de la aplicación
   '/assets/js/app.js?v=26',
   '/assets/js/api.js',
+  '/assets/js/config/chatAssistant.js',
   '/assets/js/store.js',
   '/assets/js/vendor/vue.esm-browser.prod.js',
   '/assets/js/vendor/chart.umd.min.js',

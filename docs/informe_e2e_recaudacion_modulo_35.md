@@ -5,7 +5,7 @@
 - **Contratos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../specs/technical/cash_collection_vault_audit_contracts.md)
 - **Fecha de la corrida:** 2026-11-17 · **Rama:** `feat/cash-collection-vault-audit` · **HEAD:** `ba4c097`
 - **Alcance:** recorrido manual en navegador real (Chromium del panel) sobre el servidor de desarrollo con el contrato del banco de la batería, más sondas HTTP directas para las invariantes que la interfaz no expone.
-- **Estado:** H-1 y H-2 corregidos el 2026-11-17 con sus guardas de regresión (ver la nota de cada hallazgo). Quedan abiertos H-3 a H-6, ninguno bloqueante para la rama.
+- **Estado:** H-1, H-2 y H-3 corregidos el 2026-11-17 con sus guardas de regresión (ver la nota de cada hallazgo). Quedan abiertos H-4 a H-6, ninguno bloqueante para la rama.
 - **Adenda (2026-11-17):** los arreglos vuelven a medir el mismo caso que reprodujo el defecto y suben la caché del App Shell a `vendguard-app-shell-v23` para que una PWA instalada reciba la hoja corregida.
 
 ---
@@ -61,6 +61,8 @@ Recorrido ejecutado: acceso de los cuatro perfiles → sub-vista «🪙 Recaudac
 **Qué ocurre.** `n8nChat.js` declara la hoja de estilos y el bundle por `cdn.jsdelivr.net` y el webhook `https://rugsoft.app.n8n.cloud/webhook/…/chat` como constantes del código fuente.
 
 **Por qué importa.** Cada carga hace dos peticiones a Internet y una al tenant ajeno en una PWA que se presenta como offline-first; sin cobertura, el widget falla y ensucia la consola. La URL debería viajar por configuración y quedar fuera del precacheo obligatorio.
+
+**Estado: corregido.** Los tres destinos viven ahora en [`public/assets/js/config/chatAssistant.js`](../public/assets/js/config/chatAssistant.js) (`CHAT_ASSISTANT_DEFAULTS`, con `loadTimeoutMs` y `mountDelayMs`), validados y sobrescribibles por despliegue con `window.VENDGUARD_CHAT_CONFIG`; `n8nChat.js` ya no contiene ningún literal de CDN ni de tenant y se precachea como parte del shell cerrado (`vendguard-app-shell-v24`). El montaje se programa en el primer hueco de inactividad y la importación del bundle tiene techo de espera de 8 s, así que el CDN queda fuera de la ruta crítica: un bundle que nunca responde se rinde en el techo, se avisa por `console.warn` y la consola sigue. Cerrar sesión cancela un montaje pendiente y retira la hoja inyectada. Guarda de regresión en `tests/unit/N8nChatScopeTest.mjs` §3–§4 (validación de la configuración, ausencia de literales, techo de espera con un importador colgado y cancelación del montaje pendiente).
 
 ### H-4 · P3 · El CSV de arqueo entrega los estados como código
 
@@ -124,6 +126,6 @@ Las pruebas mutaron el banco (una bolsa sellada, un arqueo, un alta del reponedo
 
 1. ✅ **H-1** (P2): aislar el puntero del widget o reservar el pasillo inferior derecho. Es el único defecto que un usuario nota bloqueando una acción. *Corregido: puntero aislado y pasillo de 88 px.*
 2. ✅ **H-2** (P3): filtrar el montaje del asistente por rol, tal como exige su contrato; corrige también la causa de H-1 en la vista del reponedor. *Corregido: emisión condicionada en el servidor y guarda en el cliente.*
-3. **H-3** (P3): sacar CDN y webhook del código y de la ruta crítica de arranque.
+3. ✅ **H-3** (P3): sacar CDN y webhook del código y de la ruta crítica de arranque. *Corregido: configuración validada, montaje diferido y techo de espera.*
 4. **H-6** (cobertura): aserción del arqueo directo desde `SEALED_IN_ROUTE`.
 5. **H-4** y **H-5** (P3): etiquetas en el CSV y criterio de numeración, cuando el Product Owner lo decida.
