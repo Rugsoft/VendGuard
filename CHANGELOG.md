@@ -4,6 +4,31 @@ Registro de los hitos de producto y de los módulos cerrados bajo el ciclo SDD.
 El proyecto no publica versiones semánticas independientes: cada entrada corresponde
 a un módulo funcional certificado por la batería global.
 
+## [Módulo 35] · Recaudación de Efectivo, Tubos de Cambio y Arqueo en Cámara — 2026-11-17
+
+**Estado:** Cerrado · los seis hallazgos de la corrida E2E corregidos y certificados.
+
+### Añadido
+
+- Tabla 49 `machine_cash_collections` con precinto único global (`uq_machine_cash_collections_seal`), código `MCC-AAAA-NNNN` y tipo nativo #42 `cash_collection_status` (`SEALED_IN_ROUTE`, `DELIVERED_TO_VAULT`, `DEPOSITED_AT_RECEPTION`, `RECONCILED_OK`, `DISCREPANCY_FLAGGED`); `audit_entity_type` incorpora `MACHINE_CASH_COLLECTION`, con el censo canónico en **49 tablas y 42 tipos `ENUM`**.
+- Ciclo de custodia completo: alta idempotente por `(restocker_id, client_mutation_id)` desde la visita del Módulo 34 o como operación suelta, recepción física en cámara y Arqueo Ciego con tolerancia de `±1,00 €`, justificación real de ≥ 20 caracteres y ≥ 3 bloques alfanuméricos, y re-arqueo bloqueado con `409`; «Recepcionar y Arquear» sella recepción y arqueo en una sola escritura desde `SEALED_IN_ROUTE` (EARS 04.2).
+- Correlativo anual `MCC-AAAA-NNNN` reservado en la transacción de captura con `pg_advisory_xact_lock` y `MAX + 1`, relleno de cuatro dígitos y el índice único como última red: dos capturas simultáneas reciben números consecutivos y las semillas `0001`–`0004` siguen su curso por `0005`.
+- Opacidad financiera: `expected_cashbox_eur` nunca se proyecta al reponedor, el recibo de recepción expone nueve campos sin importes calculados, y la entrega en conserjería de hasta `10,00 €` se vincula a un reintegro del Módulo 08 con transición atómica a `DEPOSITED_AT_RECEPTION`.
+- Sub-vista de Coordinación «🪙 Recaudación y Arqueo» con 6 KPIs reactivos al filtro, filtros por reponedor, máquina, sede, estado, precinto y fechas, detalle con enlace a la visita, recepción en un toque, modal de arqueo ciego, recibo y exportación CSV con etiquetas legibles.
+- Captura y cola offline del reponedor: botón rápido por máquina, bloque dentro de la visita, historial sin campos privados y `IndexedDB` FIFO aislada por reponedor con volcado de conflictos `409` a auditoría; Service Worker `vendguard-app-shell-v24`.
+- Blindaje constitucional: disparadores de inmutabilidad por etapas (`45000`), guarda sanitaria en aplicación y motor (Art. II.2), catálogo de errores `403`/`409`/`422` y 12 endpoints REST con RBAC.
+
+### Corregido
+
+- **H-1:** el chat de n8n ya no intercepta clics en «Acciones» a 522 px (`pointer-events` aislado y pasillo de 88 px en la tabla). **H-2:** el asistente solo se monta para Coordinación y Técnico, con lista blanca en cliente y retirada al cambiar de rol. **H-3:** CDN y webhook salen del código a `config/chatAssistant.js`, con montaje diferido en inactividad y techo de espera del bundle.
+- **H-4:** el CSV entrega la etiqueta legible en `Estado` y conserva el código técnico en la columna final `Código de estado`, sin mover las columnas de dinero. **H-5:** los códigos nuevos son correlativos por año en lugar de aleatorios. **H-6:** el arqueo directo desde `SEALED_IN_ROUTE` tiene aserción propia (200, `RECONCILED_OK` y doble sello persistido).
+- `/api/health` degrada a `503 JSON` cuando el motor no responde en vez de provocar un fatal del router, y el visor de auditoría etiqueta las tres acciones de recaudación.
+
+### Certificación
+
+- `CashCollectionVaultAuditApiTest` (41/41), `CashCollectionVaultAuditConstitutionalTest` (25/25), `CashCollectionConcurrencyTest` (8/8), `CashCollectionLayoutBrowserTest` (32/32 a 360 px en navegador real), `PostgresCashCollectionVaultAuditSchemaTest` (46/46), `PdoMachineCashCollectionRepositoryTest` (45/45), `CashCollectionDomainModelsTest` (123/123), `MachineCashCollectionValidatorTest` (114/114) y `MachineCashCollectionServiceTest` (45/45).
+- Batería global: **436 suites y 16.781 aserciones**, 0 fallos y `DocMetricsGuard` sin desviaciones (193/193 PHP Unit, 105/105 JS Unit, 135/135 de integración y 3/3 E2E manuales).
+- Canal `new_engine`: **66/66 suites y 2.176 aserciones**, 0 no ejecutables, 0 fallos y salida `0`.
 ## [Certificación] · Batería global y canal new_engine tras los Módulos 25 a 34 — 2026-11-15
 
 **Estado:** Cerrada en verde · cifras canónicas auditadas por `DocMetricsGuard`.
