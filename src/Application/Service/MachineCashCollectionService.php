@@ -67,6 +67,9 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
     /** BOM UTF-8 de la exportación (`QA 4`). */
     public const UTF8_BOM = "\xEF\xBB\xBF";
 
+    /** Desfase máximo admitido para `collected_at` respecto al reloj del servidor (`D2`, `C3`). */
+    public const COLLECTED_AT_MAX_FUTURE_SECONDS = 300;
+
     private MachineCashCollectionRepositoryInterface $collections;
 
     private MachineCashCollectionGatewayInterface $gateway;
@@ -197,6 +200,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
 
             $previousCollection = $this->collections->findLastForMachine($machineId);
             $previousReading = $previousCollection?->getSalesCounterReading();
+            $collectedAt = $this->resolveCollectedAt($payload, $previousCollection);
 
             $isReset = filter_var($payload['is_counter_reset'] ?? false, FILTER_VALIDATE_BOOLEAN);
             $resetNotes = isset($payload['counter_reset_notes']) && trim((string)$payload['counter_reset_notes']) !== ''
@@ -258,9 +262,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                     ? trim((string)$payload['route_notes'])
                     : null,
                 CashCollectionStatus::SEALED_IN_ROUTE,
-                isset($payload['collected_at']) && trim((string)$payload['collected_at']) !== ''
-                    ? trim((string)$payload['collected_at'])
-                    : (new DateTimeImmutable('now'))->format('Y-m-d H:i:sP'),
+                $collectedAt,
                 $mutationId
             );
 
@@ -758,6 +760,46 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
         }
 
         return $id;
+    }
+
+    /**
+     * Valida el formato y la ventana temporal del corte de ruta (`D2`, `C3`).
+     *
+     * El cliente puede fechar la captura, pero nunca por delante del reloj del
+     * servidor más un desfase de reloj, ni por detrás de la última captura de
+     * la máquina: `findLastForMachine()` ordena por `collected_at` y una fecha
+     * retrocedida alteraría la lectura previa y el esperado de las siguientes.
+     *
+     * @param array<string, mixed> $payload
+     */
+    private function resolveCollectedAt(array $payload, ?MachineCashCollection $previousCollection): string
+    {
+        $raw = isset($payload['collected_at']) && trim((string)$payload['collected_at']) !== ''
+            ? trim((string)$payload['collected_at'])
+            : (new DateTimeImmutable('now'))->format('Y-m-d H:i:sP');
+
+        try {
+            $collected = new DateTimeImmutable($raw);
+        } catch (\Exception $exception) {
+            throw MachineCashCollectionValidationException::invalidCollectedAt($raw);
+        }
+
+        $now = new DateTimeImmutable('now');
+        if ($collected > $now->modify('+' . self::COLLECTED_AT_MAX_FUTURE_SECONDS . ' seconds')) {
+            throw MachineCashCollectionValidationException::collectedAtInFuture(
+                $raw,
+                $now->modify('+' . self::COLLECTED_AT_MAX_FUTURE_SECONDS . ' seconds')->format('Y-m-d H:i:sP')
+            );
+        }
+
+        if ($previousCollection !== null) {
+            $lastCollectedAt = $previousCollection->getCollectedAt();
+            if ($collected < new DateTimeImmutable($lastCollectedAt)) {
+                throw MachineCashCollectionValidationException::collectedAtBeforeLastCapture($raw, $lastCollectedAt);
+            }
+        }
+
+        return $raw;
     }
 
     private function nullablePositiveInt(mixed $value): ?int

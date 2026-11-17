@@ -430,6 +430,64 @@ try {
         $errorCode($standaloneVisit) . ' · filas=' . $countCollections()
     );
 
+    $invalidCollectedAt = $call(
+        'POST',
+        '/api/restocker/machines/' . $machineId . '/cash-collections',
+        array_merge($capturePayload, [
+            'client_mutation_id' => 'ccv08-cash-date-format-0001',
+            'bag_seal_code' => 'BAG-CCV8-0015',
+            'collected_at' => 'fecha-ilegible',
+        ]),
+        $ownerToken
+    );
+    $invalidCollectedAtDetails = $json($invalidCollectedAt)['error']['details'] ?? [];
+    $assert(
+        '3.4h collected_at ilegible responde 422 VALIDATION_ERROR con field=collected_at sin insertar fila (D2, C3)',
+        $invalidCollectedAt->getStatusCode() === 422
+            && $errorCode($invalidCollectedAt) === 'VALIDATION_ERROR'
+            && ($invalidCollectedAtDetails['field'] ?? '') === 'collected_at'
+            && $countCollections() === $beforeActivityChecksCount,
+        $errorCode($invalidCollectedAt) . ' · field=' . ($invalidCollectedAtDetails['field'] ?? '')
+    );
+
+    $futureCollectedAt = $call(
+        'POST',
+        '/api/restocker/machines/' . $machineId . '/cash-collections',
+        array_merge($capturePayload, [
+            'client_mutation_id' => 'ccv08-cash-date-future-0001',
+            'bag_seal_code' => 'BAG-CCV8-0016',
+            'collected_at' => date('Y-m-d H:i:sP', time() + 172800),
+        ]),
+        $ownerToken
+    );
+    $assert(
+        '3.4i collected_at en el futuro responde 422 VALIDATION_ERROR sin insertar fila (D2, C3)',
+        $futureCollectedAt->getStatusCode() === 422
+            && $errorCode($futureCollectedAt) === 'VALIDATION_ERROR'
+            && (($json($futureCollectedAt)['error']['details']['reason'] ?? '') === 'FUTURE_OUT_OF_WINDOW')
+            && $countCollections() === $beforeActivityChecksCount,
+        $errorCode($futureCollectedAt)
+    );
+
+    $staleCollectedAt = $call(
+        'POST',
+        '/api/restocker/machines/' . $machineId . '/cash-collections',
+        array_merge($capturePayload, [
+            'client_mutation_id' => 'ccv08-cash-date-stale-0001',
+            'bag_seal_code' => 'BAG-CCV8-0017',
+            'collected_at' => '2026-11-01 10:00:00+00',
+        ]),
+        $ownerToken
+    );
+    $assert(
+        '3.4j collected_at anterior a la última captura responde 422 VALIDATION_ERROR sin insertar fila (D2, C3)',
+        $staleCollectedAt->getStatusCode() === 422
+            && $errorCode($staleCollectedAt) === 'VALIDATION_ERROR'
+            && (($json($staleCollectedAt)['error']['details']['reason'] ?? '') === 'BEFORE_LAST_CAPTURE')
+            && $countCollections() === $beforeActivityChecksCount,
+        $errorCode($staleCollectedAt)
+    );
+
     $pdo->prepare('UPDATE operational_zones SET is_active = FALSE WHERE id = :id')
         ->execute([':id' => $zoneId]);
     $inactiveZone = $call(

@@ -317,6 +317,7 @@ CREATE INDEX IF NOT EXISTS idx_machine_cash_collections_status_collected
 | `THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN` | `422` | Se intenta incluir datos de recaudación/cambio dentro de una visita in situ enviada con `status = 'ABORTED_THERMAL_BREACH'` (`RF-02.1`, `C4`, `Art. II.2`). |
 | `RESTOCK_VISIT_NOT_ALLOWED` | `422` | La vía independiente de recaudación recibe un `restock_visit_id`; el vínculo con la visita solo se declara al crearla (`D1`). |
 | `RESTOCK_VISIT_NOT_COMPLETED` | `422` | La visita vinculada a la recaudación no está en `status = 'COMPLETED'` (`D1`). |
+| `VALIDATION_ERROR` | `422` | `collected_at` no es una marca temporal interpretable, supera la hora del servidor en más de 5 minutos o es anterior a la última captura de la máquina (`D2`, `C3`). El detalle incluye `field = collected_at` y `reason` (`INVALID_FORMAT`, `FUTURE_OUT_OF_WINDOW` o `BEFORE_LAST_CAPTURE`). |
 | `INVALID_BAG_SEAL_CODE` | `422` | `bag_seal_code` no cumple el patrón `^[A-Z0-9_-]{6,40}$` o carece de al menos 3 dígitos numéricos consecutivos (`RF-01.2`, `C1`). |
 | `SALES_COUNTER_REGRESSION` | `422` | `sales_counter_reading < previous_sales_counter_reading` con `is_counter_reset = false` (`RF-02.2`, `C3`). |
 | `COUNTER_RESET_NOTES_REQUIRED` | `422` | Se envía `is_counter_reset = true` sin `counter_reset_notes` de entre 20 y 500 caracteres reales con al menos 3 bloques alfanuméricos (`RF-02.2`, `C3`, `Art. V.1`). |

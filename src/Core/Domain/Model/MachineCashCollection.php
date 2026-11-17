@@ -273,6 +273,8 @@ final class MachineCashCollection implements JsonSerializable
             throw new InvalidArgumentException('La recaudación debe declarar el instante del corte (collected_at).');
         }
 
+        self::parseTimestamp($cleanCollectedAt, 'collected_at');
+
         $change = round($changeTubesLoadedEur, 2);
         $sales = round($salesCounterReading, 2);
         $previous = $previousSalesCounterReading === null ? null : round($previousSalesCounterReading, 2);

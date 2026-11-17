@@ -605,6 +605,29 @@ try {
         422
     );
 
+    $invalidCollectedAt = assertCashRejects(
+        static fn () => $service->registerCollection(1, array_merge(
+            $basePayload('BAG-2026-060005', 'mutation-ccv06-date-001', 100.00),
+            ['collected_at' => 'fecha-ilegible']
+        ), $restocker),
+        MachineCashCollectionValidationException::VALIDATION_ERROR,
+        422
+    );
+    assertCash(
+        $invalidCollectedAt->getField() === 'collected_at'
+            && $repository->collections === [],
+        'Una marca temporal ilegible debe responder 422 VALIDATION_ERROR con field=collected_at y sin insertar'
+    );
+
+    assertCashRejects(
+        static fn () => $service->registerCollection(1, array_merge(
+            $basePayload('BAG-2026-060006', 'mutation-ccv06-date-002', 100.00),
+            ['collected_at' => date('Y-m-d H:i:sP', time() + 172800)]
+        ), $restocker),
+        MachineCashCollectionValidationException::VALIDATION_ERROR,
+        422
+    );
+
     echo "\n--- Precinto, contador y conserjería ---\n";
 
     assertCashRejects(
@@ -632,6 +655,21 @@ try {
         $repository->collections[(int)$second['id']]->getExpectedCashboxEur() === 25.50
             && $repository->collections[(int)$second['id']]->getPreviousSalesCounterReading() === 100.00,
         'El servicio lee la última lectura de la máquina y calcula la diferencia (D2)'
+    );
+
+    $insertedBeforeStale = count($repository->collections);
+    $staleCollectedAt = assertCashRejects(
+        static fn () => $service->registerCollection(1, array_merge(
+            $basePayload('BAG-2026-060007', 'mutation-ccv06-date-003', 130.00),
+            ['collected_at' => '2026-11-09 10:00:00+00']
+        ), $restocker),
+        MachineCashCollectionValidationException::VALIDATION_ERROR,
+        422
+    );
+    assertCash(
+        $staleCollectedAt->getField() === 'collected_at'
+            && count($repository->collections) === $insertedBeforeStale,
+        'collected_at no puede retroceder por detrás de la última captura de la máquina (D2, C3)'
     );
 
     assertCashRejects(

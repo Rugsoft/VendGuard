@@ -5,7 +5,7 @@
 - **HEAD revisado:** `09d0f3f` · **Base:** `47ba599` (sin commits nuevos en `main` desde la bifurcación)
 - **Fecha de la revisión:** 2026-11-17
 - **Alcance:** revisión estática del diff completo (76 archivos, +20.345/−155): migración 031 y convergencia con `supabase_init.sql`, dominio, servicio y repositorios, controladores y RBAC, proyección móvil, cola offline, exportación CSV y coherencia documental. Contraste con la spec v2.1, los contratos técnicos y las suites del módulo.
-- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 y PR-02 corregidos el 2026-11-17** con sus pruebas de regresión; quedan **9 hallazgos abiertos** (3 media y 6 baja).
+- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01, PR-02 y PR-03 corregidos el 2026-11-17** con sus pruebas de regresión; quedan **8 hallazgos abiertos** (2 media y 6 baja).
 
 ---
 
@@ -21,7 +21,7 @@ Los defectos se concentran en los bordes del contrato: la exportación financier
 |---:|:---:|:---:|---|---|---|
 | 1 | `PR-01` | **Alta** | La exportación CSV se corta en 100 filas sin avisar | Pérdida silenciosa de datos en el libro contable exportado | Corregido (2026-11-17) |
 | 2 | `PR-02` | **Alta** | La vía independiente acepta `restock_visit_id` de cualquier visita y de cualquier reponedor | Vínculo cruzado fuera de spec, bloqueo del índice único y 500 al dueño legítimo | Corregido (2026-11-17) |
-| 3 | `PR-03` | Media | `collected_at` viaja del cliente sin validar formato ni ventana temporal | 500 ante un valor malformado y alteración de la cadena de contador y del esperado | Abierto |
+| 3 | `PR-03` | Media | `collected_at` viaja del cliente sin validar formato ni ventana temporal | 500 ante un valor malformado y alteración de la cadena de contador y del esperado | Corregido (2026-11-17) |
 | 4 | `PR-04` | Media | Las carreras de unicidad (precinto o mutación) acaban en 500 | Un conflicto de negocio se presenta como fallo interno y no se reintenta como replay | Abierto |
 | 5 | `PR-05` | Media | La cola offline marca como conflicto irreversible cualquier 401, 403 o 5xx | Capturas válidas quedan bloqueadas tras caducar la sesión o un fallo transitorio | Abierto |
 | 6 | `PR-06` | Baja | El replay idempotente no está acotado por máquina | Un identificador reutilizado devuelve otra bolsa con 200 y pierde la captura | Abierto |
@@ -80,7 +80,7 @@ Rechazar `restock_visit_id` en el endpoint independiente (400/422) y, en la vía
 
 **Corrección aplicada (2026-11-17)**
 
-La vía independiente responde `422 RESTOCK_VISIT_NOT_ALLOWED` ante cualquier `restock_visit_id`, sin insertar fila (`3.4g`). La vía integrada valida, tras bloquear la visita, que `restocker_id` coincide con el actor (`403 RESTOCK_VISIT_NOT_OWNED`) y que el estado es `COMPLETED` (`422 RESTOCK_VISIT_NOT_COMPLETED`); ambas guardas se cubren en `MachineCashCollectionServiceTest`, que pasa a 48/48.
+La vía independiente responde `422 RESTOCK_VISIT_NOT_ALLOWED` ante cualquier `restock_visit_id`, sin insertar fila (`3.4g`). La vía integrada valida, tras bloquear la visita, que `restocker_id` coincide con el actor (`403 RESTOCK_VISIT_NOT_OWNED`) y que el estado es `COMPLETED` (`422 RESTOCK_VISIT_NOT_COMPLETED`); ambas guardas se cubren en `MachineCashCollectionServiceTest`, que pasa a 53/53.
 
 ---
 
@@ -101,6 +101,10 @@ Un cliente con una fecha malformada recibe un 500 en lugar de un 422. Una fecha 
 **Corrección propuesta**
 
 Parsear con `DateTimeImmutable` en el modelo, devolver `422 VALIDATION_ERROR` con el campo y acotar la ventana (no posterior a «ahora + desfase» y no anterior a la última captura de la máquina o al inicio de la visita). Reflejar la cota en la spec si se adopta.
+
+**Corrección aplicada (2026-11-17)**
+
+`MachineCashCollection` valida el formato con `DateTimeImmutable` y `MachineCashCollectionService::resolveCollectedAt()` responde `422 VALIDATION_ERROR` con `field = collected_at` cuando la marca es ilegible, supera la hora del servidor en más de 5 minutos o retrocede por detrás de la última captura de la máquina. Las regresiones `3.4h`–`3.4j` de `CashCollectionVaultAuditApiTest` (46/46) y `MachineCashCollectionServiceTest` (53/53) comprueban el estado, el campo y que no se inserta fila. La cota queda documentada en el contrato técnico; los criterios de aceptación de la spec no cambian.
 
 ---
 
@@ -259,11 +263,12 @@ Derivar el año con `DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'))
 ## Verificado y correcto
 
 - **Integración con `main`:** `MERGEABLE`/`CLEAN`, sin commits nuevos en la base desde la bifurcación y sin archivos de solape; la migración 031 es la siguiente libre tras la 030.
-- **Cifras:** batería hermética **436 suites · 16.784 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.178 aserciones · 0 fallos**. Suites del módulo: API 43/43, constitucional 25/25, concurrencia 8/8, layout 32/32, esquema 46/46, repositorio 45/45, dominio 123/123, validador 114/114 y servicio 48/48.
+- **Cifras:** batería hermética **436 suites · 16.789 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.181 aserciones · 0 fallos**. Suites del módulo: API 46/46, constitucional 25/25, concurrencia 8/8, layout 32/32, esquema 46/46, repositorio 45/45, dominio 123/123, validador 114/114 y servicio 53/53.
 - **Opacidad:** el DTO del reponedor publica 18 campos y omite las cinco claves del Arqueo Ciego; el recibo de conserjería expone exactamente nueve campos, sin precinto, PIN ni importes calculados.
 - **Integridad:** ocho `CHECK`, inmutabilidad por etapas con `45000`, guarda sanitaria en aplicación y motor, reserva del código con cerrojo transaccional y arqueo concurrente protegido por `UPDATE` condicionado.
 - **Seguridad:** rutas con `COORDINATOR`/`RESTOCKER`, CSV neutralizado contra fórmulas, sin secretos ni archivos de entorno en el diff.
-- **Documentación:** la matriz de trazabilidad actualizó solo las filas de la suite de API (43/43 y 8/8) y del servicio (48/48); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
+- **Documentación:** la matriz de trazabilidad actualizó solo las filas de la suite de API (46/46 y 8/8) y del servicio (53/53); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
+- **Cota inferior:** se usa la última captura de la máquina; el puerto `lockRestockVisit()` no expone la hora de inicio de la visita, así que no se emplea como cota adicional.
 
 ## Límites de esta revisión
 

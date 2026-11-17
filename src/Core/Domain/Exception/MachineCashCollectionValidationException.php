@@ -61,6 +61,7 @@ final class MachineCashCollectionValidationException extends DomainException
     public const REFUND_AMOUNT_MISMATCH = 'REFUND_AMOUNT_MISMATCH';
     public const RESTOCK_VISIT_NOT_ALLOWED = 'RESTOCK_VISIT_NOT_ALLOWED';
     public const RESTOCK_VISIT_NOT_COMPLETED = 'RESTOCK_VISIT_NOT_COMPLETED';
+    public const VALIDATION_ERROR = 'VALIDATION_ERROR';
 
     private string $errorCode;
 
@@ -348,6 +349,39 @@ final class MachineCashCollectionValidationException extends DomainException
             409,
             'machine_id',
             ['machine_id' => $machineId, 'reasons' => $reasons]
+        );
+    }
+
+    public static function invalidCollectedAt(string $value): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf('collected_at no es una marca temporal interpretable («%s»): use ISO 8601 con zona horaria (D2, C3).', $value),
+            422,
+            'collected_at',
+            ['reason' => 'INVALID_FORMAT', 'collected_at' => $value]
+        );
+    }
+
+    public static function collectedAtInFuture(string $value, string $maxAllowed): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf('collected_at no puede superar la hora del servidor en más de 5 minutos (máximo %s); se recibió «%s» (D2, C3).', $maxAllowed, $value),
+            422,
+            'collected_at',
+            ['reason' => 'FUTURE_OUT_OF_WINDOW', 'collected_at' => $value, 'max_allowed' => $maxAllowed]
+        );
+    }
+
+    public static function collectedAtBeforeLastCapture(string $value, string $lastCollectedAt): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf('collected_at no puede ser anterior a la última captura de la máquina «%s»; se recibió «%s» (D2, C3).', $lastCollectedAt, $value),
+            422,
+            'collected_at',
+            ['reason' => 'BEFORE_LAST_CAPTURE', 'collected_at' => $value, 'last_collected_at' => $lastCollectedAt]
         );
     }
 
