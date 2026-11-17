@@ -35,6 +35,16 @@ use VendGuard\Core\Domain\Model\MachineCashCollection;
 interface MachineCashCollectionRepositoryInterface
 {
     /**
+     * Reserva el siguiente código `MCC-AAAA-NNNN` del año en curso.
+     *
+     * Debe invocarse dentro de la misma transacción que el `insert()`: la
+     * implementación toma el cerrojo de transacción del año y calcula el hueco
+     * con el máximo ya persistido, de modo que dos capturas simultáneas no
+     * reciben nunca el mismo número y un rollback no deja huecos (H-5).
+     */
+    public function reserveCollectionCode(): string;
+
+    /**
      * Inserta la captura en ruta y devuelve la fila hidratada con su `id` y sus
      * sellos del motor.
      *

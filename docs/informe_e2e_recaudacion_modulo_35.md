@@ -5,7 +5,7 @@
 - **Contratos:** [`specs/technical/cash_collection_vault_audit_contracts.md`](../specs/technical/cash_collection_vault_audit_contracts.md)
 - **Fecha de la corrida:** 2026-11-17 · **Rama:** `feat/cash-collection-vault-audit` · **HEAD:** `ba4c097`
 - **Alcance:** recorrido manual en navegador real (Chromium del panel) sobre el servidor de desarrollo con el contrato del banco de la batería, más sondas HTTP directas para las invariantes que la interfaz no expone.
-- **Estado:** H-1, H-2, H-3, H-4 y H-6 corregidos el 2026-11-17 con sus guardas de regresión (ver la nota de cada hallazgo). Solo queda abierto H-5, una decisión de producto no bloqueante para la rama.
+- **Estado:** los seis hallazgos (H-1 a H-6) están corregidos el 2026-11-17 con sus guardas de regresión (ver la nota de cada uno). El informe queda cerrado.
 - **Adenda (2026-11-17):** los arreglos vuelven a medir el mismo caso que reprodujo el defecto y suben la caché del App Shell a `vendguard-app-shell-v23` para que una PWA instalada reciba la hoja corregida.
 
 ---
@@ -76,6 +76,8 @@ Recorrido ejecutado: acceso de los cuatro perfiles → sub-vista «🪙 Recaudac
 
 **Qué ocurre.** Las altas nuevas generan seis dígitos aleatorios (`MCC-2026-897619`) mientras las semillas son correlativas (`MCC-2026-0001` … `MCC-2026-0004`). La unicidad no se resiente (el precinto es único global y su duplicado responde `409 BAG_SEAL_CODE_ALREADY_USED`), pero ordenar por código deja de ser cronológico y la búsqueda manual se complica.
 
+**Estado: corregido.** `PdoMachineCashCollectionRepository::reserveCollectionCode()` reserva el siguiente `MCC-AAAA-NNNN` del año dentro de la transacción de captura, con el mismo cerrojo que ya usaban los códigos de reinspección y de merma sanitaria: `pg_advisory_xact_lock(hashtext('cash_collection_code_<año>'))`, `MAX(número) + 1` entre los códigos del año y relleno de cuatro dígitos (crece solo al pasar de 9999). La cerradura se libera al hacer commit, así que dos capturas simultáneas se serializan sin repetir número y un rollback no consume hueco; el índice único sigue siendo la última red. Las semillas conservan `0001`–`0004` y el siguiente alta toma `0005`. En una base con códigos aleatorios previos el contador arranca en el máximo existente, sin migración de datos. Guarda de regresión: `CashCollectionVaultAuditApiTest` `3.1b`/`4.1b` (0001 y 0002 en el esquema aislado) y `CashCollectionConcurrencyTest` `3.1`/`3.2` (dos capturas en paralelo reciben códigos consecutivos).
+
 ### H-6 · Cobertura · Falta la aserción del camino «Recepcionar y Arquear»
 
 **Qué ocurre.** [`tests/integration/CashCollectionVaultAuditApiTest.php`](../tests/integration/CashCollectionVaultAuditApiTest.php) certifica sellar → recibir → arquear y el re-arqueo terminal, pero no el arqueo directo desde `SEALED_IN_ROUTE`, que `EARS 04.2` autoriza y que hoy se verificó a mano: `200` y sellado simultáneo de `delivered_to_vault_at` y `delivered_to_vault_by`.
@@ -133,4 +135,4 @@ Las pruebas mutaron el banco (una bolsa sellada, un arqueo, un alta del reponedo
 3. ✅ **H-3** (P3): sacar CDN y webhook del código y de la ruta crítica de arranque. *Corregido: configuración validada, montaje diferido y techo de espera.*
 4. ✅ **H-6** (cobertura): aserción del arqueo directo desde `SEALED_IN_ROUTE`. *Corregido: bloque 5.11–5.14 de `CashCollectionVaultAuditApiTest`.*
 5. ✅ **H-4** (P3): etiquetas en el CSV. *Corregido: `Estado` legible y `Código de estado` técnico al final.*
-6. **H-5** (P3): criterio de numeración de los códigos, cuando el Product Owner lo decida.
+6. ✅ **H-5** (P3): criterio de numeración de los códigos. *Corregido: correlativo anual bajo cerrojo de transacción.*

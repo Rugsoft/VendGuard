@@ -95,6 +95,37 @@ final class PdoMachineCashCollectionRepository implements MachineCashCollectionR
 
     /**
      * {@inheritdoc}
+     *
+     * Comparte la forma de bloqueo de `PdoSanitarySpoilageRecordRepository::nextRecordCode()`
+     * y `nextPreventiveOrderCode()`: cerrojo de transacción por año, hueco calculado
+     * con el máximo persistido y la clave única del motor como última red. La
+     * cerradura se libera al hacer commit, así que dos capturas simultáneas se
+     * serializan y un rollback no consume número (H-5).
+     */
+    public function reserveCollectionCode(): string
+    {
+        $year = (int)date('Y');
+        $prefix = sprintf('MCC-%04d-', $year);
+
+        $stmtLock = $this->pdo->prepare('SELECT pg_advisory_xact_lock(hashtext(:lock_key))');
+        $stmtLock->execute([':lock_key' => 'cash_collection_code_' . $year]);
+
+        $stmtSeq = $this->pdo->prepare("
+            SELECT COALESCE(
+                MAX(CAST(SUBSTRING(collection_code FROM '([0-9]+)$') AS INTEGER)),
+                0
+            ) + 1
+            FROM machine_cash_collections
+            WHERE collection_code LIKE :prefix
+        ");
+        $stmtSeq->execute([':prefix' => $prefix . '%']);
+        $next = (int)$stmtSeq->fetchColumn();
+
+        return sprintf('MCC-%04d-%s', $year, str_pad((string)$next, 4, '0', STR_PAD_LEFT));
+    }
+
+    /**
+     * {@inheritdoc}
      */
     public function insert(MachineCashCollection $collection): MachineCashCollection
     {

@@ -814,7 +814,7 @@ Corrida del 17 de noviembre de 2026 (canal cerrado · **66/66 suites en verde**,
  Suites evaluadas    : 66
  Suites en verde     : 66
  No ejecutables      : 0
- Aserciones          : 2.172
+ Aserciones          : 2.176
  Fallos              : 0
  RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 ======================================================================

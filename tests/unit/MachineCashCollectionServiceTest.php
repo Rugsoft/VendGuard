@@ -166,6 +166,13 @@ final class CashTestRepository implements MachineCashCollectionRepositoryInterfa
 
     private int $nextId = 1;
 
+    private int $nextCode = 1;
+
+    public function reserveCollectionCode(): string
+    {
+        return sprintf('MCC-%04d-%04d', (int)date('Y'), $this->nextCode++);
+    }
+
     public function insert(MachineCashCollection $collection): MachineCashCollection
     {
         $persisted = $collection->withId($this->nextId++);

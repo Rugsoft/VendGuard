@@ -473,6 +473,155 @@ try {
         $countRows() === 2 && $countSealedAudits() === 2,
         'rows=' . $countRows() . ' audits=' . $countSealedAudits()
     );
+    // ────────────────────────────────────────────────
+    // 3. Dos capturas simultáneas en máquinas distintas (H-5)
+    // ────────────────────────────────────────────────
+    echo "\n--- 3. Correlativo anual bajo dos capturas simultáneas ---\n";
+
+    $machine2Stmt = $pgPdo->prepare(
+        "INSERT INTO machines (location_id, code, model, machine_type, floor_wing)
+         VALUES (:location_id, 'CCV-CONC-02', 'Modelo concurrencia CCV 2', 'SNACKS', 'Planta baja')
+         RETURNING id"
+    );
+    $machine2Stmt->execute([':location_id' => $locationId]);
+    $machine2Id = (int)$machine2Stmt->fetchColumn();
+
+    $seqPrefix = tempnam(sys_get_temp_dir(), 'vendguard_ccv_seq_');
+    if ($seqPrefix === false) {
+        throw new RuntimeException('No se pudo crear el prefijo temporal del correlativo.');
+    }
+    @unlink($seqPrefix);
+
+    $seqStart = $seqPrefix . '.start';
+    // Sin barrera de salida: los dos actores arrancan en cuanto escriben su 'ready'.
+    file_put_contents($seqStart, 'go');
+
+    $seqPaths = [];
+    $seqProcesses = [];
+
+    try {
+        $seqActors = [
+            'a' => [$machineId, 'ccv-conc-seq-0001', 'BAG-CCV-CONC-0011', 250.00],
+            'b' => [$machine2Id, 'ccv-conc-seq-0002', 'BAG-CCV-CONC-0012', 140.00],
+        ];
+
+        foreach ($seqActors as $slot => [$seqMachineId, $mutation, $bag, $reading]) {
+            $seqPaths[$slot] = [
+                'ready' => $seqPrefix . '.' . $slot . '.ready',
+                'result' => $seqPrefix . '.' . $slot . '.result.json',
+                'stdout' => $seqPrefix . '.' . $slot . '.out',
+                'stderr' => $seqPrefix . '.' . $slot . '.err',
+            ];
+
+            $command = [
+                PHP_BINARY,
+                __DIR__ . '/../Support/CashCollectionConcurrencyActor.php',
+                CASH_CONCURRENCY_SCHEMA,
+                'register',
+                (string)$seqMachineId,
+                (string)$restockerId,
+                'Reponedor Concurrencia CCV',
+                'vendguard-ccv-seq-' . $slot,
+                CASH_CONCURRENCY_PARENT_APP,
+                $seqPaths[$slot]['ready'],
+                $seqStart,
+                $seqPaths[$slot]['result'],
+                json_encode([
+                    'client_mutation_id' => $mutation,
+                    'bag_seal_code' => $bag,
+                    'sales_counter_reading' => $reading,
+                    'change_tubes_loaded_eur' => 0.00,
+                ], JSON_THROW_ON_ERROR),
+            ];
+
+            $process = proc_open(
+                $command,
+                [
+                    1 => ['file', $seqPaths[$slot]['stdout'], 'w'],
+                    2 => ['file', $seqPaths[$slot]['stderr'], 'w'],
+                ],
+                $pipes,
+                $projectRoot
+            );
+
+            if (!is_resource($process)) {
+                throw new RuntimeException('No se pudo abrir el actor secuencial ' . $slot . '.');
+            }
+
+            $seqProcesses[$slot] = $process;
+        }
+
+        $seqDeadline = microtime(true) + 20.0;
+        $seqResults = [];
+
+        foreach ($seqProcesses as $slot => $process) {
+            $status = proc_get_status($process);
+            while ($status['running'] && microtime(true) < $seqDeadline) {
+                usleep(20_000);
+                $status = proc_get_status($process);
+            }
+            if ($status['running']) {
+                proc_terminate($process);
+            }
+            proc_close($process);
+            unset($seqProcesses[$slot]);
+
+            $raw = is_file($seqPaths[$slot]['result']) ? (string)file_get_contents($seqPaths[$slot]['result']) : '';
+            $decoded = $raw !== '' ? json_decode($raw, true) : null;
+            $seqResults[$slot] = is_array($decoded) ? $decoded : [];
+        }
+    } finally {
+        foreach ($seqProcesses as $process) {
+            if (is_resource($process)) {
+                proc_terminate($process);
+                proc_close($process);
+            }
+        }
+        if (is_file($seqStart)) {
+            @unlink($seqStart);
+        }
+        foreach ($seqPaths as $group) {
+            foreach ($group as $file) {
+                if (is_file($file)) {
+                    @unlink($file);
+                }
+            }
+        }
+    }
+
+    $seqIds = [
+        (int)($seqResults['a']['id'] ?? 0),
+        (int)($seqResults['b']['id'] ?? 0),
+    ];
+    $codesStmt = $pgPdo->prepare(
+        'SELECT collection_code FROM machine_cash_collections WHERE id IN (?, ?)'
+    );
+    $codesStmt->execute($seqIds);
+    $seqCodes = array_map('strval', $codesStmt->fetchAll(PDO::FETCH_COLUMN));
+    sort($seqCodes);
+
+    $seqNumbers = array_map(
+        static fn (string $code): int => (int)substr($code, strrpos($code, '-') + 1),
+        $seqCodes
+    );
+
+    $assert(
+        '3.1 Dos capturas simultáneas en máquinas distintas completan y reciben códigos distintos',
+        ($seqResults['a']['ok'] ?? false) === true
+            && ($seqResults['b']['ok'] ?? false) === true
+            && count($seqCodes) === 2
+            && count(array_unique($seqCodes)) === 2
+            && preg_match('/^MCC-\d{4}-\d{4,}$/', $seqCodes[0] ?? '') === 1
+            && preg_match('/^MCC-\d{4}-\d{4,}$/', $seqCodes[1] ?? '') === 1,
+        json_encode(['codes' => $seqCodes, 'results' => $seqResults])
+    );
+    $assert(
+        '3.2 Los dos códigos son consecutivos: el cerrojo de transacción del año serializa la reserva',
+        count($seqNumbers) === 2
+            && $seqNumbers[1] - $seqNumbers[0] === 1
+            && substr($seqCodes[0], 0, 8) === substr($seqCodes[1], 0, 8),
+        json_encode($seqCodes)
+    );
 } catch (Throwable $exception) {
     $crash = $exception;
 } finally {

@@ -222,7 +222,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
 
             $collection = new MachineCashCollection(
                 null,
-                $this->nextCollectionCode(),
+                $this->collections->reserveCollectionCode(),
                 $visitId,
                 $machineId,
                 (string)$context['machine_code'],
@@ -776,11 +776,6 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
         }
 
         return round((float)$value, 2);
-    }
-
-    private function nextCollectionCode(): string
-    {
-        return sprintf('MCC-%s-%06d', (new DateTimeImmutable('now'))->format('Y'), random_int(1, 999999));
     }
 
     private function assertRefundEligible(int $refundRequestId, int $machineId, float $deliveredAmount): void

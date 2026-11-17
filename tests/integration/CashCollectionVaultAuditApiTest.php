@@ -308,6 +308,12 @@ try {
             && !in_array('discrepancy_justification', $collectKeys($createdData), true)
     );
 
+    $assert(
+        '3.1b El código es el primero del correlativo anual, con cuatro dígitos (H-5)',
+        preg_match('/^MCC-\d{4}-0001$/', (string)($createdData['collection_code'] ?? '')) === 1,
+        (string)($createdData['collection_code'] ?? '')
+    );
+
     $repeated = $call('POST', '/api/restocker/machines/' . $machineId . '/cash-collections', $capturePayload, $ownerToken);
     $repeatedData = $data($repeated);
     $assert(
@@ -556,6 +562,19 @@ try {
             && $visitId > 0
             && (int)($visitData['cash_collection']['restock_visit_id'] ?? 0) === $visitId
             && ($visitData['cash_collection']['status'] ?? '') === 'SEALED_IN_ROUTE'
+    );
+
+    $visitCashDetail = $call(
+        'GET',
+        '/api/coordinator/cash-collections/' . (int)($visitData['cash_collection']['id'] ?? 0),
+        [],
+        $coordinatorToken
+    );
+    $visitCashCode = (string)($data($visitCashDetail)['collection_code'] ?? '');
+    $assert(
+        '4.1b El código de la bolsa de la visita continúa el correlativo anual (H-5)',
+        preg_match('/^MCC-\d{4}-0002$/', $visitCashCode) === 1,
+        $visitCashCode
     );
 
     $detail = $call('GET', '/api/coordinator/restock-visits/' . $visitId, [], $coordinatorToken);

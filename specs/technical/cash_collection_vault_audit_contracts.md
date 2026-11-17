@@ -29,6 +29,10 @@
 | `POST` | `/api/coordinator/cash-collections/{id}/reconcile` | `InternalAuthMiddleware(COORDINATOR)` | Ejecuta el Arqueo Ciego en Caja Central introduciendo `vault_counted_eur`, calculando `discrepancy_eur` y sellando el estado terminal inmutable `RECONCILED_OK` ($\le \pm 1,00\,\text{€}$) o `DISCREPANCY_FLAGGED` ($> \pm 1,00\,\text{€}$, exigiendo `discrepancy_justification` $\ge 20$ caracteres reales con $\ge 3$ bloques alfanuméricos, `RF-04.2`, `D2`, `Art. V.1`). Si parte de `SEALED_IN_ROUTE`, sella también `delivered_to_vault_at` y `delivered_to_vault_by`. |
 | `GET` | `/api/coordinator/cash-collections/{id}/reception-receipt` | `InternalAuthMiddleware(COORDINATOR)` | Devuelve el comprobante limpio de entrega en conserjería ($\le 10,00\,\text{€}$, `QA 2`, `Art. V.4`). |
 
+### 1.0. Correlativo del `collection_code` (`H-5`)
+
+`collection_code` se compone como `MCC-AAAA-NNNN`: prefijo de año y número correlativo con relleno de cuatro dígitos (crece a más dígitos al superar 9999). La reserva la hace `PdoMachineCashCollectionRepository::reserveCollectionCode()` dentro de la transacción de captura: toma `pg_advisory_xact_lock(hashtext('cash_collection_code_<año>'))`, calcula `MAX(número) + 1` entre los códigos del año y devuelve el siguiente; la cerradura se libera al hacer commit, de modo que dos capturas simultáneas se serializan sin repetir número y un rollback no consume hueco. El índice único `uq_machine_cash_collections_code` sigue siendo la última red. Las semillas conservan `MCC-2026-0001`…`0004`.
+
 ### 1.1. Contrato de idempotencia de la captura independiente (`RF-01.2.3`)
 
 La respuesta de `POST /api/restocker/machines/{machineId}/cash-collections` usa la envolvente canónica `{ success, data, message }`. El alta nueva y el reenvío comparten la proyección del reponedor; solo cambian el código HTTP y `data.idempotent_replay`.
