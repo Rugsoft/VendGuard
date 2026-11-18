@@ -5,7 +5,7 @@
 - **HEAD revisado:** `09d0f3f` · **Base:** `47ba599` (sin commits nuevos en `main` desde la bifurcación)
 - **Fecha de la revisión:** 2026-11-17
 - **Alcance:** revisión estática del diff completo (76 archivos, +20.345/−155): migración 031 y convergencia con `supabase_init.sql`, dominio, servicio y repositorios, controladores y RBAC, proyección móvil, cola offline, exportación CSV y coherencia documental. Contraste con la spec v2.1, los contratos técnicos y las suites del módulo.
-- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 a PR-10 corregidos** (PR-01 a PR-04 el 2026-11-17; PR-05 a PR-10 el 2026-11-18) con sus pruebas de regresión cuando aplican; queda **1 hallazgo abierto** (de prioridad baja).
+- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 a PR-11 corregidos** (PR-01 a PR-04 el 2026-11-17; PR-05 a PR-11 el 2026-11-18) con sus pruebas de regresión cuando aplican; **no quedan hallazgos abiertos**.
 
 ---
 
@@ -29,7 +29,7 @@ Los defectos se concentran en los bordes del contrato: la exportación financier
 | 8 | `PR-08` | Baja | `dumpConflict` admite cualquier `machine_id` y texto libre sin comprobar pertenencia | Ruido y posible spoofing en `audit_log` | Corregido (2026-11-18) |
 | 9 | `PR-09` | Baja | Dos comentarios de la migración 031 describen el código como `MCC-AAAA-NNNNNN` | Deriva documental frente al `CHECK`, el modelo y la spec (`NNNN`) | Corregido (2026-11-18) |
 | 10 | `PR-10` | Baja | La entrada del CHANGELOG cita un estado y un índice incorrectos | Documentación de release inexacta | Corregido (2026-11-18) |
-| 11 | `PR-11` | Baja | El año del correlativo depende de la zona horaria del proceso PHP | En un servidor en UTC, el 1 de enero puede emitir el año anterior | Abierto |
+| 11 | `PR-11` | Baja | El año del correlativo depende de la zona horaria del proceso PHP | En un servidor en UTC, el 1 de enero puede emitir el año anterior | Corregido (2026-11-18) |
 
 ---
 
@@ -286,20 +286,24 @@ En un servidor configurado en UTC, las capturas del 1 de enero entre las 00:00 y
 
 Derivar el año con `DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'))` dentro del repositorio, o fijar la zona operativa en el arranque de la aplicación.
 
+**Corrección aplicada (2026-11-18)**
+
+`PdoMachineCashCollectionRepository::reserveCollectionCode()` deriva el año del calendario operativo `Europe/Madrid`, con un reloj opcional para las pruebas. La regresión de `PdoMachineCashCollectionRepositoryTest` fija el proceso en UTC y el instante `2027-12-31 23:30 UTC` (ya 2028 en Madrid), y exige `operationalYear() === 2028` y el prefijo `MCC-2028-`; la suite queda en 48/48.
+
 ---
 
 ## Verificado y correcto
 
 - **Integración con `main`:** `MERGEABLE`/`CLEAN`, sin commits nuevos en la base desde la bifurcación y sin archivos de solape; la migración 031 es la siguiente libre tras la 030.
-- **Cifras:** batería hermética **436 suites · 16.807 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.190 aserciones · 0 fallos**. Suites del módulo: API 50/50, constitucional 25/25, concurrencia 10/10, layout 32/32, esquema 47/47, repositorio 47/47, dominio 123/123, validador 114/114 y servicio 67/67.
+- **Cifras:** batería hermética **436 suites · 16.807 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.191 aserciones · 0 fallos**. Suites del módulo: API 50/50, constitucional 25/25, concurrencia 10/10, layout 32/32, esquema 47/47, repositorio 48/48, dominio 123/123, validador 114/114 y servicio 67/67.
 - **Opacidad:** el DTO del reponedor publica 18 campos y omite las cinco claves del Arqueo Ciego; el recibo de conserjería expone exactamente nueve campos, sin precinto, PIN ni importes calculados.
 - **Integridad:** ocho `CHECK`, inmutabilidad por etapas con `45000`, guarda sanitaria en aplicación y motor, reserva del código con cerrojo transaccional y arqueo concurrente protegido por `UPDATE` condicionado.
 - **Seguridad:** rutas con `COORDINATOR`/`RESTOCKER`, CSV neutralizado contra fórmulas, sin secretos ni archivos de entorno en el diff.
-- **Documentación:** la matriz de trazabilidad actualizó las filas de la suite de API (50/50 y 10/10), del servicio (67/67), del esquema (47/47), del repositorio (47/47) y de la vista móvil (213/213); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
+- **Documentación:** la matriz de trazabilidad actualizó las filas de la suite de API (50/50 y 10/10), del servicio (67/67), del esquema (47/47), del repositorio (48/48) y de la vista móvil (213/213); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
 - **Cota inferior:** se usa la última captura de la máquina; el puerto `lockRestockVisit()` no expone la hora de inicio de la visita, así que no se emplea como cota adicional.
 
 ## Límites de esta revisión
 
 - No hay CI configurado en la PR (`statusCheckRollup` vacío): toda la evidencia de pruebas procede de ejecuciones locales.
 - La revisión original es estática sobre `09d0f3f`; cada corrección se validó con pruebas reales y la batería se reejecutó con las correcciones aplicadas.
-- Las correcciones de `PR-01` a `PR-10` se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17`, la vía independiente rechaza la visita en `3.4g`, las fechas y las carreras de unicidad tienen casos dedicados en servicio y concurrencia, la cola offline conserva las capturas ante red, sesión caducada y 5xx (213/213 en la suite de la vista), el replay acotado por máquina responde `409` sin devolver la bolsa ajena, el KPI de pendientes del reponedor respeta máquina, precinto, fechas y estado, contando solo las bolsas `SEALED_IN_ROUTE`, y el volcado de conflicto exige máquina cubierta, textos acotados y una marca temporal interpretable, auditando bajo `MACHINE`, los comentarios de la migración 031 quedan alineados con el correlativo real `MCC-AAAA-NNNN`, y la entrada del CHANGELOG identifica el índice y el enum reales de la Tabla 49.
+- Las correcciones de `PR-01` a `PR-11` se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17`, la vía independiente rechaza la visita en `3.4g`, las fechas y las carreras de unicidad tienen casos dedicados en servicio y concurrencia, la cola offline conserva las capturas ante red, sesión caducada y 5xx (213/213 en la suite de la vista), el replay acotado por máquina responde `409` sin devolver la bolsa ajena, el KPI de pendientes del reponedor respeta máquina, precinto, fechas y estado, contando solo las bolsas `SEALED_IN_ROUTE`, y el volcado de conflicto exige máquina cubierta, textos acotados y una marca temporal interpretable, auditando bajo `MACHINE`, los comentarios de la migración 031 quedan alineados con el correlativo real `MCC-AAAA-NNNN`, la entrada del CHANGELOG identifica el índice y el enum reales de la Tabla 49, y el año del correlativo se deriva del calendario operativo de Madrid.

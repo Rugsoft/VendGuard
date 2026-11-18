@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Infrastructure\Repository;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use InvalidArgumentException;
 use PDO;
 use PDOStatement;
@@ -52,6 +53,9 @@ final class PdoMachineCashCollectionRepository implements MachineCashCollectionR
     /** Tope por defecto y máximo del listado histórico. */
     private const DEFAULT_LIMIT = 100;
     private const MAX_LIMIT = 500;
+
+    /** Zona operativa del parque: el año del correlativo se deriva aquí (PR-11). */
+    private const OPERATIONAL_TIMEZONE = 'Europe/Madrid';
 
     private const COLLECTION_SELECT = "
         c.id,
@@ -106,10 +110,15 @@ final class PdoMachineCashCollectionRepository implements MachineCashCollectionR
      * con el máximo persistido y la clave única del motor como última red. La
      * cerradura se libera al hacer commit, así que dos capturas simultáneas se
      * serializan y un rollback no consume número (H-5).
+     *
+     * El año se deriva del calendario operativo de Madrid, no de la zona
+     * horaria del proceso: un servidor en UTC no debe adelantar el año anterior
+     * en la madrugada del 1 de enero. El reloj opcional existe para que la
+     * regresión pueda fijar el instante sin tocar el reloj del sistema.
      */
-    public function reserveCollectionCode(): string
+    public function reserveCollectionCode(?DateTimeImmutable $now = null): string
     {
-        $year = (int)date('Y');
+        $year = self::operationalYear($now);
         $prefix = sprintf('MCC-%04d-', $year);
 
         $stmtLock = $this->pdo->prepare('SELECT pg_advisory_xact_lock(hashtext(:lock_key))');
@@ -127,6 +136,22 @@ final class PdoMachineCashCollectionRepository implements MachineCashCollectionR
         $next = (int)$stmtSeq->fetchColumn();
 
         return sprintf('MCC-%04d-%s', $year, str_pad((string)$next, 4, '0', STR_PAD_LEFT));
+    }
+
+    /**
+     * Año natural del correlativo en el calendario operativo de Madrid (PR-11).
+     *
+     * El instante opcional permite certificar el cambio de año sin depender del
+     * reloj del sistema; la zona se aplica siempre, también cuando el proceso
+     * corre en UTC.
+     */
+    public static function operationalYear(?DateTimeImmutable $now = null): int
+    {
+        $timezone = new DateTimeZone(self::OPERATIONAL_TIMEZONE);
+
+        return (int)($now ?? new DateTimeImmutable('now', $timezone))
+            ->setTimezone($timezone)
+            ->format('Y');
     }
 
     /**

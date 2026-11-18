@@ -29,6 +29,9 @@ declare(strict_types=1);
  *   6. **Arqueo Ciego y resumen (C2, QA 3, Art. V.4).** La proyección del
  *      reponedor no contiene las cinco claves financieras privadas; el resumen
  *      solo suma cambio y conserjería declarados.
+ *   7. **Correlativo anual (RF-01.1, PR-11).** El año se resuelve en
+ *      `Europe/Madrid` aunque el proceso esté en UTC, también en el cambio de
+ *      año, y la reserva usa ese mismo reloj operativo.
  *
  * CATEGORÍA: `new_engine`
  *   Exige un PostgreSQL disponible. Sin `PG_TEST_DSN` sale con código 2 y lo
@@ -161,6 +164,21 @@ try {
     }
 
     $repo = new PdoMachineCashCollectionRepository($pdo);
+
+    $newYearInstant = new DateTimeImmutable('2027-12-31 23:30:00', new DateTimeZone('UTC'));
+    $previousTimezone = date_default_timezone_get();
+    date_default_timezone_set('UTC');
+    try {
+        $resolvedYear = PdoMachineCashCollectionRepository::operationalYear($newYearInstant);
+        $newYearCode = $repo->reserveCollectionCode($newYearInstant);
+    } finally {
+        date_default_timezone_set($previousTimezone);
+    }
+    $assert(
+        'El año del correlativo se deriva en Europe/Madrid aunque el proceso esté en UTC (PR-11)',
+        $resolvedYear === 2028 && str_starts_with($newYearCode, 'MCC-2028-'),
+        json_encode(['year' => $resolvedYear, 'code' => $newYearCode])
+    );
 
     $makeCollection = static function (
         string $code,

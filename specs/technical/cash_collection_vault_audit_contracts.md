@@ -31,7 +31,7 @@
 
 ### 1.0. Correlativo del `collection_code` (`H-5`)
 
-`collection_code` se compone como `MCC-AAAA-NNNN`: prefijo de año y número correlativo con relleno de cuatro dígitos (crece a más dígitos al superar 9999). La reserva la hace `PdoMachineCashCollectionRepository::reserveCollectionCode()` dentro de la transacción de captura: toma `pg_advisory_xact_lock(hashtext('cash_collection_code_<año>'))`, calcula `MAX(número) + 1` entre los códigos del año y devuelve el siguiente; la cerradura se libera al hacer commit, de modo que dos capturas simultáneas se serializan sin repetir número y un rollback no consume hueco. El índice único `uq_machine_cash_collections_code` sigue siendo la última red. Las semillas conservan `MCC-2026-0001`…`0004`.
+`collection_code` se compone como `MCC-AAAA-NNNN`: prefijo del año natural en la zona operativa `Europe/Madrid` y número correlativo con relleno de cuatro dígitos (crece a más dígitos al superar 9999); el prefijo no depende de la zona horaria del proceso. La reserva la hace `PdoMachineCashCollectionRepository::reserveCollectionCode()` dentro de la transacción de captura: toma `pg_advisory_xact_lock(hashtext('cash_collection_code_<año>'))`, calcula `MAX(número) + 1` entre los códigos del año y devuelve el siguiente; la cerradura se libera al hacer commit, de modo que dos capturas simultáneas se serializan sin repetir número y un rollback no consume hueco. El índice único `uq_machine_cash_collections_code` sigue siendo la última red. Las semillas conservan `MCC-2026-0001`…`0004`.
 
 ### 1.1. Contrato de idempotencia de la captura independiente (`RF-01.2.3`)
 
