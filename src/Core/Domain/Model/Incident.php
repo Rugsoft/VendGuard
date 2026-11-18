@@ -11,8 +11,10 @@ use InvalidArgumentException;
 use JsonSerializable;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\Level1IssueType;
 use VendGuard\Core\Domain\ValueObject\OpportunisticMode;
 use VendGuard\Core\Domain\ValueObject\OpportunisticOriginReason;
 use VendGuard\Core\Domain\ValueObject\SlaTier;
@@ -85,6 +87,13 @@ class Incident implements ArrayAccess, JsonSerializable
 
     /** Objetivo en minutos naturales de la matriz RF-01. */
     private int $slaTargetMinutes;
+
+    // Nivel de despacho y rastro de escalado (Módulo 36, D1, D2). El expediente
+    // es único: el nivel decide si interviene primero el reponedor o el SAT.
+    private IncidentDispatchLevel $dispatchLevel;
+    private ?Level1IssueType $level1IssueType;
+    private ?int $escalatedFromRestockerId;
+    private ?string $escalatedToSatAt;
 
     // Campos de la avería oportunista in situ (módulo 16)
     private ?OpportunisticMode $opportunisticMode;
@@ -179,7 +188,11 @@ class Incident implements ArrayAccess, JsonSerializable
         ?string $standardSolutionCodeSnapshot = null,
         ?string $standardSolutionNameSnapshot = null,
         ?SlaTier $slaTierSnapshot = null,
-        ?int $slaTargetMinutes = null
+        ?int $slaTargetMinutes = null,
+        ?IncidentDispatchLevel $dispatchLevel = null,
+        ?Level1IssueType $level1IssueType = null,
+        ?int $escalatedFromRestockerId = null,
+        ?string $escalatedToSatAt = null
     ) {
         $this->id = $id;
         $this->ticketCode = strtoupper(trim($ticketCode));
@@ -313,6 +326,38 @@ class Incident implements ArrayAccess, JsonSerializable
         $this->rootCauseNameSnapshot = $rootCauseNameSnapshot;
         $this->standardSolutionCodeSnapshot = $standardSolutionCodeSnapshot;
         $this->standardSolutionNameSnapshot = $standardSolutionNameSnapshot;
+
+        // Nivel de despacho (Módulo 36). La fila histórica sin columna se hidrata
+        // en `L2_SAT`, que es el nivel que ya tenía de facto; la coherencia con
+        // `chk_incidents_l1_dispatch_coherence` se replica aquí para que una
+        // escritura a medias falle como validación de dominio y no como SQLSTATE
+        // (Art. II, QA-LIM-03).
+        $this->dispatchLevel = $dispatchLevel ?? IncidentDispatchLevel::DEFAULT;
+        $this->level1IssueType = $level1IssueType;
+
+        if ($this->dispatchLevel->isLevel1()) {
+            if ($category === IncidentCategory::TEMPERATURE_COLD || $category === IncidentCategory::ELECTRICAL_OFF) {
+                throw new InvalidArgumentException(
+                    'Una avería térmica o eléctrica no puede quedar en Nivel 1: exige Técnico SAT (Art. II).'
+                );
+            }
+            if ($status === IncidentStatus::PENDING_PARTS || $pendingPartsReason !== null) {
+                throw new InvalidArgumentException(
+                    'El Nivel 1 no admite el bloqueo por repuestos: debe resolverse o escalarse (QA-LIM-03).'
+                );
+            }
+        }
+
+        $normalizedEscalatedAt = $escalatedToSatAt !== null && trim($escalatedToSatAt) !== ''
+            ? $escalatedToSatAt
+            : null;
+        if (($escalatedFromRestockerId === null) !== ($normalizedEscalatedAt === null)) {
+            throw new InvalidArgumentException(
+                'El rastro de escalado exige el custodio de origen y la marca temporal juntos, o ninguno de los dos.'
+            );
+        }
+        $this->escalatedFromRestockerId = $escalatedFromRestockerId;
+        $this->escalatedToSatAt = $normalizedEscalatedAt;
     }
 
     /**
@@ -421,7 +466,19 @@ class Incident implements ArrayAccess, JsonSerializable
             isset($row['sla_tier_snapshot']) && $row['sla_tier_snapshot'] !== null && $row['sla_tier_snapshot'] !== ''
                 ? SlaTier::fromString((string)$row['sla_tier_snapshot'])
                 : null,
-            isset($row['sla_target_minutes']) ? (int)$row['sla_target_minutes'] : null
+            isset($row['sla_target_minutes']) ? (int)$row['sla_target_minutes'] : null,
+            isset($row['dispatch_level']) && $row['dispatch_level'] !== null && $row['dispatch_level'] !== ''
+                ? IncidentDispatchLevel::fromString((string)$row['dispatch_level'])
+                : IncidentDispatchLevel::DEFAULT,
+            isset($row['level1_issue_type']) && $row['level1_issue_type'] !== null && $row['level1_issue_type'] !== ''
+                ? Level1IssueType::fromString((string)$row['level1_issue_type'])
+                : null,
+            isset($row['escalated_from_restocker_id']) && $row['escalated_from_restocker_id'] !== null
+                ? (int)$row['escalated_from_restocker_id']
+                : null,
+            isset($row['escalated_to_sat_at']) && $row['escalated_to_sat_at'] !== null
+                ? (string)$row['escalated_to_sat_at']
+                : null
         );
     }
 
@@ -790,6 +847,57 @@ class Incident implements ArrayAccess, JsonSerializable
      * Modalidad oportunista del expediente (Módulo 16). `null` en los tickets
      * abiertos por los canales ordinarios, que son la inmensa mayoría.
      */
+    /**
+     * Nivel con el que se despacha el expediente (Módulo 36, D1).
+     */
+    public function getDispatchLevel(): IncidentDispatchLevel
+    {
+        return $this->dispatchLevel;
+    }
+
+    /**
+     * Motivo rápido de Nivel 1 declarado en el alta, si lo hubo. Se conserva
+     * como rastro de origen aunque el expediente se haya escalado a `L2_SAT`.
+     */
+    public function getLevel1IssueType(): ?Level1IssueType
+    {
+        return $this->level1IssueType;
+    }
+
+    /**
+     * Reponedor que escaló el aviso desde su ruta (Módulo 36, D2).
+     */
+    public function getEscalatedFromRestockerId(): ?int
+    {
+        return $this->escalatedFromRestockerId;
+    }
+
+    /**
+     * Marca del escalado «⚡ Escalar Avería al SAT» en hora del servidor.
+     */
+    public function getEscalatedToSatAt(): ?string
+    {
+        return $this->escalatedToSatAt;
+    }
+
+    public function isLevel1(): bool
+    {
+        return $this->dispatchLevel->isLevel1();
+    }
+
+    public function isDispatchedToSat(): bool
+    {
+        return $this->dispatchLevel->isSatLevel();
+    }
+
+    /**
+     * ¿El expediente conserva el rastro de un escalado desde ruta?
+     */
+    public function wasEscalatedToSat(): bool
+    {
+        return $this->escalatedFromRestockerId !== null && $this->escalatedToSatAt !== null;
+    }
+
     public function getOpportunisticMode(): ?OpportunisticMode
     {
         return $this->opportunisticMode;
@@ -1162,6 +1270,14 @@ class Incident implements ArrayAccess, JsonSerializable
     }
 
     /**
+     * Proyección genérica del expediente, de mínimo privilegio.
+     *
+     * El nivel de despacho, el motivo de Nivel 1 y el rastro de escalado NO se
+     * publican aquí (`QA-CONST-03`, Art. V.4): la Sede y el canal público QR
+     * serializan esta vista y jamás deben verlos. Los consumidores internos
+     * autorizados los leen por sus getters y los exponen solo en su propia
+     * proyección.
+     *
      * @return array<string, mixed>
      */
     public function toArray(): array
