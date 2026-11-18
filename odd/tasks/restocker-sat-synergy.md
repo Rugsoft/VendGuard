@@ -25,7 +25,7 @@ S4 — **Indicador «🤝 Coincidencia en Sede» (`D4`), Relevo Automático de F
 | **WU-4 / T-RSS-06** | S2, S3, S4 | inline | `feat(synergy): add the restocker sat synergy service` | ✅ hecho (hash en Engram) |
 | **WU-4 / T-RSS-07** | S2, S4 | inline | `feat(synergy): integrate level 1 dispatch across qr, shifts and work hours` | ✅ hecho (hash en Engram) |
 | **WU-5 / T-RSS-08** | S1–S4 | inline | `feat(synergy): expose level 1 operations through the http api` | ✅ hecho (hash en Engram) |
-| **WU-5 / T-RSS-09** | S1–S4 | inline | pendiente | ⏳ pendiente |
+| **WU-5 / T-RSS-09** | S1–S4 | inline | `test(synergy): certify the http and constitutional guardrails` | ✅ hecho (hash en Engram) |
 | **WU-6 / T-RSS-10** | S2, S4 | inline | pendiente | ⏳ pendiente |
 | **WU-6 / T-RSS-11** | S3, S4 | inline | pendiente | ⏳ pendiente |
 | **WU-7 / T-RSS-12** | S1–S4 | inline | pendiente | ⏳ pendiente |
@@ -50,3 +50,5 @@ S4 — **Indicador «🤝 Coincidencia en Sede» (`D4`), Relevo Automático de F
   * **Commit:** `feat(synergy): integrate level 1 dispatch across qr, shifts and work hours` (rama `feat/restocker-sat-synergy`, sin atribución de IA).
 * **L10 (2026-11-18 · T-RSS-08):** Registradas seis rutas nuevas con RBAC estricto: inicio/resolución L1, escalado por máquina y volcado de conflicto del reponedor; sugerencia de reponedores y conmutación de nivel en Coordinación. Los controladores montan `RestockerSatSynergyService` sobre el gateway PDO y traducen los errores de dominio. QR y Portal pre-clasifican `level1_issue_type` y persisten `dispatch_level`/`level1_issue_type`. Evidencia: `RestockerSatSynergyApiTest` **13/13 aserciones, `exit=0`** (401/403, replay, resolución, volcado, sugerencia, L2 y opacidad QR); regresiones 34+27+105 = 166 (**179 verdes en total**). Esquema `t_rss08_api` retirado, residuo 0.
   * **Commit:** `feat(synergy): expose level 1 operations through the http api` (rama `feat/restocker-sat-synergy`, sin atribución de IA).
+* **L11 (2026-11-18 · T-RSS-09):** `RestockerSatSynergyConstitutionalTest` certifica el blindaje del módulo: CHECK L1/categoría, cuarentena, textos mínimos, absorción sobre L2 sin segundo ticket ni pérdida de custodia, Nota Interna `is_internal`, opacidad QR, unicidad de custodia y trazabilidad inmutable. Se corrigió el mapeo `workshop_internal_note` → gateway y la captura de `dispatch_level`/`level1_issue_type` en QR. Evidencia: API 13/13 + constitucional 15/15 (**28 aserciones HTTP**); regresiones 34+46+27+21 = 128 (**156 verdes en total**). Esquemas `t_rss08_api` y `t_rss09_const` retirados, residuo 0.
+  * **Commit:** `test(synergy): certify the http and constitutional guardrails` (rama `feat/restocker-sat-synergy`, sin atribución de IA).

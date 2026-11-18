@@ -160,9 +160,14 @@ final class RestockerSatSynergyService
             throw new InvalidArgumentException('La máquina del escalado no es válida.');
         }
 
-        $payload['internal_note'] = RestockerSatSynergyValidator::assertEscalationInternalNote(
-            isset($payload['internal_note']) ? (string)$payload['internal_note'] : null
+        // El contrato HTTP habla de `workshop_internal_note`; la clave corta se
+        // conserva para los llamadores internos y ambas viajan al gateway.
+        $rawNote = $payload['workshop_internal_note'] ?? $payload['internal_note'] ?? null;
+        $validatedNote = RestockerSatSynergyValidator::assertEscalationInternalNote(
+            $rawNote !== null ? (string)$rawNote : null
         );
+        $payload['workshop_internal_note'] = $validatedNote;
+        $payload['internal_note'] = $validatedNote;
         RestockerSatSynergyValidator::assertEscalationPhoto(
             isset($payload['photo_path']) ? (string)$payload['photo_path'] : null,
             isset($payload['photo_size_bytes']) ? (int)$payload['photo_size_bytes'] : null,

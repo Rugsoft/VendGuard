@@ -227,7 +227,7 @@ class QrReportService
         //       única notificación, y nunca responde un 500 por una colisión de azar.
         try {
             $enqueuer = $this->notificationEnqueuer;
-            $created = $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $location, $category, $description, $urgency, $slaTier, $slaTargetMinutes, $reporterName, $reporterPhone, $retainedMoney, $photoPath, $reporterEmail, $enqueuer): Incident {
+            $created = $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $location, $category, $description, $urgency, $slaTier, $slaTargetMinutes, $reporterName, $reporterPhone, $retainedMoney, $photoPath, $reporterEmail, $enqueuer, $dispatchLevel, $level1IssueType): Incident {
                 $newIncident = new Incident(
                     id: null,
                     ticketCode: $ticketCode,
