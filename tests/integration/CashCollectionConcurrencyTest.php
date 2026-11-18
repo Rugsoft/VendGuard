@@ -759,14 +759,15 @@ try {
         ],
     ];
     $mutationRace = $runCrossMachineRace($duplicateMutationPayloads);
+    $mutationWinner = ($mutationRace['a']['ok'] ?? false) === true ? 'a' : 'b';
+    $mutationLoser = $mutationWinner === 'a' ? 'b' : 'a';
 
     $assert(
-        '4.1 La misma mutación en dos máquinas devuelve un único id, un replay idempotente y una sola fila (D4)',
-        ($mutationRace['a']['ok'] ?? false) === true
-            && ($mutationRace['b']['ok'] ?? false) === true
-            && (int)($mutationRace['a']['id'] ?? 0) > 0
-            && (int)($mutationRace['a']['id'] ?? 0) === (int)($mutationRace['b']['id'] ?? -1)
-            && (($mutationRace['a']['idempotent_replay'] ?? false) !== ($mutationRace['b']['idempotent_replay'] ?? false))
+        '4.1 La misma mutación en dos máquinas responde 409 CLIENT_MUTATION_ID_ALREADY_USED y deja una sola fila (D4)',
+        ($mutationRace[$mutationWinner]['ok'] ?? false) === true
+            && ($mutationRace[$mutationLoser]['ok'] ?? true) === false
+            && (int)($mutationRace[$mutationLoser]['http'] ?? 0) === 409
+            && ($mutationRace[$mutationLoser]['code'] ?? '') === 'CLIENT_MUTATION_ID_ALREADY_USED'
             && $countByMutation('ccv-conc-dup-mutation-0001') === 1,
         json_encode(['results' => $mutationRace, 'rows' => $countByMutation('ccv-conc-dup-mutation-0001')])
     );

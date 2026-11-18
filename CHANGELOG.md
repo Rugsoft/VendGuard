@@ -26,9 +26,9 @@ a un módulo funcional certificado por la batería global.
 
 ### Certificación
 
-- `CashCollectionVaultAuditApiTest` (46/46), `CashCollectionVaultAuditConstitutionalTest` (25/25), `CashCollectionConcurrencyTest` (10/10), `CashCollectionLayoutBrowserTest` (32/32 a 360 px en navegador real), `PostgresCashCollectionVaultAuditSchemaTest` (46/46), `PdoMachineCashCollectionRepositoryTest` (45/45), `CashCollectionDomainModelsTest` (123/123), `MachineCashCollectionValidatorTest` (114/114) y `MachineCashCollectionServiceTest` (56/56).
-- Batería global: **436 suites y 16.796 aserciones**, 0 fallos y `DocMetricsGuard` sin desviaciones (193/193 PHP Unit, 105/105 JS Unit, 135/135 de integración y 3/3 E2E manuales).
-- Canal `new_engine`: **66/66 suites y 2.183 aserciones**, 0 no ejecutables, 0 fallos y salida `0`.
+- `CashCollectionVaultAuditApiTest` (47/47), `CashCollectionVaultAuditConstitutionalTest` (25/25), `CashCollectionConcurrencyTest` (10/10), `CashCollectionLayoutBrowserTest` (32/32 a 360 px en navegador real), `PostgresCashCollectionVaultAuditSchemaTest` (46/46), `PdoMachineCashCollectionRepositoryTest` (45/45), `CashCollectionDomainModelsTest` (123/123), `MachineCashCollectionValidatorTest` (114/114) y `MachineCashCollectionServiceTest` (60/60).
+- Batería global: **436 suites y 16.800 aserciones**, 0 fallos y `DocMetricsGuard` sin desviaciones (193/193 PHP Unit, 105/105 JS Unit, 135/135 de integración y 3/3 E2E manuales).
+- Canal `new_engine`: **66/66 suites y 2.184 aserciones**, 0 no ejecutables, 0 fallos y salida `0`.
 ## [Certificación] · Batería global y canal new_engine tras los Módulos 25 a 34 — 2026-11-15
 
 **Estado:** Cerrada en verde · cifras canónicas auditadas por `DocMetricsGuard`.

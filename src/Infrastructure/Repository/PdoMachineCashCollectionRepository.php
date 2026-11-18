@@ -27,9 +27,11 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  *      la captura en ruta: solo el `INSERT` y las dos transiciones de custodia.
  *      El motor lo blinda con `enforce_machine_cash_collections_immutability()`
  *      y `prevent_hard_delete()` (Art. III.1).
- *   2. **Idempotencia y precinto (D4, C1).** `findByClientMutationId()` resuelve
- *      la repetición de la cola offline y `findByBagSealCode()` detecta el
- *      precinto consumido; los índices únicos del motor cierran la carrera.
+ *   2. **Idempotencia y precinto (D4, C1).** `findByClientMutationId()` localiza
+ *      la repetición de la cola offline sin filtrar por máquina —el servicio
+ *      decide si es replay o `409 CLIENT_MUTATION_ID_ALREADY_USED`— y
+ *      `findByBagSealCode()` detecta el precinto consumido; los índices únicos
+ *      del motor cierran la carrera.
  *   3. **Arqueo Ciego estructural (C2, Art. V.4).** El repositorio devuelve
  *      entidades hidratadas, no arrays financieros; cada superficie elige su
  *      proyección y la del reponedor no contiene las cinco claves privadas.

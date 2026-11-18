@@ -24,9 +24,10 @@ use VendGuard\Core\Domain\Model\MachineCashCollection;
  *
  * **Idempotencia y precinto (D4, C1).** `findByClientMutationId()` resuelve la
  * repetición de la cola offline por `(restocker_id, client_mutation_id)` y
- * `findByBagSealCode()` detecta un precinto ya consumido. Ambas son consultas
- * previas: el índice único del motor sigue siendo la última palabra ante una
- * carrera.
+ * `findByBagSealCode()` detecta un precinto ya consumido. La repetición solo es
+ * replay si pertenece a la misma máquina; el servicio rechaza con `409` una
+ * mutación reutilizada en otra. Ambas son consultas previas: el índice único
+ * del motor sigue siendo la última palabra ante una carrera.
  *
  * **Arqueo Ciego (C2, Art. V.4).** El repositorio devuelve entidades, nunca
  * arrays financieros sueltos; cada superficie decide su proyección con
@@ -59,7 +60,10 @@ interface MachineCashCollectionRepositoryInterface
     public function findById(int $collectionId): ?MachineCashCollection;
 
     /**
-     * Recaudación ya registrada por `(restocker_id, client_mutation_id)` (D4).
+     * Recaudación ya registrada por el reponedor con esa mutación (D4).
+     *
+     * La consulta no filtra por máquina para que el servicio pueda distinguir
+     * un replay legítimo de una mutación reutilizada en otra captura.
      */
     public function findByClientMutationId(int $restockerId, string $clientMutationId): ?MachineCashCollection;
 

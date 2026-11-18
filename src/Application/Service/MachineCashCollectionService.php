@@ -132,7 +132,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
             ));
         }
 
-        $existing = $this->collections->findByClientMutationId($restocker['id'], $mutationId);
+        $existing = $this->replayForMachine($mutationId, $restocker['id'], $machineId);
         if ($existing !== null) {
             return RestockerCashCollectionViewDTO::fromMachineCashCollection($existing)->toArray() + ['idempotent_replay' => true];
         }
@@ -142,7 +142,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
             throw MachineCashCollectionValidationException::machineNotFound($machineId);
         }
 
-        $repeated = $this->collections->findByClientMutationId($restocker['id'], $mutationId);
+        $repeated = $this->replayForMachine($mutationId, $restocker['id'], $machineId);
         if ($repeated !== null) {
             return RestockerCashCollectionViewDTO::fromMachineCashCollection($repeated)->toArray() + ['idempotent_replay' => true];
         }
@@ -271,8 +271,17 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                 $persisted = $this->collections->insert($collection);
             } catch (MachineCashCollectionUniqueViolationException $exception) {
                 if ($exception->isDuplicateMutation() && $exception->getExistingCollection() !== null) {
+                    $winner = $exception->getExistingCollection();
+                    if ($winner->getMachineId() !== $machineId) {
+                        throw MachineCashCollectionValidationException::clientMutationIdAlreadyUsed(
+                            $mutationId,
+                            $machineId,
+                            $winner->getMachineId()
+                        );
+                    }
+
                     return RestockerCashCollectionViewDTO::fromMachineCashCollection(
-                        $exception->getExistingCollection()
+                        $winner
                     )->toArray() + ['idempotent_replay' => true];
                 }
 
@@ -815,6 +824,36 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
         }
 
         return $raw;
+    }
+
+    /**
+     * Resuelve el replay idempotente sin cruzar la máquina de la captura (D4).
+     *
+     * La clave de idempotencia sigue siendo `(restocker_id, client_mutation_id)`,
+     * pero reutilizarla en otra máquina no puede devolver una bolsa ajena: se
+     * rechaza con `409 CLIENT_MUTATION_ID_ALREADY_USED`. Al comparar la máquina
+     * se cubre también la carrera en la que el `INSERT` pierde contra el índice
+     * único y la fila ganadora aparece después del bloqueo.
+     */
+    private function replayForMachine(
+        string $mutationId,
+        int $restockerId,
+        int $machineId
+    ): ?MachineCashCollection {
+        $existing = $this->collections->findByClientMutationId($restockerId, $mutationId);
+        if ($existing === null) {
+            return null;
+        }
+
+        if ($existing->getMachineId() !== $machineId) {
+            throw MachineCashCollectionValidationException::clientMutationIdAlreadyUsed(
+                $mutationId,
+                $machineId,
+                $existing->getMachineId()
+            );
+        }
+
+        return $existing;
     }
 
     private function nullablePositiveInt(mixed $value): ?int

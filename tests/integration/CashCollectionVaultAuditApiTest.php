@@ -161,6 +161,14 @@ try {
     ]);
     $machineId = (int)$machineStmt->fetchColumn();
 
+    $machineStmt->execute([
+        ':location_id' => $locationId,
+        ':code' => 'CCV8-SNACK-02',
+        ':model' => 'Modelo de certificación CCV8',
+        ':floor_wing' => 'Planta baja',
+    ]);
+    $secondMachineId = (int)$machineStmt->fetchColumn();
+
     $assignStmt = $pdo->prepare(
         "INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
          VALUES (:restocker_id, :zone_id, 'PRIMARY', TRUE)"
@@ -321,6 +329,19 @@ try {
         $repeated->getStatusCode() === 200
             && (int)($repeatedData['id'] ?? 0) === $collectionId
             && ($repeatedData['idempotent_replay'] ?? false) === true
+    );
+
+    $crossMachineReplay = $call('POST', '/api/restocker/machines/' . $secondMachineId . '/cash-collections', array_merge($capturePayload, [
+        'bag_seal_code' => 'BAG-CCV8-0009',
+    ]), $ownerToken);
+    $secondMachineRows = $pdo->prepare('SELECT COUNT(*) FROM machine_cash_collections WHERE machine_id = :machine_id');
+    $secondMachineRows->execute([':machine_id' => $secondMachineId]);
+    $assert(
+        '3.2c Reutilizar la mutación en otra máquina responde 409 CLIENT_MUTATION_ID_ALREADY_USED sin capturar',
+        $crossMachineReplay->getStatusCode() === 409
+            && $errorCode($crossMachineReplay) === 'CLIENT_MUTATION_ID_ALREADY_USED'
+            && (int)$secondMachineRows->fetchColumn() === 0,
+        $errorCode($crossMachineReplay)
     );
 
     $regression = $call(

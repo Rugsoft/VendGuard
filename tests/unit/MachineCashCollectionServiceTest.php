@@ -531,6 +531,7 @@ $gateway->machines[1] = [
 $gateway->machines[2] = array_merge($gateway->machines[1], ['id' => 2, 'is_covered' => false]);
 $gateway->machines[3] = array_merge($gateway->machines[1], ['id' => 3, 'sanitary_status' => 'QUARANTINE']);
 $gateway->machines[4] = array_merge($gateway->machines[1], ['id' => 4, 'machine_code' => 'VEND-CCV06-D', 'has_physical_reception' => false]);
+$gateway->machines[6] = array_merge($gateway->machines[1], ['id' => 6, 'machine_code' => 'VEND-CCV06-F']);
 
 $gateway->visits[9] = ['id' => 9, 'machine_id' => 1, 'restocker_id' => 10, 'status' => 'COMPLETED'];
 $gateway->visits[10] = ['id' => 10, 'machine_id' => 1, 'restocker_id' => 10, 'status' => 'ABORTED_THERMAL_BREACH'];
@@ -660,6 +661,19 @@ try {
     );
     assertCash($repository->collections[(int)$first['id']]->getExpectedCashboxEur() === 100.00, 'La primera base produce el esperado privado');
 
+    $rowsBeforeCrossMachineReuse = count($repository->collections);
+    $reusedMutation = assertCashRejects(
+        static fn () => $service->registerCollection(6, $basePayload('BAG-2026-060010', 'mutation-ccv06-001', 100.00), $restocker),
+        MachineCashCollectionValidationException::CLIENT_MUTATION_ID_ALREADY_USED,
+        409
+    );
+    assertCash(
+        $reusedMutation->getField() === 'client_mutation_id'
+            && ($reusedMutation->getContext()['existing_machine_id'] ?? 0) === 1
+            && count($repository->collections) === $rowsBeforeCrossMachineReuse,
+        'Reutilizar una mutación en otra máquina responde 409 CLIENT_MUTATION_ID_ALREADY_USED sin insertar (D4)'
+    );
+
     $second = $service->registerCollection(1, $basePayload('BAG-2026-060002', 'mutation-ccv06-002', 125.50), $restocker);
     assertCash(
         $repository->collections[(int)$second['id']]->getExpectedCashboxEur() === 25.50
@@ -695,6 +709,18 @@ try {
             && ($replayed['idempotent_replay'] ?? false) === true
             && count($repository->collections) === $rowsBeforeReplay,
         'Una carrera de mutación perdida devuelve la fila ganadora como replay idempotente (D4)'
+    );
+
+    $repository->uniqueViolationOnInsert = MachineCashCollectionUniqueViolationException::duplicateMutation($raceWinner);
+    $rowsBeforeCrossMachineRace = count($repository->collections);
+    assertCashRejects(
+        static fn () => $service->registerCollection(6, $basePayload('BAG-2026-060011', 'mutation-ccv06-race-cross-001', 130.00), $restocker),
+        MachineCashCollectionValidationException::CLIENT_MUTATION_ID_ALREADY_USED,
+        409
+    );
+    assertCash(
+        count($repository->collections) === $rowsBeforeCrossMachineRace,
+        'Una carrera de mutación perdida en otra máquina responde 409 y no devuelve la bolsa ganadora (D4)'
     );
 
     $repository->uniqueViolationOnInsert = MachineCashCollectionUniqueViolationException::duplicateSeal('BAG-2026-060009');

@@ -44,6 +44,7 @@ final class MachineCashCollectionValidationException extends DomainException
     // ── 409 · cerrojo sanitario, conserjería y estado terminal ─────────────
     public const SANITARY_CASH_COLLECTION_BLOCKED = 'SANITARY_CASH_COLLECTION_BLOCKED';
     public const BAG_SEAL_CODE_ALREADY_USED = 'BAG_SEAL_CODE_ALREADY_USED';
+    public const CLIENT_MUTATION_ID_ALREADY_USED = 'CLIENT_MUTATION_ID_ALREADY_USED';
     public const REFUND_REQUEST_NOT_ELIGIBLE_FOR_RECEPTION = 'REFUND_REQUEST_NOT_ELIGIBLE_FOR_RECEPTION';
     public const INVALID_CASH_COLLECTION_STATE_TRANSITION = 'INVALID_CASH_COLLECTION_STATE_TRANSITION';
     public const LOCATION_HAS_NO_PHYSICAL_RECEPTION = 'LOCATION_HAS_NO_PHYSICAL_RECEPTION';
@@ -185,6 +186,36 @@ final class MachineCashCollectionValidationException extends DomainException
             409,
             'bag_seal_code',
             ['bag_seal_code' => $bagSealCode]
+        );
+    }
+
+    /**
+     * El cliente reutilizó una mutación ya grabada en otra máquina (D4).
+     *
+     * La clave de idempotencia es del reponedor, pero el replay solo puede
+     * devolver la fila de la misma máquina: devolver la bolsa de otra sería
+     * perder la captura nueva sin error.
+     */
+    public static function clientMutationIdAlreadyUsed(
+        string $clientMutationId,
+        int $requestedMachineId,
+        int $existingMachineId
+    ): self {
+        return new self(
+            self::CLIENT_MUTATION_ID_ALREADY_USED,
+            sprintf(
+                'El client_mutation_id «%s» ya se usó en la máquina %d y no puede reutilizarse en la máquina %d (D4).',
+                $clientMutationId,
+                $existingMachineId,
+                $requestedMachineId
+            ),
+            409,
+            'client_mutation_id',
+            [
+                'client_mutation_id' => $clientMutationId,
+                'machine_id' => $requestedMachineId,
+                'existing_machine_id' => $existingMachineId,
+            ]
         );
     }
 
