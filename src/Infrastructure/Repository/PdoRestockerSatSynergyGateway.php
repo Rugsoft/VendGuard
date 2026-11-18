@@ -136,6 +136,78 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         }
     }
 
+    public function promoteToSatOnQrMerge(
+        int $incidentId,
+        string $category,
+        ?int $assignTechnicianId,
+        array $actor
+    ): array {
+        $categoryEnum = IncidentCategory::tryFrom(strtoupper(trim($category)));
+        $this->begin();
+        try {
+            $current = $this->lockIncident($incidentId);
+            if ($current === null) {
+                return $this->fail('INCIDENT_NOT_FOUND', 404, 'El expediente no existe o está dado de baja.');
+            }
+            if (!IncidentDispatchLevel::tryFrom((string)$current['dispatch_level'])?->isLevel1()) {
+                return ['ok' => true, 'promoted' => false, 'dispatch_level' => (string)$current['dispatch_level']];
+            }
+
+            $this->closeOpenCustody(
+                $incidentId,
+                $actor,
+                'QR_AUTO_ESCALATED_TO_SAT',
+                'Auto-escalado a SAT por absorción QR grave (QA-LIM-01)',
+                null
+            );
+
+            $status = $assignTechnicianId !== null && $assignTechnicianId > 0 ? 'ASSIGNED' : 'REGISTERED';
+            $stmt = $this->pdo->prepare(
+                'UPDATE incidents
+                    SET dispatch_level = \'L2_SAT\'::incident_dispatch_level,
+                        category = :category::incident_category,
+                        assigned_technician_id = :assignee,
+                        status = :status,
+                        assigned_at = CASE WHEN :flag::bigint IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
+                        started_at = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                  WHERE id = :id'
+            );
+            $stmt->execute([
+                ':category' => ($categoryEnum ?? IncidentCategory::fromString((string)$current['category']))->value,
+                ':assignee' => $assignTechnicianId !== null && $assignTechnicianId > 0 ? $assignTechnicianId : null,
+                ':flag' => $assignTechnicianId !== null && $assignTechnicianId > 0 ? $assignTechnicianId : null,
+                ':status' => $status,
+                ':id' => $incidentId,
+            ]);
+
+            if ($assignTechnicianId !== null && $assignTechnicianId > 0) {
+                $this->openCustody($incidentId, $assignTechnicianId, 'QR_AUTO_ESCALATION_TO_SAT', $this->actorId($actor), null);
+            }
+
+            $this->insertHistory(
+                $incidentId,
+                $this->actorId($actor),
+                (string)$current['status'],
+                $status,
+                'Auto-escalado QR a L2_SAT (QA-LIM-01/Art. II)'
+            );
+            $this->audit(
+                $incidentId,
+                'QR_AUTO_ESCALATED_TO_SAT',
+                $actor,
+                ['dispatch_level' => (string)$current['dispatch_level'], 'category' => (string)$current['category']],
+                ['dispatch_level' => 'L2_SAT', 'category' => ($categoryEnum ?? IncidentCategory::fromString((string)$current['category']))->value]
+            );
+            $this->commit();
+
+            return ['ok' => true, 'promoted' => true, 'dispatch_level' => 'L2_SAT', 'status' => $status];
+        } catch (Throwable $exception) {
+            $this->rollback();
+            throw $exception;
+        }
+    }
+
     public function assignDispatchLevel(
         array $incident,
         string $dispatchLevel,

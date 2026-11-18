@@ -49,7 +49,8 @@ final class ShiftLifecycleService
         private readonly AuditLogRepositoryInterface $auditRepo,
         private readonly TransactionManagerInterface $transactions,
         private readonly TechnicianLockRepositoryInterface $lockRepo,
-        private readonly ?TechnicianShiftLogRepositoryInterface $shiftLogRepo = null
+        private readonly ?TechnicianShiftLogRepositoryInterface $shiftLogRepo = null,
+        private readonly ?RestockerSatSynergyService $synergyService = null
     ) {
     }
 
@@ -264,6 +265,10 @@ final class ShiftLifecycleService
             if ($activeShift === null) {
                 throw InvalidShiftTransitionException::noOpenShift('cerrar la jornada');
             }
+
+            // C1: un L1 en IN_PROGRESS bloquea el cierre; los ASSIGNED se
+            // relevan al suplente o vuelven a REGISTERED antes de cerrar.
+            $this->synergyService?->handoverLevel1($technicianId, 'SHIFT_CLOSE', $cleanReason);
 
             $now = new DateTimeImmutable('now');
             $closed = $this->shiftRepo->closeShift(

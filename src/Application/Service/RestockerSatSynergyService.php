@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Application\Service;
 
+use DateTimeImmutable;
 use InvalidArgumentException;
 use VendGuard\Core\Domain\Repository\RestockerSatSynergyGatewayInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
@@ -184,6 +185,69 @@ final class RestockerSatSynergyService
         }
 
         return $result;
+    }
+
+    /**
+     * ¿La absorción QR de un ticket L1 debe auto-escalarlo? (QA-LIM-01)
+     */
+    public static function shouldAutoEscalateQrMerge(
+        IncidentDispatchLevel $currentLevel,
+        IncidentCategory $incomingCategory,
+        ?float $retainedMoneyAmount = null,
+        ?string $refundMethod = null
+    ): bool {
+        if (!$currentLevel->isLevel1()) {
+            return false;
+        }
+
+        if (in_array($incomingCategory, RestockerSatSynergyValidator::FORBIDDEN_LEVEL1_CATEGORIES, true)) {
+            return true;
+        }
+
+        if ($retainedMoneyAmount !== null && $retainedMoneyAmount > RestockerSatSynergyValidator::MAX_LEVEL1_CLAIM_EUR) {
+            return true;
+        }
+
+        return in_array(strtoupper(trim((string)$refundMethod)), RestockerSatSynergyValidator::DIGITAL_REFUND_METHODS, true);
+    }
+
+    /**
+     * Auto-escalado inmediato a L2_SAT en absorción QR grave (QA-LIM-01).
+     *
+     * @param array<string, mixed> $actor
+     * @return array<string, mixed>
+     */
+    public function autoEscalateQrMerge(
+        int $incidentId,
+        IncidentDispatchLevel $currentLevel,
+        IncidentCategory $incomingCategory,
+        ?float $retainedMoneyAmount,
+        ?string $refundMethod,
+        array $actor,
+        ?int $assignTechnicianId = null
+    ): array {
+        if (!self::shouldAutoEscalateQrMerge($currentLevel, $incomingCategory, $retainedMoneyAmount, $refundMethod)) {
+            return ['ok' => true, 'promoted' => false, 'dispatch_level' => $currentLevel->value];
+        }
+
+        return $this->gateway->promoteToSatOnQrMerge(
+            $incidentId,
+            $incomingCategory->value,
+            $assignTechnicianId,
+            $actor
+        );
+    }
+
+    /**
+     * Promoción a L2_SAT en reapertura de garantía < 48 h (QA-LIM-02).
+     */
+    public static function shouldPromoteOnReopen(array $incident, ?DateTimeImmutable $reopenedAt = null): bool
+    {
+        return RestockerSatSynergyValidator::isReopenPromotionRequired(
+            (string)($incident['dispatch_level'] ?? ''),
+            isset($incident['resolved_at']) ? (string)$incident['resolved_at'] : null,
+            $reopenedAt ?? new \DateTimeImmutable('now')
+        );
     }
 
     /**

@@ -18,6 +18,8 @@ use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\Level1IssueType;
+use VendGuard\Core\Service\RestockerSatSynergyValidator;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
@@ -48,6 +50,7 @@ class QrReportService
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
     private ?TransactionManagerInterface $transactionManager;
     private ?IncidentTicketAllocator $ticketAllocator;
+    private ?RestockerSatSynergyService $synergyService;
 
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
@@ -55,7 +58,8 @@ class QrReportService
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
         ?TransactionManagerInterface $transactionManager = null,
-        ?IncidentTicketAllocator $ticketAllocator = null
+        ?IncidentTicketAllocator $ticketAllocator = null,
+        ?RestockerSatSynergyService $synergyService = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
@@ -63,6 +67,7 @@ class QrReportService
         $this->notificationEnqueuer = $notificationEnqueuer;
         $this->transactionManager = $transactionManager;
         $this->ticketAllocator = $ticketAllocator;
+        $this->synergyService = $synergyService;
     }
 
     /**
@@ -166,6 +171,24 @@ class QrReportService
             $retainedMoney = $val;
         }
 
+        // RF-01.2 / QA-LIM-01: la pre-clasificación L1 solo se sella si la
+        // categoría, el estado sanitario y la reclamación lo permiten.
+        $level1IssueType = null;
+        $rawIssueType = strtoupper(trim((string)($payload['level1_issue_type'] ?? '')));
+        if ($rawIssueType !== '') {
+            $level1IssueType = Level1IssueType::tryFrom($rawIssueType);
+        }
+        $classification = RestockerSatSynergyValidator::classifyCreation(
+            $level1IssueType,
+            $category,
+            null,
+            $retainedMoney,
+            isset($payload['refund_method']) ? (string)$payload['refund_method'] : null
+        );
+        $category = $classification['category'];
+        $dispatchLevel = $classification['dispatch_level'];
+        $level1IssueType = $classification['level1_issue_type'];
+
         $photoPath = isset($payload['photo_path']) && trim((string)$payload['photo_path']) !== ''
             ? trim((string)$payload['photo_path'])
             : null;
@@ -221,7 +244,9 @@ class QrReportService
                     photoPath: $photoPath,
                     reporterEmail: $reporterEmail,
                     slaTierSnapshot: $slaTier,
-                    slaTargetMinutes: $slaTargetMinutes
+                    slaTargetMinutes: $slaTargetMinutes,
+                    dispatchLevel: $dispatchLevel,
+                    level1IssueType: $level1IssueType
                 );
 
                 if ($enqueuer === null) {
@@ -312,6 +337,20 @@ class QrReportService
             $incomingCategory,
             $incomingUrgency
         );
+
+        // QA-LIM-01: una absorción grave sobre un aviso L1 lo auto-escala en la
+        // misma unidad de trabajo, antes de anexar la nueva observación.
+        if ($this->synergyService !== null) {
+            $promotion = $this->synergyService->autoEscalateQrMerge(
+                (int)$incident->getId(),
+                $incident->getDispatchLevel(),
+                $incomingCategory,
+                $retainedMoney,
+                null,
+                ['id' => 0, 'name' => 'QR Auto-Escalation', 'role' => 'SYSTEM'],
+                null
+            );
+        }
 
         if ($incomingUrgency->priorityRank() > $incident->getUrgency()->priorityRank()
             || $incomingTargetMinutes < $incident->getSlaTargetMinutes()

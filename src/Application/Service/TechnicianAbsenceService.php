@@ -45,7 +45,8 @@ final class TechnicianAbsenceService
         private readonly TransactionManagerInterface $transactions,
         private readonly TechnicianLockRepositoryInterface $lockRepo,
         private readonly ?SuggestedTechniciansService $suggestions = null,
-        private readonly ?OperationalZoneRepositoryInterface $zoneRepo = null
+        private readonly ?OperationalZoneRepositoryInterface $zoneRepo = null,
+        private readonly ?RestockerSatSynergyService $synergyService = null
     ) {
     }
 
@@ -75,6 +76,16 @@ final class TechnicianAbsenceService
 
         if ($ends < $starts) {
             throw InvalidAbsenceException::invalidDateRange();
+        }
+
+        // C1: una ausencia que empieza ahora releva los L1 asignados del
+        // reponedor antes de registrarla; un L1 en IN_PROGRESS la bloquea.
+        if ($this->synergyService !== null && $starts <= new \DateTimeImmutable('now')) {
+            $this->synergyService->handoverLevel1(
+                $technicianId,
+                'ABSENCE',
+                'Ausencia registrada: ' . trim($reason)
+            );
         }
 
         // RF-01.1: las notas son opcionales pero nunca superan 500 caracteres.

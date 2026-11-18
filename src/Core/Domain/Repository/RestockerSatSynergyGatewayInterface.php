@@ -63,6 +63,19 @@ interface RestockerSatSynergyGatewayInterface
     ): array;
 
     /**
+     * Auto-escala a L2_SAT un aviso L1 absorbido por QR grave (QA-LIM-01).
+     *
+     * @param array<string, mixed> $actor
+     * @return array<string, mixed>
+     */
+    public function promoteToSatOnQrMerge(
+        int $incidentId,
+        string $category,
+        ?int $assignTechnicianId,
+        array $actor
+    ): array;
+
+    /**
      * Despacha o conmuta el nivel operativo del expediente (EARS 02.1).
      *
      * @param array<string, mixed> $incident

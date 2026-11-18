@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace VendGuard\Core\Service;
 
+use DateTimeImmutable;
+
 use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
@@ -177,6 +179,36 @@ final class RestockerSatSynergyValidator
             'forced_to_sat' => false,
             'forced_reason' => null,
         ];
+    }
+
+    /**
+     * ¿Una reapertura en garantía debe promover el expediente a L2_SAT?
+     * (QA-LIM-02, Art. V.6). Solo aplica a un expediente resuelto en L1 dentro
+     * de las 48 horas posteriores a su resolución.
+     */
+    public static function isReopenPromotionRequired(
+        string $dispatchLevel,
+        ?string $resolvedAt,
+        DateTimeImmutable $reopenedAt,
+        int $warrantyHours = 48
+    ): bool {
+        if (IncidentDispatchLevel::tryFrom(strtoupper(trim($dispatchLevel))) !== IncidentDispatchLevel::L1_RESTOCKER) {
+            return false;
+        }
+
+        if ($resolvedAt === null || trim($resolvedAt) === '') {
+            return false;
+        }
+
+        try {
+            $resolved = new DateTimeImmutable($resolvedAt);
+        } catch (\Exception) {
+            return false;
+        }
+
+        $elapsed = $reopenedAt->getTimestamp() - $resolved->getTimestamp();
+
+        return $elapsed >= 0 && $elapsed < $warrantyHours * 3600;
     }
 
     /**

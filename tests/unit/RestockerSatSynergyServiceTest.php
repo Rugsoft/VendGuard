@@ -91,6 +91,13 @@ final class SynergyGatewayDouble implements RestockerSatSynergyGatewayInterface
         ];
     }
 
+    public function promoteToSatOnQrMerge(int $incidentId, string $category, ?int $assignTechnicianId, array $actor): array
+    {
+        $this->calls[] = ['method' => 'promoteToSatOnQrMerge', 'args' => compact('incidentId', 'category', 'assignTechnicianId', 'actor')];
+
+        return ['ok' => true, 'promoted' => true];
+    }
+
     public function assignDispatchLevel(array $incident, string $dispatchLevel, array $assignee, array $actor): array
     {
         $this->calls[] = ['method' => 'assignDispatchLevel', 'args' => compact('incident', 'dispatchLevel', 'assignee', 'actor')];
