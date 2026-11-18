@@ -366,7 +366,7 @@ try {
         $insertMutation($pgPdo, [
             'technician_id' => $technicianId,
             'client_mutation_id' => 'fixture.m24.badstop',
-            'stop_type' => 'MACHINE',
+            'stop_type' => 'TRIP',
         ]);
     });
     $assert(

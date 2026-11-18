@@ -1921,7 +1921,7 @@ export const CoordinatorDashboardView = {
           <h2 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 22px; font-weight: 700; color: var(--color-ink, #000000); margin: 0;">
             Panel de Coordinación
           </h2>
-          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, #6c7e9d); margin-top: 6px;">
+          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted); margin-top: 6px;">
             Identifícate con tus credenciales de operador para supervisar el parque de vending.
           </p>
           <div style="margin-top: 10px;">
@@ -1942,7 +1942,7 @@ export const CoordinatorDashboardView = {
 
         <form @submit.prevent="handleInternalLogin">
           <div style="margin-bottom: 16px;">
-            <label for="coord-email" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="coord-email" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Correo electrónico
             </label>
             <input
@@ -1957,7 +1957,7 @@ export const CoordinatorDashboardView = {
           </div>
 
           <div style="margin-bottom: 16px;">
-            <label for="coord-password" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="coord-password" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Contraseña
             </label>
             <input
@@ -2270,7 +2270,7 @@ export const CoordinatorDashboardView = {
         <!-- 2. Metrics Summary Bar (8px cards) -->
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
           <div class="vg-card" style="padding: 16px; border-radius: var(--radius-card, 8px);">
-            <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); font-weight: 600; text-transform: uppercase;">
+            <div style="font-size: 12px; color: var(--color-ink-muted); font-weight: 600; text-transform: uppercase;">
               Avisos Activos
             </div>
             <div style="font-size: 26px; font-weight: 700; color: var(--color-ink, #000000); font-family: var(--font-display, 'DM Sans', sans-serif); margin-top: 4px;">
@@ -2394,7 +2394,7 @@ export const CoordinatorDashboardView = {
               📄 Etiquetas de Sede (A4)
             </button>
 
-            <span style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+            <span style="font-size: 12px; color: var(--color-ink-muted);">
               Sondeo activo (60s)
             </span>
             <button
@@ -2413,7 +2413,7 @@ export const CoordinatorDashboardView = {
           <div class="vg-triage-table-scroll">
             <table class="vg-triage-table" style="width: 100%; border-collapse: collapse; text-align: left; font-family: var(--font-body, Inter, sans-serif); font-size: 13px;">
               <thead>
-                <tr style="background-color: #fafbfc; border-bottom: 1px solid var(--color-hairline, #c8cfda); color: var(--color-ink-muted, #6c7e9d); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;">
+                <tr style="background-color: #fafbfc; border-bottom: 1px solid var(--color-hairline, #c8cfda); color: var(--color-ink-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;">
                   <th style="padding: 12px 16px;">Ticket / SLA</th>
                   <th style="padding: 12px 16px;">Sede / Ubicación</th>
                   <th style="padding: 12px 16px;">Máquina</th>
@@ -2425,12 +2425,12 @@ export const CoordinatorDashboardView = {
               </thead>
               <tbody>
                 <tr v-if="isLoading && incidents.length === 0">
-                  <td colspan="7" style="text-align: center; padding: 32px; color: var(--color-ink-muted, #6c7e9d);">
+                  <td colspan="7" style="text-align: center; padding: 32px; color: var(--color-ink-muted);">
                     Cargando averías del parque...
                   </td>
                 </tr>
                 <tr v-else-if="filteredIncidents.length === 0">
-                  <td colspan="7" style="text-align: center; padding: 32px; color: var(--color-ink-muted, #6c7e9d);">
+                  <td colspan="7" style="text-align: center; padding: 32px; color: var(--color-ink-muted);">
                     No se han encontrado averías con los filtros actuales.
                   </td>
                 </tr>
@@ -2483,7 +2483,7 @@ export const CoordinatorDashboardView = {
                       </span>
                       <span
                         v-else
-                        style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);"
+                        style="font-size: 11px; color: var(--color-ink-muted);"
                       >
                         Espera: {{ inc.waiting_minutes ?? inc.sla_minutes_elapsed ?? 0 }}m
                       </span>
@@ -2492,10 +2492,10 @@ export const CoordinatorDashboardView = {
 
                   <!-- 2. Sede -->
                   <td style="padding: 14px 16px; vertical-align: top;">
-                    <div style="font-weight: 600; color: var(--color-slate, #2c333f);">
+                    <div style="font-weight: 600; color: var(--color-slate);">
                       {{ inc.location_name || inc.location_site_code || inc.site_code }}
                     </div>
-                    <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 2px;">
+                    <div style="font-size: 12px; color: var(--color-ink-muted); margin-top: 2px;">
                       {{ inc.floor_wing || 'Ubicación no especificada' }}
                     </div>
                     <div v-if="inc.sla_tier_label" class="mt-1" data-testid="row-sla-tier" style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
@@ -2511,7 +2511,7 @@ export const CoordinatorDashboardView = {
                     <div style="font-weight: 600; color: var(--color-ink, #000000);">
                       {{ inc.machine_code }}
                     </div>
-                    <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+                    <div style="font-size: 12px; color: var(--color-ink-muted);">
                       {{ inc.machine_model || 'Vending' }}
                     </div>
                   </td>
@@ -2527,7 +2527,7 @@ export const CoordinatorDashboardView = {
                       <IncidentBadge :value="inc.status" type="status" size="sm" />
                       <span
                         data-testid="row-dispatch-level"
-                        style="font-size: 11px; font-weight: 700; color: var(--color-slate, #2c333f);"
+                        style="font-size: 11px; font-weight: 700; color: var(--color-slate);"
                       >
                         {{ dispatchLevelLabel(inc) }}
                         <template v-if="inc.level1_issue_type">· {{ inc.level1_issue_type }}</template>
@@ -2551,7 +2551,7 @@ export const CoordinatorDashboardView = {
 
                   <!-- 6. Técnico -->
                   <td style="padding: 14px 16px; vertical-align: top;">
-                    <div v-if="inc.assigned_technician?.name || inc.technician_name" style="font-weight: 500; color: var(--color-slate, #2c333f);">
+                    <div v-if="inc.assigned_technician?.name || inc.technician_name" style="font-weight: 500; color: var(--color-slate);">
                       👤 {{ inc.assigned_technician?.name || inc.technician_name }}
                     </div>
                     <span v-else style="font-size: 12px; color: #dc2626; font-weight: 600;">
@@ -2991,7 +2991,7 @@ export const CoordinatorDashboardView = {
 
           <!-- Selector de nivel operativo (RF-05.3, Módulo 36) -->
           <div style="margin-bottom: 16px;">
-            <label for="assign-dispatch-level" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="assign-dispatch-level" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Nivel operativo del despacho
             </label>
             <select
@@ -3013,7 +3013,7 @@ export const CoordinatorDashboardView = {
             data-testid="assign-restocker-suggestions"
             style="margin-bottom: 16px;"
           >
-            <div v-if="isLoadingRestockers" style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+            <div v-if="isLoadingRestockers" style="font-size: 12px; color: var(--color-ink-muted);">
               Cargando reponedores de la zona...
             </div>
             <div v-else-if="recommendedRestocker" class="vg-alert vg-alert-info">
@@ -3039,7 +3039,7 @@ export const CoordinatorDashboardView = {
             <p v-else-if="restockersError" style="font-size: 12px; color: #b91c1c;" role="alert">
               {{ restockersError }}
             </p>
-            <p v-else style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+            <p v-else style="font-size: 12px; color: var(--color-ink-muted);">
               No hay reponedores en turno para la zona de esta sede.
             </p>
             <select
@@ -3058,7 +3058,7 @@ export const CoordinatorDashboardView = {
 
           <!-- Technician Selector -->
           <div style="margin-bottom: 16px;">
-            <label for="assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Seleccionar Técnico de Campo <span style="color: #dc2626;">*</span>
             </label>
             <select
@@ -3086,8 +3086,8 @@ export const CoordinatorDashboardView = {
 
           <!-- Urgency Reclassification (Optional / Audit trail required) -->
           <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 14px; margin-bottom: 16px;">
-            <label style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
-              Reclasificar nivel de urgencia <span style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);">(Opcional)</span>
+            <label style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Reclasificar nivel de urgencia <span style="font-size: 11px; color: var(--color-ink-muted);">(Opcional)</span>
             </label>
             <div style="display: flex; gap: 8px; margin-bottom: 10px;">
               <select v-model="assignUrgencyOverride" class="vg-select" :disabled="isAssigning">
@@ -3196,7 +3196,7 @@ export const CoordinatorDashboardView = {
         <form v-if="bulkAssignSite" @submit.prevent="submitBulkAssignment" data-testid="bulk-assign-form">
           <!-- Pending incidents summary -->
           <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 16px;">
-            <div style="font-size: 12px; font-weight: 700; color: var(--color-slate, #2c333f); text-transform: uppercase; margin-bottom: 8px;">
+            <div style="font-size: 12px; font-weight: 700; color: var(--color-slate); text-transform: uppercase; margin-bottom: 8px;">
               Incidencias activas de {{ bulkAssignSite.siteCode }}<span v-if="hasAssignedIncidents()" data-testid="bulk-assign-batch-note">: se cambiará el responsable de las marcadas</span>
             </div>
             <ul style="margin: 0; padding-left: 18px; font-size: 13px; color: var(--color-ink, #000000);">
@@ -3206,7 +3206,7 @@ export const CoordinatorDashboardView = {
                 <span
                   v-if="incidentOwnerLabel(inc)"
                   data-testid="bulk-assign-row-owner"
-                  style="margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--color-ink-muted, #6c7e9d); border: 1px solid var(--color-hairline, #c8cfda); border-radius: 4px; padding: 1px 6px;"
+                  style="margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--color-ink-muted); border: 1px solid var(--color-hairline, #c8cfda); border-radius: 4px; padding: 1px 6px;"
                 >{{ incidentOwnerLabel(inc) }}</span>
               </li>
             </ul>
@@ -3249,7 +3249,7 @@ export const CoordinatorDashboardView = {
 
           <!-- Technician Selector -->
           <div style="margin-bottom: 16px;">
-            <label for="bulk-assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="bulk-assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Técnico de Campo responsable <span style="color: #dc2626;">*</span>
             </label>
             <select
@@ -3269,14 +3269,14 @@ export const CoordinatorDashboardView = {
                 {{ t.name }} ({{ t.email }})
               </option>
             </select>
-            <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
+            <div style="font-size: 12px; color: var(--color-ink-muted); margin-top: 4px;">
               El mismo técnico quedará como único responsable activo de todas las incidencias listadas (Art. II: un responsable activo por incidencia).<span v-if="hasAssignedIncidents()"> Para las incidencias ya asignadas, el cambio de responsable exige motivo justificado (RF-07.3).</span>
             </div>
           </div>
 
           <!-- Reassignment Reason (mandatory as soon as the batch carries assigned incidents, RF-07.3) -->
           <div v-if="hasAssignedIncidents()" style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 14px; margin-bottom: 16px;">
-            <label for="bulk-assign-reassignment-reason" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="bulk-assign-reassignment-reason" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Motivo de la reasignación <span style="color: #dc2626;">* (Obligatorio para las incidencias ya asignadas)</span>
             </label>
             <textarea
@@ -3289,7 +3289,7 @@ export const CoordinatorDashboardView = {
               :disabled="isBulkAssigning"
               data-testid="bulk-assign-reassignment-reason"
             ></textarea>
-            <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
+            <div style="font-size: 12px; color: var(--color-ink-muted); margin-top: 4px;">
               El cambio de responsable exige al menos 10 caracteres reales y queda registrado en el historial inmutable de cada incidencia (RF-07.3).
             </div>
           </div>
@@ -3317,8 +3317,8 @@ export const CoordinatorDashboardView = {
 
           <!-- Urgency Reclassification (Optional / Audit trail required) -->
           <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 14px; margin-bottom: 16px;">
-            <label for="bulk-assign-urgency" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
-              Reclasificar urgencia del lote <span style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);">(Opcional, afecta a todas)</span>
+            <label for="bulk-assign-urgency" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Reclasificar urgencia del lote <span style="font-size: 11px; color: var(--color-ink-muted);">(Opcional, afecta a todas)</span>
             </label>
             <select id="bulk-assign-urgency" v-model="bulkAssignUrgencyOverride" class="vg-select" :disabled="isBulkAssigning" data-testid="bulk-assign-urgency">
               <option value="">Mantener la urgencia actual de cada incidencia</option>
@@ -3379,12 +3379,12 @@ export const CoordinatorDashboardView = {
         @close="closeCancelModal"
       >
         <form v-if="selectedIncident" @submit.prevent="submitCancellation">
-          <p style="font-size: 13px; color: var(--color-slate, #2c333f); margin-bottom: 14px; line-height: 1.4;">
+          <p style="font-size: 13px; color: var(--color-slate); margin-bottom: 14px; line-height: 1.4;">
             Conforme a la Constitución (Art. III) y la norma RF-06, la incidencia pasará a estado <strong>CANCELADA</strong> conservando íntegro su historial en base de datos (borrado lógico).
           </p>
 
           <div style="margin-bottom: 16px;">
-            <label for="cancel-reason-input" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 4px;">
+            <label for="cancel-reason-input" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 4px;">
               Motivo obligatorio del descarte <span style="color: #dc2626;">*</span>
             </label>
             <textarea

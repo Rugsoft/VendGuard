@@ -22,7 +22,7 @@ declare(strict_types=1);
  *
  * La suite crea una referencia `TEST-PLN-T6HOT`, carriles numéricos y `T6HOP`
  * en la máquina 2, y restaura cualquier fila semilla que toque (zona canónica
- * `ZONA-BCN-CENTRO`, asignación del reponedor 8319 y estado de la máquina 8)
+ * `ZONA-BCN-CENTRO`, asignación de la reponedora titular y estado de la máquina 8)
  * en el `finally`. La zona se resuelve por código, nunca por un ID de secuencia.
  */
 
@@ -48,14 +48,21 @@ $repo = new PdoMachinePlanogramRepository($pdo);
 $productRepo = new PdoVendingProductRepository($pdo);
 
 const TEST_MACHINE_ID = 2;       // VEND-0102 · HOT_DRINKS
-const RESTOCKER_ONE_ZONE = 8319; // Titular de ZONA-BCN-CENTRO
-const RESTOCKER_TWO_ZONES = 8320;
+
+// Los identificadores de usuario no son estables entre re-siembras: el vínculo
+// canónico es el correo del cuadrante, igual que la zona se resuelve por código.
+$restockerOneId = (int)$pdo->query(
+    "SELECT id FROM users WHERE email = 'lucia.repostaje@vendguard.internal'"
+)->fetchColumn();
+$restockerTwoId = (int)$pdo->query(
+    "SELECT id FROM users WHERE email = 'oscar.repostaje@vendguard.internal'"
+)->fetchColumn();
 
 // La secuencia de `operational_zones` avanza con cada re-siembra: el vínculo
 // canónico es el código, tal como declara `supabase_seeds.sql`.
 $zoneId = (int)$pdo->query("SELECT id FROM operational_zones WHERE code = 'ZONA-BCN-CENTRO'")->fetchColumn();
 
-$cleanup = static function (PDO $pdo) use ($zoneId): void {
+$cleanup = static function (PDO $pdo) use ($zoneId, $restockerOneId): void {
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo): void {
         $pdo->exec("
             DELETE FROM machine_planogram_slots
@@ -65,7 +72,7 @@ $cleanup = static function (PDO $pdo) use ($zoneId): void {
     });
 
     $pdo->exec('UPDATE operational_zones SET is_active = TRUE WHERE id = ' . $zoneId);
-    $pdo->exec('UPDATE restocker_zone_assignments SET removed_at = NULL WHERE restocker_id = ' . RESTOCKER_ONE_ZONE);
+    $pdo->exec('UPDATE restocker_zone_assignments SET removed_at = NULL WHERE restocker_id = ' . $restockerOneId);
     $pdo->exec('UPDATE machines SET is_active = TRUE WHERE id = 8');
 };
 
@@ -352,7 +359,7 @@ try {
     // =================================================================
     echo "\n--- 6. Máquinas y planogramas por zona del reponedor ---\n";
 
-    $oneZoneMachines = $repo->findMachinesForRestocker(RESTOCKER_ONE_ZONE);
+    $oneZoneMachines = $repo->findMachinesForRestocker($restockerOneId);
     $oneZoneCodes = array_column($oneZoneMachines, 'code');
     $assert(
         '6.1 El reponedor de una zona ve sólo las cinco máquinas de su zona viva',
@@ -381,12 +388,12 @@ try {
 
     $assert(
         '6.4 El detalle de una máquina de su zona se resuelve; la ajena devuelve null',
-        $repo->findMachineForRestocker(1, RESTOCKER_ONE_ZONE) !== null
-        && $repo->findMachineForRestocker(4, RESTOCKER_ONE_ZONE) === null
-        && $repo->findMachineForRestocker(3, RESTOCKER_ONE_ZONE) === null
+        $repo->findMachineForRestocker(1, $restockerOneId) !== null
+        && $repo->findMachineForRestocker(4, $restockerOneId) === null
+        && $repo->findMachineForRestocker(3, $restockerOneId) === null
     );
 
-    $twoZoneMachines = $repo->findMachinesForRestocker(RESTOCKER_TWO_ZONES);
+    $twoZoneMachines = $repo->findMachinesForRestocker($restockerTwoId);
     $twoZoneCodes = array_column($twoZoneMachines, 'code');
     $twoZoneCodesSeen = array_values(array_unique(array_column($twoZoneMachines, 'zone_code')));
     sort($twoZoneCodesSeen);
@@ -399,23 +406,23 @@ try {
         json_encode([count($twoZoneMachines), $twoZoneCodesSeen])
     );
 
-    $pdo->exec('UPDATE restocker_zone_assignments SET removed_at = NOW() WHERE restocker_id = ' . RESTOCKER_ONE_ZONE);
+    $pdo->exec('UPDATE restocker_zone_assignments SET removed_at = NOW() WHERE restocker_id = ' . $restockerOneId);
     $assert(
         '6.6 Una asignación retirada deja el perímetro vacío',
-        $repo->findMachinesForRestocker(RESTOCKER_ONE_ZONE) === []
-        && $repo->findMachineForRestocker(1, RESTOCKER_ONE_ZONE) === null
+        $repo->findMachinesForRestocker($restockerOneId) === []
+        && $repo->findMachineForRestocker(1, $restockerOneId) === null
     );
-    $pdo->exec('UPDATE restocker_zone_assignments SET removed_at = NULL WHERE restocker_id = ' . RESTOCKER_ONE_ZONE);
+    $pdo->exec('UPDATE restocker_zone_assignments SET removed_at = NULL WHERE restocker_id = ' . $restockerOneId);
 
     $pdo->exec('UPDATE operational_zones SET is_active = FALSE WHERE id = ' . $zoneId);
     $assert(
         '6.7 Una zona inactiva deja el perímetro vacío',
-        $repo->findMachinesForRestocker(RESTOCKER_ONE_ZONE) === []
+        $repo->findMachinesForRestocker($restockerOneId) === []
     );
     $pdo->exec('UPDATE operational_zones SET is_active = TRUE WHERE id = ' . $zoneId);
 
     $pdo->exec('UPDATE machines SET is_active = FALSE WHERE id = 8');
-    $activeAfterMachineOff = array_column($repo->findMachinesForRestocker(RESTOCKER_ONE_ZONE), 'code');
+    $activeAfterMachineOff = array_column($repo->findMachinesForRestocker($restockerOneId), 'code');
     $pdo->exec('UPDATE machines SET is_active = TRUE WHERE id = 8');
     $assert(
         '6.8 Una máquina inactiva desaparece del listado del reponedor',
@@ -486,7 +493,7 @@ try {
     );
 
     $machineCard = null;
-    foreach ($repo->findMachinesForRestocker(RESTOCKER_ONE_ZONE) as $row) {
+    foreach ($repo->findMachinesForRestocker($restockerOneId) as $row) {
         if ($row['code'] === 'VEND-0102') {
             $machineCard = $row;
             break;
@@ -505,7 +512,7 @@ try {
         'SELECT sanitary_status FROM machines WHERE id = ' . TEST_MACHINE_ID
     )->fetchColumn();
     $pdo->exec("UPDATE machines SET sanitary_status = 'QUARANTINE' WHERE id = " . TEST_MACHINE_ID);
-    $quarantinedCard = $repo->findMachineForRestocker(TEST_MACHINE_ID, RESTOCKER_ONE_ZONE);
+    $quarantinedCard = $repo->findMachineForRestocker(TEST_MACHINE_ID, $restockerOneId);
     $pdo->exec("UPDATE machines SET sanitary_status = '" . $previousSanitaryStatus . "' WHERE id = " . TEST_MACHINE_ID);
     $assert(
         '7.6 Una máquina en cuarentena no puede reponerse (Art. II)',
@@ -590,7 +597,7 @@ try {
         $inactiveError !== null && $inactiveError->getErrorCode() === 'INVALID_PLANOGRAM_SLOT_BOUNDS'
     );
 
-    $finalCard = $repo->findMachineForRestocker(TEST_MACHINE_ID, RESTOCKER_ONE_ZONE);
+    $finalCard = $repo->findMachineForRestocker(TEST_MACHINE_ID, $restockerOneId);
     $assert(
         '7.14 Tras la visita no quedan alertas FEFO pendientes en la máquina',
         $finalCard !== null

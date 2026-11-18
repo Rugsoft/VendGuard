@@ -4271,7 +4271,7 @@ export const TechnicianRouteView = {
                 <span
                   v-if="wasEscalatedByRestocker(incident)"
                   data-testid="tech-escalated-by-restocker"
-                  style="display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid var(--color-warning-border, #d97706); border-radius: var(--radius-interactive); background-color: var(--color-warning-bg, #fffbeb); color: var(--color-warning-text, #92400e); font-size: 11px; font-weight: 700;"
+                  style="display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid var(--color-warning-border); border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text); font-size: 11px; font-weight: 700;"
                 >
                   ⚡ Escalado por Reponedor In Situ
                 </span>
