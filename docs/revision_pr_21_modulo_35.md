@@ -5,7 +5,7 @@
 - **HEAD revisado:** `09d0f3f` · **Base:** `47ba599` (sin commits nuevos en `main` desde la bifurcación)
 - **Fecha de la revisión:** 2026-11-17
 - **Alcance:** revisión estática del diff completo (76 archivos, +20.345/−155): migración 031 y convergencia con `supabase_init.sql`, dominio, servicio y repositorios, controladores y RBAC, proyección móvil, cola offline, exportación CSV y coherencia documental. Contraste con la spec v2.1, los contratos técnicos y las suites del módulo.
-- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 a PR-09 corregidos** (PR-01 a PR-04 el 2026-11-17; PR-05 a PR-09 el 2026-11-18) con sus pruebas de regresión; quedan **2 hallazgos abiertos** (ambos de prioridad baja).
+- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 a PR-10 corregidos** (PR-01 a PR-04 el 2026-11-17; PR-05 a PR-10 el 2026-11-18) con sus pruebas de regresión cuando aplican; queda **1 hallazgo abierto** (de prioridad baja).
 
 ---
 
@@ -28,7 +28,7 @@ Los defectos se concentran en los bordes del contrato: la exportación financier
 | 7 | `PR-07` | Baja | El KPI de bolsas pendientes del reponedor ignora los filtros activos | La tarjeta discrepa del listado filtrado | Corregido (2026-11-18) |
 | 8 | `PR-08` | Baja | `dumpConflict` admite cualquier `machine_id` y texto libre sin comprobar pertenencia | Ruido y posible spoofing en `audit_log` | Corregido (2026-11-18) |
 | 9 | `PR-09` | Baja | Dos comentarios de la migración 031 describen el código como `MCC-AAAA-NNNNNN` | Deriva documental frente al `CHECK`, el modelo y la spec (`NNNN`) | Corregido (2026-11-18) |
-| 10 | `PR-10` | Baja | La entrada del CHANGELOG cita un estado y un índice incorrectos | Documentación de release inexacta | Abierto |
+| 10 | `PR-10` | Baja | La entrada del CHANGELOG cita un estado y un índice incorrectos | Documentación de release inexacta | Corregido (2026-11-18) |
 | 11 | `PR-11` | Baja | El año del correlativo depende de la zona horaria del proceso PHP | En un servidor en UTC, el 1 de enero puede emitir el año anterior | Abierto |
 
 ---
@@ -263,6 +263,10 @@ La entrada de release describe un estado y un objeto que no existen con ese nomb
 
 Quitar `DEPOSITED_AT_RECEPTION` de la lista de valores del enum y corregir el nombre del índice.
 
+**Corrección aplicada (2026-11-18)**
+
+La entrada de release cita ahora el índice real `uq_machine_cash_collections_bag_seal` y enumera solo los cuatro valores de `cash_collection_status`: `SEALED_IN_ROUTE`, `DELIVERED_TO_VAULT`, `RECONCILED_OK` y `DISCREPANCY_FLAGGED`. `DEPOSITED_AT_RECEPTION` se conserva únicamente en la viñeta siguiente, donde describe la transición del expediente de reintegro. No hay cambios de esquema, código ni cifras de suites.
+
 ---
 
 ## 11. `PR-11` · El año del correlativo depende de la zona horaria del proceso
@@ -298,4 +302,4 @@ Derivar el año con `DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'))
 
 - No hay CI configurado en la PR (`statusCheckRollup` vacío): toda la evidencia de pruebas procede de ejecuciones locales.
 - La revisión original es estática sobre `09d0f3f`; cada corrección se validó con pruebas reales y la batería se reejecutó con las correcciones aplicadas.
-- Las correcciones de `PR-01` a `PR-09` se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17`, la vía independiente rechaza la visita en `3.4g`, las fechas y las carreras de unicidad tienen casos dedicados en servicio y concurrencia, la cola offline conserva las capturas ante red, sesión caducada y 5xx (213/213 en la suite de la vista), el replay acotado por máquina responde `409` sin devolver la bolsa ajena, el KPI de pendientes del reponedor respeta máquina, precinto, fechas y estado, contando solo las bolsas `SEALED_IN_ROUTE`, y el volcado de conflicto exige máquina cubierta, textos acotados y una marca temporal interpretable, auditando bajo `MACHINE`, y los comentarios de la migración 031 quedan alineados con el correlativo real `MCC-AAAA-NNNN`.
+- Las correcciones de `PR-01` a `PR-10` se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17`, la vía independiente rechaza la visita en `3.4g`, las fechas y las carreras de unicidad tienen casos dedicados en servicio y concurrencia, la cola offline conserva las capturas ante red, sesión caducada y 5xx (213/213 en la suite de la vista), el replay acotado por máquina responde `409` sin devolver la bolsa ajena, el KPI de pendientes del reponedor respeta máquina, precinto, fechas y estado, contando solo las bolsas `SEALED_IN_ROUTE`, y el volcado de conflicto exige máquina cubierta, textos acotados y una marca temporal interpretable, auditando bajo `MACHINE`, los comentarios de la migración 031 quedan alineados con el correlativo real `MCC-AAAA-NNNN`, y la entrada del CHANGELOG identifica el índice y el enum reales de la Tabla 49.
