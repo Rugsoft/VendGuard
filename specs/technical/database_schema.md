@@ -29,7 +29,7 @@ El sistema opera sobre **49 tablas de dominio** y **1 tabla de infraestructura d
 | 1 | `locations` | Sedes y ubicaciones físicas de las máquinas |
 | 2 | `machines` | Parque de máquinas expendedoras |
 | 3 | `users` | Cuentas internas de personal (Coordinadores, Técnicos) |
-| 4 | `incidents` | Registro central de averías e incidencias (52 columnas) |
+| 4 | `incidents` | Registro central de averías e incidencias (56 columnas) |
 | 5 | `incident_history` | Trazabilidad inmutable de cambios de estado de incidencias |
 | 6 | `incident_comments` | Hilo de evidencias y comentarios de incidencias |
 | 7 | `incident_replaced_parts` | Repuestos consumidos y sustituidos en intervenciones |
@@ -81,7 +81,7 @@ El sistema opera sobre **49 tablas de dominio** y **1 tabla de infraestructura d
 
 ## 3. Tipos Enumerados Nativos (ENUM)
 
-El esquema implementa 42 tipos `ENUM` nativos en PostgreSQL:
+El esquema implementa 44 tipos `ENUM` nativos en PostgreSQL:
 - `user_role`: `'COORDINATOR'`, `'TECHNICIAN'`, `'RESTOCKER'` (Módulo 31)
 - `machine_type`: `'HOT_DRINKS'`, `'COLD_DRINKS'`, `'SNACKS'`, `'PERISHABLE_FOOD'`, `'COMBO'`
 - `preventive_machine_type`: `'PERISHABLE_FOOD'`, `'HOT_DRINKS'`, `'COLD_DRINKS'`, `'SNACKS'`, `'COMBO'`
@@ -89,16 +89,18 @@ El esquema implementa 42 tipos `ENUM` nativos en PostgreSQL:
 - `incident_category`: `'TEMPERATURE_COLD'`, `'PAYMENT_SYSTEM'`, `'PRODUCT_JAM'`, `'ELECTRICAL_OFF'`, `'OTHER'`. La etiqueta funcional `THERMAL_BREAKDOWN` del Módulo 34 se persiste como `'TEMPERATURE_COLD'`; no existe `breakdown_type` en `incidents`.
 - `incident_status`: `'REGISTERED'`, `'ASSIGNED'`, `'IN_PROGRESS'`, `'PENDING_PARTS'`, `'PENDING_INFO'`, `'RESOLVED'`, `'REOPENED'`, `'CLOSED'`, `'CANCELLED'`
 - `sanitary_status`: `'OK'`, `'ATTENTION_REQUIRED'`, `'EXPIRED'`, `'QUARANTINE'`, `'SEASONAL_PAUSE'`. No existe un valor `OUT_OF_SERVICE`: el fuera de servicio funcional se representa con `machines.is_blocked_no_access = TRUE` y no hay columna `machines.status`.
-- `comment_author_type`: `'REPORTER'`, `'TECHNICIAN'`, `'COORDINATOR'`, `'SYSTEM'`
+- `comment_author_type`: `'REPORTER'`, `'TECHNICIAN'`, `'COORDINATOR'`, `'SYSTEM'`, `'RESTOCKER'` (Módulo 36)
 - `audit_entity_type`: catálogo completo en el contrato de correspondencia (§2), ampliado con `'ROOT_CAUSE_TAXONOMY'` por la migración `021_root_cause_taxonomy.sql` (Módulo 25), con `'RESTOCKER_ZONE'` por `027_restocker_role_and_zone_assignments.sql` (Módulo 31) y con `'VENDING_PRODUCT'` y `'MACHINE_PLANOGRAM'` por `028_product_catalog_and_planogram_slots.sql` (Módulo 32). Los tipos `vending_product_category` (5 categorías) y `vending_product_unit_type` (`UNIT`, `GRAMS`, `SLEEVE`) llegan con esa misma migración, con `'MACHINE_RESTOCK_VISIT'` por `030_in_situ_restock_visit_and_fefo.sql` (Módulo 34) y con `'MACHINE_CASH_COLLECTION'` por `031_cash_collection_vault_audit.sql` (Módulo 35)
-- `incident_assignment_source`: `'COORDINATOR_ASSIGN'`, `'COORDINATOR_REASSIGN'`, `'ABSENCE_COVERAGE_REASSIGN'`, `'OPPORTUNISTIC_NEW'`, `'OPPORTUNISTIC_ASSUMED'`, `'OPPORTUNISTIC_TAKEOVER'`, `'OPPORTUNISTIC_WARRANTY_REOPEN'`, `'SHIFT_HANDOVER'`, `'SANITARY_FAILSAFE_GUARD'` (Módulo 26)
-- `incident_unassignment_reason_type`: las 10 causas de cierre de tramo, de `'REASSIGNED_BY_COORDINATOR'` a `'CANCELLED'` (Módulo 26)
+- `incident_assignment_source`: los 13 canales de apertura de tramo: los 9 del Módulo 26 más `'RESTOCKER_ESCALATION_TO_SAT'`, `'RESTOCKER_SHIFT_HANDOVER'`, `'QR_AUTO_ESCALATION_TO_SAT'` y `'WARRANTY_REOPEN_ESCALATION_TO_SAT'` (Módulo 36)
+- `incident_unassignment_reason_type`: las 13 causas de cierre de tramo, de `'REASSIGNED_BY_COORDINATOR'` a `'CANCELLED'`, más `'ESCALATED_TO_SAT_BY_RESTOCKER'`, `'QR_AUTO_ESCALATED_TO_SAT'` y `'RESTOCKER_SHIFT_HANDOVER'` (Módulos 26 y 36)
 - `sla_tier`: `'STANDARD'`, `'PRIORITY_CORPORATE'`, `'CRITICAL_INFRASTRUCTURE_24_7'` (Módulo 30)
 - `product_loading_order_status`: `'PENDING_PICKING'`, `'DISPATCHED'`, `'CONFIRMED_BY_RESTOCKER'`, `'RECONCILED_AT_CLOSE'`, `'CANCELLED'` (Módulo 33)
 - `product_loading_demand_mode`: `'ALERTS_ONLY'`, `'ALL_GAPS'` (Módulo 33)
 - `product_loading_item_reason`: `'STOCKOUT_ALERT'`, `'LOW_STOCK_ALERT'`, `'ROUTE_GAP_FILL'`, `'MANUAL_ADDITION'` (Módulo 33)
 - `restock_visit_status`: `'COMPLETED'`, `'ABORTED_THERMAL_BREACH'` (Módulo 34)
 - `cash_collection_status`: `'SEALED_IN_ROUTE'`, `'DELIVERED_TO_VAULT'`, `'RECONCILED_OK'`, `'DISCREPANCY_FLAGGED'` (Módulo 35)
+- `incident_dispatch_level`: `'L1_RESTOCKER'`, `'L2_SAT'` (Módulo 36)
+- `level1_issue_type`: `'STOCKOUT_EMPTY_SLOT'`, `'MISSING_CONSUMABLES'`, `'EMPTY_CHANGE_TUBES'`, `'MINOR_SPIRAL_JAM'` (Módulo 36)
 - *Otros enumerados de dominio:* `spare_part_category`, `inspection_result`, `approval_decision`, `compensation_method`, `technician_finding`, etc.
 
 ---
@@ -134,6 +136,8 @@ Los dos enumerados del Módulo 27 nacen con la migración `023_workshop_repair_i
 ---
 
 - **Recaudación de efectivo, cambio y arqueo ciego (Módulo 35, RF-01.1, RF-01.2, D1 a D4, C1 a C3, QA 1, Art. II.2, III.1 y III.3):** `machine_cash_collections` (Tabla 49, 33 columnas) es el corte formal de bolsa precintada y su liquidación en Caja Central. Declara `collection_code` único con formato `MCC-AAAA-NNNN`, `bag_seal_code` único global (`^[A-Z0-9_-]{6,40}$` con bloque numérico de tres dígitos), la idempotencia `uq_machine_cash_collections_mutation (restocker_id, client_mutation_id)`, el vínculo nullable a la visita del Módulo 34 y al reintegro del Módulo 08, la captura en ruta (lectura del contador, lectura previa, base inicial, reseteo y cambio de tubos) y el ciclo de custodia `SEALED_IN_ROUTE` → `DELIVERED_TO_VAULT` → `RECONCILED_OK` / `DISCREPANCY_FLAGGED`. Seis claves foráneas `ON DELETE RESTRICT ON UPDATE CASCADE` y ocho `CHECK` sostienen el arqueo ciego: `chk_machine_cash_collections_counter_coherence` obliga a que `expected_cashbox_eur` sea la diferencia real del contador (o la lectura completa con reseteo, que exige nota de 20 caracteres reales), `chk_machine_cash_collections_reception_coherence` exige conserje cuando hay entrega, `chk_machine_cash_collections_vault_lifecycle` sella cada estado con sus marcas y aplica la tolerancia de ±1,00 € (justificación real por encima) y `chk_machine_cash_collections_amounts_bounds` acota las cuantías. Los índices únicos parciales `uq_machine_cash_collections_visit` y `uq_machine_cash_collections_refund` impiden dos recaudaciones de la misma visita y dos liquidaciones del mismo reintegro. `trg_no_delete_machine_cash_collections` (`prevent_hard_delete()`, Art. III.1), `trg_touch_machine_cash_collections`, `trg_guard_machine_cash_collections` (`enforce_machine_cash_collections_immutability()`, que congela la captura en ruta y el arqueo terminal) y `trg_enforce_cash_collection_sanitary_guard` (cuarentena, fuera de servicio, ticket `TEMPERATURE_COLD` vivo, visita `ABORTED_THERMAL_BREACH` y sede sin conserjería física) cierran el ciclo con `45000` (Art. II.2 y III.3). El tipo `cash_collection_status` y el valor `MACHINE_CASH_COLLECTION` de `audit_entity_type` llegan con la migración `031_cash_collection_vault_audit.sql`.
+
+- **Sinergia operativa reponedor ↔ técnico SAT (Módulo 36, RF-01 a RF-05, D1 a D4, C1 a C2, QA-AMB-01/02, QA-LIM-03, QA-CONST-01, Art. II, III.1 y IV):** `incidents` (Tabla 4) pasa a 56 columnas con `dispatch_level incident_dispatch_level NOT NULL DEFAULT 'L2_SAT'`, `level1_issue_type level1_issue_type` (nulo), `escalated_from_restocker_id BIGINT` (FK `fk_incidents_escalated_from_restocker` a `users(id)`, `ON DELETE RESTRICT ON UPDATE CASCADE`) y `escalated_to_sat_at TIMESTAMPTZ`. La guarda `chk_incidents_l1_dispatch_coherence` impone en el motor que un ticket `TEMPERATURE_COLD` o `ELECTRICAL_OFF` jamás quede en `L1_RESTOCKER` (Art. II), que el Nivel 1 no declare `PENDING_PARTS` ni `pending_parts_reason` (`QA-LIM-03`) y que el rastro de escalado sea todo-o-nada. El índice parcial `idx_incidents_dispatch_level_status (dispatch_level, status, assigned_technician_id) WHERE deleted_at IS NULL` sirve el filtro de Coordinación y la bandeja L1 del reponedor. Los tipos #43 `incident_dispatch_level` (`L1_RESTOCKER`, `L2_SAT`) y #44 `level1_issue_type` (`STOCKOUT_EMPTY_SLOT`, `MISSING_CONSUMABLES`, `EMPTY_CHANGE_TUBES`, `MINOR_SPIRAL_JAM`) elevan el catálogo a 44 enumerados y 50 columnas `ENUM`; `comment_author_type` admite `RESTOCKER`, `incident_assignment_source` suma sus 4 canales y `incident_unassignment_reason_type` sus 3 causas (`QA-AMB-02`). `offline_sync_mutations` amplía `chk_offline_sync_stop_type` con `MACHINE` y `chk_offline_sync_operation_type` con `START_L1_INCIDENT`, `RESOLVE_L1_INCIDENT` y `ESCALATE_INCIDENT_TO_SAT` (C2). Las cuatro parejas `RC-L1-*` / `SS-L1-*` se siembran de forma idempotente con su categoría determinista (`QA-AMB-01`) y el esquema permanece en 49 tablas (Art. IV). Todo llega con la migración `032_restocker_sat_synergy.sql`.
 
 ## 5. Convergencia Futura de Esquema
 

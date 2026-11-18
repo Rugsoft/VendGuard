@@ -11,7 +11,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
  * Las suites de la categoría `new_engine` necesitan lo mismo antes de certificar nada: una
  * conexión al motor nuevo por su contrato de entorno (`PG_TEST_DSN`, sin valor por defecto), un
  * esquema aislado con el DDL del repositorio aplicado y la capacidad de escribir **una fila
- * válida en cada una de las 38 tablas** respetando el grafo de claves foráneas.
+ * válida en cada una de las 49 tablas** respetando el grafo de claves foráneas.
  *
  * Lo último no se puede improvisar tabla por tabla: serían veinte fixtures escritos a mano que
  * se desincronizarían del DDL a la primera columna nueva, y el día que dejaran de insertar
@@ -509,6 +509,62 @@ final class PostgresFixtureBuilder
 
         if (!is_array($row)) {
             throw new RuntimeException("El motor nuevo no devolvió la fila insertada en «{$table}».");
+        }
+
+        return $row;
+    }
+
+    /**
+     * Siembra un expediente con su nivel de despacho y el rastro de escalado del Módulo 36.
+     *
+     * La fixture genérica deja `dispatch_level` en su defecto `'L2_SAT'` y no puede expresar
+     * la rama de Nivel 1 ni el par todo-o-nada del escalado. Las suites del módulo necesitan
+     * declararlos explícitamente para medir la guarda `chk_incidents_l1_dispatch_coherence`
+     * en lugar de la forma por defecto.
+     *
+     * @param array<string, mixed> $overrides Columna => valor; las que falten toman el defecto
+     *                                          del alta mínima (`PAYMENT_SYSTEM`, `REGISTERED`,
+     *                                          `MEDIUM`).
+     * @return array<string, mixed> la fila tal como quedó en el motor
+     */
+    public static function insertIncident(
+        PDO $pdo,
+        string $ticketCode,
+        int $locationId,
+        int $machineId,
+        array $overrides = []
+    ): array {
+        $values = $overrides + [
+            'category' => 'PAYMENT_SYSTEM',
+            'status' => 'REGISTERED',
+            'urgency' => 'MEDIUM',
+            'description' => self::FILLER_TEXT,
+        ];
+
+        $columns = array_keys($values);
+        $placeholders = array_map(static fn (string $column): string => ':' . $column, $columns);
+
+        $sql = 'INSERT INTO incidents (ticket_code, location_id, machine_id, '
+            . implode(', ', $columns)
+            . ') VALUES (:ticket_code, :location_id, :machine_id, '
+            . implode(', ', $placeholders)
+            . ') RETURNING *';
+
+        $stmt = $pdo->prepare($sql);
+        $params = [
+            ':ticket_code' => $ticketCode,
+            ':location_id' => $locationId,
+            ':machine_id' => $machineId,
+        ];
+        foreach ($values as $column => $value) {
+            $params[':' . $column] = $value;
+        }
+
+        $stmt->execute($params);
+        $row = $stmt->fetch();
+
+        if (!is_array($row)) {
+            throw new RuntimeException('El motor nuevo no devolvió el expediente insertado.');
         }
 
         return $row;
