@@ -12,6 +12,7 @@ use VendGuard\Application\Service\MachinePlanogramService;
 use VendGuard\Application\Service\MachineCashCollectionService;
 use VendGuard\Application\Service\MachineRestockVisitService;
 use VendGuard\Application\Service\ProductLoadingOrderService;
+use VendGuard\Application\Service\RestockerSatSynergyService;
 use VendGuard\Application\Service\RestockerVanStockService;
 use VendGuard\Application\Service\ShiftLifecycleService;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
@@ -21,6 +22,7 @@ use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineOutsideRestockerZonesException;
 use VendGuard\Core\Domain\Exception\MachineRestockVisitValidationException;
 use VendGuard\Core\Domain\Exception\ProductLoadingValidationException;
+use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
@@ -86,6 +88,8 @@ final class RestockerRouteController
 
     private MachineCashCollectionService $cashCollections;
 
+    private ?RestockerSatSynergyService $synergyService;
+
     public function __construct(
         ?PDO $pdo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -96,7 +100,8 @@ final class RestockerRouteController
         ?RestockerVanStockService $vanStockService = null,
         ?MachineRestockVisitService $visitService = null,
         ?MachineRestockVisitRepositoryInterface $visitRepository = null,
-        ?MachineCashCollectionService $cashCollections = null
+        ?MachineCashCollectionService $cashCollections = null,
+        ?RestockerSatSynergyService $synergyService = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $this->userRepo = $userRepo ?? new PdoUserRepository($pdo);
@@ -153,6 +158,10 @@ final class RestockerRouteController
             $this->userRepo,
             new AuditLogger(),
             $pdo
+        );
+
+        $this->synergyService = $synergyService ?? new RestockerSatSynergyService(
+            new \VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway($pdo)
         );
 
         $this->visitService = $visitService ?? new MachineRestockVisitService(
@@ -586,6 +595,101 @@ final class RestockerRouteController
     }
 
     /**
+     * POST /api/restocker/incidents/{id}/start
+     */
+    public function startLevel1(Request $request): Response
+    {
+        return $this->executeSynergy(function () use ($request): Response {
+            $body = $request->getParsedBody();
+            $mutation = isset($body['client_mutation_id'])
+                ? [
+                    'client_mutation_id' => (string)$body['client_mutation_id'],
+                    'client_occurred_at' => $body['client_occurred_at'] ?? null,
+                ]
+                : null;
+
+            return Response::json(
+                $this->synergy()->startLevel1($this->incidentRouteId($request), $this->actor($request), $mutation),
+                200,
+                'Intervención de Nivel 1 iniciada.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/incidents/{id}/resolve
+     */
+    public function resolveLevel1(Request $request): Response
+    {
+        return $this->executeSynergy(function () use ($request): Response {
+            $body = $request->getParsedBody();
+            $incident = [
+                'id' => $this->incidentRouteId($request),
+                'machine_id' => (int)($body['machine_id'] ?? 0),
+                'sanitary_status' => $body['sanitary_status'] ?? null,
+            ];
+            $resolution = [
+                'diagnosis' => $body['diagnosis'] ?? null,
+                'action' => $body['action'] ?? null,
+                'root_cause_id' => $body['root_cause_id'] ?? null,
+                'standard_solution_id' => $body['standard_solution_id'] ?? null,
+            ];
+            $mutation = isset($body['client_mutation_id'])
+                ? [
+                    'client_mutation_id' => (string)$body['client_mutation_id'],
+                    'client_occurred_at' => $body['client_occurred_at'] ?? null,
+                ]
+                : null;
+
+            return Response::json(
+                $this->synergy()->resolveLevel1($incident, $this->actor($request), $resolution, $mutation),
+                200,
+                'Nivel 1 resuelto y custodia cerrada.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/machines/{machineId}/escalate-to-sat
+     */
+    public function escalateToSat(Request $request): Response
+    {
+        return $this->executeSynergy(function () use ($request): Response {
+            $body = $request->getParsedBody();
+            $machineId = (int)($request->getRouteParam('machineId') ?? 0);
+            $mutation = isset($body['client_mutation_id'])
+                ? [
+                    'client_mutation_id' => (string)$body['client_mutation_id'],
+                    'client_occurred_at' => $body['client_occurred_at'] ?? null,
+                ]
+                : null;
+
+            return Response::json(
+                $this->synergy()->escalateToSat($machineId, $this->actor($request), $body, $mutation),
+                201,
+                'Avería escalada al SAT.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/incidents/conflict-dump
+     */
+    public function dumpIncidentConflict(Request $request): Response
+    {
+        return $this->executeSynergy(function () use ($request): Response {
+            $body = $request->getParsedBody();
+            $conflict = is_array($body['conflict'] ?? null) ? $body['conflict'] : [];
+
+            return Response::json(
+                $this->synergy()->dumpOfflineConflict($this->actor($request), $body, $conflict),
+                201,
+                'Conflicto offline archivado en auditoría.'
+            );
+        });
+    }
+
+    /**
      * POST /api/restocker/visits/conflict-dump
      *
      * Archiva en auditoría una mutación offline rechazada (`C3`, `Art. III.3`).
@@ -599,6 +703,45 @@ final class RestockerRouteController
                 'Conflicto offline archivado en auditoría.'
             );
         });
+    }
+
+    private function executeSynergy(callable $operation): Response
+    {
+        try {
+            return $operation();
+        } catch (RestockerSatSynergyValidationException $exception) {
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $exception->getField() === null ? null : ['field' => $exception->getField()]
+            );
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('VALIDATION_ERROR', $exception->getMessage(), 400);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo en la operación de sinergia L1: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo completar la operación de Nivel 1.', 500);
+        }
+    }
+
+    private function synergy(): RestockerSatSynergyService
+    {
+        if ($this->synergyService === null) {
+            throw new \RuntimeException('El servicio de sinergia no está disponible.');
+        }
+
+        return $this->synergyService;
+    }
+
+    private function incidentRouteId(Request $request): int
+    {
+        $raw = (string)($request->getRouteParam('id') ?? '');
+        if ($raw === '' || !ctype_digit($raw) || (int)$raw <= 0) {
+            throw new InvalidArgumentException('El identificador de la avería debe ser un número entero positivo.');
+        }
+
+        return (int)$raw;
     }
 
     private function executeVisit(callable $operation): Response

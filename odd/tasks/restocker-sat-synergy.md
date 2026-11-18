@@ -24,7 +24,7 @@ S4 — **Indicador «🤝 Coincidencia en Sede» (`D4`), Relevo Automático de F
 | **WU-3 / T-RSS-05** | S1–S4 | inline | `feat(synergy): add the transactional restocker sat synergy gateway` | ✅ hecho (hash en Engram) |
 | **WU-4 / T-RSS-06** | S2, S3, S4 | inline | `feat(synergy): add the restocker sat synergy service` | ✅ hecho (hash en Engram) |
 | **WU-4 / T-RSS-07** | S2, S4 | inline | `feat(synergy): integrate level 1 dispatch across qr, shifts and work hours` | ✅ hecho (hash en Engram) |
-| **WU-5 / T-RSS-08** | S1–S4 | inline | pendiente | ⏳ pendiente |
+| **WU-5 / T-RSS-08** | S1–S4 | inline | `feat(synergy): expose level 1 operations through the http api` | ✅ hecho (hash en Engram) |
 | **WU-5 / T-RSS-09** | S1–S4 | inline | pendiente | ⏳ pendiente |
 | **WU-6 / T-RSS-10** | S2, S4 | inline | pendiente | ⏳ pendiente |
 | **WU-6 / T-RSS-11** | S3, S4 | inline | pendiente | ⏳ pendiente |
@@ -48,3 +48,5 @@ S4 — **Indicador «🤝 Coincidencia en Sede» (`D4`), Relevo Automático de F
   * **Commits:** `feat(synergy): add the restocker sat synergy service` (`c3d849b`) y `fix(synergy): skip escalation notification on idempotent replay`, rama `feat/restocker-sat-synergy`, sin atribución de IA.
 * **L9 (2026-11-18 · T-RSS-07):** `QrReportService` sella la pre-clasificación `level1_issue_type` (mapeo QA-AMB-01) y persiste `dispatch_level`/`level1_issue_type` en el alta; la absorción QR grave auto-escala a `L2_SAT` vía `promoteToSatOnQrMerge()` (custodia `QR_AUTO_ESCALATED_TO_SAT` → `QR_AUTO_ESCALATION_TO_SAT`). `shouldPromoteOnReopen()` cubre la reapertura L1 < 48 h. `ShiftLifecycleService` y `TechnicianAbsenceService` relevan L1 al cerrar turno o registrar ausencia inmediata. `TechnicianWorkHoursService` computa las intervenciones L1 del reponedor. Evidencia: `RestockerSatSynergyIntegrationsTest` **27/27 aserciones, `exit=0`**; regresiones 34+46+54+12+17 = 163 (**190 verdes en total**). Sin esquemas `t_*` (suite unitaria).
   * **Commit:** `feat(synergy): integrate level 1 dispatch across qr, shifts and work hours` (rama `feat/restocker-sat-synergy`, sin atribución de IA).
+* **L10 (2026-11-18 · T-RSS-08):** Registradas seis rutas nuevas con RBAC estricto: inicio/resolución L1, escalado por máquina y volcado de conflicto del reponedor; sugerencia de reponedores y conmutación de nivel en Coordinación. Los controladores montan `RestockerSatSynergyService` sobre el gateway PDO y traducen los errores de dominio. QR y Portal pre-clasifican `level1_issue_type` y persisten `dispatch_level`/`level1_issue_type`. Evidencia: `RestockerSatSynergyApiTest` **13/13 aserciones, `exit=0`** (401/403, replay, resolución, volcado, sugerencia, L2 y opacidad QR); regresiones 34+27+105 = 166 (**179 verdes en total**). Esquema `t_rss08_api` retirado, residuo 0.
+  * **Commit:** `feat(synergy): expose level 1 operations through the http api` (rama `feat/restocker-sat-synergy`, sin atribución de IA).

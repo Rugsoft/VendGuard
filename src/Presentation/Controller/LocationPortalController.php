@@ -36,6 +36,8 @@ use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\Level1IssueType;
+use VendGuard\Core\Service\RestockerSatSynergyValidator;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
@@ -556,6 +558,22 @@ class LocationPortalController
             $photoPath = trim((string)$request->getBodyParam('photo_path'));
         }
 
+        // RF-01.2: pre-clasificación L1 del aviso de sede con el mismo
+        // predicado que QR y Coordinación.
+        $requestedCategory = IncidentCategory::fromString($categoryNormalized);
+        $rawIssueType = strtoupper(trim((string)($request->getBodyParam('level1_issue_type') ?? '')));
+        $level1IssueType = $rawIssueType !== '' ? Level1IssueType::tryFrom($rawIssueType) : null;
+        $classification = RestockerSatSynergyValidator::classifyCreation(
+            $level1IssueType,
+            $requestedCategory,
+            null,
+            $retainedMoney,
+            $request->getBodyParam('refund_method') !== null ? (string)$request->getBodyParam('refund_method') : null
+        );
+        $category = $classification['category'];
+        $dispatchLevel = $classification['dispatch_level'];
+        $level1IssueType = $classification['level1_issue_type'];
+
         // 7-10. Urgencia automática (Constitución Art. II, RF-03 / EARS 3.2-3.7), código de
         //       ticket, entidad de dominio y persistencia atómica con prevención de
         //       duplicados (RF-02), todo bajo la transaccionalidad compensatoria del archivo
@@ -565,7 +583,7 @@ class LocationPortalController
         try {
             $created = $this->compensator()->executeWithCompensatingFile(
                 (string)$uploadedPhotoPath,
-                function () use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath): Incident {
+                function () use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath, $dispatchLevel, $level1IssueType): Incident {
                     $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $category);
                     $slaTier = $location->getSlaTier();
                     $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
@@ -579,7 +597,7 @@ class LocationPortalController
                     // reintenta la unidad de trabajo completa con un código nuevo. El
                     // aviso se confirma una sola vez y la notificación se encola sólo
                     // tras el alta, así que el reintento no la duplica.
-                    return $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath, $urgency, $slaTier, $slaTargetMinutes): Incident {
+                    return $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath, $urgency, $slaTier, $slaTargetMinutes, $dispatchLevel, $level1IssueType): Incident {
                         $incident = new Incident(
                             id: null,
                             ticketCode: $ticketCode,
@@ -596,7 +614,9 @@ class LocationPortalController
                             photoPath: $photoPath,
                             reporterEmail: $reporterEmail,
                             slaTierSnapshot: $slaTier,
-                            slaTargetMinutes: $slaTargetMinutes
+                            slaTargetMinutes: $slaTargetMinutes,
+                            dispatchLevel: $dispatchLevel,
+                            level1IssueType: $level1IssueType
                         );
 
                         $enqueuer = $this->notifications();

@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use InvalidArgumentException;
+use Throwable;
+use VendGuard\Application\Service\RestockerSatSynergyService;
+use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
+
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
 use VendGuard\Core\Domain\Service\CustodyChannelResolver;
@@ -139,6 +144,8 @@ class CoordinatorController
     /** Cierre con trazabilidad de repuestos y taxonomía (Módulos 06 y 25); perezoso. */
     private ?SparePartTraceabilityService $traceabilityService = null;
 
+    private ?RestockerSatSynergyService $synergyService = null;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -158,7 +165,8 @@ class CoordinatorController
         ?SparePartRequestRepositoryInterface $sparePartRequestRepo = null,
         ?VanStockRepositoryInterface $vanStockRepo = null,
         ?SparePartTraceabilityService $traceabilityService = null,
-        ?TechnicianAbsenceRepositoryInterface $absenceRepo = null
+        ?TechnicianAbsenceRepositoryInterface $absenceRepo = null,
+        ?RestockerSatSynergyService $synergyService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->absenceRepo = $absenceRepo;
@@ -189,6 +197,80 @@ class CoordinatorController
         $this->sparePartRequestRepo = $sparePartRequestRepo;
         $this->vanStockRepo = $vanStockRepo;
         $this->traceabilityService = $traceabilityService;
+        $this->synergyService = $synergyService;
+    }
+
+    /**
+     * GET /api/coordinator/incidents/{id}/suggested-restockers
+     */
+    public function getSuggestedRestockers(Request $request): Response
+    {
+        $incidentId = (int)($request->getRouteParam('id') ?? 0);
+        if ($incidentId <= 0) {
+            return Response::error('INVALID_INCIDENT_ID', 'El identificador de la avería no es válido.', 400);
+        }
+
+        return $this->executeSynergy(fn (): Response => Response::json(
+            $this->synergy()->suggestRestockers($incidentId),
+            200
+        ));
+    }
+
+    /**
+     * POST /api/coordinator/incidents/{id}/dispatch-level
+     */
+    public function dispatchLevel(Request $request): Response
+    {
+        $incidentId = (int)($request->getRouteParam('id') ?? 0);
+        $incident = $incidentId > 0 ? $this->incidentRepo->findById($incidentId) : null;
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', 'La avería no existe.', 404);
+        }
+
+        $assigneeId = (int)($request->getBodyParam('assignee_id') ?? 0);
+        $assignee = $assigneeId > 0 ? $this->userRepo->findById($assigneeId) : null;
+        if ($assignee === null) {
+            return Response::error('ASSIGNEE_NOT_FOUND', 'El operario indicado no existe o está inactivo.', 422);
+        }
+
+        $actor = [
+            'id' => (int)($request->getAttribute('user_id') ?? 0),
+            'name' => (string)($request->getAttribute('user_name') ?? 'Coordinación'),
+            'role' => 'COORDINATOR',
+        ];
+
+        return $this->executeSynergy(fn (): Response => Response::json(
+            $this->synergy()->dispatchLevel(
+                ['id' => (int)$incident->getId(), 'category' => $incident->getCategory()->value],
+                (string)($request->getBodyParam('dispatch_level') ?? ''),
+                ['id' => (int)$assignee->getId(), 'role' => $assignee->getRole()->value, 'is_active' => $assignee->isActive()],
+                $actor
+            ),
+            200,
+            'Nivel operativo actualizado.'
+        ));
+    }
+
+    private function synergy(): RestockerSatSynergyService
+    {
+        return $this->synergyService ??= new RestockerSatSynergyService(
+            new \VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway()
+        );
+    }
+
+    private function executeSynergy(callable $operation): Response
+    {
+        try {
+            return $operation();
+        } catch (RestockerSatSynergyValidationException $exception) {
+            return Response::error($exception->getErrorCode(), $exception->getMessage(), $exception->getHttpStatusCode());
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('VALIDATION_ERROR', $exception->getMessage(), 400);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo en la sinergia L1 de coordinación: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo completar la operación de Nivel 1.', 500);
+        }
     }
 
     /**

@@ -136,6 +136,8 @@ final class RestockerSatSynergyService
         );
         $resolution['diagnosis'] = $texts['diagnosis'];
         $resolution['action'] = $texts['action'];
+        $resolution['resolution_diagnosis'] = $texts['diagnosis'];
+        $resolution['resolution_action'] = $texts['action'];
 
         return $this->gateway->resolveLevel1($incidentId, $actor, $resolution, $mutation);
     }
