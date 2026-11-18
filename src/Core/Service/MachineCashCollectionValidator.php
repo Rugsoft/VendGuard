@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Core\Service;
 
+use DateTimeImmutable;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
 use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
 use VendGuard\Core\Domain\Model\MachineCashCollection;
@@ -59,6 +60,11 @@ final class MachineCashCollectionValidator
     public const MAX_RECEPTION_CASH_DELIVERED_EUR = 10.00;
     public const MIN_RECEPTIONIST_NAME_LENGTH = 3;
     public const MAX_RECEPTIONIST_NAME_LENGTH = 120;
+
+    /** Cotas del volcado de conflicto offline (C4, Art. III.3). */
+    public const MAX_CONFLICT_REASON_LENGTH = 500;
+    public const MAX_CONFLICT_MUTATION_ID_LENGTH = 64;
+    public const CONFLICT_MUTATION_ID_PATTERN = '/^[A-Za-z0-9._:-]+$/';
 
     /** Rigor textual de las notas justificadas (Art. V.1). */
     public const MIN_COUNTER_RESET_NOTES_LENGTH = 20;
@@ -153,6 +159,66 @@ final class MachineCashCollectionValidator
         }
 
         return $clean;
+    }
+
+    /**
+     * Normaliza el volcado de un conflicto offline (`C4`, Art. III.3).
+     *
+     * El evento de auditoría no puede convertirse en un vertedero de texto
+     * libre: la mutación exige el mismo rango de 6 a 64 caracteres que la
+     * columna `client_mutation_id`, el precinto opcional conserva el patrón
+     * global `C1`, el motivo se acota a 500 caracteres y la marca del cliente
+     * debe ser interpretable como fecha. Un campo ausente que no sea esencial
+     * se conserva como `NULL`.
+     *
+     * @param array<string, mixed> $payload
+     *
+     * @return array{
+     *     bag_seal_code: string|null,
+     *     client_mutation_id: string,
+     *     reason: string|null,
+     *     offline_created_at: string|null
+     * }
+     *
+     * @throws MachineCashCollectionValidationException
+     */
+    public static function normalizeConflictDumpPayload(array $payload): array
+    {
+        $mutationId = trim((string)($payload['client_mutation_id'] ?? ''));
+        $mutationLength = mb_strlen($mutationId, 'UTF-8');
+        if ($mutationLength < MachineCashCollection::MIN_MUTATION_ID_LENGTH
+            || $mutationLength > self::MAX_CONFLICT_MUTATION_ID_LENGTH
+            || preg_match(self::CONFLICT_MUTATION_ID_PATTERN, $mutationId) !== 1) {
+            throw MachineCashCollectionValidationException::invalidConflictMutationId($mutationLength);
+        }
+
+        $rawSeal = trim((string)($payload['bag_seal_code'] ?? ''));
+        $bagSealCode = $rawSeal === '' ? null : self::normalizeBagSeal($rawSeal);
+
+        $reason = self::normalizeText($payload['reason'] ?? null);
+        if ($reason !== null && mb_strlen($reason, 'UTF-8') > self::MAX_CONFLICT_REASON_LENGTH) {
+            throw MachineCashCollectionValidationException::invalidConflictReason(
+                mb_strlen($reason, 'UTF-8')
+            );
+        }
+
+        $offlineCreatedAt = self::normalizeText($payload['offline_created_at'] ?? null);
+        if ($offlineCreatedAt !== null) {
+            try {
+                new DateTimeImmutable($offlineCreatedAt);
+            } catch (\Exception $exception) {
+                throw MachineCashCollectionValidationException::invalidConflictOfflineCreatedAt(
+                    $offlineCreatedAt
+                );
+            }
+        }
+
+        return [
+            'bag_seal_code' => $bagSealCode,
+            'client_mutation_id' => $mutationId,
+            'reason' => $reason,
+            'offline_created_at' => $offlineCreatedAt,
+        ];
     }
 
     /**

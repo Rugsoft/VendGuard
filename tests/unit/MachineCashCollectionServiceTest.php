@@ -954,9 +954,89 @@ try {
     $event = $auditLog->events[count($auditLog->events) - 1];
     assertCash(
         $event->getAction() === 'OFFLINE_CASH_COLLECTION_CONFLICT_DUMP'
-            && $event->getEntityType() === 'MACHINE_CASH_COLLECTION'
-            && $event->getEntityId() === 1,
-        'El volcado usa la acción y la entidad auditables del contrato (Art. III.3)'
+            && $event->getEntityType() === AuditEvent::ENTITY_MACHINE
+            && $event->getEntityId() === 1
+            && ($event->getNewState()['bag_seal_code'] ?? null) === 'BAG-2026-060007',
+        'El volcado usa la acción, la entidad máquina y el precinto normalizado (Art. III.3)'
+    );
+
+    assertCashRejects(
+        static fn () => $service->dumpConflict([
+            'machine_id' => 999,
+            'client_mutation_id' => 'mutation-ccv06-conflict-missing',
+            'bag_seal_code' => 'BAG-2026-060008',
+            'reason' => 'La máquina ya no existe al sincronizar.',
+            'offline_created_at' => '2026-11-10T09:00:00+01:00',
+        ], $restocker),
+        MachineCashCollectionValidationException::MACHINE_NOT_FOUND,
+        404
+    );
+
+    assertCashRejects(
+        static fn () => $service->dumpConflict([
+            'machine_id' => 2,
+            'client_mutation_id' => 'mutation-ccv06-conflict-uncovered',
+            'bag_seal_code' => 'BAG-2026-060009',
+            'reason' => 'La máquina quedó fuera de las zonas del reponedor.',
+            'offline_created_at' => '2026-11-10T09:00:00+01:00',
+        ], $restocker),
+        MachineCashCollectionValidationException::MACHINE_OUTSIDE_RESTOCKER_ZONES,
+        403
+    );
+
+    assertCashRejects(
+        static fn () => $service->dumpConflict([
+            'machine_id' => 1,
+            'client_mutation_id' => 'mutation-ccv06-conflict-seal',
+            'bag_seal_code' => 'SIN DIGITOS',
+            'reason' => 'El precinto llegó corrupto desde el móvil.',
+            'offline_created_at' => '2026-11-10T09:00:00+01:00',
+        ], $restocker),
+        MachineCashCollectionValidationException::INVALID_BAG_SEAL_CODE,
+        422
+    );
+
+    $reasonError = assertCashRejects(
+        static fn () => $service->dumpConflict([
+            'machine_id' => 1,
+            'client_mutation_id' => 'mutation-ccv06-conflict-reason',
+            'bag_seal_code' => 'BAG-2026-060010',
+            'reason' => str_repeat('x', 501),
+            'offline_created_at' => '2026-11-10T09:00:00+01:00',
+        ], $restocker),
+        MachineCashCollectionValidationException::VALIDATION_ERROR,
+        422
+    );
+
+    $mutationError = assertCashRejects(
+        static fn () => $service->dumpConflict([
+            'machine_id' => 1,
+            'client_mutation_id' => 'bad id',
+            'bag_seal_code' => 'BAG-2026-060011',
+            'reason' => 'La mutación llegó sin formato válido.',
+            'offline_created_at' => '2026-11-10T09:00:00+01:00',
+        ], $restocker),
+        MachineCashCollectionValidationException::VALIDATION_ERROR,
+        422
+    );
+
+    $timestampError = assertCashRejects(
+        static fn () => $service->dumpConflict([
+            'machine_id' => 1,
+            'client_mutation_id' => 'mutation-ccv06-conflict-date',
+            'bag_seal_code' => 'BAG-2026-060012',
+            'reason' => 'La marca offline llegó corrupta.',
+            'offline_created_at' => 'no-es-fecha',
+        ], $restocker),
+        MachineCashCollectionValidationException::VALIDATION_ERROR,
+        422
+    );
+
+    assertCash(
+        $reasonError->getField() === 'reason'
+            && $mutationError->getField() === 'client_mutation_id'
+            && $timestampError->getField() === 'offline_created_at',
+        'Los rechazos del volcado señalan el campo culpable (C4)'
     );
 
     assertCashRejects(

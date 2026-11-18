@@ -619,6 +619,53 @@ try {
             && ($conflictData['action'] ?? '') === 'OFFLINE_CASH_COLLECTION_CONFLICT_DUMP'
     );
 
+    $missingMachineConflict = $call('POST', '/api/restocker/cash-collections/conflict-dump', [
+        'machine_id' => 999999,
+        'client_mutation_id' => 'ccv08-cash-conflict-missing-0001',
+        'bag_seal_code' => 'BAG-CCV8-0014',
+        'reason' => 'La máquina ya no existe al sincronizar.',
+        'offline_created_at' => '2026-11-10T09:00:00+01:00',
+    ], $ownerToken);
+    $assert(
+        '3.7a Un volcado sobre una máquina inexistente responde 404 MACHINE_NOT_FOUND (C4)',
+        $missingMachineConflict->getStatusCode() === 404
+            && $errorCode($missingMachineConflict) === 'MACHINE_NOT_FOUND',
+        $errorCode($missingMachineConflict)
+    );
+
+    $pdo->prepare('UPDATE operational_zones SET is_active = FALSE WHERE id = :id')
+        ->execute([':id' => $zoneId]);
+    $outsideConflict = $call('POST', '/api/restocker/cash-collections/conflict-dump', [
+        'machine_id' => $machineId,
+        'client_mutation_id' => 'ccv08-cash-conflict-outside-0001',
+        'bag_seal_code' => 'BAG-CCV8-0015',
+        'reason' => 'La zona quedó inactiva antes de archivar el conflicto.',
+        'offline_created_at' => '2026-11-10T09:00:00+01:00',
+    ], $ownerToken);
+    $pdo->prepare('UPDATE operational_zones SET is_active = TRUE WHERE id = :id')
+        ->execute([':id' => $zoneId]);
+    $assert(
+        '3.7b Un volcado fuera de las zonas vivas responde 403 MACHINE_OUTSIDE_RESTOCKER_ZONES (C4)',
+        $outsideConflict->getStatusCode() === 403
+            && $errorCode($outsideConflict) === 'MACHINE_OUTSIDE_RESTOCKER_ZONES',
+        $errorCode($outsideConflict)
+    );
+
+    $invalidTimestampConflict = $call('POST', '/api/restocker/cash-collections/conflict-dump', [
+        'machine_id' => $machineId,
+        'client_mutation_id' => 'ccv08-cash-conflict-date-0001',
+        'bag_seal_code' => 'BAG-CCV8-0016',
+        'reason' => 'La marca offline llegó corrupta.',
+        'offline_created_at' => 'no-es-fecha',
+    ], $ownerToken);
+    $assert(
+        '3.7c Un offline_created_at ilegible responde 422 VALIDATION_ERROR con su campo (C4)',
+        $invalidTimestampConflict->getStatusCode() === 422
+            && $errorCode($invalidTimestampConflict) === 'VALIDATION_ERROR'
+            && (($json($invalidTimestampConflict)['error']['details']['field'] ?? '') === 'offline_created_at'),
+        $errorCode($invalidTimestampConflict)
+    );
+
     $myRouteAfter = $call('GET', '/api/restocker/my-route', [], $ownerToken);
     $routeAfterData = $data($myRouteAfter);
     $assert(

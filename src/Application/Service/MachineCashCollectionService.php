@@ -651,9 +651,22 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
         $restocker = $this->requireActor($actor, 'RESTOCKER');
         $machineId = $this->requirePositiveId(['id' => $payload['machine_id'] ?? null]);
 
+        $machine = $this->gateway->lockMachineContext($machineId, $restocker['id']);
+        if ($machine === null) {
+            throw MachineCashCollectionValidationException::machineNotFound($machineId);
+        }
+        if (!(bool)($machine['is_covered'] ?? false)) {
+            throw MachineCashCollectionValidationException::machineOutsideRestockerZones(
+                $machineId,
+                $restocker['id']
+            );
+        }
+
+        $conflict = MachineCashCollectionValidator::normalizeConflictDumpPayload($payload);
+
         $event = new AuditEvent(
             null,
-            AuditEvent::ENTITY_MACHINE_CASH_COLLECTION,
+            AuditEvent::ENTITY_MACHINE,
             $machineId,
             self::ACTION_OFFLINE_CASH_COLLECTION_CONFLICT_DUMP,
             $restocker['id'],
@@ -662,10 +675,11 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
             null,
             [
                 'machine_id' => $machineId,
-                'bag_seal_code' => isset($payload['bag_seal_code']) ? strtoupper(trim((string)$payload['bag_seal_code'])) : null,
-                'client_mutation_id' => isset($payload['client_mutation_id']) ? trim((string)$payload['client_mutation_id']) : null,
-                'reason' => isset($payload['reason']) ? trim((string)$payload['reason']) : null,
-                'offline_created_at' => isset($payload['offline_created_at']) ? trim((string)$payload['offline_created_at']) : null,
+                'machine_code' => (string)($machine['machine_code'] ?? ''),
+                'bag_seal_code' => $conflict['bag_seal_code'],
+                'client_mutation_id' => $conflict['client_mutation_id'],
+                'reason' => $conflict['reason'],
+                'offline_created_at' => $conflict['offline_created_at'],
             ]
         );
 

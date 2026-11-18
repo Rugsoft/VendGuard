@@ -394,6 +394,48 @@ final class MachineCashCollectionValidationException extends DomainException
         );
     }
 
+    public static function invalidConflictMutationId(int $length): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf(
+                'El client_mutation_id del volcado offline debe tener entre 6 y 64 caracteres y usar solo letras, números, punto, guion, guion bajo o dos puntos; se recibieron %d (C4, Art. III.3).',
+                $length
+            ),
+            422,
+            'client_mutation_id',
+            ['reason' => 'INVALID_FORMAT', 'length' => $length, 'maximum_length' => 64]
+        );
+    }
+
+    public static function invalidConflictReason(int $length): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf(
+                'El motivo del volcado offline no puede superar los 500 caracteres reales; se recibieron %d (C4, Art. III.3).',
+                $length
+            ),
+            422,
+            'reason',
+            ['reason' => 'TOO_LONG', 'length' => $length, 'maximum_length' => 500]
+        );
+    }
+
+    public static function invalidConflictOfflineCreatedAt(string $value): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf(
+                'offline_created_at no es una marca temporal interpretable («%s»): use ISO 8601 con zona horaria (C4, Art. III.3).',
+                $value
+            ),
+            422,
+            'offline_created_at',
+            ['reason' => 'INVALID_FORMAT', 'offline_created_at' => $value]
+        );
+    }
+
     public static function collectedAtInFuture(string $value, string $maxAllowed): self
     {
         return new self(

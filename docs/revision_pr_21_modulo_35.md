@@ -5,7 +5,7 @@
 - **HEAD revisado:** `09d0f3f` · **Base:** `47ba599` (sin commits nuevos en `main` desde la bifurcación)
 - **Fecha de la revisión:** 2026-11-17
 - **Alcance:** revisión estática del diff completo (76 archivos, +20.345/−155): migración 031 y convergencia con `supabase_init.sql`, dominio, servicio y repositorios, controladores y RBAC, proyección móvil, cola offline, exportación CSV y coherencia documental. Contraste con la spec v2.1, los contratos técnicos y las suites del módulo.
-- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 a PR-07 corregidos** (PR-01 a PR-04 el 2026-11-17; PR-05 a PR-07 el 2026-11-18) con sus pruebas de regresión; quedan **4 hallazgos abiertos** (todos de prioridad baja).
+- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 a PR-08 corregidos** (PR-01 a PR-04 el 2026-11-17; PR-05 a PR-08 el 2026-11-18) con sus pruebas de regresión; quedan **3 hallazgos abiertos** (todos de prioridad baja).
 
 ---
 
@@ -26,7 +26,7 @@ Los defectos se concentran en los bordes del contrato: la exportación financier
 | 5 | `PR-05` | Media | La cola offline marca como conflicto irreversible cualquier 401, 403 o 5xx | Capturas válidas quedan bloqueadas tras caducar la sesión o un fallo transitorio | Corregido (2026-11-18) |
 | 6 | `PR-06` | Baja | El replay idempotente no está acotado por máquina | Un identificador reutilizado devuelve otra bolsa con 200 y pierde la captura | Corregido (2026-11-18) |
 | 7 | `PR-07` | Baja | El KPI de bolsas pendientes del reponedor ignora los filtros activos | La tarjeta discrepa del listado filtrado | Corregido (2026-11-18) |
-| 8 | `PR-08` | Baja | `dumpConflict` admite cualquier `machine_id` y texto libre sin comprobar pertenencia | Ruido y posible spoofing en `audit_log` | Abierto |
+| 8 | `PR-08` | Baja | `dumpConflict` admite cualquier `machine_id` y texto libre sin comprobar pertenencia | Ruido y posible spoofing en `audit_log` | Corregido (2026-11-18) |
 | 9 | `PR-09` | Baja | Dos comentarios de la migración 031 describen el código como `MCC-AAAA-NNNNNN` | Deriva documental frente al `CHECK`, el modelo y la spec (`NNNN`) | Abierto |
 | 10 | `PR-10` | Baja | La entrada del CHANGELOG cita un estado y un índice incorrectos | Documentación de release inexacta | Abierto |
 | 11 | `PR-11` | Baja | El año del correlativo depende de la zona horaria del proceso PHP | En un servidor en UTC, el 1 de enero puede emitir el año anterior | Abierto |
@@ -217,6 +217,10 @@ Cualquier reponedor puede generar eventos de auditoría con identificadores de m
 
 Comprobar que la máquina existe y está cubierta por sus zonas; acotar los textos a las longitudes del contrato y validar `offline_created_at` como marca temporal. Si el evento no representa una recaudación concreta, usar la entidad máquina.
 
+**Corrección aplicada (2026-11-18)**
+
+`dumpConflict()` comprueba la máquina con `lockMachineContext()` —`404 MACHINE_NOT_FOUND` si no existe o está inactiva, `403 MACHINE_OUTSIDE_RESTOCKER_ZONES` si no está cubierta—, normaliza el payload en `MachineCashCollectionValidator::normalizeConflictDumpPayload()` (`client_mutation_id` de 6 a 64 caracteres con alfabeto seguro, precinto opcional con el patrón `C1`, `reason` de hasta 500 caracteres y `offline_created_at` interpretable) y audita el hecho bajo `AuditEvent::ENTITY_MACHINE` con el `machine_code`. La suite del servicio añade siete aserciones (67/67) y la de API tres (50/50), cubriendo 404, 403, precinto inválido y los campos `reason`, `client_mutation_id` y `offline_created_at`.
+
 ---
 
 ## 9. `PR-09` · Comentarios obsoletos del correlativo en la migración
@@ -279,15 +283,15 @@ Derivar el año con `DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'))
 ## Verificado y correcto
 
 - **Integración con `main`:** `MERGEABLE`/`CLEAN`, sin commits nuevos en la base desde la bifurcación y sin archivos de solape; la migración 031 es la siguiente libre tras la 030.
-- **Cifras:** batería hermética **436 suites · 16.800 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.186 aserciones · 0 fallos**. Suites del módulo: API 47/47, constitucional 25/25, concurrencia 10/10, layout 32/32, esquema 46/46, repositorio 47/47, dominio 123/123, validador 114/114 y servicio 60/60.
+- **Cifras:** batería hermética **436 suites · 16.807 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.189 aserciones · 0 fallos**. Suites del módulo: API 50/50, constitucional 25/25, concurrencia 10/10, layout 32/32, esquema 46/46, repositorio 47/47, dominio 123/123, validador 114/114 y servicio 67/67.
 - **Opacidad:** el DTO del reponedor publica 18 campos y omite las cinco claves del Arqueo Ciego; el recibo de conserjería expone exactamente nueve campos, sin precinto, PIN ni importes calculados.
 - **Integridad:** ocho `CHECK`, inmutabilidad por etapas con `45000`, guarda sanitaria en aplicación y motor, reserva del código con cerrojo transaccional y arqueo concurrente protegido por `UPDATE` condicionado.
 - **Seguridad:** rutas con `COORDINATOR`/`RESTOCKER`, CSV neutralizado contra fórmulas, sin secretos ni archivos de entorno en el diff.
-- **Documentación:** la matriz de trazabilidad actualizó las filas de la suite de API (47/47 y 10/10), del servicio (60/60), del repositorio (47/47) y de la vista móvil (213/213); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
+- **Documentación:** la matriz de trazabilidad actualizó las filas de la suite de API (50/50 y 10/10), del servicio (67/67), del repositorio (47/47) y de la vista móvil (213/213); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
 - **Cota inferior:** se usa la última captura de la máquina; el puerto `lockRestockVisit()` no expone la hora de inicio de la visita, así que no se emplea como cota adicional.
 
 ## Límites de esta revisión
 
 - No hay CI configurado en la PR (`statusCheckRollup` vacío): toda la evidencia de pruebas procede de ejecuciones locales.
 - La revisión original es estática sobre `09d0f3f`; cada corrección se validó con pruebas reales y la batería se reejecutó con las correcciones aplicadas.
-- Las correcciones de `PR-01` a `PR-07` se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17`, la vía independiente rechaza la visita en `3.4g`, las fechas y las carreras de unicidad tienen casos dedicados en servicio y concurrencia, la cola offline conserva las capturas ante red, sesión caducada y 5xx (213/213 en la suite de la vista), el replay acotado por máquina responde `409` sin devolver la bolsa ajena y el KPI de pendientes del reponedor respeta máquina, precinto, fechas y estado, contando solo las bolsas `SEALED_IN_ROUTE`.
+- Las correcciones de `PR-01` a `PR-08` se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17`, la vía independiente rechaza la visita en `3.4g`, las fechas y las carreras de unicidad tienen casos dedicados en servicio y concurrencia, la cola offline conserva las capturas ante red, sesión caducada y 5xx (213/213 en la suite de la vista), el replay acotado por máquina responde `409` sin devolver la bolsa ajena, el KPI de pendientes del reponedor respeta máquina, precinto, fechas y estado, contando solo las bolsas `SEALED_IN_ROUTE`, y el volcado de conflicto exige máquina cubierta, textos acotados y una marca temporal interpretable, auditando bajo `MACHINE`.
