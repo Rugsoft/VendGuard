@@ -20,18 +20,27 @@ use VendGuard\Presentation\Http\Response;
  * exige el código de sede y la clave de centro (hallazgo S-4): el código de sede por
  * sí solo —en cualquier cabecera— ya no identifica a nadie. Si no se aporta un token
  * de sede válido, rechaza con HTTP 401 Unauthorized.
+ *
+ * **Resolución perezosa de sus colaboradores.** `AuthService` y `PdoLocationRepository`
+ * construyen repositorios PDO, es decir, abren conexión con el motor. Este middleware lo
+ * instancia `AppRouter::create()` al montar la tabla de rutas, de modo que resolverlos en
+ * el constructor hacía que **el arranque del enrutador** dependiera de que el motor
+ * respondiera: con la base caída, ninguna ruta llegaba a existir —ni siquiera las sondas
+ * de salud— y el proceso emitía un fatal en HTML en vez de un `503`. Se resuelven en el
+ * primer uso, y sólo el camino que de verdad los necesita los paga. Mismo criterio y
+ * mismo motivo que en `CronAuthMiddleware`.
  */
 class SiteAuthMiddleware
 {
-    private AuthService $authService;
-    private LocationRepositoryInterface $locationRepo;
+    private ?AuthService $authService;
+    private ?LocationRepositoryInterface $locationRepo;
 
     public function __construct(
         ?AuthService $authService = null,
         ?LocationRepositoryInterface $locationRepo = null
     ) {
-        $this->authService = $authService ?? new AuthService();
-        $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
+        $this->authService = $authService;
+        $this->locationRepo = $locationRepo;
     }
 
     /**
@@ -51,7 +60,7 @@ class SiteAuthMiddleware
         }
 
         // 2. Verificar firma y expiración del token de sede
-        $payload = $this->authService->validateSiteToken($bearerToken);
+        $payload = $this->authService()->validateSiteToken($bearerToken);
         if ($payload === null) {
             return Response::error(
                 'UNAUTHORIZED',
@@ -60,7 +69,7 @@ class SiteAuthMiddleware
             );
         }
 
-        $location = $this->locationRepo->findById((int)$payload['location_id']);
+        $location = $this->locationRepo()->findById((int)$payload['location_id']);
 
         if ($location === null) {
             return Response::error(
@@ -76,5 +85,24 @@ class SiteAuthMiddleware
         $request->setAttribute('location_id', $location->getId());
 
         return $next($request);
+    }
+
+    /**
+     * Validador de sesiones de sede, resuelto en el primer uso.
+     *
+     * No se construye en el constructor porque construirlo abre conexión con el motor (ver
+     * el bloque de la clase): el arranque del enrutador no puede depender del motor.
+     */
+    private function authService(): AuthService
+    {
+        return $this->authService ??= new AuthService();
+    }
+
+    /**
+     * Repositorio de sedes, resuelto en el primer uso y por el mismo motivo.
+     */
+    private function locationRepo(): LocationRepositoryInterface
+    {
+        return $this->locationRepo ??= new PdoLocationRepository();
     }
 }

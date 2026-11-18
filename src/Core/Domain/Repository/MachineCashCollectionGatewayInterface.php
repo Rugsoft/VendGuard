@@ -1,0 +1,70 @@
+<?php
+
+declare(strict_types=1);
+
+namespace VendGuard\Core\Domain\Repository;
+
+/**
+ * MachineCashCollectionGatewayInterface
+ *
+ * Puerto de persistencia de los cerrojos que la recaudación necesita fuera de
+ * la Tabla 49 (Módulo 35; RF-02.1, RF-03.1, D3, D4, C4, Art. II.2, Art. V.4).
+ *
+ * El servicio pide la fotografía bloqueada de la máquina (estado sanitario,
+ * cobertura territorial, conserjería física y snapshots del reponedor), la
+ * visita in situ vinculada y el expediente de reintegro que se va a liquidar en
+ * conserjería. También resuelve la lectura no bloqueante del bootstrap móvil:
+ * qué máquinas de la ruta tienen conserjería física y qué reintegros
+ * `EN_MANO_SEDE` están pendientes. La implementación PDO concentra el acceso y
+ * no conoce ninguna regla de negocio: quien decide es el servicio.
+ *
+ * Claves del contexto de máquina:
+ *   `id`, `machine_code`, `location_id`, `sanitary_status`,
+ *   `is_out_of_service`, `is_covered`, `has_open_thermal_breakdown`,
+ *   `has_physical_reception`, `restocker_name`, `restocker_code`.
+ */
+interface MachineCashCollectionGatewayInterface
+{
+    /**
+     * Bloquea la máquina del reponedor y devuelve sus hechos de cerrojo.
+     *
+     * `null` significa que la máquina no existe, está inactiva o dada de baja.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function lockMachineContext(int $machineId, int $restockerId): ?array;
+
+    /**
+     * Bloquea la visita in situ que se va a vincular al corte.
+     *
+     * `null` cuando la visita no existe o pertenece a otra máquina.
+     *
+     * @return array{id: int, machine_id: int, restocker_id: int, status: string}|null
+     */
+    public function lockRestockVisit(int $visitId, int $machineId): ?array;
+
+    /**
+     * Bloquea el expediente de reintegro antes de liquidarlo en conserjería.
+     *
+     * `null` cuando el expediente no existe.
+     *
+     * @return array{id: int, machine_id: int, status: string, compensation_method: string, claimed_amount: float, is_active: bool}|null
+     */
+    public function lockRefundForReception(int $refundRequestId): ?array;
+
+    /**
+     * Contexto de efectivo no bloqueante para `GET /api/restocker/my-route`.
+     *
+     * Devuelve, por una parte, el mapa `machine_id => has_physical_reception`
+     * de las máquinas de las zonas vivas del reponedor y, por otra, los
+     * reintegros `EN_MANO_SEDE` pendientes de inspección cuya sede sí tiene
+     * conserjería física. Los reintegros se proyectan sin `pickup_pin`, sin
+     * datos de contacto y sin PII del reclamante (`D3`, `Art. V.4`).
+     *
+     * @return array{
+     *     machines: array<int, bool>,
+     *     refunds: list<array{id: int, machine_id: int, machine_code: string, claimed_amount: float, created_at: string}>
+     * }
+     */
+    public function routeBootstrap(int $restockerId): array;
+}

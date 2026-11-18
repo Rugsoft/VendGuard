@@ -115,6 +115,12 @@ final class TestDataCleaner
         // pasa por la ventana de purga del arnés (Art. III.1).
         'machine_restock_visit_items',
         'machine_restock_visits',
+        // Recaudaciones de efectivo (Módulo 35): cuelgan de `machines`, `users`,
+        // la visita in situ y el reintegro —maestras y raíz protegidas—, de modo
+        // que el grafo desde `incidents` no las alcanza. Entran como raíz propia,
+        // antes que la visita por su FK RESTRICT; son inmutables tras el arqueo,
+        // así que el borrado pasa por la ventana de purga del arnés (Art. III.1).
+        'machine_cash_collections',
     ];
 
     /**

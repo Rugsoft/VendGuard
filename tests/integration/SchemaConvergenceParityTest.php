@@ -43,7 +43,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 48 tablas del contrato de correspondencia (§2.1, Módulos 14 a 34). */
+/** Las 49 tablas del contrato de correspondencia (§2.1, Módulos 14 a 35). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -80,6 +80,10 @@ const CONTRACT_TABLES = [
     // ambas declaran `prevent_hard_delete()` y la inmutabilidad del Art. III.3.
     'machine_restock_visits',
     'machine_restock_visit_items',
+    // Módulo 35 · recaudación de efectivo, carga de tubos de cambio y arqueo de
+    // caja: declara `prevent_hard_delete()` (Art. III.1), la inmutabilidad de la
+    // captura en ruta (Art. III.3) y el cerrojo sanitario en `BEFORE INSERT`.
+    'machine_cash_collections',
 ];
 
 /** Adiciones declaradas del motor nuevo (§5). */
@@ -277,7 +281,7 @@ try {
 
     $baseOnlyTables = $readTables($pgPdo, $schema);
     $assert(
-        'El DDL base crea las 48 tablas del contrato y ninguna más',
+        'El DDL base crea las 49 tablas del contrato y ninguna más',
         $sameSet($baseOnlyTables, CONTRACT_TABLES),
         'tablas: ' . count($baseOnlyTables) . ' · ' . $listSample(array_merge(array_diff($baseOnlyTables, CONTRACT_TABLES), array_diff(CONTRACT_TABLES, $baseOnlyTables)))
     );
@@ -328,6 +332,7 @@ try {
             '028_product_catalog_and_planogram_slots.sql',
             '029_product_loading_orders_and_cold_picking.sql',
             '030_in_situ_restock_visit_and_fefo.sql',
+            '031_cash_collection_vault_audit.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -335,7 +340,7 @@ try {
     $runner->assertConverged();
     $convergedTables = $readTables($pgPdo, $schema);
     $assert(
-        'Tras la migración, el inventario converge al del repositorio (48 tablas + libro A-5)',
+        'Tras la migración, el inventario converge al del repositorio (49 tablas + libro A-5)',
         $sameSet($convergedTables, array_merge(CONTRACT_TABLES, [ADDITION_LEDGER])),
         'tablas: ' . count($convergedTables)
     );
@@ -372,6 +377,7 @@ try {
         '028_product_catalog_and_planogram_slots.sql',
         '029_product_loading_orders_and_cold_picking.sql',
         '030_in_situ_restock_visit_and_fefo.sql',
+        '031_cash_collection_vault_audit.sql',
     ];
     $ledgerFiles = array_map(static fn (array $row): string => (string)$row['filename'], $ledgerRows);
     $ledgerChecksumsOk = true;
@@ -404,15 +410,15 @@ try {
 
     $pgTables = $readTables($pgPdo, $schema);
     $assert(
-        'El motor único declara las 48 tablas canónicas del dominio',
+        'El motor único declara las 49 tablas canónicas del dominio',
         $sameSet(array_values(array_diff($pgTables, [ADDITION_LEDGER])), CONTRACT_TABLES),
         'tablas: ' . count($pgTables)
     );
 
     $pgColumns = $readColumnNames($pgPdo, $schema);
     $assert(
-        'Todas las 48 tablas tienen columnas declaradas en PostgreSQL',
-        count($pgColumns) >= 48
+        'Todas las 49 tablas tienen columnas declaradas en PostgreSQL',
+        count($pgColumns) >= 49
     );
     $assert(
         'incidents declara las 52 columnas del contrato (43 + 7 de taxonomía + 2 de SLA)',
@@ -513,8 +519,8 @@ try {
         ]
     );
     $assert(
-        'El esquema declara los 47 conjuntos ENUM nativos del dominio (41 tipos)',
-        count($pgEnums) === 47,
+        'El esquema declara los 48 conjuntos ENUM nativos del dominio (42 tipos)',
+        count($pgEnums) === 48,
         'conjuntos: ' . count($pgEnums)
     );
 
@@ -541,8 +547,8 @@ try {
     $enumTypesStmt->execute([':schema' => $schema]);
     $enumTypeCount = (int)$enumTypesStmt->fetchColumn();
     $assert(
-        'El esquema declara los 41 tipos ENUM nativos distintos del contrato',
-        $enumTypeCount === 41,
+        'El esquema declara los 42 tipos ENUM nativos distintos del contrato',
+        $enumTypeCount === 42,
         'tipos: ' . $enumTypeCount
     );
 
@@ -568,8 +574,8 @@ try {
     $triggerStmt->execute([':schema' => $schema]);
     $pgTriggerTables = array_map(static fn (array $row): string => (string)$row['table_name'], $triggerStmt->fetchAll());
     $assert(
-        'A-4: las 48 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
-        count(array_unique($pgTriggerTables)) === 48 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
+        'A-4: las 49 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
+        count(array_unique($pgTriggerTables)) === 49 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
         'tablas con disparador: ' . count(array_unique($pgTriggerTables))
     );
 
@@ -642,6 +648,40 @@ try {
     $assert(
         'Disparador del cerrojo térmico trg_enforce_restock_visit_sanitary_guard vinculado (Módulo 34, Art. II)',
         (string)$thermalGuardStmt->fetchColumn() === 'trg_enforce_restock_visit_sanitary_guard'
+    );
+
+    // Módulo 35: el ciclo de custodia de la bolsa precintada, la aritmética del
+    // arqueo y los índices de unicidad parcial forman parte del contrato
+    // convergente, no solo del servicio.
+    $assert(
+        'El estado de custodia de la bolsa declara sus cuatro desenlaces (Módulo 35, D4)',
+        ($pgEnums['machine_cash_collections.status'] ?? []) === [
+            'SEALED_IN_ROUTE',
+            'DELIVERED_TO_VAULT',
+            'RECONCILED_OK',
+            'DISCREPANCY_FLAGGED',
+        ],
+        implode(' · ', $pgEnums['machine_cash_collections.status'] ?? [])
+    );
+
+    $assert(
+        'machine_cash_collections declara las 33 columnas del contrato (Módulo 35)',
+        count($pgColumns['machine_cash_collections'] ?? []) === 33,
+        'columnas: ' . count($pgColumns['machine_cash_collections'] ?? [])
+    );
+
+    $cashIndexStmt = $pgPdo->prepare(
+        "SELECT indexname FROM pg_indexes
+          WHERE schemaname = :schema AND tablename = 'machine_cash_collections'
+            AND indexname IN ('uq_machine_cash_collections_visit', 'uq_machine_cash_collections_refund')
+          ORDER BY indexname"
+    );
+    $cashIndexStmt->execute([':schema' => $schema]);
+    $cashIndexes = array_map(static fn (array $row): string => (string)$row['indexname'], $cashIndexStmt->fetchAll());
+    $assert(
+        'Los índices únicos parciales de visita y reintegro están presentes (Módulo 35, D1 y D3)',
+        $cashIndexes === ['uq_machine_cash_collections_refund', 'uq_machine_cash_collections_visit'],
+        implode(' · ', $cashIndexes)
     );
 
     // Sin tablas inesperadas

@@ -228,6 +228,20 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
+-- Módulo 35 · tipo nativo #42 del ciclo de custodia de la bolsa precintada
+-- (RF-01.1, D4): sellada en ruta, recibida en cámara, arqueada conforme o
+-- marcada con descuadre justificado.
+DO $do$
+BEGIN
+    CREATE TYPE cash_collection_status AS ENUM (
+        'SEALED_IN_ROUTE',
+        'DELIVERED_TO_VAULT',
+        'RECONCILED_OK',
+        'DISCREPANCY_FLAGGED'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
 -- Módulo 34 · tipo nativo #31 del estado final de la visita in situ (RF-01.2).
 -- Solo hay dos desenlaces posibles: la visita se completa con producto cargado o
 -- se aborta porque la cabina superó el techo sanitario del Art. II.
@@ -359,7 +373,11 @@ BEGIN
         -- Visita de reposición in situ del Módulo 34 (Art. III.3): la visita, su
         -- lectura térmica, la merma retirada y el ticket SAT disparado se auditan
         -- contra esta entidad, no contra la máquina ni contra el reponedor.
-        'MACHINE_RESTOCK_VISIT'
+        'MACHINE_RESTOCK_VISIT',
+        -- Recaudación, cambio y arqueo de caja del Módulo 35 (Art. III.3): el
+        -- corte de bolsa, la entrega en conserjería y el dictamen de Caja
+        -- Central se auditan contra esta entidad, no contra la máquina.
+        'MACHINE_CASH_COLLECTION'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -4437,9 +4455,364 @@ CREATE OR REPLACE TRIGGER trg_enforce_restock_visit_item_guard
     FOR EACH ROW EXECUTE FUNCTION enforce_restock_visit_item_guard();
 
 
+-- =============================================================================
+-- SECCIÓN 18 · Tabla 49 · Recaudación de efectivo, tubos de cambio y arqueo
+--              (Módulo 35 · 35-cash-collection-vault-audit)
+-- =============================================================================
+-- La visita in situ demostró qué producto entró y salió del carril, pero el
+-- efectivo seguía sin cadena de custodia: ni el precinto de la bolsa, ni la
+-- lectura acumulada del monedero, ni el cambio cargado en los tubos quedaban
+-- registrados. Sin esos datos Caja Central no puede contrastar a ciegas lo
+-- contado contra lo facturado desde el vaciado anterior, y una reclamación de
+-- hasta 10,00 € sigue esperando a un Técnico SAT aunque el reponedor ya esté en
+-- el edificio. La Tabla 49 conserva ese corte formal y su arqueo.
+
+CREATE TABLE IF NOT EXISTS machine_cash_collections (
+    id                                  BIGINT GENERATED ALWAYS AS IDENTITY,
+    collection_code                     VARCHAR(32) NOT NULL,
+    restock_visit_id                    BIGINT,
+    machine_id                          BIGINT NOT NULL,
+    machine_code_snapshot               VARCHAR(32) NOT NULL,
+    restocker_id                        BIGINT NOT NULL,
+    restocker_name_snapshot             VARCHAR(150) NOT NULL,
+    restocker_code_snapshot             VARCHAR(32) NOT NULL,
+    bag_seal_code                       VARCHAR(40) NOT NULL,
+    change_tubes_loaded_eur             NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    sales_counter_reading               NUMERIC(12, 2) NOT NULL,
+    previous_sales_counter_reading      NUMERIC(12, 2),
+    initial_baseline_reading_eur        NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    is_counter_reset                    BOOLEAN NOT NULL DEFAULT FALSE,
+    counter_reset_notes                 VARCHAR(500),
+    expected_cashbox_eur                NUMERIC(10, 2) NOT NULL,
+    reception_cash_delivered_eur        NUMERIC(6, 2) NOT NULL DEFAULT 0.00,
+    receptionist_name                   VARCHAR(120),
+    linked_refund_request_id            BIGINT,
+    route_notes                         VARCHAR(500),
+    status                              cash_collection_status NOT NULL DEFAULT 'SEALED_IN_ROUTE',
+    collected_at                        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    delivered_to_vault_at               TIMESTAMPTZ,
+    delivered_to_vault_by               BIGINT,
+    vault_counted_eur                   NUMERIC(10, 2),
+    discrepancy_eur                     NUMERIC(10, 2),
+    vault_reconciled_by                 BIGINT,
+    vault_reconciled_by_name_snapshot   VARCHAR(150),
+    vault_reconciled_at                 TIMESTAMPTZ,
+    discrepancy_justification           VARCHAR(1000),
+    client_mutation_id                  VARCHAR(64) NOT NULL,
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_machine_cash_collections PRIMARY KEY (id),
+    CONSTRAINT uq_machine_cash_collections_code UNIQUE (collection_code),
+    CONSTRAINT uq_machine_cash_collections_bag_seal UNIQUE (bag_seal_code),
+    CONSTRAINT uq_machine_cash_collections_mutation UNIQUE (restocker_id, client_mutation_id),
+    CONSTRAINT fk_machine_cash_collections_visit
+        FOREIGN KEY (restock_visit_id) REFERENCES machine_restock_visits (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_cash_collections_machine
+        FOREIGN KEY (machine_id) REFERENCES machines (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_cash_collections_restocker
+        FOREIGN KEY (restocker_id) REFERENCES users (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_cash_collections_refund
+        FOREIGN KEY (linked_refund_request_id) REFERENCES refund_requests (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_cash_collections_delivered_by
+        FOREIGN KEY (delivered_to_vault_by) REFERENCES users (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_machine_cash_collections_reconciled_by
+        FOREIGN KEY (vault_reconciled_by) REFERENCES users (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_machine_cash_collections_code_format
+        CHECK (collection_code ~ '^MCC-[0-9]{4}-[0-9]{4,}$'),
+    -- C1: el precinto se normaliza en mayúsculas, sin espacios extremos, con al
+    -- menos un bloque numérico de tres dígitos y unicidad histórica global.
+    CONSTRAINT chk_machine_cash_collections_bag_seal_format
+        CHECK (
+            bag_seal_code ~ '^[A-Z0-9_-]{6,40}$'
+            AND bag_seal_code ~ '[0-9]{3,}'
+        ),
+    CONSTRAINT chk_machine_cash_collections_mutation_format
+        CHECK (char_length(btrim(client_mutation_id)) >= 6),
+    CONSTRAINT chk_machine_cash_collections_snapshots_not_empty
+        CHECK (
+            char_length(btrim(machine_code_snapshot)) BETWEEN 1 AND 32
+            AND char_length(btrim(restocker_name_snapshot)) BETWEEN 1 AND 150
+            AND char_length(btrim(restocker_code_snapshot)) BETWEEN 1 AND 32
+            AND (
+                vault_reconciled_by_name_snapshot IS NULL
+                OR char_length(btrim(vault_reconciled_by_name_snapshot)) BETWEEN 1 AND 150
+            )
+        ),
+    CONSTRAINT chk_machine_cash_collections_amounts_bounds
+        CHECK (
+            change_tubes_loaded_eur >= 0.00 AND change_tubes_loaded_eur <= 500.00
+            AND sales_counter_reading >= 0.00 AND sales_counter_reading <= 9999999.99
+            AND (previous_sales_counter_reading IS NULL OR (previous_sales_counter_reading >= 0.00 AND previous_sales_counter_reading <= 9999999.99))
+            AND initial_baseline_reading_eur >= 0.00 AND initial_baseline_reading_eur <= 9999999.99
+            AND expected_cashbox_eur >= 0.00 AND expected_cashbox_eur <= 10000.00
+            AND reception_cash_delivered_eur >= 0.00 AND reception_cash_delivered_eur <= 10.00
+            AND (vault_counted_eur IS NULL OR (vault_counted_eur >= 0.00 AND vault_counted_eur <= 10000.00))
+        ),
+    CONSTRAINT chk_machine_cash_collections_counter_coherence
+        CHECK (
+            (
+                is_counter_reset = TRUE
+                AND initial_baseline_reading_eur = 0.00
+                AND counter_reset_notes IS NOT NULL
+                AND char_length(btrim(counter_reset_notes)) BETWEEN 20 AND 500
+                AND btrim(counter_reset_notes) ~ '([[:alnum:]]+[^[:alnum:]]+){2,}[[:alnum:]]+'
+                AND expected_cashbox_eur = ROUND(sales_counter_reading, 2)
+            )
+            OR (
+                is_counter_reset = FALSE
+                AND counter_reset_notes IS NULL
+                AND (
+                    (
+                        previous_sales_counter_reading IS NOT NULL
+                        AND initial_baseline_reading_eur = 0.00
+                        AND sales_counter_reading >= previous_sales_counter_reading
+                        AND expected_cashbox_eur = ROUND(sales_counter_reading - previous_sales_counter_reading, 2)
+                    )
+                    OR (
+                        previous_sales_counter_reading IS NULL
+                        AND sales_counter_reading >= initial_baseline_reading_eur
+                        AND expected_cashbox_eur = ROUND(sales_counter_reading - initial_baseline_reading_eur, 2)
+                    )
+                )
+            )
+        ),
+    CONSTRAINT chk_machine_cash_collections_reception_coherence
+        CHECK (
+            (
+                reception_cash_delivered_eur = 0.00
+                AND receptionist_name IS NULL
+                AND linked_refund_request_id IS NULL
+            )
+            OR (
+                reception_cash_delivered_eur > 0.00
+                AND receptionist_name IS NOT NULL
+                AND char_length(btrim(receptionist_name)) BETWEEN 3 AND 120
+            )
+        ),
+    CONSTRAINT chk_machine_cash_collections_vault_lifecycle
+        CHECK (
+            (
+                status = 'SEALED_IN_ROUTE'
+                AND delivered_to_vault_at IS NULL
+                AND delivered_to_vault_by IS NULL
+                AND vault_counted_eur IS NULL
+                AND discrepancy_eur IS NULL
+                AND vault_reconciled_by IS NULL
+                AND vault_reconciled_by_name_snapshot IS NULL
+                AND vault_reconciled_at IS NULL
+                AND discrepancy_justification IS NULL
+            )
+            OR (
+                status = 'DELIVERED_TO_VAULT'
+                AND delivered_to_vault_at IS NOT NULL
+                AND delivered_to_vault_at >= collected_at
+                AND delivered_to_vault_by IS NOT NULL
+                AND vault_counted_eur IS NULL
+                AND discrepancy_eur IS NULL
+                AND vault_reconciled_by IS NULL
+                AND vault_reconciled_by_name_snapshot IS NULL
+                AND vault_reconciled_at IS NULL
+                AND discrepancy_justification IS NULL
+            )
+            OR (
+                status = 'RECONCILED_OK'
+                AND delivered_to_vault_at IS NOT NULL
+                AND delivered_to_vault_at >= collected_at
+                AND delivered_to_vault_by IS NOT NULL
+                AND vault_counted_eur IS NOT NULL
+                AND discrepancy_eur = ROUND(vault_counted_eur - expected_cashbox_eur, 2)
+                AND ABS(discrepancy_eur) <= 1.00
+                AND vault_reconciled_by IS NOT NULL
+                AND vault_reconciled_by_name_snapshot IS NOT NULL
+                AND vault_reconciled_at IS NOT NULL
+                AND vault_reconciled_at >= delivered_to_vault_at
+                AND (
+                    discrepancy_justification IS NULL
+                    OR char_length(btrim(discrepancy_justification)) BETWEEN 3 AND 1000
+                )
+            )
+            OR (
+                status = 'DISCREPANCY_FLAGGED'
+                AND delivered_to_vault_at IS NOT NULL
+                AND delivered_to_vault_at >= collected_at
+                AND delivered_to_vault_by IS NOT NULL
+                AND vault_counted_eur IS NOT NULL
+                AND discrepancy_eur = ROUND(vault_counted_eur - expected_cashbox_eur, 2)
+                AND ABS(discrepancy_eur) > 1.00
+                AND vault_reconciled_by IS NOT NULL
+                AND vault_reconciled_by_name_snapshot IS NOT NULL
+                AND vault_reconciled_at IS NOT NULL
+                AND vault_reconciled_at >= delivered_to_vault_at
+                AND discrepancy_justification IS NOT NULL
+                AND char_length(btrim(discrepancy_justification)) BETWEEN 20 AND 1000
+                AND btrim(discrepancy_justification) ~ '([[:alnum:]]+[^[:alnum:]]+){2,}[[:alnum:]]+'
+            )
+        )
+);
+
+-- D1: a lo sumo una operación de recaudación vinculada por visita.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_machine_cash_collections_visit
+    ON machine_cash_collections (restock_visit_id)
+    WHERE restock_visit_id IS NOT NULL;
+
+-- D3: un expediente de reintegro de conserjería solo se liquida una vez.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_machine_cash_collections_refund
+    ON machine_cash_collections (linked_refund_request_id)
+    WHERE linked_refund_request_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_machine_cash_collections_machine_collected
+    ON machine_cash_collections (machine_id, collected_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_machine_cash_collections_restocker_collected
+    ON machine_cash_collections (restocker_id, collected_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_machine_cash_collections_status_collected
+    ON machine_cash_collections (status, collected_at DESC);
+
+-- Prohibición de borrado físico (Art. III.1).
+CREATE OR REPLACE TRIGGER trg_no_delete_machine_cash_collections
+    BEFORE DELETE ON machine_cash_collections
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+-- Marca temporal de actualización.
+CREATE OR REPLACE TRIGGER trg_touch_machine_cash_collections
+    BEFORE UPDATE ON machine_cash_collections
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+-- Inmutabilidad de la captura en ruta y bloqueo terminal del arqueo (Art. III.3).
+CREATE OR REPLACE FUNCTION enforce_machine_cash_collections_immutability()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF OLD.status IN ('RECONCILED_OK', 'DISCREPANCY_FLAGGED') THEN
+        RAISE EXCEPTION 'ART_III_3_CASH_COLLECTION_IMMUTABLE: La recaudación % ya fue arqueada en Caja Central (%) y es inmutable.', OLD.collection_code, OLD.status
+            USING ERRCODE = '45000';
+    END IF;
+
+    IF NEW.id IS DISTINCT FROM OLD.id
+       OR NEW.collection_code IS DISTINCT FROM OLD.collection_code
+       OR NEW.restock_visit_id IS DISTINCT FROM OLD.restock_visit_id
+       OR NEW.machine_id IS DISTINCT FROM OLD.machine_id
+       OR NEW.machine_code_snapshot IS DISTINCT FROM OLD.machine_code_snapshot
+       OR NEW.restocker_id IS DISTINCT FROM OLD.restocker_id
+       OR NEW.restocker_name_snapshot IS DISTINCT FROM OLD.restocker_name_snapshot
+       OR NEW.restocker_code_snapshot IS DISTINCT FROM OLD.restocker_code_snapshot
+       OR NEW.bag_seal_code IS DISTINCT FROM OLD.bag_seal_code
+       OR NEW.change_tubes_loaded_eur IS DISTINCT FROM OLD.change_tubes_loaded_eur
+       OR NEW.sales_counter_reading IS DISTINCT FROM OLD.sales_counter_reading
+       OR NEW.previous_sales_counter_reading IS DISTINCT FROM OLD.previous_sales_counter_reading
+       OR NEW.initial_baseline_reading_eur IS DISTINCT FROM OLD.initial_baseline_reading_eur
+       OR NEW.is_counter_reset IS DISTINCT FROM OLD.is_counter_reset
+       OR NEW.counter_reset_notes IS DISTINCT FROM OLD.counter_reset_notes
+       OR NEW.expected_cashbox_eur IS DISTINCT FROM OLD.expected_cashbox_eur
+       OR NEW.reception_cash_delivered_eur IS DISTINCT FROM OLD.reception_cash_delivered_eur
+       OR NEW.receptionist_name IS DISTINCT FROM OLD.receptionist_name
+       OR NEW.linked_refund_request_id IS DISTINCT FROM OLD.linked_refund_request_id
+       OR NEW.route_notes IS DISTINCT FROM OLD.route_notes
+       OR NEW.collected_at IS DISTINCT FROM OLD.collected_at
+       OR NEW.client_mutation_id IS DISTINCT FROM OLD.client_mutation_id
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+        RAISE EXCEPTION 'ART_III_3_ROUTE_CAPTURE_IMMUTABLE: Los datos declarados en ruta de la bolsa % son inmutables tras su sellado.', OLD.bag_seal_code
+            USING ERRCODE = '45000';
+    END IF;
+
+    IF OLD.status = 'DELIVERED_TO_VAULT' AND NEW.status = 'SEALED_IN_ROUTE' THEN
+        RAISE EXCEPTION 'ART_III_3_INVALID_CASH_STATE_REGRESSION: Una bolsa entregada en Caja Central no puede volver a estado SEALED_IN_ROUTE.'
+            USING ERRCODE = '45000';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_guard_machine_cash_collections
+    BEFORE UPDATE ON machine_cash_collections
+    FOR EACH ROW EXECUTE FUNCTION enforce_machine_cash_collections_immutability();
+
+-- Guarda de primacía sanitaria y de conserjería (Art. II.2, C4, D3).
+CREATE OR REPLACE FUNCTION enforce_cash_collection_sanitary_guard()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_machine_code          VARCHAR(32);
+    v_sanitary_status       sanitary_status;
+    v_blocked_no_access     BOOLEAN;
+    v_has_physical_reception BOOLEAN;
+    v_thermal_incident      BOOLEAN;
+    v_visit_status          restock_visit_status;
+    v_visit_machine_id      BIGINT;
+BEGIN
+    SELECT m.code, m.sanitary_status, m.is_blocked_no_access, l.has_physical_reception
+      INTO v_machine_code, v_sanitary_status, v_blocked_no_access, v_has_physical_reception
+      FROM machines m
+      INNER JOIN locations l ON l.id = m.location_id
+     WHERE m.id = NEW.machine_id;
+
+    IF v_sanitary_status = 'QUARANTINE' THEN
+        RAISE EXCEPTION 'ART_II_SANITARY_CASH_COLLECTION_BLOCKED: La máquina % está en cuarentena sanitaria y no admite recaudación.', v_machine_code
+            USING ERRCODE = '45000';
+    END IF;
+
+    IF COALESCE(v_blocked_no_access, FALSE) THEN
+        RAISE EXCEPTION 'ART_II_SANITARY_CASH_COLLECTION_BLOCKED: La máquina % está fuera de servicio y no admite recaudación.', v_machine_code
+            USING ERRCODE = '45000';
+    END IF;
+
+    SELECT EXISTS (
+        SELECT 1
+          FROM incidents i
+         WHERE i.machine_id = NEW.machine_id
+           AND i.category = 'TEMPERATURE_COLD'
+           AND i.status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED')
+    ) INTO v_thermal_incident;
+
+    IF v_thermal_incident THEN
+        RAISE EXCEPTION 'ART_II_SANITARY_CASH_COLLECTION_BLOCKED: La máquina % tiene una avería térmica abierta y no admite recaudación.', v_machine_code
+            USING ERRCODE = '45000';
+    END IF;
+
+    IF NEW.restock_visit_id IS NOT NULL THEN
+        SELECT v.status, v.machine_id
+          INTO v_visit_status, v_visit_machine_id
+          FROM machine_restock_visits v
+         WHERE v.id = NEW.restock_visit_id;
+
+        IF v_visit_status = 'ABORTED_THERMAL_BREACH' THEN
+            RAISE EXCEPTION 'ART_II_THERMAL_ABORT_CASH_FORBIDDEN: La visita % está abortada por rotura de cadena de frío y no admite recaudación.', NEW.restock_visit_id
+                USING ERRCODE = '45000';
+        END IF;
+
+        IF v_visit_machine_id IS NOT NULL AND v_visit_machine_id <> NEW.machine_id THEN
+            RAISE EXCEPTION 'ART_II_CASH_COLLECTION_VISIT_MACHINE_MISMATCH: La visita % no pertenece a la máquina %.', NEW.restock_visit_id, v_machine_code
+                USING ERRCODE = '45000';
+        END IF;
+    END IF;
+
+    IF NEW.reception_cash_delivered_eur > 0.00 AND COALESCE(v_has_physical_reception, FALSE) = FALSE THEN
+        RAISE EXCEPTION 'LOCATION_HAS_NO_PHYSICAL_RECEPTION: La sede de la máquina % no tiene conserjería física y no admite entrega de efectivo.', v_machine_code
+            USING ERRCODE = '45000';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_enforce_cash_collection_sanitary_guard
+    BEFORE INSERT ON machine_cash_collections
+    FOR EACH ROW EXECUTE FUNCTION enforce_cash_collection_sanitary_guard();
+
+
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 48 tablas (las 48 del contrato de correspondencia) · 47 columnas `ENUM` · 17
+-- 49 tablas (las 49 del contrato de correspondencia) · 48 columnas `ENUM` · 19
 -- funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
 -- `prevent_satisfaction_survey_rewrite()`, `prevent_service_sheet_update()`
@@ -4454,8 +4827,11 @@ CREATE OR REPLACE TRIGGER trg_enforce_restock_visit_item_guard
 -- `enforce_loading_order_cold_chain_dispatch()`) y las tres del blindaje de la
 -- visita in situ del Módulo 34 (`prevent_restock_visit_mutation()`,
 -- `enforce_restock_visit_sanitary_guard()` y `enforce_restock_visit_item_guard()`)
--- 93 disparadores: 48 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 28
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2), 13 `BEFORE UPDATE` de
+-- y las dos del blindaje de la recaudación del Módulo 35
+-- (`enforce_machine_cash_collections_immutability()` y
+-- `enforce_cash_collection_sanitary_guard()`)
+-- 97 disparadores: 49 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 29
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2), 14 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
 -- `trg_no_update_technician_shift_logs`, `trg_immutable_root_causes`,
@@ -4466,14 +4842,17 @@ CREATE OR REPLACE TRIGGER trg_enforce_restock_visit_item_guard
 -- `trg_validate_product_update_against_planograms` y
 -- `trg_validate_machine_type_against_planogram` del Módulo 32,
 -- `trg_immutable_machine_restock_visits` y `trg_immutable_machine_restock_visit_items`
--- del Módulo 34) y 2 del cerrojo sanitario de frío y lote del Módulo 33
+-- del Módulo 34, y `trg_guard_machine_cash_collections` del Módulo 35) y 2 del
+-- cerrojo sanitario de frío y lote del Módulo 33
 -- (`trg_enforce_van_stock_cold_chain_batch`, `BEFORE INSERT OR UPDATE`, y
 -- `trg_enforce_loading_order_cold_chain_dispatch`) y 2 del cerrojo térmico de la
 -- visita in situ del Módulo 34 (`trg_enforce_restock_visit_sanitary_guard` y
--- `trg_enforce_restock_visit_item_guard`, `BEFORE INSERT`)
--- 82 restricciones nombradas: 48 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 34 únicas
--- 116 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- `trg_enforce_restock_visit_item_guard`, `BEFORE INSERT`) y 1 del cerrojo
+-- sanitario de la recaudación del Módulo 35
+-- (`trg_enforce_cash_collection_sanitary_guard`, `BEFORE INSERT`)
+-- 86 restricciones nombradas: 49 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 37 únicas
+-- 124 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
 -- en la bitácora), las 12 del Módulo 23 (5 en órdenes y 7 en líneas) y las 4 del
 -- Módulo 24 (formato del identificador, tipo de parada, operación y resultado) y
@@ -4489,14 +4868,17 @@ CREATE OR REPLACE TRIGGER trg_enforce_restock_visit_item_guard
 -- reponedor quede de guardia técnica), las 12 del Módulo 32 (8 del producto y 4
 -- del carril) y las 13 del Módulo 33 (3 del stock por lote, 5 de la orden y 5 de
 -- la línea) y las 9 del Módulo 34 (5 de la visita, 3 de la línea de visita y el
--- formato del lote vigente del carril)
--- · 114 claves foráneas con las reglas declaradas en el contrato §2.4
--- 119 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- formato del lote vigente del carril) y las 8 del Módulo 35 (formato del código y
+-- del precinto, idempotencia, snapshots, cotas económicas, coherencia del contador
+-- con y sin reseteo, coherencia de la entrega en conserjería y ciclo de vida del
+-- arqueo con la tolerancia de ±1,00 €)
+-- · 120 claves foráneas con las reglas declaradas en el contrato §2.4
+-- 122 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
 -- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2), el Módulo 23 (5) y el
 -- Módulo 24 (2), el Módulo 26 (3), el Módulo 27 (6), el Módulo 28 (3) y el
 -- Módulo 29 (4), el Módulo 31 (2) y el Módulo 32 (3), el Módulo 33 (3) y el
--- Módulo 34 (5)— y doce
+-- Módulo 34 (5) y el Módulo 35 (3)— y catorce
 -- índices únicos parciales:
 -- `uq_incident_assignments_active_custody` (M26, Art. V.3), `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
@@ -4504,7 +4886,9 @@ CREATE OR REPLACE TRIGGER trg_enforce_restock_visit_item_guard
 -- `uq_tech_shifts_single_active` (M21, Resolución R3),
 -- `uq_van_restock_open_per_tech` (M23, Decisión D3), `uq_restocker_zone_live` y
 -- `uq_restocker_primary_zone` (M31, RF-02.1 y QA 1) y
--- `uq_product_loading_orders_active_restocker` (M33, D3, RF-02.3). La identidad
+-- `uq_product_loading_orders_active_restocker` (M33, D3, RF-02.3),
+-- `uq_machine_cash_collections_visit` y `uq_machine_cash_collections_refund`
+-- (M35, D1 y D3). La identidad
 -- de la visita in situ (`uq_machine_restock_visits_code`) y la idempotencia del
 -- móvil (`uq_machine_restock_visits_mutation`, M34, D4) son restricciones únicas
 -- plenas, no parciales: rigen sobre toda la tabla histórica.
@@ -4513,7 +4897,9 @@ CREATE OR REPLACE TRIGGER trg_enforce_restock_visit_item_guard
 -- 9 columnas `JSONB`: 3 en `audit_log` (D-4), 2 en `technician_shift_logs` (M22),
 -- `signed_document` en `incident_service_sheets` (M19), `payload_json` en
 -- `notification_outbox` (M16), `response_payload` en `offline_sync_mutations` (M24)
--- y `hygiene_checklist_json` en `machine_restock_visits` (M34, D3)
+-- y `hygiene_checklist_json` en `machine_restock_visits` (M34, D3). La Tabla 49
+-- no declara ninguna columna `JSONB`: el arqueo se expresa con columnas
+-- numéricas y temporales tipadas, no con un documento opaco
 --
 -- La verificación de correspondencia entre motores y la convergencia del esquema
 -- desplegado son T-HYBRID-23 y T-HYBRID-24; las semillas maestras, T-HYBRID-03.

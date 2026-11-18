@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../src/autoload.php';
 
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\MachineRestockVisitService;
+use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
 use VendGuard\Core\Domain\Exception\MachineRestockVisitValidationException;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\MachinePlanogramSlot;
@@ -14,6 +15,7 @@ use VendGuard\Core\Domain\Model\MachineRestockVisitItem;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\RestockerVanProductStock;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
+use VendGuard\Core\Domain\Repository\CashCollectionRegistrarInterface;
 use VendGuard\Core\Domain\Repository\InSituRestockVisitGatewayInterface;
 use VendGuard\Core\Domain\Repository\MachinePlanogramRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
@@ -35,6 +37,19 @@ function check(bool $condition, string $message): void
 /**
  * @return MachineRestockVisitValidationException
  */
+function expectCashFailure(callable $operation, string $expectedCode): MachineCashCollectionValidationException
+{
+    try {
+        $operation();
+    } catch (MachineCashCollectionValidationException $exception) {
+        check($exception->getErrorCode() === $expectedCode, "código {$expectedCode}, recibido {$exception->getErrorCode()}");
+        return $exception;
+    }
+
+    fwrite(STDERR, "FAIL: se esperaba {$expectedCode} y no se lanzó ninguna excepción de recaudación.\n");
+    exit(1);
+}
+
 function expectValidationFailure(callable $operation, string $expectedCode): MachineRestockVisitValidationException
 {
     try {
@@ -53,6 +68,49 @@ final class InMemoryTransactionManager implements TransactionManagerInterface
     public function runInTransaction(callable $operation): mixed
     {
         return $operation();
+    }
+}
+
+final class FakeCashCollectionRegistrar implements CashCollectionRegistrarInterface
+{
+    /** @var list<array{machineId: int, payload: array<string, mixed>, actor: array<string, mixed>, visitId: int|null}> */
+    public array $calls = [];
+
+    /** @var array<string, mixed>|null */
+    public ?array $visitSummary = null;
+
+    /** @var array{recent_cash_collections: list<array<string, mixed>>, cash_route_summary: array<string, mixed>} */
+    public array $routeContext = ['recent_cash_collections' => [], 'cash_route_summary' => []];
+
+    public function registerCollectionInTransaction(
+        int $machineId,
+        array $payload,
+        array $actor,
+        ?int $restockVisitId = null
+    ): array {
+        $this->calls[] = [
+            'machineId' => $machineId,
+            'payload' => $payload,
+            'actor' => $actor,
+            'visitId' => $restockVisitId,
+        ];
+
+        return [
+            'id' => 901,
+            'collection_code' => 'MCC-2026-000901',
+            'bag_seal_code' => strtoupper(trim((string)($payload['bag_seal_code'] ?? ''))),
+            'status' => 'SEALED_IN_ROUTE',
+        ];
+    }
+
+    public function summarizeForVisit(int $restockVisitId): ?array
+    {
+        return $this->visitSummary;
+    }
+
+    public function routeCashContext(int $restockerId, int $limit = 5): array
+    {
+        return $this->routeContext;
     }
 }
 
@@ -400,15 +458,16 @@ function completedPayload(array $overrides = []): array
 }
 
 /**
- * @return array{0: MachineRestockVisitService, 1: InMemoryRestockVisitRepository, 2: InMemoryAuditLogRepository, 3: FakeInSituRestockVisitGateway, 4: InMemoryPlanogramRepository, 5: InMemoryRestockerVanStockRepository}
+ * @return array{0: MachineRestockVisitService, 1: InMemoryRestockVisitRepository, 2: InMemoryAuditLogRepository, 3: FakeInSituRestockVisitGateway, 4: InMemoryPlanogramRepository, 5: InMemoryRestockerVanStockRepository, 6: FakeCashCollectionRegistrar}
  */
-function buildService(?string $uploadDir = null): array
+function buildService(?string $uploadDir = null, bool $withCash = true): array
 {
     $visits = new InMemoryRestockVisitRepository();
     $planograms = new InMemoryPlanogramRepository();
     $vanStock = new InMemoryRestockerVanStockRepository();
     $gateway = new FakeInSituRestockVisitGateway();
     $auditRepo = new InMemoryAuditLogRepository();
+    $cash = new FakeCashCollectionRegistrar();
 
     $service = new MachineRestockVisitService(
         $visits,
@@ -417,10 +476,11 @@ function buildService(?string $uploadDir = null): array
         $gateway,
         new InMemoryTransactionManager(),
         new AuditLogger($auditRepo),
-        new LocalFileUploader($uploadDir)
+        new LocalFileUploader($uploadDir),
+        $withCash ? $cash : null
     );
 
-    return [$service, $visits, $auditRepo, $gateway, $planograms, $vanStock];
+    return [$service, $visits, $auditRepo, $gateway, $planograms, $vanStock, $cash];
 }
 
 function seedCompletedFixtures(
@@ -563,6 +623,78 @@ expectValidationFailure(
     fn () => $service->registerVisit(1, completedPayload(), ['id' => 99, 'role' => 'COORDINATOR', 'name' => 'Coordi']),
     MachineRestockVisitValidationException::RESTOCKER_ROLE_REQUIRED
 );
+
+// 9 · D1/C4: la recaudación se registra dentro de la transacción de la visita.
+[$service, $visits, , $gateway, , $vanStock, $cashRegistrar] = buildService();
+seedCompletedFixtures($gateway, $vanStock);
+$visitWithCash = $service->registerVisit(1, completedPayload([
+    'client_mutation_id' => 'mut-visit-cash-0001',
+    'cash_collection' => [
+        'client_mutation_id' => 'mut-cash-070001',
+        'bag_seal_code' => ' bag-2026-070001 ',
+        'sales_counter_reading' => 342.10,
+        'change_tubes_loaded_eur' => 10.00,
+    ],
+]), ['id' => 7, 'role' => 'RESTOCKER', 'name' => 'Lucía']);
+check(($visitWithCash['cash_collection']['id'] ?? null) === 901, 'la visita devuelve la recaudación creada');
+check(count($cashRegistrar->calls) === 1, 'la recaudación se delega una sola vez');
+check(($cashRegistrar->calls[0]['machineId'] ?? null) === 1, 'la recaudación hereda la máquina de la visita');
+check(($cashRegistrar->calls[0]['visitId'] ?? null) === 1, 'la recaudación se vincula al id de la visita');
+check(($cashRegistrar->calls[0]['payload']['bag_seal_code'] ?? null) === ' bag-2026-070001 ', 'el payload de recaudación llega íntegro');
+check(count($visits->visits) === 1, 'la visita con recaudación se inserta una sola vez');
+
+// 10 · C4: un aborto térmico no admite recaudación (422, sin residuo).
+[$service, $visits, , $gateway, , , $cashRegistrar] = buildService();
+$gateway->context = completedContext();
+expectCashFailure(
+    fn () => $service->registerVisit(1, [
+        'status' => 'ABORTED_THERMAL_BREACH',
+        'client_mutation_id' => 'mut-abort-cash-0001',
+        'cabin_temp_celsius' => 9.5,
+        'cash_collection' => [
+            'client_mutation_id' => 'mut-cash-070002',
+            'bag_seal_code' => 'BAG-2026-070002',
+            'sales_counter_reading' => 100.00,
+        ],
+    ], ['id' => 7, 'role' => 'RESTOCKER', 'name' => 'Lucía']),
+    MachineCashCollectionValidationException::THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN
+);
+check(count($visits->visits) === 0, 'el aborto con recaudación no deja visita residual');
+check(count($cashRegistrar->calls) === 0, 'el aborto con recaudación no registra efectivo');
+
+// 11 · QA 3: el detalle expone solo el resumen opaco del corte.
+[$service, , , $gateway, , $vanStock, $cashRegistrar] = buildService();
+seedCompletedFixtures($gateway, $vanStock);
+$service->registerVisit(1, completedPayload(['client_mutation_id' => 'mut-detail-0001']), ['id' => 7, 'role' => 'RESTOCKER', 'name' => 'Lucía']);
+$cashRegistrar->visitSummary = [
+    'id' => 901,
+    'collection_code' => 'MCC-2026-000901',
+    'bag_seal_code' => 'BAG-2026-070001',
+    'status' => 'SEALED_IN_ROUTE',
+    'status_label' => 'Precintada en ruta',
+    'change_tubes_loaded_eur' => 10.00,
+    'reception_cash_delivered_eur' => null,
+    'has_reception_receipt' => false,
+];
+$detail = $service->findVisitDetail(1);
+check(($detail['cash_collection_summary']['collection_code'] ?? null) === 'MCC-2026-000901', 'el detalle incluye el resumen del corte');
+check(!array_key_exists('expected_cashbox_eur', $detail['cash_collection_summary'] ?? []), 'el detalle no filtra el esperado del arqueo ciego');
+check(!array_key_exists('previous_counter_reading', $detail['cash_collection_summary'] ?? []), 'el detalle no filtra la lectura previa');
+check($service->findVisitDetail(999) === null, 'una visita inexistente no inventa detalle');
+
+// 12 · QA 3: la ruta recibe recaudaciones recientes y KPIs, o vacío sin servicio.
+$cashRegistrar->routeContext = [
+    'recent_cash_collections' => [['id' => 901, 'collection_code' => 'MCC-2026-000901']],
+    'cash_route_summary' => ['pending_vault_bags_count' => 1, 'cash_in_route_eur' => 352.10],
+];
+$cashContext = $service->routeCashContext(7);
+check(count($cashContext['recent_cash_collections']) === 1, 'la ruta lista la recaudación reciente');
+check(($cashContext['cash_route_summary']['pending_vault_bags_count'] ?? null) === 1, 'la ruta recibe el KPI de bolsas pendientes');
+
+[$serviceWithoutCash] = buildService(null, false);
+$emptyContext = $serviceWithoutCash->routeCashContext(7);
+check($emptyContext['recent_cash_collections'] === [], 'sin servicio de recaudación la ruta no falla');
+check($emptyContext['cash_route_summary'] === [], 'sin servicio de recaudación el KPI queda vacío');
 
 echo "MachineRestockVisitServiceTest: OK · Total Assertions: {$GLOBALS['assertions']}\n";
 exit(0);

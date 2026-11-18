@@ -34,6 +34,11 @@ import {
   RESTOCK_VISIT_CONFLICT,
   RESTOCK_VISIT_PENDING
 } from '../utils/RestockVisitOfflineQueue.js';
+import {
+  CashCollectionOfflineQueue,
+  CASH_COLLECTION_CONFLICT,
+  CASH_COLLECTION_PENDING
+} from '../utils/CashCollectionOfflineQueue.js';
 
 const HYGIENE_ITEMS = [
   { key: 'coffee_grounds_emptied', label: 'Cajón de posos vaciado', scope: 'hot' },
@@ -50,6 +55,61 @@ const THERMAL_CEILINGS = Object.freeze({
 });
 
 const HOT_MACHINE_TYPES = new Set(['HOT_DRINKS', 'COMBO']);
+
+const CASH_RECEIPT_FIELDS = Object.freeze([
+  'collection_code',
+  'collected_at',
+  'location_code',
+  'location_name',
+  'machine_code',
+  'restocker_name',
+  'receptionist_name',
+  'reception_cash_delivered_eur',
+  'linked_refund_request_id'
+]);
+
+const CASH_COLLECTION_PUBLIC_FIELDS = Object.freeze([
+  'id',
+  'collection_code',
+  'restock_visit_id',
+  'machine_id',
+  'machine_code',
+  'bag_seal_code',
+  'sales_counter_reading',
+  'change_tubes_loaded_eur',
+  'is_counter_reset',
+  'counter_reset_notes',
+  'reception_cash_delivered_eur',
+  'receptionist_name',
+  'linked_refund_request_id',
+  'has_reception_receipt',
+  'status',
+  'status_label',
+  'collected_at',
+  'created_at'
+]);
+
+const blankCashForm = () => ({
+  client_mutation_id: '',
+  bag_seal_code: '',
+  sales_counter_reading: '',
+  change_tubes_loaded_eur: 0,
+  is_counter_reset: false,
+  counter_reset_notes: '',
+  reception_cash_delivered_eur: 0,
+  receptionist_name: '',
+  linked_refund_request_id: null,
+  route_notes: '',
+  collected_at: ''
+});
+
+const blankCashRouteSummary = () => ({
+  total_collections_count: 0,
+  total_change_tubes_loaded_eur: 0,
+  total_reception_cash_delivered_eur: 0,
+  pending_vault_bags_count: 0,
+  last_collected_at: null
+});
 
 const blankVisitForm = () => ({
   client_mutation_id: '',
@@ -131,6 +191,29 @@ export const RestockerRouteView = {
       isSyncingVisits: false,
       visitSyncMessage: '',
       visitSyncError: '',
+
+      // Recaudación, cambio y conserjería (Módulo 35, T-CCV-11, D1–D4)
+      showCashModal: false,
+      cashContext: 'INDEPENDENT',
+      cashMachine: null,
+      cashForm: blankCashForm(),
+      cashError: '',
+      cashSuccess: '',
+      cashSubmitting: false,
+      visitCashEnabled: false,
+      visitCashForm: blankCashForm(),
+      pendingReceptionRefunds: [],
+      recentCashCollections: [],
+      cashRouteSummary: blankCashRouteSummary(),
+      pendingCashMutations: [],
+      cashQueueSequence: 0,
+      isSyncingCash: false,
+      cashSyncMessage: '',
+      cashSyncError: '',
+      showCashReceiptModal: false,
+      cashReceipt: {},
+      cashReceiptLoading: false,
+      cashReceiptError: '',
 
       // Órdenes de carga de producto y stock por lote (Módulo 33, T-PLD-12)
       activeLoadingOrder: null,
@@ -338,6 +421,39 @@ export const RestockerRouteView = {
     },
     conflictVisitCount() {
       return this.pendingVisitMutations.filter((item) => item.status === RESTOCK_VISIT_CONFLICT).length;
+    },
+    cashRestockerId() {
+      return this.visitRestockerId;
+    },
+    pendingCashCount() {
+      return this.pendingCashMutations.filter((item) => item.status === CASH_COLLECTION_PENDING).length;
+    },
+    conflictCashCount() {
+      return this.pendingCashMutations.filter((item) => item.status === CASH_COLLECTION_CONFLICT).length;
+    },
+    cashContextIsVisit() {
+      return this.cashContext === 'VISIT';
+    },
+    cashModalMachine() {
+      return this.cashMachine || this.visitMachine || null;
+    },
+    cashMachineHasReception() {
+      return this.cashModalMachine?.has_physical_reception === true;
+    },
+    cashPendingRefunds() {
+      return this.machinePendingRefunds(this.cashModalMachine);
+    },
+    cashSelectedRefund() {
+      const id = Number(this.cashForm?.linked_refund_request_id || 0);
+      if (id < 1) return null;
+      return this.cashPendingRefunds.find((refund) => Number(refund.id) === id) || null;
+    },
+    cashDeliveryAmount() {
+      const value = Number(this.cashForm?.reception_cash_delivered_eur || 0);
+      return Number.isFinite(value) ? value : 0;
+    },
+    visitCashConfigured() {
+      return this.visitCashEnabled && String(this.visitCashForm?.bag_seal_code || '').trim() !== '';
     }
   },
   mounted() {
@@ -345,10 +461,13 @@ export const RestockerRouteView = {
       this.loadMyRoute();
       this.loadShiftStatus();
       this.loadPendingVisitQueue();
+      this.loadPendingCashQueue();
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       this.visitOnlineHandler = () => {
-        if (this.navigatorOnline) this.syncPendingVisits();
+        if (!this.navigatorOnline) return;
+        this.syncPendingVisits();
+        this.syncPendingCashCollections();
       };
       window.addEventListener('online', this.visitOnlineHandler);
     }
@@ -410,6 +529,15 @@ export const RestockerRouteView = {
         this.lastReconciledOrder = data.last_reconciled_order || null;
         this.vanProductStocks = Array.isArray(data.van_product_stocks) ? data.van_product_stocks : [];
         this.recentVisits = Array.isArray(data.recent_visits) ? data.recent_visits.slice(0, 5) : [];
+        this.pendingReceptionRefunds = Array.isArray(data.pending_reception_refunds)
+          ? data.pending_reception_refunds
+          : [];
+        this.recentCashCollections = (Array.isArray(data.recent_cash_collections)
+          ? data.recent_cash_collections
+          : []).map((row) => this.sanitizeCashCollection(row)).filter(Boolean);
+        this.cashRouteSummary = data.cash_route_summary && typeof data.cash_route_summary === 'object'
+          ? { ...blankCashRouteSummary(), ...data.cash_route_summary }
+          : blankCashRouteSummary();
         this.vanStockKpis = data.van_stock_kpis && typeof data.van_stock_kpis === 'object'
           ? data.van_stock_kpis
           : this.vanStockKpis;
@@ -417,6 +545,7 @@ export const RestockerRouteView = {
           || Number(this.vanStockKpis.expired_lots || 0) > 0;
         this.applyShiftResponse(data.shift || {}, 'OFF_SHIFT');
         await this.loadPendingVisitQueue();
+        await this.loadPendingCashQueue();
       } catch (err) {
         this.loadError = err?.message || 'No se pudo cargar tu ruta de reposición.';
       } finally {
@@ -883,6 +1012,13 @@ export const RestockerRouteView = {
       this.visitForm.client_mutation_id = createClientMutationId();
       this.visitForm.started_at = new Date().toISOString();
       this.visitForm.hygiene_checklist = hygieneDefaults(machine.machine_type);
+      this.visitCashEnabled = false;
+      this.visitCashForm = blankCashForm();
+      this.cashContext = 'INDEPENDENT';
+      this.cashMachine = null;
+      this.showCashModal = false;
+      this.cashError = '';
+      this.cashSuccess = '';
       this.clearVisitPhoto();
       await this.loadVisitPlanogram(machine.id);
     },
@@ -894,6 +1030,11 @@ export const RestockerRouteView = {
       this.visitError = '';
       this.visitLoading = false;
       this.visitSubmitting = false;
+      this.visitCashEnabled = false;
+      this.visitCashForm = blankCashForm();
+      this.showCashModal = false;
+      this.cashContext = 'INDEPENDENT';
+      this.cashMachine = null;
       this.clearVisitPhoto();
     },
 
@@ -973,6 +1114,39 @@ export const RestockerRouteView = {
         || error?.status === 0
         || error?.code === 'NETWORK_ERROR'
         || error?.code === 'REQUEST_TIMEOUT';
+    },
+
+    /**
+     * Fallo que conserva la captura en `PENDING` (`RF-05`, `C4`, `D4`).
+     *
+     * Un 401 o un 403 de la puerta de sesión (`FORBIDDEN`/`FORBIDDEN_ROLE`)
+     * no invalida el dato: la sesión caducó mientras el operario estaba sin
+     * cobertura y volverá a estar vigente al iniciar sesión. Un 5xx es una
+     * avería transitoria del servidor. Los 403 de negocio —máquina fuera de
+     * zona, rol sobre la operación o visita ajena— y los 409/422 siguen siendo
+     * irreversibles para esa captura y se archivan como `CONFLICT`.
+     */
+    isRetryableSyncFailure(error) {
+      if (this.isNetworkFailure(error)) return true;
+      const status = Number(error?.status);
+      if (status === 401) return true;
+      if (status === 403) {
+        const code = String(error?.code || '');
+        return code === 'FORBIDDEN' || code === 'FORBIDDEN_ROLE';
+      }
+      return status >= 500 && status <= 599;
+    },
+
+    /** Motivo visible del reintento; nunca consume la entrada de la cola. */
+    syncRetryMessage(error, noun) {
+      const status = Number(error?.status);
+      if (status === 401 || status === 403) {
+        return `La sesión ha caducado: las ${noun} siguen en la cola. Vuelve a iniciar sesión para sincronizarlas.`;
+      }
+      if (status >= 500) {
+        return `El servidor no está disponible ahora mismo: las ${noun} siguen en la cola y se reintentarán más tarde.`;
+      }
+      return `Se perdió la conexión durante la sincronización. La cola conserva las ${noun} restantes.`;
     },
 
     validateVisit() {
@@ -1055,6 +1229,14 @@ export const RestockerRouteView = {
         }
       }
 
+      if (this.visitCashEnabled) {
+        const cash = this.validateCashForm(this.visitCashForm, this.visitMachine, true);
+        if (!cash.ok) {
+          this.visitError = cash.error;
+          return false;
+        }
+      }
+
       return true;
     },
 
@@ -1067,7 +1249,7 @@ export const RestockerRouteView = {
         loaded_batch_code: item.loaded_batch_code || null
       }));
 
-      return {
+      const payload = {
         client_mutation_id: this.visitForm.client_mutation_id,
         status: this.visitMode,
         started_at: this.visitForm.started_at,
@@ -1079,6 +1261,13 @@ export const RestockerRouteView = {
         hygiene_checklist: { ...this.visitForm.hygiene_checklist },
         items
       };
+
+      // Art. II.2: el bloque de efectivo jamás viaja dentro de un aborto térmico.
+      if (this.visitCashEnabled && !this.visitIsThermalAbort) {
+        payload.cash_collection = this.buildCashCollectionPayload(this.visitCashForm);
+      }
+
+      return payload;
     },
 
     extractPhotoEvidenceUrl(response) {
@@ -1139,6 +1328,9 @@ export const RestockerRouteView = {
         const savedVisit = saved?.visit || saved;
         if (savedVisit && typeof savedVisit === 'object') {
           this.recentVisits = [savedVisit, ...this.recentVisits].slice(0, 5);
+          if (savedVisit.cash_collection_summary) {
+            await this.applyCashCollectionResult(savedVisit.cash_collection_summary);
+          }
         }
         this.showVisitModal = false;
         this.visitSuccess = `Visita registrada en ${this.visitMachine.code || 'la máquina'}.`;
@@ -1253,7 +1445,8 @@ export const RestockerRouteView = {
         cabin_temp_celsius: payload.cabin_temp_celsius,
         units_added: items.reduce((total, item) => total + Number(item.qty_added || 0), 0),
         units_withdrawn: items.reduce((total, item) => total + this.visitItemWithdrawn(item), 0),
-        is_offline_pending: true
+        is_offline_pending: true,
+        cash_collection_pending: Boolean(payload.cash_collection)
       };
       this.recentVisits = [localVisit, ...this.recentVisits.filter((visit) => visit.id !== localVisit.id)].slice(0, 5);
     },
@@ -1291,8 +1484,8 @@ export const RestockerRouteView = {
             await queue.remove(item.client_mutation_id);
             synced += 1;
           } catch (error) {
-            if (this.isNetworkFailure(error)) {
-              this.visitSyncError = 'Se perdió la conexión durante la sincronización. La cola conserva las visitas restantes.';
+            if (this.isRetryableSyncFailure(error)) {
+              this.visitSyncError = this.syncRetryMessage(error, 'visitas');
               break;
             }
             await queue.markConflict(
@@ -1512,6 +1705,508 @@ export const RestockerRouteView = {
       }
     },
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Recaudación, cambio y conserjería (Módulo 35, T-CCV-11)
+    // ─────────────────────────────────────────────────────────────────────
+
+    machinePendingRefunds(machine) {
+      return Array.isArray(machine?.pending_reception_refunds)
+        ? machine.pending_reception_refunds
+        : [];
+    },
+
+    machinePendingRefundsCount(machine) {
+      const explicit = Number(machine?.pending_reception_refunds_count);
+      if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+      return this.machinePendingRefunds(machine).length;
+    },
+
+    sanitizeCashCollection(row) {
+      if (!row || typeof row !== 'object') return null;
+      const clean = {};
+      for (const key of CASH_COLLECTION_PUBLIC_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(row, key)) clean[key] = row[key];
+      }
+      if (!clean.id && !clean.collection_code) return null;
+      return clean;
+    },
+
+    sanitizeCashReceipt(row) {
+      const clean = {};
+      for (const key of CASH_RECEIPT_FIELDS) {
+        clean[key] = row && Object.prototype.hasOwnProperty.call(row, key) ? row[key] : null;
+      }
+      return clean;
+    },
+
+    openCashCollection(machine, context = 'INDEPENDENT') {
+      const target = machine || this.visitMachine;
+      if (!target?.id) return;
+      if (!this.machineCanRestock(target)) {
+        this.loadingActionError = this.machineRestockBlockReason(target);
+        return;
+      }
+
+      this.cashContext = context === 'VISIT' ? 'VISIT' : 'INDEPENDENT';
+      this.cashMachine = target;
+      this.cashError = '';
+      this.cashSuccess = '';
+
+      if (this.cashContext === 'VISIT' && String(this.visitCashForm?.bag_seal_code || '').trim() !== '') {
+        this.cashForm = { ...this.visitCashForm };
+      } else {
+        this.cashForm = blankCashForm();
+        this.cashForm.client_mutation_id = createClientMutationId();
+        this.cashForm.collected_at = new Date().toISOString();
+      }
+      if (!this.cashForm.client_mutation_id) this.cashForm.client_mutation_id = createClientMutationId();
+      if (!this.cashForm.collected_at) this.cashForm.collected_at = new Date().toISOString();
+      this.showCashModal = true;
+    },
+
+    onVisitCashToggle() {
+      if (!this.visitCashEnabled) {
+        this.visitCashForm = blankCashForm();
+        if (this.cashContextIsVisit) this.showCashModal = false;
+        return;
+      }
+      this.openCashCollection(this.visitMachine, 'VISIT');
+    },
+
+    selectCashRefund(refund) {
+      const id = Number(refund?.id || 0);
+      if (id < 1) return;
+      if (Number(this.cashForm.linked_refund_request_id || 0) === id) {
+        this.cashForm.linked_refund_request_id = null;
+        this.cashForm.reception_cash_delivered_eur = 0;
+        this.cashForm.receptionist_name = '';
+        return;
+      }
+      this.cashForm.linked_refund_request_id = id;
+      this.cashForm.reception_cash_delivered_eur = Number(refund.claimed_amount || 0);
+    },
+
+    buildCashCollectionPayload(form) {
+      const reset = form?.is_counter_reset === true;
+      const reception = Number(form?.reception_cash_delivered_eur || 0);
+      const refundId = Number(form?.linked_refund_request_id || 0) || null;
+      return {
+        client_mutation_id: form?.client_mutation_id || createClientMutationId(),
+        bag_seal_code: String(form?.bag_seal_code || '').trim().toUpperCase(),
+        sales_counter_reading: Number(form?.sales_counter_reading),
+        change_tubes_loaded_eur: Number(form?.change_tubes_loaded_eur || 0),
+        is_counter_reset: reset,
+        counter_reset_notes: reset ? String(form?.counter_reset_notes || '').trim() : null,
+        reception_cash_delivered_eur: reception,
+        receptionist_name: reception > 0 ? String(form?.receptionist_name || '').trim() : null,
+        linked_refund_request_id: refundId,
+        route_notes: String(form?.route_notes || '').trim() || null,
+        collected_at: form?.collected_at || new Date().toISOString()
+      };
+    },
+
+    validateCashForm(form, machine, forVisit = false) {
+      if (forVisit && this.visitIsThermalAbort) {
+        return { ok: false, error: 'El aborto térmico no admite recaudación ni carga de cambio (Art. II.2).', payload: null };
+      }
+      if (!machine?.id) {
+        return { ok: false, error: 'No hay una máquina seleccionada para la recaudación.', payload: null };
+      }
+
+      const seal = String(form?.bag_seal_code || '').trim().toUpperCase();
+      if (!/^[A-Z0-9_-]{6,40}$/.test(seal) || !/[0-9]{3,}/.test(seal)) {
+        return {
+          ok: false,
+          error: 'El precinto debe tener 6–40 caracteres A–Z, 0–9, guion o guion bajo y al menos 3 dígitos (C1).',
+          payload: null
+        };
+      }
+
+      const reset = form?.is_counter_reset === true;
+      const notes = String(form?.counter_reset_notes || '').trim();
+      if (reset) {
+        const blocks = notes.match(/[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ]+/g) || [];
+        if (notes.length < 20 || blocks.length < 3) {
+          return {
+            ok: false,
+            error: 'El reseteo del contador exige una nota de al menos 20 caracteres reales y 3 bloques alfanuméricos (Art. V.1).',
+            payload: null
+          };
+        }
+      }
+
+      if (form?.sales_counter_reading === '' || form?.sales_counter_reading === null || form?.sales_counter_reading === undefined) {
+        return { ok: false, error: 'Registra la lectura actual del contador de ventas.', payload: null };
+      }
+      const sales = Number(form.sales_counter_reading);
+      if (!Number.isFinite(sales) || sales < 0 || sales > 9999999.99) {
+        return { ok: false, error: 'La lectura del contador debe estar entre 0,00 € y 9.999.999,99 € (C3).', payload: null };
+      }
+
+      const change = Number(form?.change_tubes_loaded_eur || 0);
+      if (!Number.isFinite(change) || change < 0 || change > 500) {
+        return { ok: false, error: 'La carga de tubos de cambio debe estar entre 0,00 € y 500,00 € (C3).', payload: null };
+      }
+
+      const delivery = Number(form?.reception_cash_delivered_eur || 0);
+      if (!Number.isFinite(delivery) || delivery < 0 || delivery > 10) {
+        return { ok: false, error: 'La entrega en conserjería no puede superar 10,00 € (D3, QA 2).', payload: null };
+      }
+
+      const refundId = Number(form?.linked_refund_request_id || 0) || null;
+      if (refundId !== null) {
+        const refund = this.machinePendingRefunds(machine).find(
+          (row) => Number(row.id) === refundId
+        );
+        if (!refund) {
+          return { ok: false, error: 'El reintegro seleccionado ya no está pendiente en esta máquina.', payload: null };
+        }
+        if (Math.abs(Number(refund.claimed_amount || 0) - delivery) > 0.001) {
+          return { ok: false, error: 'La entrega debe coincidir exactamente con el importe reclamado del reintegro.', payload: null };
+        }
+      }
+
+      if (delivery > 0) {
+        if (machine.has_physical_reception !== true) {
+          return { ok: false, error: 'Esta sede no tiene conserjería física para entregar efectivo (D3).', payload: null };
+        }
+        const receptionist = String(form?.receptionist_name || '').trim();
+        if (receptionist.length < 3 || receptionist.length > 120) {
+          return { ok: false, error: 'Indica el nombre del conserje (3–120 caracteres) que recibe el efectivo (D3).', payload: null };
+        }
+      }
+
+      return { ok: true, error: '', payload: this.buildCashCollectionPayload({ ...form, bag_seal_code: seal }) };
+    },
+
+    async saveCashFromModal() {
+      if (this.cashSubmitting) return;
+      const result = this.validateCashForm(this.cashForm, this.cashModalMachine, this.cashContextIsVisit);
+      if (!result.ok) {
+        this.cashError = result.error;
+        return;
+      }
+
+      this.cashError = '';
+      if (this.cashContextIsVisit) {
+        this.visitCashForm = { ...this.cashForm, bag_seal_code: result.payload.bag_seal_code };
+        this.visitCashEnabled = true;
+        this.cashSuccess = 'Recaudación preparada para registrarse de forma atómica con la visita.';
+        this.loadingActionMessage = this.cashSuccess;
+        this.showCashModal = false;
+        return;
+      }
+
+      await this.submitIndependentCashCollection(result.payload);
+    },
+
+    cancelCashModal() {
+      if (this.cashContextIsVisit && String(this.visitCashForm?.bag_seal_code || '').trim() === '') {
+        this.visitCashEnabled = false;
+      }
+      this.showCashModal = false;
+      this.cashError = '';
+    },
+
+    async submitIndependentCashCollection(payload) {
+      if (!this.cashModalMachine?.id) return;
+      this.cashSubmitting = true;
+      this.cashError = '';
+      this.cashSuccess = '';
+      try {
+        if (!this.navigatorOnline) {
+          await this.queueOfflineCashCollection(payload);
+          return;
+        }
+
+        const response = await api.restocker.createCashCollection(this.cashModalMachine.id, payload);
+        const collection = this.normalizeApiData(response);
+        await this.applyCashCollectionResult(collection);
+        this.cashSuccess = `Recaudación ${collection.collection_code || ''} registrada en bolsa precintada.`;
+        this.loadingActionMessage = this.cashSuccess;
+        this.showCashModal = false;
+      } catch (error) {
+        if (this.isNetworkFailure(error)) {
+          await this.queueOfflineCashCollection(payload);
+        } else {
+          this.cashError = error?.message || 'No se pudo registrar la recaudación en ruta.';
+        }
+      } finally {
+        this.cashSubmitting = false;
+      }
+    },
+
+    async queueOfflineCashCollection(payload) {
+      const machine = this.cashModalMachine;
+      const restockerId = this.cashRestockerId;
+      if (!machine?.id || !restockerId) {
+        this.cashError = 'No se pudo identificar la máquina o el reponedor para guardar la recaudación offline.';
+        return;
+      }
+
+      try {
+        const sequence = Date.now() * 1000 + (Number(this.cashQueueSequence || 0) % 1000);
+        this.cashQueueSequence = (Number(this.cashQueueSequence || 0) + 1) % 1000;
+        await this.ensureCashQueue().enqueue({
+          client_mutation_id: payload.client_mutation_id,
+          restocker_id: restockerId,
+          machine_id: machine.id,
+          machine_code: machine.code || null,
+          payload,
+          created_at: payload.collected_at,
+          sequence_order: sequence
+        });
+        this.applyOptimisticCash(machine, payload);
+        await this.loadPendingCashQueue();
+        this.showCashModal = false;
+        this.cashSuccess = 'Recaudación guardada en la cola offline. Se sincronizará al recuperar conexión.';
+        this.loadingActionMessage = this.cashSuccess;
+      } catch (error) {
+        this.cashError = error?.message || 'No se pudo guardar la recaudación en la cola offline.';
+      }
+    },
+
+    applyOptimisticCash(machine, payload) {
+      machine.has_prior_cash_collection = true;
+      const refundId = Number(payload?.linked_refund_request_id || 0);
+      if (refundId > 0) {
+        machine.pending_reception_refunds = this.machinePendingRefunds(machine).filter(
+          (row) => Number(row.id) !== refundId
+        );
+        machine.pending_reception_refunds_count = machine.pending_reception_refunds.length;
+        this.pendingReceptionRefunds = this.pendingReceptionRefunds.filter(
+          (row) => Number(row.id) !== refundId
+        );
+      }
+
+      const summary = this.cashRouteSummary;
+      this.cashRouteSummary = {
+        ...summary,
+        total_collections_count: Number(summary.total_collections_count || 0) + 1,
+        total_change_tubes_loaded_eur: Math.round((Number(summary.total_change_tubes_loaded_eur || 0) + Number(payload.change_tubes_loaded_eur || 0)) * 100) / 100,
+        total_reception_cash_delivered_eur: Math.round((Number(summary.total_reception_cash_delivered_eur || 0) + Number(payload.reception_cash_delivered_eur || 0)) * 100) / 100,
+        pending_vault_bags_count: Number(summary.pending_vault_bags_count || 0) + 1,
+        last_collected_at: payload.collected_at || new Date().toISOString()
+      };
+
+      const local = {
+        id: `offline-${payload.client_mutation_id}`,
+        collection_code: 'PENDIENTE',
+        machine_id: machine.id,
+        machine_code: machine.code || null,
+        bag_seal_code: payload.bag_seal_code,
+        sales_counter_reading: payload.sales_counter_reading,
+        change_tubes_loaded_eur: payload.change_tubes_loaded_eur,
+        reception_cash_delivered_eur: payload.reception_cash_delivered_eur,
+        receptionist_name: payload.receptionist_name,
+        linked_refund_request_id: payload.linked_refund_request_id,
+        has_reception_receipt: Number(payload.reception_cash_delivered_eur || 0) > 0,
+        status: 'PENDING_SYNC',
+        status_label: 'Pendiente de sincronizar',
+        collected_at: payload.collected_at,
+        is_offline_pending: true
+      };
+      this.recentCashCollections = [local, ...this.recentCashCollections].slice(0, 20);
+    },
+
+    async applyCashCollectionResult(collection, options = {}) {
+      const clean = this.sanitizeCashCollection(collection);
+      if (!clean) return;
+
+      this.recentCashCollections = [
+        clean,
+        ...this.recentCashCollections.filter(
+          (row) => String(row.id) !== String(clean.id)
+            && String(row.collection_code || '') !== String(clean.collection_code || '')
+        )
+      ].slice(0, 20);
+
+      const machineId = Number(clean.machine_id || 0);
+      const machine = this.machines.find((row) => Number(row.id) === machineId);
+      if (machine) {
+        machine.has_prior_cash_collection = true;
+        const refundId = Number(clean.linked_refund_request_id || 0);
+        if (refundId > 0) {
+          machine.pending_reception_refunds = this.machinePendingRefunds(machine).filter(
+            (row) => Number(row.id) !== refundId
+          );
+          machine.pending_reception_refunds_count = machine.pending_reception_refunds.length;
+        }
+      }
+      const refundId = Number(clean.linked_refund_request_id || 0);
+      if (refundId > 0) {
+        this.pendingReceptionRefunds = this.pendingReceptionRefunds.filter(
+          (row) => Number(row.id) !== refundId
+        );
+      }
+
+      const summary = this.cashRouteSummary;
+      this.cashRouteSummary = {
+        ...summary,
+        total_collections_count: Number(summary.total_collections_count || 0) + 1,
+        total_change_tubes_loaded_eur: Math.round((Number(summary.total_change_tubes_loaded_eur || 0) + Number(clean.change_tubes_loaded_eur || 0)) * 100) / 100,
+        total_reception_cash_delivered_eur: Math.round((Number(summary.total_reception_cash_delivered_eur || 0) + Number(clean.reception_cash_delivered_eur || 0)) * 100) / 100,
+        pending_vault_bags_count: Number(summary.pending_vault_bags_count || 0) + 1,
+        last_collected_at: clean.collected_at || new Date().toISOString()
+      };
+
+      const hasReceipt = clean.has_reception_receipt === true
+        || Number(clean.reception_cash_delivered_eur || 0) > 0;
+      if (options.openReceipt !== false && hasReceipt && clean.id) {
+        await this.openCashReceipt(clean);
+      }
+    },
+
+    async openCashReceipt(collection) {
+      const id = Number(collection?.id || 0);
+      if (id < 1) return;
+      this.showCashReceiptModal = true;
+      this.cashReceipt = {};
+      this.cashReceiptLoading = true;
+      this.cashReceiptError = '';
+      try {
+        const response = await api.restocker.getCashCollectionReceptionReceipt(id);
+        this.cashReceipt = this.sanitizeCashReceipt(this.normalizeApiData(response));
+      } catch (error) {
+        this.cashReceiptError = error?.message || 'No se pudo recuperar el recibo de conserjería.';
+      } finally {
+        this.cashReceiptLoading = false;
+      }
+    },
+
+    closeCashReceipt() {
+      this.showCashReceiptModal = false;
+      this.cashReceipt = {};
+      this.cashReceiptError = '';
+    },
+
+    printCashReceipt() {
+      if (typeof window !== 'undefined' && typeof window.print === 'function') {
+        window.print();
+      }
+    },
+
+    ensureCashQueue() {
+      if (!this.cashQueue) {
+        this.cashQueue = new CashCollectionOfflineQueue();
+      }
+      return this.cashQueue;
+    },
+
+    async loadPendingCashQueue() {
+      const restockerId = this.cashRestockerId;
+      if (!restockerId) {
+        this.pendingCashMutations = [];
+        return;
+      }
+
+      try {
+        this.pendingCashMutations = await this.ensureCashQueue().list(restockerId);
+      } catch (error) {
+        this.pendingCashMutations = [];
+        this.cashSyncError = error?.message || 'No se pudo leer la cola offline de recaudaciones.';
+      }
+    },
+
+    async syncPendingCashCollections() {
+      const restockerId = this.cashRestockerId;
+      if (!restockerId) {
+        this.cashSyncError = 'Inicia sesión como reponedor para sincronizar recaudaciones.';
+        return;
+      }
+      if (!this.navigatorOnline) {
+        this.cashSyncError = 'Sin conexión. Las recaudaciones seguirán guardadas en la cola offline.';
+        return;
+      }
+      if (this.isSyncingCash) return;
+
+      this.isSyncingCash = true;
+      this.cashSyncError = '';
+      this.cashSyncMessage = '';
+      let synced = 0;
+      let conflicts = 0;
+      try {
+        const queue = this.ensureCashQueue();
+        const pending = await queue.list(restockerId, [CASH_COLLECTION_PENDING]);
+        for (const item of pending) {
+          try {
+            const response = await api.restocker.createCashCollection(item.machine_id, item.payload);
+            await this.applyCashCollectionResult(this.normalizeApiData(response), { openReceipt: false });
+            await queue.remove(item.client_mutation_id);
+            synced += 1;
+          } catch (error) {
+            if (this.isRetryableSyncFailure(error)) {
+              this.cashSyncError = this.syncRetryMessage(error, 'recaudaciones');
+              break;
+            }
+            await queue.markConflict(
+              item.client_mutation_id,
+              error?.message || 'La recaudación offline fue rechazada por el servidor.'
+            );
+            conflicts += 1;
+          }
+        }
+
+        await this.loadPendingCashQueue();
+        if (synced > 0 || conflicts > 0) {
+          this.cashSyncMessage = `${synced} recaudación(es) sincronizada(s).${conflicts > 0 ? ` ${conflicts} conflicto(s) pendientes de archivar.` : ''}`;
+        } else if (!this.cashSyncError) {
+          this.cashSyncMessage = 'No hay recaudaciones pendientes de sincronizar.';
+        }
+      } catch (error) {
+        this.cashSyncError = error?.message || 'No se pudo sincronizar la cola offline de recaudaciones.';
+      } finally {
+        this.isSyncingCash = false;
+      }
+    },
+
+    async archiveCashConflict(item) {
+      if (!item?.client_mutation_id || this.isSyncingCash) return;
+      this.isSyncingCash = true;
+      this.cashSyncError = '';
+      this.cashSyncMessage = '';
+      try {
+        await api.restocker.dumpCashCollectionConflict({
+          machine_id: item.machine_id,
+          client_mutation_id: item.client_mutation_id,
+          bag_seal_code: item.payload?.bag_seal_code || null,
+          reason: item.conflict_reason || 'La recaudación offline ya no puede aplicarse.',
+          offline_created_at: item.created_at
+        });
+        await this.ensureCashQueue().remove(item.client_mutation_id);
+        await this.loadPendingCashQueue();
+        this.cashSyncMessage = 'Conflicto de recaudación archivado en auditoría. La cola local queda limpia.';
+      } catch (error) {
+        this.cashSyncError = error?.message || 'No se pudo archivar el conflicto de recaudación.';
+      } finally {
+        this.isSyncingCash = false;
+      }
+    },
+
+    cashStatusLabel(collection) {
+      if (collection?.status_label) return collection.status_label;
+      const labels = {
+        SEALED_IN_ROUTE: 'Precintada en ruta',
+        DELIVERED_TO_VAULT: 'Entregada en cámara',
+        PROCESSED_IN_VAULT: 'Arqueada en caja',
+        PENDING_SYNC: 'Pendiente de sincronizar'
+      };
+      return labels[collection?.status] || collection?.status || 'Sin estado';
+    },
+
+    cashStatusStyle(status) {
+      if (status === 'PROCESSED_IN_VAULT' || status === 'RECONCILED_OK') {
+        return { backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success-text)' };
+      }
+      if (status === 'DELIVERED_TO_VAULT') {
+        return { backgroundColor: 'var(--color-info-bg)', color: 'var(--color-info-text)' };
+      }
+      if (status === 'PENDING_SYNC') {
+        return { backgroundColor: 'var(--color-surface-1)', color: 'var(--color-ink-muted)' };
+      }
+      return { backgroundColor: 'var(--color-warning-bg)', color: 'var(--color-warning-text)' };
+    },
+
     handleLogout() {
       store.clearSession();
       this.restocker = null;
@@ -1536,6 +2231,19 @@ export const RestockerRouteView = {
       this.pendingVisitMutations = [];
       this.visitSyncMessage = '';
       this.visitSyncError = '';
+      this.showCashModal = false;
+      this.cashMachine = null;
+      this.cashForm = blankCashForm();
+      this.visitCashEnabled = false;
+      this.visitCashForm = blankCashForm();
+      this.pendingReceptionRefunds = [];
+      this.recentCashCollections = [];
+      this.cashRouteSummary = blankCashRouteSummary();
+      this.pendingCashMutations = [];
+      this.cashSyncMessage = '';
+      this.cashSyncError = '';
+      this.showCashReceiptModal = false;
+      this.cashReceipt = {};
       this.clearVisitPhoto();
       this.shiftStatus = 'OFF_SHIFT';
       this.todaySummary = null;
@@ -2081,6 +2789,12 @@ export const RestockerRouteView = {
                   data-testid="restocker-machine-pending-visit"
                   style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text);"
                 >📥 Visita pendiente</span>
+                <span
+                  v-if="machinePendingRefundsCount(machine) > 0"
+                  data-testid="restocker-machine-pending-refunds"
+                  :data-pending-refunds-count="machinePendingRefundsCount(machine)"
+                  style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-info-bg); color: var(--color-info-text);"
+                >🪙 {{ machinePendingRefundsCount(machine) }} reintegro(s)</span>
               </div>
 
               <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
@@ -2103,6 +2817,17 @@ export const RestockerRouteView = {
                   @click="openVisitAssistant(machine)"
                 >
                   📋 Iniciar Visita de Reposición
+                </button>
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary vg-btn-sm"
+                  data-testid="btn-quick-cash-collection"
+                  :data-machine-id="machine.id"
+                  :disabled="!machineCanRestock(machine)"
+                  :title="machineCanRestock(machine) ? 'Recaudar hucha, cargar cambio y entregar reintegros en conserjería' : machineRestockBlockReason(machine)"
+                  @click="openCashCollection(machine)"
+                >
+                  🪙 Recaudación / Cambio
                 </button>
               </div>
               <p
@@ -2222,7 +2947,148 @@ export const RestockerRouteView = {
                 <span>{{ visit.cabin_temp_celsius ?? '—' }} °C</span>
                 <span>+{{ visit.units_added ?? 0 }} uds. cargadas</span>
                 <span>−{{ visit.units_withdrawn ?? 0 }} uds. retiradas</span>
+                <span v-if="visit.cash_collection_pending" data-testid="restocker-visit-cash-pending">🪙 Recaudación pendiente</span>
               </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- Historial de bolsas y cola offline de recaudaciones (T-CCV-11, C2, C4, Art. V.4) -->
+        <section
+          data-testid="restocker-cash-history"
+          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 500; margin: 0 0 4px 0;">🪙 Mis Bolsas Precintadas y Cambios de Ruta</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
+                Arqueo Ciego: solo consta lo que declaraste en ruta. La cámara concilia en privado.
+              </p>
+            </div>
+            <button
+              v-if="pendingCashMutations.length > 0"
+              type="button"
+              class="vg-btn vg-btn-secondary vg-btn-sm"
+              data-testid="btn-sync-cash-collections"
+              :disabled="isSyncingCash"
+              @click="syncPendingCashCollections"
+            >
+              {{ isSyncingCash ? 'Sincronizando…' : '🔄 Sincronizar Recaudaciones' }}
+            </button>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px;">
+            <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px;">
+              <span style="display: block; font-size: 10px; color: var(--color-ink-muted); text-transform: uppercase;">Recaudaciones</span>
+              <strong data-testid="cash-summary-total" style="font-family: var(--font-display); font-size: 15px;">{{ Number(cashRouteSummary.total_collections_count || 0) }}</strong>
+            </div>
+            <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px;">
+              <span style="display: block; font-size: 10px; color: var(--color-ink-muted); text-transform: uppercase;">Pendientes de cámara</span>
+              <strong data-testid="cash-summary-pending-vault" style="font-family: var(--font-display); font-size: 15px; color: var(--color-warning-text);">{{ Number(cashRouteSummary.pending_vault_bags_count || 0) }}</strong>
+            </div>
+            <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px;">
+              <span style="display: block; font-size: 10px; color: var(--color-ink-muted); text-transform: uppercase;">Cambio cargado</span>
+              <strong style="font-family: var(--font-display); font-size: 15px; color: var(--color-info-text);">{{ formatPrice(cashRouteSummary.total_change_tubes_loaded_eur) }}</strong>
+            </div>
+            <div style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px;">
+              <span style="display: block; font-size: 10px; color: var(--color-ink-muted); text-transform: uppercase;">Entregado en conserjería</span>
+              <strong style="font-family: var(--font-display); font-size: 15px; color: var(--color-success-text);">{{ formatPrice(cashRouteSummary.total_reception_cash_delivered_eur) }}</strong>
+            </div>
+          </div>
+
+          <div
+            v-if="cashSyncMessage"
+            data-testid="restocker-cash-sync-message"
+            style="font-size: 12px; color: var(--color-success-text); background-color: var(--color-success-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;"
+          >
+            {{ cashSyncMessage }}
+          </div>
+          <div
+            v-if="cashSyncError"
+            data-testid="restocker-cash-sync-error"
+            style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;"
+          >
+            ⚠️ {{ cashSyncError }}
+          </div>
+
+          <div
+            v-if="pendingCashMutations.length > 0"
+            data-testid="restocker-offline-cash-queue"
+            style="margin-top: 10px; padding: 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); background-color: var(--color-warning-bg);"
+          >
+            <strong style="display: block; font-size: 12px; color: var(--color-warning-text);">
+              📥 Cola offline de recaudaciones · {{ pendingCashCount }} pendiente(s) · {{ conflictCashCount }} conflicto(s)
+            </strong>
+            <ul style="margin: 8px 0 0 0; padding: 0; list-style: none; display: grid; gap: 6px;">
+              <li
+                v-for="item in pendingCashMutations"
+                :key="item.client_mutation_id"
+                data-testid="restocker-offline-cash-item"
+                style="font-size: 11px; color: var(--color-slate);"
+              >
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
+                  <span>
+                    <strong>{{ item.machine_code || ('Máquina #' + item.machine_id) }}</strong>
+                    · {{ item.status === 'CONFLICT' ? 'Conflicto' : 'Pendiente' }}
+                    · {{ item.payload?.bag_seal_code || 'Sin precinto' }}
+                  </span>
+                  <button
+                    v-if="item.status === 'CONFLICT'"
+                    type="button"
+                    class="vg-btn vg-btn-ghost vg-btn-sm"
+                    data-testid="btn-archive-cash-conflict"
+                    :disabled="isSyncingCash"
+                    @click="archiveCashConflict(item)"
+                  >
+                    📥 Archivar Conflicto en Auditoría
+                  </button>
+                </div>
+                <span v-if="item.conflict_reason" style="display: block; color: var(--color-error-text); margin-top: 2px;">
+                  {{ item.conflict_reason }}
+                </span>
+              </li>
+            </ul>
+          </div>
+
+          <p v-if="recentCashCollections.length === 0" data-testid="restocker-cash-history-empty" style="font-size: 13px; color: var(--color-ink-muted); margin: 12px 0 0 0;">
+            Todavía no has precintado ninguna bolsa ni cargado cambio en ruta.
+          </p>
+          <ul v-else style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 8px;">
+            <li
+              v-for="collection in recentCashCollections"
+              :key="collection.id || collection.collection_code"
+              data-testid="restocker-cash-collection-item"
+              :data-collection-id="collection.id"
+              style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 8px 10px;"
+            >
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                <div style="min-width: 0;">
+                  <strong style="display: block; font-size: 12px; font-family: var(--font-display); font-weight: 500;">
+                    {{ collection.collection_code || 'Recaudación' }} · {{ collection.machine_code || 'Máquina' }}
+                  </strong>
+                  <span style="display: block; font-size: 11px; color: var(--color-ink-muted);">
+                    {{ formatShiftDate(collection.collected_at || collection.created_at) }} · precinto {{ collection.bag_seal_code || '—' }}
+                  </span>
+                </div>
+                <span
+                  :style="cashStatusStyle(collection.status)"
+                  style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-interactive); white-space: nowrap;"
+                >{{ cashStatusLabel(collection) }}</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--color-ink-muted); margin-top: 5px;">
+                <span>Contador {{ formatPrice(collection.sales_counter_reading) }}</span>
+                <span>Cambio {{ formatPrice(collection.change_tubes_loaded_eur) }}</span>
+                <span v-if="Number(collection.reception_cash_delivered_eur || 0) > 0">Conserjería {{ formatPrice(collection.reception_cash_delivered_eur) }}</span>
+              </div>
+              <button
+                v-if="collection.has_reception_receipt && collection.id && !collection.is_offline_pending"
+                type="button"
+                class="vg-btn vg-btn-ghost vg-btn-sm mt-1"
+                data-testid="btn-open-cash-receipt"
+                @click="openCashReceipt(collection)"
+              >
+                🧾 Ver Recibo de Conserjería
+              </button>
             </li>
           </ul>
         </section>
@@ -2338,6 +3204,245 @@ export const RestockerRouteView = {
                 </li>
               </ul>
             </template>
+          </div>
+        </div>
+
+        <!-- Modal rápido de recaudación, cambio y conserjería (T-CCV-11, D1, D3) -->
+        <div
+          v-if="showCashModal"
+          data-testid="modal-cash-collection"
+          style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 78; padding: 0;"
+          @click.self="cancelCashModal"
+        >
+          <div
+            style="background-color: var(--color-surface-card); width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; border-top-left-radius: var(--radius-card); border-top-right-radius: var(--radius-card); border: 1px solid var(--color-hairline); padding: 16px; box-sizing: border-box;"
+          >
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div style="min-width: 0;">
+                <h2 style="font-family: var(--font-display); font-size: 18px; font-weight: 500; margin: 0;">
+                  🪙 {{ cashContextIsVisit ? 'Recaudación integrada en la visita' : 'Recaudación / Cambio en ruta' }}
+                </h2>
+                <p style="font-size: 12px; color: var(--color-ink-muted); margin: 2px 0 0 0;">
+                  {{ cashModalMachine?.code || 'Máquina' }} · {{ cashModalMachine?.location_name || '—' }}
+                </p>
+              </div>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-cash" @click="cancelCashModal">
+                Cerrar
+              </button>
+            </div>
+
+            <div
+              v-if="cashError"
+              data-testid="restocker-cash-error"
+              style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;"
+            >
+              ⚠️ {{ cashError }}
+            </div>
+
+            <p style="font-size: 10px; color: var(--color-ink-muted); margin: 10px 0 0 0;">
+              Arqueo Ciego: declara la lectura del contador y el cambio cargado. El esperado de caja, la lectura anterior y el arqueo de cámara no se muestran al reponedor (C2, Art. V.4).
+            </p>
+
+            <label style="display: block; font-size: 11px; font-weight: 600; color: var(--color-slate); margin-top: 12px;">
+              Precinto de la bolsa · obligatorio
+            </label>
+            <input
+              v-model="cashForm.bag_seal_code"
+              type="text"
+              maxlength="40"
+              placeholder="BAG-XXXX-0000"
+              data-testid="cash-bag-seal"
+              style="width: 100%; box-sizing: border-box; height: 36px; margin-top: 4px; padding: 0 8px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); text-transform: uppercase;"
+            />
+            <p style="font-size: 10px; color: var(--color-ink-muted); margin: 4px 0 0 0;">
+              6–40 caracteres A–Z, 0–9, guion o guion bajo, con al menos 3 dígitos. El precinto es global e irrepetible (C1).
+            </p>
+
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px;">
+              <label style="display: block; font-size: 11px; color: var(--color-slate);">
+                Lectura del contador (€)
+                <input
+                  v-model.number="cashForm.sales_counter_reading"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="9999999.99"
+                  data-testid="cash-counter-reading"
+                  style="width: 100%; box-sizing: border-box; height: 34px; margin-top: 3px; padding: 0 6px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);"
+                />
+              </label>
+              <label style="display: block; font-size: 11px; color: var(--color-slate);">
+                Tubos de cambio (€)
+                <input
+                  v-model.number="cashForm.change_tubes_loaded_eur"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="500"
+                  data-testid="cash-change-tubes"
+                  style="width: 100%; box-sizing: border-box; height: 34px; margin-top: 3px; padding: 0 6px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);"
+                />
+              </label>
+            </div>
+
+            <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; margin-top: 10px;">
+              <input v-model="cashForm.is_counter_reset" type="checkbox" data-testid="cash-counter-reset" style="margin-top: 2px;" />
+              <span>La máquina se ha reseteado y la lectura vuelve a cero.</span>
+            </label>
+            <label v-if="cashForm.is_counter_reset" style="display: block; font-size: 11px; color: var(--color-slate); margin-top: 8px;">
+              Justificación del reseteo · mín. 20 caracteres y 3 bloques
+              <textarea
+                v-model="cashForm.counter_reset_notes"
+                rows="2"
+                maxlength="500"
+                data-testid="cash-reset-notes"
+                style="width: 100%; box-sizing: border-box; margin-top: 3px; padding: 6px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: 12px;"
+              ></textarea>
+            </label>
+
+            <div
+              v-if="cashMachineHasReception"
+              style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px; margin-top: 12px;"
+            >
+              <strong style="display: block; font-size: 12px; color: var(--color-slate);">🏢 Entrega en conserjería · máximo 10,00 €</strong>
+              <p style="font-size: 10px; color: var(--color-ink-muted); margin: 4px 0 0 0;">
+                Selecciona un reintegro EN_MANO_SEDE para igualar importe y reclamante, o declara una entrega manual con el nombre del conserje.
+              </p>
+              <div v-if="cashPendingRefunds.length > 0" style="display: grid; gap: 6px; margin-top: 8px;">
+                <button
+                  v-for="refund in cashPendingRefunds"
+                  :key="refund.id"
+                  type="button"
+                  class="vg-btn vg-btn-sm"
+                  :class="Number(cashForm.linked_refund_request_id) === Number(refund.id) ? 'vg-btn-primary' : 'vg-btn-secondary'"
+                  data-testid="cash-refund-option"
+                  :data-refund-id="refund.id"
+                  @click="selectCashRefund(refund)"
+                >
+                  Reintegro #{{ refund.id }} · {{ formatPrice(refund.claimed_amount) }} · 1 toque
+                </button>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px;">
+                <label style="display: block; font-size: 11px; color: var(--color-slate);">
+                  Efectivo entregado (€)
+                  <input
+                    v-model.number="cashForm.reception_cash_delivered_eur"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="10"
+                    data-testid="cash-reception-amount"
+                    style="width: 100%; box-sizing: border-box; height: 34px; margin-top: 3px; padding: 0 6px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);"
+                  />
+                </label>
+                <label style="display: block; font-size: 11px; color: var(--color-slate);">
+                  Nombre del conserje
+                  <input
+                    v-model="cashForm.receptionist_name"
+                    type="text"
+                    maxlength="120"
+                    data-testid="cash-receptionist-name"
+                    style="width: 100%; box-sizing: border-box; height: 34px; margin-top: 3px; padding: 0 6px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);"
+                  />
+                </label>
+              </div>
+              <p v-if="cashSelectedRefund" data-testid="cash-refund-locked" style="font-size: 10px; color: var(--color-success-text); margin: 6px 0 0 0;">
+                Importe bloqueado al reclamado del expediente #{{ cashSelectedRefund.id }} ({{ formatPrice(cashSelectedRefund.claimed_amount) }}).
+              </p>
+            </div>
+            <p v-else style="font-size: 11px; color: var(--color-warning-text); background-color: var(--color-warning-bg); border-radius: var(--radius-interactive); padding: 7px 8px; margin-top: 12px;">
+              Esta sede no tiene conserjería física: la bolsa y el cambio se registran, pero no puede entregarse efectivo aquí (D3).
+            </p>
+
+            <label style="display: block; font-size: 11px; color: var(--color-slate); margin-top: 10px;">
+              Notas de ruta · opcionales
+              <textarea
+                v-model="cashForm.route_notes"
+                rows="2"
+                maxlength="500"
+                data-testid="cash-route-notes"
+                style="width: 100%; box-sizing: border-box; margin-top: 3px; padding: 6px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: 12px;"
+              ></textarea>
+            </label>
+
+            <p style="font-size: 10px; color: var(--color-ink-muted); margin: 10px 0 0 0;">
+              Sin conexión, la recaudación se guarda en una cola IndexedDB FIFO y se sincroniza al recuperar cobertura (D4, C4).
+            </p>
+
+            <div style="display: flex; gap: 8px; margin-top: 14px;">
+              <button type="button" class="vg-btn vg-btn-lg vg-btn-secondary flex-grow-1" @click="cancelCashModal">
+                Cancelar
+              </button>
+              <button
+                type="button"
+                class="vg-btn vg-btn-lg vg-btn-primary flex-grow-1"
+                data-testid="btn-save-cash-collection"
+                :disabled="cashSubmitting"
+                @click="saveCashFromModal"
+              >
+                {{ cashSubmitting ? 'Registrando…' : (cashContextIsVisit ? 'Añadir a la visita' : 'Registrar recaudación') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recibo opaco de conserjería: exactamente nueve campos (QA 2, Art. V.4) -->
+        <div
+          v-if="showCashReceiptModal"
+          data-testid="cash-reception-receipt-modal"
+          style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 82; padding: 0;"
+          @click.self="closeCashReceipt"
+        >
+          <div
+            style="background-color: var(--color-surface-card); width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; border-top-left-radius: var(--radius-card); border-top-right-radius: var(--radius-card); border: 1px solid var(--color-hairline); padding: 16px; box-sizing: border-box;"
+          >
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div>
+                <h2 style="font-family: var(--font-display); font-size: 18px; font-weight: 500; margin: 0;">🧾 Recibo de Conserjería</h2>
+                <p style="font-size: 12px; color: var(--color-ink-muted); margin: 2px 0 0 0;">
+                  Entrega de efectivo en sede · sin datos de la bolsa ni PIN del reclamante.
+                </p>
+              </div>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-cash-receipt" @click="closeCashReceipt">
+                Cerrar
+              </button>
+            </div>
+            <p v-if="cashReceiptLoading" style="font-size: 13px; color: var(--color-ink-muted); margin-top: 12px;">Cargando el recibo…</p>
+            <p v-if="cashReceiptError" data-testid="restocker-cash-receipt-error" style="font-size: 12px; color: var(--color-error-text); margin-top: 12px;">⚠️ {{ cashReceiptError }}</p>
+            <div v-if="!cashReceiptLoading && !cashReceiptError" style="margin-top: 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 12px;">
+              <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 0;">
+                <span style="color: var(--color-ink-muted);">Recaudación</span><strong>{{ cashReceipt.collection_code || '—' }}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 0;">
+                <span style="color: var(--color-ink-muted);">Fecha</span><strong>{{ formatShiftDate(cashReceipt.collected_at) }}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 0;">
+                <span style="color: var(--color-ink-muted);">Sede</span><strong>{{ cashReceipt.location_code }} · {{ cashReceipt.location_name }}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 0;">
+                <span style="color: var(--color-ink-muted);">Máquina</span><strong>{{ cashReceipt.machine_code || '—' }}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 0;">
+                <span style="color: var(--color-ink-muted);">Reponedor</span><strong>{{ cashReceipt.restocker_name || '—' }}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 0;">
+                <span style="color: var(--color-ink-muted);">Conserje</span><strong>{{ cashReceipt.receptionist_name || '—' }}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 0;">
+                <span style="color: var(--color-ink-muted);">Efectivo entregado</span><strong style="color: var(--color-success-text);">{{ formatPrice(cashReceipt.reception_cash_delivered_eur) }}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 0;">
+                <span style="color: var(--color-ink-muted);">Expediente</span><strong>#{{ cashReceipt.linked_refund_request_id || '—' }}</strong>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="vg-btn vg-btn-primary vg-btn-lg w-100 mt-2"
+              data-testid="btn-print-cash-receipt"
+              @click="printCashReceipt"
+            >
+              🖨️ Imprimir recibo
+            </button>
           </div>
         </div>
 
@@ -2534,6 +3639,55 @@ export const RestockerRouteView = {
                   <p v-if="visitHygieneMissing.length > 0" style="font-size: 10px; color: var(--color-warning-text); margin: 7px 0 0 0;">
                     Faltan {{ visitHygieneMissing.length }} comprobaciones obligatorias.
                   </p>
+                </div>
+
+                <!-- Recaudación integrada opcional, jamás en aborto térmico (T-CCV-11, D1, Art. II.2) -->
+                <div
+                  v-if="!visitIsThermalAbort"
+                  data-testid="visit-cash-block"
+                  style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px; margin-top: 12px;"
+                >
+                  <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px;">
+                    <input
+                      v-model="visitCashEnabled"
+                      type="checkbox"
+                      data-testid="visit-cash-enabled"
+                      style="margin-top: 2px;"
+                      @change="onVisitCashToggle"
+                    />
+                    <span>🪙 Recaudar Hucha / Cargar Cambio / Conserjería (opcional)</span>
+                  </label>
+                  <p style="font-size: 10px; color: var(--color-ink-muted); margin: 5px 0 0 0;">
+                    Se registrará de forma atómica dentro de esta visita. El esperado de caja y el arqueo de la cámara quedan ocultos.
+                  </p>
+                  <div
+                    v-if="visitCashConfigured"
+                    data-testid="visit-cash-summary"
+                    style="font-size: 11px; background-color: var(--color-surface-1); border-radius: var(--radius-interactive); padding: 8px; margin-top: 8px;"
+                  >
+                    <strong style="display: block;">Precinto {{ visitCashForm.bag_seal_code }}</strong>
+                    <span>Cambio {{ formatPrice(visitCashForm.change_tubes_loaded_eur) }} · Contador {{ formatPrice(visitCashForm.sales_counter_reading) }}</span>
+                    <span v-if="Number(visitCashForm.reception_cash_delivered_eur || 0) > 0" style="display: block; color: var(--color-success-text); margin-top: 2px;">
+                      Conserjería {{ formatPrice(visitCashForm.reception_cash_delivered_eur) }} · {{ visitCashForm.receptionist_name }}
+                    </span>
+                    <button
+                      type="button"
+                      class="vg-btn vg-btn-ghost vg-btn-sm mt-1"
+                      data-testid="btn-edit-visit-cash"
+                      @click="openCashCollection(visitMachine, 'VISIT')"
+                    >
+                      Editar recaudación
+                    </button>
+                  </div>
+                  <button
+                    v-else-if="visitCashEnabled"
+                    type="button"
+                    class="vg-btn vg-btn-secondary vg-btn-sm mt-2"
+                    data-testid="btn-configure-visit-cash"
+                    @click="openCashCollection(visitMachine, 'VISIT')"
+                  >
+                    Configurar recaudación
+                  </button>
                 </div>
               </template>
 

@@ -1,0 +1,526 @@
+<?php
+
+declare(strict_types=1);
+
+namespace VendGuard\Core\Domain\Exception;
+
+use DomainException;
+
+/**
+ * MachineCashCollectionValidationException
+ *
+ * Única excepción de negocio de la recaudación de efectivo, la carga de tubos de
+ * cambio y el arqueo de caja (Módulo 35). Transporta el código exacto del
+ * contrato REST y el estado HTTP con el que la capa de presentación debe
+ * responder, de modo que ningún controlador reinvente la traducción de las
+ * reglas del Arqueo Ciego.
+ *
+ * Los constructores son semánticos: el código no se escribe a mano en el
+ * servicio, se elige llamando al constructor que describe el fallo.
+ *
+ * Códigos por estado HTTP:
+ *   - `409`: máquina bloqueada por cuarentena, fuera de servicio o avería
+ *     térmica abierta (Art. II.2); sede sin conserjería física (D3); bolsa ya
+ *     arqueada (D4, Art. III.3).
+ *   - `422`: precinto inválido (C1), regresión del contador o reseteo sin nota
+ *     real (C3, Art. V.1), cotas económicas (D2), entrega en conserjería (D3),
+ *     visita abortada por rotura de frío (C4, Art. II.2) y justificación del
+ *     descuadre (D2, Art. V.1).
+ *
+ * Dogma Vanilla: PHP 8.2+ puro, sin dependencias.
+ * Dualismo Lingüístico: código en inglés, mensajes en castellano.
+ */
+final class MachineCashCollectionValidationException extends DomainException
+{
+    // ── 403 · rol y perímetro territorial ────────────────────────────────
+    public const MACHINE_OUTSIDE_RESTOCKER_ZONES = 'MACHINE_OUTSIDE_RESTOCKER_ZONES';
+    public const CASH_COLLECTION_FORBIDDEN_FOR_ROLE = 'CASH_COLLECTION_FORBIDDEN_FOR_ROLE';
+    public const RESTOCK_VISIT_NOT_OWNED = 'RESTOCK_VISIT_NOT_OWNED';
+
+    // ── 404 · máquina o recaudación inexistente ──────────────────────────
+    public const MACHINE_NOT_FOUND = 'MACHINE_NOT_FOUND';
+    public const CASH_COLLECTION_NOT_FOUND = 'CASH_COLLECTION_NOT_FOUND';
+
+    // ── 409 · cerrojo sanitario, conserjería y estado terminal ─────────────
+    public const SANITARY_CASH_COLLECTION_BLOCKED = 'SANITARY_CASH_COLLECTION_BLOCKED';
+    public const BAG_SEAL_CODE_ALREADY_USED = 'BAG_SEAL_CODE_ALREADY_USED';
+    public const CLIENT_MUTATION_ID_ALREADY_USED = 'CLIENT_MUTATION_ID_ALREADY_USED';
+    public const REFUND_REQUEST_NOT_ELIGIBLE_FOR_RECEPTION = 'REFUND_REQUEST_NOT_ELIGIBLE_FOR_RECEPTION';
+    public const INVALID_CASH_COLLECTION_STATE_TRANSITION = 'INVALID_CASH_COLLECTION_STATE_TRANSITION';
+    public const LOCATION_HAS_NO_PHYSICAL_RECEPTION = 'LOCATION_HAS_NO_PHYSICAL_RECEPTION';
+    public const CASH_COLLECTION_ALREADY_RECONCILED = 'CASH_COLLECTION_ALREADY_RECONCILED';
+
+    // ── 422 · precinto, contador, conserjería, térmico y arqueo ────────────
+    public const INVALID_BAG_SEAL_CODE = 'INVALID_BAG_SEAL_CODE';
+    public const SALES_COUNTER_REGRESSION = 'SALES_COUNTER_REGRESSION';
+    public const COUNTER_RESET_NOTES_REQUIRED = 'COUNTER_RESET_NOTES_REQUIRED';
+    public const INVALID_CASH_AMOUNT_BOUNDS = 'INVALID_CASH_AMOUNT_BOUNDS';
+    public const RECEPTION_CASH_LIMIT_EXCEEDED = 'RECEPTION_CASH_LIMIT_EXCEEDED';
+    public const RECEPTIONIST_NAME_REQUIRED = 'RECEPTIONIST_NAME_REQUIRED';
+    public const THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN = 'THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN';
+    public const DISCREPANCY_JUSTIFICATION_REQUIRED = 'DISCREPANCY_JUSTIFICATION_REQUIRED';
+    public const REFUND_AMOUNT_MISMATCH = 'REFUND_AMOUNT_MISMATCH';
+    public const RESTOCK_VISIT_NOT_ALLOWED = 'RESTOCK_VISIT_NOT_ALLOWED';
+    public const RESTOCK_VISIT_NOT_COMPLETED = 'RESTOCK_VISIT_NOT_COMPLETED';
+    public const VALIDATION_ERROR = 'VALIDATION_ERROR';
+
+    private string $errorCode;
+
+    private int $httpStatusCode;
+
+    private ?string $field;
+
+    /** @var array<string, mixed> Datos de contexto útiles para el log, nunca secretos. */
+    private array $context;
+
+    /**
+     * @param array<string, mixed> $context
+     */
+    public function __construct(
+        string $errorCode,
+        string $message,
+        int $httpStatusCode,
+        ?string $field = null,
+        array $context = []
+    ) {
+        parent::__construct($message, $httpStatusCode);
+        $this->errorCode = $errorCode;
+        $this->httpStatusCode = $httpStatusCode;
+        $this->field = $field;
+        $this->context = $context;
+    }
+
+    public function getErrorCode(): string
+    {
+        return $this->errorCode;
+    }
+
+    public function getHttpStatusCode(): int
+    {
+        return $this->httpStatusCode;
+    }
+
+    public function getField(): ?string
+    {
+        return $this->field;
+    }
+
+    /** @return array<string, mixed> */
+    public function getContext(): array
+    {
+        return $this->context;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 403 · rol y perímetro territorial (C2, Art. V.4)
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function cashCollectionForbiddenForRole(string $role): self
+    {
+        return new self(
+            self::CASH_COLLECTION_FORBIDDEN_FOR_ROLE,
+            sprintf('El rol «%s» no está autorizado a operar sobre la recaudación de efectivo (Art. V.4).', $role),
+            403,
+            'actor',
+            ['role' => $role]
+        );
+    }
+
+    public static function machineOutsideRestockerZones(int $machineId, int $restockerId): self
+    {
+        return new self(
+            self::MACHINE_OUTSIDE_RESTOCKER_ZONES,
+            sprintf('La máquina %d no pertenece a las zonas operativas cubiertas hoy por el reponedor %d (C2).', $machineId, $restockerId),
+            403,
+            'machine_id',
+            ['machine_id' => $machineId, 'restocker_id' => $restockerId]
+        );
+    }
+
+    public static function restockVisitNotOwnedByRestocker(int $visitId): self
+    {
+        return new self(
+            self::RESTOCK_VISIT_NOT_OWNED,
+            sprintf('La visita de reposición %d pertenece a otro reponedor y no puede vincularse a esta recaudación (D1).', $visitId),
+            403,
+            'restock_visit_id',
+            ['restock_visit_id' => $visitId]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 404 · máquina o recaudación inexistente
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function machineNotFound(int $machineId): self
+    {
+        return new self(
+            self::MACHINE_NOT_FOUND,
+            sprintf('La máquina %d no existe o está inactiva.', $machineId),
+            404,
+            'machine_id',
+            ['machine_id' => $machineId]
+        );
+    }
+
+    public static function cashCollectionNotFound(int $collectionId): self
+    {
+        return new self(
+            self::CASH_COLLECTION_NOT_FOUND,
+            sprintf('La recaudación %d no existe o no tiene el dato solicitado.', $collectionId),
+            404,
+            'cash_collection_id',
+            ['cash_collection_id' => $collectionId]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 409 · precinto ya consumido, reintegro no elegible y transición inválida
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function bagSealCodeAlreadyUsed(string $bagSealCode): self
+    {
+        return new self(
+            self::BAG_SEAL_CODE_ALREADY_USED,
+            sprintf('El precinto «%s» ya fue utilizado en otra recaudación histórica (C1).', $bagSealCode),
+            409,
+            'bag_seal_code',
+            ['bag_seal_code' => $bagSealCode]
+        );
+    }
+
+    /**
+     * El cliente reutilizó una mutación ya grabada en otra máquina (D4).
+     *
+     * La clave de idempotencia es del reponedor, pero el replay solo puede
+     * devolver la fila de la misma máquina: devolver la bolsa de otra sería
+     * perder la captura nueva sin error.
+     */
+    public static function clientMutationIdAlreadyUsed(
+        string $clientMutationId,
+        int $requestedMachineId,
+        int $existingMachineId
+    ): self {
+        return new self(
+            self::CLIENT_MUTATION_ID_ALREADY_USED,
+            sprintf(
+                'El client_mutation_id «%s» ya se usó en la máquina %d y no puede reutilizarse en la máquina %d (D4).',
+                $clientMutationId,
+                $existingMachineId,
+                $requestedMachineId
+            ),
+            409,
+            'client_mutation_id',
+            [
+                'client_mutation_id' => $clientMutationId,
+                'machine_id' => $requestedMachineId,
+                'existing_machine_id' => $existingMachineId,
+            ]
+        );
+    }
+
+    public static function refundRequestNotEligibleForReception(int $refundRequestId, string $reason): self
+    {
+        return new self(
+            self::REFUND_REQUEST_NOT_ELIGIBLE_FOR_RECEPTION,
+            sprintf('El reintegro %d no es elegible para entrega en conserjería: %s (D3).', $refundRequestId, $reason),
+            409,
+            'linked_refund_request_id',
+            ['linked_refund_request_id' => $refundRequestId, 'reason' => $reason]
+        );
+    }
+
+    public static function invalidCashCollectionStateTransition(string $from, string $to): self
+    {
+        return new self(
+            self::INVALID_CASH_COLLECTION_STATE_TRANSITION,
+            sprintf('La recaudación no puede pasar de %s a %s en su ciclo de custodia (D4).', $from, $to),
+            409,
+            'status',
+            ['from' => $from, 'to' => $to]
+        );
+    }
+
+    public static function refundAmountMismatch(float $claimedAmount, float $deliveredAmount): self
+    {
+        return new self(
+            self::REFUND_AMOUNT_MISMATCH,
+            sprintf(
+                'El efectivo entregado (%.2f €) no coincide con el importe reclamado (%.2f €) del reintegro vinculado (D3).',
+                $deliveredAmount,
+                $claimedAmount
+            ),
+            422,
+            'reception_cash_delivered_eur',
+            ['claimed_amount' => $claimedAmount, 'reception_cash_delivered_eur' => $deliveredAmount]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 422 · precinto (C1)
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function invalidBagSealCode(string $bagSealCode, string $reason): self
+    {
+        return new self(
+            self::INVALID_BAG_SEAL_CODE,
+            sprintf('El precinto «%s» no es válido: %s (C1).', $bagSealCode, $reason),
+            422,
+            'bag_seal_code',
+            ['bag_seal_code' => $bagSealCode, 'reason' => $reason]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 422 · contador (C3, D2, Art. V.1)
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function salesCounterRegression(?float $previous, float $current): self
+    {
+        return new self(
+            self::SALES_COUNTER_REGRESSION,
+            sprintf(
+                'La lectura del contador no puede retroceder de %.2f € a %.2f € sin declarar is_counter_reset = TRUE (C3).',
+                $previous ?? 0.00,
+                $current
+            ),
+            422,
+            'sales_counter_reading',
+            ['previous_sales_counter_reading' => $previous, 'sales_counter_reading' => $current]
+        );
+    }
+
+    public static function counterResetNotesRequired(?int $length): self
+    {
+        return new self(
+            self::COUNTER_RESET_NOTES_REQUIRED,
+            sprintf(
+                'Un reseteo de contador exige counter_reset_notes de 20 a 500 caracteres reales con al menos 3 bloques alfanuméricos; se recibieron %s (C3, Art. V.1).',
+                $length === null ? 'ninguna nota' : $length . ' caracteres'
+            ),
+            422,
+            'counter_reset_notes',
+            ['length' => $length]
+        );
+    }
+
+    public static function invalidCashAmountBounds(string $field, ?float $value, float $minimum, float $maximum): self
+    {
+        return new self(
+            self::INVALID_CASH_AMOUNT_BOUNDS,
+            sprintf(
+                'El campo %s debe estar entre %.2f y %.2f €; se recibió %s (D2, C3).',
+                $field,
+                $minimum,
+                $maximum,
+                $value === null ? 'NULL' : sprintf('%.2f €', $value)
+            ),
+            422,
+            $field,
+            ['field' => $field, 'value' => $value, 'minimum' => $minimum, 'maximum' => $maximum]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 422 / 409 · entrega en conserjería (D3)
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function receptionCashLimitExceeded(float $amount): self
+    {
+        return new self(
+            self::RECEPTION_CASH_LIMIT_EXCEEDED,
+            sprintf('El efectivo entregado en conserjería debe estar entre 0,00 y 10,00 €; se recibió %.2f € (D3).', $amount),
+            422,
+            'reception_cash_delivered_eur',
+            ['reception_cash_delivered_eur' => $amount]
+        );
+    }
+
+    public static function receptionistNameRequired(float $amount): self
+    {
+        return new self(
+            self::RECEPTIONIST_NAME_REQUIRED,
+            sprintf(
+                'La entrega de %.2f € en conserjería exige un receptionist_name de 3 a 120 caracteres reales (D3).',
+                $amount
+            ),
+            422,
+            'receptionist_name',
+            ['reception_cash_delivered_eur' => $amount]
+        );
+    }
+
+    public static function locationHasNoPhysicalReception(int $machineId): self
+    {
+        return new self(
+            self::LOCATION_HAS_NO_PHYSICAL_RECEPTION,
+            sprintf('La sede de la máquina %d no tiene conserjería física y no admite entrega de efectivo (D3).', $machineId),
+            409,
+            'reception_cash_delivered_eur',
+            ['machine_id' => $machineId]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 409 / 422 · primacía sanitaria (C4, Art. II.2)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * @param list<string> $reasons
+     */
+    public static function sanitaryCashCollectionBlocked(array $reasons, int $machineId): self
+    {
+        return new self(
+            self::SANITARY_CASH_COLLECTION_BLOCKED,
+            sprintf(
+                'La máquina %d no admite recaudación: %s (C4, Art. II.2).',
+                $machineId,
+                implode('; ', $reasons)
+            ),
+            409,
+            'machine_id',
+            ['machine_id' => $machineId, 'reasons' => $reasons]
+        );
+    }
+
+    public static function invalidCollectedAt(string $value): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf('collected_at no es una marca temporal interpretable («%s»): use ISO 8601 con zona horaria (D2, C3).', $value),
+            422,
+            'collected_at',
+            ['reason' => 'INVALID_FORMAT', 'collected_at' => $value]
+        );
+    }
+
+    public static function invalidConflictMutationId(int $length): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf(
+                'El client_mutation_id del volcado offline debe tener entre 6 y 64 caracteres y usar solo letras, números, punto, guion, guion bajo o dos puntos; se recibieron %d (C4, Art. III.3).',
+                $length
+            ),
+            422,
+            'client_mutation_id',
+            ['reason' => 'INVALID_FORMAT', 'length' => $length, 'maximum_length' => 64]
+        );
+    }
+
+    public static function invalidConflictReason(int $length): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf(
+                'El motivo del volcado offline no puede superar los 500 caracteres reales; se recibieron %d (C4, Art. III.3).',
+                $length
+            ),
+            422,
+            'reason',
+            ['reason' => 'TOO_LONG', 'length' => $length, 'maximum_length' => 500]
+        );
+    }
+
+    public static function invalidConflictOfflineCreatedAt(string $value): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf(
+                'offline_created_at no es una marca temporal interpretable («%s»): use ISO 8601 con zona horaria (C4, Art. III.3).',
+                $value
+            ),
+            422,
+            'offline_created_at',
+            ['reason' => 'INVALID_FORMAT', 'offline_created_at' => $value]
+        );
+    }
+
+    public static function collectedAtInFuture(string $value, string $maxAllowed): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf('collected_at no puede superar la hora del servidor en más de 5 minutos (máximo %s); se recibió «%s» (D2, C3).', $maxAllowed, $value),
+            422,
+            'collected_at',
+            ['reason' => 'FUTURE_OUT_OF_WINDOW', 'collected_at' => $value, 'max_allowed' => $maxAllowed]
+        );
+    }
+
+    public static function collectedAtBeforeLastCapture(string $value, string $lastCollectedAt): self
+    {
+        return new self(
+            self::VALIDATION_ERROR,
+            sprintf('collected_at no puede ser anterior a la última captura de la máquina «%s»; se recibió «%s» (D2, C3).', $lastCollectedAt, $value),
+            422,
+            'collected_at',
+            ['reason' => 'BEFORE_LAST_CAPTURE', 'collected_at' => $value, 'last_collected_at' => $lastCollectedAt]
+        );
+    }
+
+    public static function restockVisitNotAllowedForStandalone(): self
+    {
+        return new self(
+            self::RESTOCK_VISIT_NOT_ALLOWED,
+            'La recaudación independiente no admite restock_visit_id: la visita solo se vincula al registrar la visita de reposición (D1).',
+            422,
+            'restock_visit_id'
+        );
+    }
+
+    public static function restockVisitNotCompleted(int $visitId, string $status): self
+    {
+        return new self(
+            self::RESTOCK_VISIT_NOT_COMPLETED,
+            sprintf('La visita de reposición %d debe estar COMPLETED para vincular la recaudación; está en «%s» (D1).', $visitId, $status),
+            422,
+            'restock_visit_id',
+            ['restock_visit_id' => $visitId, 'status' => $status]
+        );
+    }
+
+    public static function thermalAbortCashCollectionForbidden(int $machineId, ?int $visitId): self
+    {
+        return new self(
+            self::THERMAL_ABORT_CASH_COLLECTION_FORBIDDEN,
+            sprintf(
+                'La visita %s de la máquina %d está abortada por rotura de cadena de frío y no admite recaudación (C4, Art. II.2).',
+                $visitId === null ? '(sin identificar)' : (string)$visitId,
+                $machineId
+            ),
+            422,
+            'cash_collection',
+            ['machine_id' => $machineId, 'restock_visit_id' => $visitId]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 422 / 409 · arqueo terminal (D2, D4, Art. V.1)
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function discrepancyJustificationRequired(float $discrepancy, ?int $length): self
+    {
+        return new self(
+            self::DISCREPANCY_JUSTIFICATION_REQUIRED,
+            sprintf(
+                'El descuadre de %.2f € exige discrepancy_justification de 20 a 1000 caracteres reales con al menos 3 bloques alfanuméricos; se recibieron %s (D2, Art. V.1).',
+                $discrepancy,
+                $length === null ? 'ninguna justificación' : $length . ' caracteres'
+            ),
+            422,
+            'discrepancy_justification',
+            ['discrepancy_eur' => $discrepancy, 'length' => $length]
+        );
+    }
+
+    public static function cashCollectionAlreadyReconciled(string $status): self
+    {
+        return new self(
+            self::CASH_COLLECTION_ALREADY_RECONCILED,
+            sprintf('La recaudación ya fue arqueada (%s) y es terminal: una corrección se registra como una recaudación nueva (D4, Art. III.3).', $status),
+            409,
+            'status',
+            ['status' => $status]
+        );
+    }
+}

@@ -11,7 +11,7 @@ declare(strict_types=1);
  * certificación. Es la sustitución del nombre engañoso `PostgresParityTest`: aquí **no** se
  * compara con el motor local —eso es la correspondencia declarada de T-HYBRID-24, que exige los
  * dos motores a la vez— sino que se demuestra que el motor nuevo **hace** las cuatro operaciones
- * sobre las 48 tablas del contrato.
+ * sobre las 49 tablas del contrato.
  *
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
@@ -19,7 +19,7 @@ declare(strict_types=1);
  *      DDL base y la migración del motor aplicada por el ejecutor canónico. Si el DDL dejara de
  *      compilar o la migración dejara de aplicar, no habría dónde certificar nada.
  *
- *   2. **Alta mínima en las 48 tablas respetando el grafo de claves foráneas.** La fixture no se
+ *   2. **Alta mínima en las 49 tablas respetando el grafo de claves foráneas.** La fixture no se
  *      escribe a mano tabla por tabla: se deriva del catálogo vivo (`information_schema` y
  *      `pg_constraint`), de modo que una columna obligatoria nueva entra sola y una referencia
  *      nueva reordena el alta. Un ciclo en el grafo, o un tipo que el arnés no sepa sintetizar,
@@ -60,7 +60,7 @@ use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 48 tablas del contrato de correspondencia (§2.1, Módulos 14 a 34). */
+/** Las 49 tablas del contrato de correspondencia (§2.1, Módulos 14 a 35). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -91,6 +91,8 @@ const CONTRACT_TABLES = [
     'restocker_van_product_stocks', 'product_loading_orders', 'product_loading_order_items',
     // Módulo 34 · visita de reposición in situ y su desglose carril a carril.
     'machine_restock_visits', 'machine_restock_visit_items',
+    // Módulo 35 · recaudación de efectivo, bolsa precintada y arqueo de caja.
+    'machine_cash_collections',
 ];
 
 /**
@@ -112,6 +114,11 @@ const APPEND_ONLY_TABLES = [
     // con una visita nueva y nunca reescribiendo la anterior.
     'machine_restock_visits',
     'machine_restock_visit_items',
+    // La recaudación del Módulo 35 congela la captura en ruta desde el `INSERT`
+    // y sella el arqueo terminal: `enforce_machine_cash_collections_immutability()`
+    // rechaza con 45000 cualquier reescritura de sus datos de custodia
+    // (Art. III.3). La corrección se registra como una recaudación nueva.
+    'machine_cash_collections',
 ];
 
 $projectRoot = dirname(__DIR__, 2);

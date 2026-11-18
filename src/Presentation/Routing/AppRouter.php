@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Routing;
 
+use Throwable;
+use VendGuard\Application\DTO\HealthCheckResponseDto;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Presentation\Controller\CoordinatorPlanogramController;
 use VendGuard\Presentation\Controller\CoordinatorProductLoadingController;
 use VendGuard\Presentation\Controller\CoordinatorRefundController;
@@ -40,6 +43,33 @@ class AppRouter
         // 1. Rutas de Diagnóstico y Health Check (T-01)
         // -----------------------------------------------------------------
         $healthHandler = function (Request $request): Response {
+            // Sonda de disponibilidad del motor (P2, 2026-11-17).
+            //
+            // La representación **sana** no cambia una coma: mismas seis claves, mismo
+            // documento de la aplicación ante `Accept: text/html`. Lo que cambia es que una
+            // sonda no puede declarar «operativo» un proceso que no puede atender: si el
+            // motor no responde, `/api/health` degrada con `503` y la envoltura de error del
+            // diagnóstico técnico, en lugar de un `200` que miente al vigilante externo.
+            //
+            // Se limita a la ruta de sonda a propósito. `/` sigue sirviendo el App Shell
+            // aunque el motor esté caído: la PWA necesita poder arrancar para mostrar su
+            // estado de error, y degradar el documento no informa de nada a nadie.
+            if ($request->getPath() === '/api/health' && !self::persistenceAvailable()) {
+                return Response::error(
+                    HealthController::ERROR_DATABASE_UNAVAILABLE,
+                    HealthController::UNAVAILABLE_MESSAGE,
+                    503,
+                    [
+                        'status' => HealthCheckResponseDto::STATUS_UNHEALTHY,
+                        'timestamp_utc' => gmdate('Y-m-d\TH:i:s\Z'),
+                    ],
+                    [
+                        'Vary' => 'Accept',
+                        'Cache-Control' => 'no-cache, no-store, must-revalidate',
+                    ]
+                );
+            }
+
             // Negociación de contenido explícita. Un navegador envía `text/html`; un
             // cliente genérico (`*/*`) que pide la raíz espera el documento, no el health
             // JSON. El JSON de la raíz exige `Accept: application/json`, mientras que la
@@ -402,6 +432,15 @@ class AppRouter
         // la lectura de la visita incluye el snapshot contable completo.
         $router->get('/api/coordinator/restock-visits', [CoordinatorProductLoadingController::class, 'listRestockVisits'], [$coordinatorAuth]);
         $router->get('/api/coordinator/restock-visits/{id}', [CoordinatorProductLoadingController::class, 'getRestockVisit'], [$coordinatorAuth]);
+        // Recaudación, cambio y arqueo de caja (Módulo 35: T-CCV-08, RF-04,
+        // RF-05.3, D2, D4, QA 3, QA 4, Art. V.1, Art. V.4). La exportación
+        // estática se registra antes del segmento dinámico `{id}`.
+        $router->get('/api/coordinator/cash-collections/export-csv', [CoordinatorProductLoadingController::class, 'exportCashCollectionsCsv'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/cash-collections', [CoordinatorProductLoadingController::class, 'listCashCollections'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/cash-collections/{id}', [CoordinatorProductLoadingController::class, 'getCashCollection'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/cash-collections/{id}/reception-receipt', [CoordinatorProductLoadingController::class, 'cashReceptionReceipt'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/cash-collections/{id}/deliver-to-vault', [CoordinatorProductLoadingController::class, 'deliverCashCollectionToVault'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/cash-collections/{id}/reconcile', [CoordinatorProductLoadingController::class, 'reconcileCashCollection'], [$coordinatorAuth]);
 
         // Actas de Merma APPCC (Módulo 29: T-SPOILAGE-10).
         // Los endpoints compartidos por Técnico y Coordinación se autentican como
@@ -562,6 +601,13 @@ class AppRouter
         $router->post('/api/restocker/visits/photo', [RestockerRouteController::class, 'uploadVisitPhoto'], [$restockerAuth]);
         $router->post('/api/restocker/visits/conflict-dump', [RestockerRouteController::class, 'dumpVisitConflict'], [$restockerAuth]);
         $router->post('/api/restocker/machines/{machineId}/visits', [RestockerRouteController::class, 'registerVisit'], [$restockerAuth]);
+        // Captura independiente de recaudación y consulta bajo Arqueo Ciego
+        // (Módulo 35: T-CCV-08, RF-01 a RF-03, D1–D4, C2, C4, QA 2, Art. V.4).
+        // `conflict-dump` se registra antes de `{id}`.
+        $router->get('/api/restocker/cash-collections', [RestockerRouteController::class, 'listCashCollections'], [$restockerAuth]);
+        $router->post('/api/restocker/cash-collections/conflict-dump', [RestockerRouteController::class, 'dumpCashCollectionConflict'], [$restockerAuth]);
+        $router->get('/api/restocker/cash-collections/{id}/reception-receipt', [RestockerRouteController::class, 'cashReceptionReceipt'], [$restockerAuth]);
+        $router->post('/api/restocker/machines/{machineId}/cash-collections', [RestockerRouteController::class, 'registerCashCollection'], [$restockerAuth]);
 
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)
@@ -592,6 +638,35 @@ class AppRouter
         $router->patch('/api/public/refunds/track', [PublicRefundController::class, 'rectify']);
 
         return $router;
+    }
+
+    /**
+     * ¿El motor de persistencia responde ahora mismo?
+     *
+     * Comprobación deliberadamente barata —una ida y vuelta, `SELECT 1`— y no fatal: cualquier
+     * fallo de configuración o de conexión se traduce en `false`, nunca en una excepción que
+     * escape del manejador de la sonda. El diagnóstico detallado sigue viviendo en
+     * `GET /api/status` (consulta sobre `machines`, latencia y libro del barrido); aquí sólo se
+     * responde a la pregunta que una sonda de disponibilidad tiene derecho a hacer.
+     *
+     * El texto del fallo se descarta a propósito: puede llevar host, usuario y pista de
+     * credencial (Art. V.4).
+     */
+    private static function persistenceAvailable(): bool
+    {
+        try {
+            $statement = ConnectionFactory::getConnection()->query('SELECT 1');
+
+            if ($statement === false) {
+                return false;
+            }
+
+            $statement->fetchColumn();
+
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
     }
 }
 

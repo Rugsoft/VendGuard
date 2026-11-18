@@ -8,14 +8,20 @@ use InvalidArgumentException;
 use PDO;
 use Throwable;
 use VendGuard\Application\Service\AuditLogger;
+use VendGuard\Application\Service\MachineCashCollectionService;
 use VendGuard\Application\Service\ProductLoadingOrderService;
 use VendGuard\Application\Service\RestockerVanStockService;
+use VendGuard\Core\Domain\Enum\CashCollectionStatus;
+use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
 use VendGuard\Core\Domain\Exception\ProductLoadingValidationException;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionGateway;
+use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRestockVisitRepository;
 use VendGuard\Infrastructure\Repository\PdoProductLoadingOrderRepository;
+use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
 use VendGuard\Infrastructure\Repository\PdoRestockerVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Infrastructure\Repository\PdoVendingProductRepository;
@@ -63,11 +69,14 @@ final class CoordinatorProductLoadingController
 
     private MachineRestockVisitRepositoryInterface $visitRepository;
 
+    private MachineCashCollectionService $cashCollections;
+
     public function __construct(
         ?ProductLoadingOrderService $orderService = null,
         ?RestockerVanStockService $stockService = null,
         ?PDO $pdo = null,
-        ?MachineRestockVisitRepositoryInterface $visitRepository = null
+        ?MachineRestockVisitRepositoryInterface $visitRepository = null,
+        ?MachineCashCollectionService $cashCollections = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $orderRepository = new PdoProductLoadingOrderRepository($pdo);
@@ -76,6 +85,13 @@ final class CoordinatorProductLoadingController
         $userRepository = new PdoUserRepository($pdo);
 
         $this->visitRepository = $visitRepository ?? new PdoMachineRestockVisitRepository($pdo);
+        $this->cashCollections = $cashCollections ?? new MachineCashCollectionService(
+            new PdoMachineCashCollectionRepository($pdo),
+            new PdoMachineCashCollectionGateway($pdo),
+            new PdoRefundRequestRepository($pdo),
+            new \VendGuard\Infrastructure\Database\PdoTransactionManager($pdo),
+            new AuditLogger()
+        );
 
         $this->orderService = $orderService ?? new ProductLoadingOrderService(
             $orderRepository,
@@ -315,8 +331,143 @@ final class CoordinatorProductLoadingController
                 );
             }
 
+            $visit['cash_collection_summary'] = $this->cashCollections->summarizeForVisit((int)$visit['id']);
+
             return Response::json($visit, 200);
         });
+    }
+
+    /** GET /api/coordinator/cash-collections */
+    public function listCashCollections(Request $request): Response
+    {
+        return $this->execute(function () use ($request): Response {
+            return Response::json(
+                $this->cashCollections->listForCoordinator(
+                    $this->actor($request),
+                    $this->cashCollectionFilters($request)
+                ),
+                200
+            );
+        });
+    }
+
+    /** GET /api/coordinator/cash-collections/export-csv */
+    public function exportCashCollectionsCsv(Request $request): Response
+    {
+        return $this->execute(function () use ($request): Response {
+            $csv = $this->cashCollections->exportCsv(
+                $this->actor($request),
+                $this->cashCollectionFilters($request)
+            );
+
+            return new Response($csv, 200, [
+                'Content-Type' => 'text/csv; charset=utf-8',
+                'Content-Disposition' => 'attachment; filename="recaudaciones.csv"',
+                'Cache-Control' => 'no-store',
+            ]);
+        });
+    }
+
+    /** GET /api/coordinator/cash-collections/{id} */
+    public function getCashCollection(Request $request): Response
+    {
+        return $this->execute(function () use ($request): Response {
+            return Response::json(
+                $this->cashCollections->findForCoordinator(
+                    $this->positiveRouteId($request, 'id', 'recaudación'),
+                    $this->actor($request)
+                ),
+                200
+            );
+        });
+    }
+
+    /** POST /api/coordinator/cash-collections/{id}/deliver-to-vault */
+    public function deliverCashCollectionToVault(Request $request): Response
+    {
+        return $this->execute(function () use ($request): Response {
+            return Response::json(
+                $this->cashCollections->deliverToVault(
+                    $this->positiveRouteId($request, 'id', 'recaudación'),
+                    $this->actor($request)
+                ),
+                200,
+                'Bolsa precintada recibida en Caja Central.'
+            );
+        });
+    }
+
+    /** POST /api/coordinator/cash-collections/{id}/reconcile */
+    public function reconcileCashCollection(Request $request): Response
+    {
+        return $this->execute(function () use ($request): Response {
+            return Response::json(
+                $this->cashCollections->reconcile(
+                    $this->positiveRouteId($request, 'id', 'recaudación'),
+                    $request->getParsedBody(),
+                    $this->actor($request)
+                ),
+                200,
+                'Arqueo ciego de Caja Central sellado.'
+            );
+        });
+    }
+
+    /** GET /api/coordinator/cash-collections/{id}/reception-receipt */
+    public function cashReceptionReceipt(Request $request): Response
+    {
+        return $this->execute(function () use ($request): Response {
+            return Response::json(
+                $this->cashCollections->receptionReceipt(
+                    $this->positiveRouteId($request, 'id', 'recaudación'),
+                    $this->actor($request)
+                ),
+                200
+            );
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function cashCollectionFilters(Request $request): array
+    {
+        $query = $request->getQueryParams();
+        $filters = [];
+
+        foreach (['restocker_id', 'machine_id'] as $key) {
+            if (isset($query[$key]) && trim((string)$query[$key]) !== '') {
+                if (!ctype_digit((string)$query[$key]) || (int)$query[$key] <= 0) {
+                    throw new InvalidArgumentException(sprintf('El filtro %s debe ser un entero positivo.', $key));
+                }
+                $filters[$key] = (int)$query[$key];
+            }
+        }
+
+        if (isset($query['status']) && trim((string)$query['status']) !== '') {
+            $status = strtoupper(trim((string)$query['status']));
+            if (CashCollectionStatus::tryFrom($status) === null) {
+                throw new InvalidArgumentException('El filtro status no es un estado de recaudación válido.');
+            }
+            $filters['status'] = $status;
+        }
+
+        foreach (['bag_seal_code', 'date_from', 'date_to'] as $key) {
+            if (isset($query[$key]) && trim((string)$query[$key]) !== '') {
+                $filters[$key] = trim((string)$query[$key]);
+            }
+        }
+
+        foreach (['limit' => 100, 'offset' => 0] as $key => $default) {
+            if (isset($query[$key]) && trim((string)$query[$key]) !== '') {
+                if (!ctype_digit((string)$query[$key])) {
+                    throw new InvalidArgumentException(sprintf('El filtro %s debe ser un entero no negativo.', $key));
+                }
+                $filters[$key] = (int)$query[$key] ?: $default;
+            }
+        }
+
+        return $filters;
     }
 
     /**
@@ -326,6 +477,17 @@ final class CoordinatorProductLoadingController
     {
         try {
             return $operation();
+        } catch (MachineCashCollectionValidationException $exception) {
+            $details = $exception->getField() === null
+                ? null
+                : array_merge(['field' => $exception->getField()], $exception->getContext());
+
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $details
+            );
         } catch (ProductLoadingValidationException $exception) {
             $details = $exception->getField() === null
                 ? null

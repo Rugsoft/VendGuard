@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VendGuard · sonda 360 · RestockerRouteView</title>
+  <link rel="stylesheet" href="/assets/css/design-tokens.css">
+  <link rel="stylesheet" href="/assets/css/styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; min-height: 100%; scrollbar-width: none; }
+    html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; width: 0; height: 0; }
+    body { background: var(--color-canvas, #f9fafb); font-family: var(--font-body, Inter, sans-serif); color: var(--color-slate, #2c333f); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import * as Vue from '/assets/js/vendor/vue.esm-browser.prod.js';
+    window.Vue = Vue;
+    const { api } = await import('/assets/js/api.js');
+    const { store } = await import('/assets/js/store.js');
+    const { RestockerRouteView } = await import('/assets/js/components/RestockerRouteView.js');
+
+    const machine = {
+      id: 7,
+      code: 'VEND-0701',
+      model: 'Jofemar Vision',
+      machine_type: 'COMBO',
+      location_name: 'Hospital del Mar',
+      site_code: 'HOSP-MAR',
+      zone_id: 1,
+      zone_code: 'ZONA-BCN-NORTE',
+      zone_name: 'Barcelona Litoral y Norte',
+      sanitary_status: 'OK',
+      has_physical_reception: true,
+      has_prior_cash_collection: false,
+      can_restock: true,
+      pending_reception_refunds: [{
+        id: 501,
+        claimed_amount: 4.5,
+        status: 'PENDING_INSPECTION',
+        compensation_method: 'EN_MANO_SEDE',
+        requester_name: 'Usuario de prueba'
+      }],
+      pending_reception_refunds_count: 1,
+      active_slots_count: 6,
+      stockout_slots_count: 1,
+      low_stock_slots_count: 2,
+      ok_slots_count: 3,
+      inactive_product_slots_count: 1,
+      total_capacity: 60,
+      total_estimated_qty: 38,
+      fill_rate_percent: 63.33
+    };
+
+    const collection = {
+      id: 901,
+      collection_code: 'MCC-2026-0901',
+      restock_visit_id: null,
+      machine_id: 7,
+      machine_code: 'VEND-0701',
+      bag_seal_code: 'BAG-CCV11-0001',
+      sales_counter_reading: 120,
+      change_tubes_loaded_eur: 10,
+      is_counter_reset: false,
+      counter_reset_notes: null,
+      reception_cash_delivered_eur: 2.5,
+      receptionist_name: 'Conserje Recepción',
+      linked_refund_request_id: null,
+      has_reception_receipt: true,
+      status: 'SEALED_IN_ROUTE',
+      status_label: 'Precintada en ruta',
+      collected_at: '2026-11-14T09:00:00+00:00',
+      created_at: '2026-11-14T09:00:00+00:00'
+    };
+
+    const planogram = {
+      data: {
+        machine: {
+          id: 7,
+          code: 'VEND-0701',
+          model: 'Jofemar Vision',
+          machine_type: 'COMBO',
+          location_name: 'Hospital del Mar',
+          zone_name: 'Barcelona Litoral y Norte',
+          sanitary_status: 'OK'
+        },
+        summary: { active_slots_count: 3, stockout_slots_count: 1, low_stock_slots_count: 1, ok_slots_count: 1, total_capacity: 27, total_estimated_qty: 6, fill_rate_percent: 22.22 },
+        slots: [
+          {
+            id: 201, slot_code: '21', product_id: 1, product_sku: 'SAND-MIXTO-01', product_name: 'Sándwich mixto',
+            product_category: 'PERISHABLE_FOOD', product_unit_type: 'UNIT', max_capacity: 10, current_estimated_qty: 2,
+            min_threshold: 2, is_active: true, slot_expiry_status: 'EXPIRED', current_batch_code: 'LOTE-VIEJO',
+            current_expiration_date: '2026-11-10', fefo_withdrawal_required: true,
+            available_van_batches: [{ product_id: 1, batch_code: 'LOTE-NEW1', expiration_date: '2026-11-20', quantity_available: 8 }],
+            fefo_recommended_batch_code: 'LOTE-NEW1'
+          },
+          {
+            id: 202, slot_code: '22', product_id: 2, product_sku: 'YOGUR-01', product_name: 'Yogur natural',
+            product_category: 'PERISHABLE_FOOD', product_unit_type: 'UNIT', max_capacity: 12, current_estimated_qty: 4,
+            min_threshold: 3, is_active: true, slot_expiry_status: 'EXPIRING_SOON', current_batch_code: 'LOTE-OLD2',
+            current_expiration_date: '2026-11-15', fefo_withdrawal_required: true,
+            available_van_batches: [{ product_id: 2, batch_code: 'LOTE-NEW2', expiration_date: '2026-11-22', quantity_available: 6 }],
+            fefo_recommended_batch_code: 'LOTE-NEW2'
+          },
+          {
+            id: 203, slot_code: '23', product_id: 3, product_sku: 'AGUA-50-01', product_name: 'Agua mineral 50 cl',
+            product_category: 'COLD_DRINK', product_unit_type: 'UNIT', max_capacity: 5, current_estimated_qty: 0,
+            min_threshold: 1, is_active: true, slot_expiry_status: 'OK', current_batch_code: null,
+            current_expiration_date: null, fefo_withdrawal_required: false,
+            available_van_batches: [{ product_id: 3, batch_code: 'LOTE-AGUA', expiration_date: '2027-01-10', quantity_available: 3 }],
+            fefo_recommended_batch_code: 'LOTE-AGUA'
+          }
+        ]
+      }
+    };
+
+    const bootstrap = {
+      data: {
+        restocker: {
+          id: 12,
+          name: 'Lucía Gómez',
+          email: 'lucia.restocker@vendguard.local',
+          operator_code: 'REP-01',
+          role: 'RESTOCKER'
+        },
+        zones: {
+          primary_zone: { id: 1, code: 'ZONA-BCN-NORTE', name: 'Barcelona Litoral y Norte', role_in_zone: 'PRIMARY' },
+          backup_zones: [{ id: 2, code: 'ZONA-BCN-CENTRO', name: 'Barcelona Distrito Centro', role_in_zone: 'BACKUP' }]
+        },
+        shift: { status: 'ACTIVE', active_shift_id: 45, today_effective_seconds: 7200 },
+        machines: [machine],
+        route_stops: [{ machine_id: 7, stop_order: 1, status: 'PENDING' }],
+        recent_visits: [],
+        pending_reception_refunds: machine.pending_reception_refunds,
+        recent_cash_collections: [collection],
+        cash_route_summary: {
+          total_collections_count: 1,
+          total_change_tubes_loaded_eur: 10,
+          total_reception_cash_delivered_eur: 2.5,
+          pending_vault_bags_count: 1,
+          last_collected_at: '2026-11-14T09:00:00+00:00'
+        }
+      }
+    };
+
+    api.get = async (url) => {
+      if (url === '/restocker/my-route') return bootstrap;
+      if (url === '/technician/shift/status') {
+        return { data: { status: 'ACTIVE', active_shift_id: 45, today_effective_seconds: 7200 } };
+      }
+      throw new Error('GET inesperado: ' + url);
+    };
+    api.restocker.getMachinePlanogram = async () => planogram;
+    api.post = async (url) => {
+      throw new Error('POST inesperado: ' + url);
+    };
+
+    store.state.user = { id: 12, name: 'Lucía Gómez', role: 'RESTOCKER', operator_code: 'REP-01' };
+
+    const app = Vue.createApp(RestockerRouteView);
+    const vm = app.mount('#app');
+    window.__vm = vm;
+    window.__harness = {
+      openCash() {
+        vm.cashContext = 'INDEPENDENT';
+        vm.cashMachine = vm.machines[0] || machine;
+        vm.cashForm = {
+          client_mutation_id: 'layout-cash-001',
+          bag_seal_code: 'BAG-CCV11-0002',
+          sales_counter_reading: 120,
+          change_tubes_loaded_eur: 10,
+          is_counter_reset: false,
+          counter_reset_notes: '',
+          reception_cash_delivered_eur: 4.5,
+          receptionist_name: 'Conserje Recepción',
+          linked_refund_request_id: 501,
+          route_notes: '',
+          collected_at: '2026-11-14T10:00:00+00:00'
+        };
+        vm.cashError = '';
+        vm.showCashModal = true;
+      },
+      async openVisit() {
+        vm.machines[0] = vm.machines[0] || machine;
+        vm.machines[0].can_restock = true;
+        await vm.openVisitAssistant(vm.machines[0]);
+        vm.visitMachine = vm.machines[0] || machine;
+        vm.visitForm.cabin_temp_celsius = 3.5;
+        vm.visitCashEnabled = true;
+        vm.visitCashForm = {
+          client_mutation_id: 'layout-visit-001',
+          bag_seal_code: 'BAG-CCV11-0003',
+          sales_counter_reading: 150,
+          change_tubes_loaded_eur: 8,
+          is_counter_reset: false,
+          counter_reset_notes: '',
+          reception_cash_delivered_eur: 4.5,
+          receptionist_name: 'Conserje Visita',
+          linked_refund_request_id: 501,
+          route_notes: '',
+          collected_at: '2026-11-14T10:10:00+00:00'
+        };
+      },
+      openReceipt() {
+        vm.cashReceipt = {
+          collection_code: 'MCC-2026-0901',
+          collected_at: '2026-11-14T09:00:00+00:00',
+          location_code: 'HOSP-MAR',
+          location_name: 'Hospital del Mar',
+          machine_code: 'VEND-0701',
+          restocker_name: 'Lucía Gómez',
+          receptionist_name: 'Conserje Recepción',
+          reception_cash_delivered_eur: 2.5,
+          linked_refund_request_id: 501
+        };
+        vm.cashReceiptLoading = false;
+        vm.cashReceiptError = '';
+        vm.showCashReceiptModal = true;
+      },
+      closeAll() {
+        vm.showCashModal = false;
+        vm.showVisitModal = false;
+        vm.showCashReceiptModal = false;
+      }
+    };
+
+    await document.fonts.ready;
+    await vm.$nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

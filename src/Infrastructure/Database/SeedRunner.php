@@ -3227,6 +3227,159 @@ class SeedRunner
     }
 
     /**
+     * Recaudaciones de efectivo y arqueos demo (Módulo 35 · RF-01 a RF-04).
+     *
+     * Siembra cuatro cortes de bolsa que cubren los cuatro estados del ciclo de
+     * custodia: una primera recaudación histórica con base inicial declarada y
+     * arqueo conforme dentro de ±1,00 €, una bolsa con entrega en conserjería y
+     * descuadre justificado, una ya recibida en cámara y una recién sellada en
+     * ruta. Las referencias se resuelven por `collection_code`, `machine_code`,
+     * `email_key` y `visit_code`, nunca por identificadores de secuencia.
+     *
+     * Se inserta **solo si no existe**: la recaudación es un hecho histórico y
+     * su arqueo terminal es inmutable (Art. III.3), de modo que una resemilla no
+     * lo reescribe ni lo duplica.
+     *
+     * @return int Recaudaciones canónicas existentes tras sembrar.
+     */
+    public function seedMachineCashCollections(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+
+        $insert = $this->pdo->prepare(sprintf(
+            'INSERT INTO machine_cash_collections (
+                collection_code, restock_visit_id, machine_id, machine_code_snapshot,
+                restocker_id, restocker_name_snapshot, restocker_code_snapshot,
+                bag_seal_code, change_tubes_loaded_eur, sales_counter_reading,
+                previous_sales_counter_reading, initial_baseline_reading_eur,
+                is_counter_reset, counter_reset_notes, expected_cashbox_eur,
+                reception_cash_delivered_eur, receptionist_name,
+                route_notes, status, collected_at, delivered_to_vault_at,
+                delivered_to_vault_by, vault_counted_eur, discrepancy_eur,
+                vault_reconciled_by, vault_reconciled_by_name_snapshot, vault_reconciled_at,
+                discrepancy_justification, client_mutation_id
+            ) VALUES (
+                :collection_code,
+                (SELECT id FROM machine_restock_visits WHERE visit_code = :visit_code LIMIT 1),
+                (SELECT id FROM machines WHERE code = :machine_code LIMIT 1),
+                :machine_code_snapshot,
+                (SELECT id FROM users WHERE %1$s = :restocker_email LIMIT 1),
+                (SELECT name FROM users WHERE %1$s = :restocker_name_email LIMIT 1),
+                COALESCE((SELECT NULLIF(btrim(operator_code), \'\') FROM users WHERE %1$s = :restocker_code_email LIMIT 1), \'SIN-CODIGO\'),
+                :bag_seal_code, :change_tubes_loaded_eur, :sales_counter_reading,
+                :previous_sales_counter_reading, :initial_baseline_reading_eur,
+                :is_counter_reset, :counter_reset_notes, :expected_cashbox_eur,
+                :reception_cash_delivered_eur, :receptionist_name,
+                :route_notes, :status, :collected_at, :delivered_to_vault_at,
+                (SELECT id FROM users WHERE %1$s = :delivered_by_email LIMIT 1),
+                :vault_counted_eur, :discrepancy_eur,
+                (SELECT id FROM users WHERE %1$s = :reconciled_by_email LIMIT 1),
+                (SELECT name FROM users WHERE %1$s = :reconciled_by_name_email LIMIT 1),
+                :vault_reconciled_at, :discrepancy_justification, :client_mutation_id
+            ) %2$s',
+            $identityColumn,
+            $this->dialect->upsertDoNothing(['collection_code'])
+        ));
+
+        $available = $this->pdo->prepare(
+            "SELECT 1
+               FROM machines m
+              WHERE m.code = :machine_code
+                AND m.is_active = TRUE
+                AND m.sanitary_status <> 'QUARANTINE'
+                AND m.is_blocked_no_access = FALSE
+                AND NOT EXISTS (
+                    SELECT 1 FROM incidents i
+                     WHERE i.machine_id = m.id
+                       AND i.category = 'TEMPERATURE_COLD'
+                       AND i.status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED')
+                )"
+        );
+
+        foreach (self::canonicalCashCollectionRows() as $collection) {
+            // El corte demo no puede imponer un estado que el Art. II prohíbe:
+            // si la máquina está bloqueada en este instante, se omite y la
+            // siguiente siembra lo recupera cuando vuelva a estar disponible.
+            $available->execute([':machine_code' => $collection['machine_code']]);
+            if ($available->fetchColumn() === false) {
+                continue;
+            }
+
+            $collectedAt = date('Y-m-d H:i:s', time() + $collection['collected_offset_hours'] * 3600);
+            $deliveredAt = $collection['delivered_offset_hours'] === null
+                ? null
+                : date('Y-m-d H:i:s', time() + $collection['delivered_offset_hours'] * 3600);
+            $reconciledAt = $collection['reconciled_offset_hours'] === null
+                ? null
+                : date('Y-m-d H:i:s', time() + $collection['reconciled_offset_hours'] * 3600);
+
+            $insert->bindValue(':collection_code', $collection['collection_code'], PDO::PARAM_STR);
+            $insert->bindValue(':visit_code', $collection['visit_code'], $collection['visit_code'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $insert->bindValue(':machine_code', $collection['machine_code'], PDO::PARAM_STR);
+            $insert->bindValue(':machine_code_snapshot', $collection['machine_code'], PDO::PARAM_STR);
+            $insert->bindValue(':restocker_email', $collection['restocker_email'], PDO::PARAM_STR);
+            $insert->bindValue(':restocker_name_email', $collection['restocker_email'], PDO::PARAM_STR);
+            $insert->bindValue(':restocker_code_email', $collection['restocker_email'], PDO::PARAM_STR);
+            $insert->bindValue(':bag_seal_code', $collection['bag_seal_code'], PDO::PARAM_STR);
+            $insert->bindValue(':change_tubes_loaded_eur', $collection['change_tubes_loaded_eur'], PDO::PARAM_STR);
+            $insert->bindValue(':sales_counter_reading', $collection['sales_counter_reading'], PDO::PARAM_STR);
+            $insert->bindValue(
+                ':previous_sales_counter_reading',
+                $collection['previous_sales_counter_reading'],
+                $collection['previous_sales_counter_reading'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(':initial_baseline_reading_eur', $collection['initial_baseline_reading_eur'], PDO::PARAM_STR);
+            $insert->bindValue(':is_counter_reset', $collection['is_counter_reset'], PDO::PARAM_BOOL);
+            $insert->bindValue(
+                ':counter_reset_notes',
+                $collection['counter_reset_notes'],
+                $collection['counter_reset_notes'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(':expected_cashbox_eur', $collection['expected_cashbox_eur'], PDO::PARAM_STR);
+            $insert->bindValue(':reception_cash_delivered_eur', $collection['reception_cash_delivered_eur'], PDO::PARAM_STR);
+            $insert->bindValue(
+                ':receptionist_name',
+                $collection['receptionist_name'],
+                $collection['receptionist_name'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(':route_notes', $collection['route_notes'], PDO::PARAM_STR);
+            $insert->bindValue(':status', $collection['status'], PDO::PARAM_STR);
+            $insert->bindValue(':collected_at', $collectedAt, PDO::PARAM_STR);
+            $insert->bindValue(':delivered_to_vault_at', $deliveredAt, $deliveredAt === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $insert->bindValue(':delivered_by_email', $collection['delivered_offset_hours'] === null ? null : 'coordinacion@vendguard.internal', $collection['delivered_offset_hours'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $insert->bindValue(
+                ':vault_counted_eur',
+                $collection['vault_counted_eur'],
+                $collection['vault_counted_eur'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(
+                ':discrepancy_eur',
+                $collection['discrepancy_eur'],
+                $collection['discrepancy_eur'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(':reconciled_by_email', $collection['reconciled_offset_hours'] === null ? null : 'coordinacion@vendguard.internal', $collection['reconciled_offset_hours'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $insert->bindValue(':reconciled_by_name_email', $collection['reconciled_offset_hours'] === null ? null : 'coordinacion@vendguard.internal', $collection['reconciled_offset_hours'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $insert->bindValue(':vault_reconciled_at', $reconciledAt, $reconciledAt === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $insert->bindValue(
+                ':discrepancy_justification',
+                $collection['discrepancy_justification'],
+                $collection['discrepancy_justification'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(':client_mutation_id', $collection['client_mutation_id'], PDO::PARAM_STR);
+            $insert->execute();
+        }
+
+        $verify = $this->pdo->prepare('SELECT COUNT(*) FROM machine_cash_collections WHERE collection_code = :collection_code');
+        $count = 0;
+        foreach (self::canonicalCashCollectionRows() as $collection) {
+            $verify->execute([':collection_code' => $collection['collection_code']]);
+            $count += (int)$verify->fetchColumn();
+        }
+
+        return $count;
+    }
+
+    /**
      * Stock de producto por lote en las furgonetas de reposición (Módulo 33 · D2, D4).
      *
      * El saldo se identifica por `(restocker_id, product_id, batch_code)`: dos lotes
@@ -3763,6 +3916,127 @@ class SeedRunner
     }
 
     /**
+     * Los cuatro cortes de bolsa demo del Módulo 35
+     * (RF-01 a RF-04 · D1–D4, C1–C3, QA 1, Art. V.1).
+     *
+     * La primera fila ejercita la rama de base inicial del contador (sin lectura
+     * previa) y un arqueo conforme dentro de ±1,00 €; la segunda declara una
+     * entrega de 2,50 € en conserjería y un descuadre de -5,50 € con la
+     * justificación real del Art. V.1; la tercera ya está recibida en cámara y
+     * la cuarta sigue sellada en ruta. El alta respeta el cerrojo sanitario del
+     * Art. II: si una suite dejó viva una avería térmica en una de esas máquinas,
+     * el corte demo se omite en esa pasada en lugar de abortar toda la siembra, y
+     * vuelve a entrar cuando la máquina queda disponible.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalCashCollectionRows(): array
+    {
+        return [
+            [
+                'collection_code' => 'MCC-2026-0001',
+                'machine_code' => 'VEND-0401',
+                'restocker_email' => 'lucia.repostaje@vendguard.internal',
+                'visit_code' => null,
+                'bag_seal_code' => 'BAG-2026-000101',
+                'change_tubes_loaded_eur' => '40.00',
+                'sales_counter_reading' => '1350.00',
+                'previous_sales_counter_reading' => null,
+                'initial_baseline_reading_eur' => '1200.00',
+                'is_counter_reset' => false,
+                'counter_reset_notes' => null,
+                'expected_cashbox_eur' => '150.00',
+                'reception_cash_delivered_eur' => '0.00',
+                'receptionist_name' => null,
+                'route_notes' => 'Corte de hucha tras la retirada FEFO; bolsa sellada sin incidencias.',
+                'status' => 'RECONCILED_OK',
+                'collected_offset_hours' => -48,
+                'delivered_offset_hours' => -24,
+                'vault_counted_eur' => '149.50',
+                'discrepancy_eur' => '-0.50',
+                'reconciled_offset_hours' => -12,
+                'discrepancy_justification' => null,
+                'client_mutation_id' => 'seed-mutation-cash-0001',
+            ],
+            [
+                'collection_code' => 'MCC-2026-0002',
+                'machine_code' => 'VEND-0601',
+                'restocker_email' => 'oscar.repostaje@vendguard.internal',
+                'visit_code' => null,
+                'bag_seal_code' => 'BAG-2026-000102',
+                'change_tubes_loaded_eur' => '60.00',
+                'sales_counter_reading' => '700.00',
+                'previous_sales_counter_reading' => '480.00',
+                'initial_baseline_reading_eur' => '0.00',
+                'is_counter_reset' => false,
+                'counter_reset_notes' => null,
+                'expected_cashbox_eur' => '220.00',
+                'reception_cash_delivered_eur' => '2.50',
+                'receptionist_name' => 'Carlos Ruiz',
+                'route_notes' => 'Recaudación rápida en parada con entrega de cambio de ruta en conserjería.',
+                'status' => 'DISCREPANCY_FLAGGED',
+                'collected_offset_hours' => -72,
+                'delivered_offset_hours' => -48,
+                'vault_counted_eur' => '214.50',
+                'discrepancy_eur' => '-5.50',
+                'reconciled_offset_hours' => -30,
+                'discrepancy_justification' => 'Faltan 5,50 € por atasco de monedas en el canal de recogida.',
+                'client_mutation_id' => 'seed-mutation-cash-0002',
+            ],
+            [
+                'collection_code' => 'MCC-2026-0003',
+                'machine_code' => 'VEND-0201',
+                'restocker_email' => 'lucia.repostaje@vendguard.internal',
+                'visit_code' => null,
+                'bag_seal_code' => 'BAG-2026-000103',
+                'change_tubes_loaded_eur' => '45.00',
+                'sales_counter_reading' => '1080.00',
+                'previous_sales_counter_reading' => '950.00',
+                'initial_baseline_reading_eur' => '0.00',
+                'is_counter_reset' => false,
+                'counter_reset_notes' => null,
+                'expected_cashbox_eur' => '130.00',
+                'reception_cash_delivered_eur' => '0.00',
+                'receptionist_name' => null,
+                'route_notes' => 'Bolsa recibida en cámara; pendiente de abrir en Caja Central.',
+                'status' => 'DELIVERED_TO_VAULT',
+                'collected_offset_hours' => -24,
+                'delivered_offset_hours' => -6,
+                'vault_counted_eur' => null,
+                'discrepancy_eur' => null,
+                'reconciled_offset_hours' => null,
+                'discrepancy_justification' => null,
+                'client_mutation_id' => 'seed-mutation-cash-0003',
+            ],
+            [
+                'collection_code' => 'MCC-2026-0004',
+                'machine_code' => 'VEND-0501',
+                'restocker_email' => 'oscar.repostaje@vendguard.internal',
+                'visit_code' => null,
+                'bag_seal_code' => 'BAG-2026-000104',
+                'change_tubes_loaded_eur' => '0.00',
+                'sales_counter_reading' => '365.50',
+                'previous_sales_counter_reading' => '300.00',
+                'initial_baseline_reading_eur' => '0.00',
+                'is_counter_reset' => false,
+                'counter_reset_notes' => null,
+                'expected_cashbox_eur' => '65.50',
+                'reception_cash_delivered_eur' => '0.00',
+                'receptionist_name' => null,
+                'route_notes' => 'Bolsa recién sellada en ruta; viaja en la furgoneta al cierre.',
+                'status' => 'SEALED_IN_ROUTE',
+                'collected_offset_hours' => -4,
+                'delivered_offset_hours' => null,
+                'vault_counted_eur' => null,
+                'discrepancy_eur' => null,
+                'reconciled_offset_hours' => null,
+                'discrepancy_justification' => null,
+                'client_mutation_id' => 'seed-mutation-cash-0004',
+            ],
+        ];
+    }
+
+    /**
      * Las tres líneas de desglose de las visitas demo (Módulo 34 · C1, QA 3).
      *
      * El carril 11 de `VEND-0101` retira las seis unidades caducadas (`L-SAND-2599`,
@@ -3878,6 +4152,11 @@ class SeedRunner
             // de la orden de carga: son hechos históricos inmutables que una
             // resemilla no reescribe ni duplica (Art. III.3).
             $restockVisitCount = $this->seedMachineRestockVisits();
+            // Las recaudaciones de efectivo (Módulo 35) cuelgan de la máquina, del
+            // reponedor y —en la vía integrada— de la visita del Módulo 34: entran
+            // cuando las tres existen. Son hechos históricos inmutables que una
+            // resemilla no reescribe ni duplica (Art. III.3).
+            $cashCollectionCount = $this->seedMachineCashCollections();
             // Las guías de diagnóstico (Módulo 28) resuelven repuesto y causa por sus
             // códigos: entran cuando ambas maestras ya están sembradas. `Fas Perla`
             // queda sin guía a propósito para el indicador de cobertura (QA 1).
@@ -3928,6 +4207,7 @@ class SeedRunner
                 'restocker_van_product_stocks' => $restockerVanStockCount,
                 'product_loading_orders' => $productLoadingOrderCount,
                 'machine_restock_visits' => $restockVisitCount,
+                'machine_cash_collections' => $cashCollectionCount,
                 'troubleshooting_guides' => $troubleshootingGuideCount,
                 'technician_van_stocks' => $vanStockCount,
                 'van_restock_orders' => $vanRestockOrderCount,

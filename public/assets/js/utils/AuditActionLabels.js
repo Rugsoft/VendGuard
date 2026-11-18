@@ -99,7 +99,10 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   PRODUCT_LOADING_ORDER: 'Orden de Carga de Producto',
   // Entidad del Módulo 34: la visita in situ se audita con tipo propio y el
   // filtro del visor debe cubrir el enumerado completo (`Art. III.3`).
-  MACHINE_RESTOCK_VISIT: 'Visita de Reposición In Situ'
+  MACHINE_RESTOCK_VISIT: 'Visita de Reposición In Situ',
+  // Entidad del Módulo 35: la recaudación y su arqueo se auditan con tipo
+  // propio y el filtro del visor debe cubrir el enumerado completo.
+  MACHINE_CASH_COLLECTION: 'Recaudación de Efectivo'
 });
 
 /**
@@ -251,6 +254,13 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'RESTOCK_VISIT_COMPLETED', label: 'Visita de Reposición Completada', tone: 'success', group: 'restock' },
   { code: 'RESTOCK_VISIT_ABORTED_THERMAL_BREACH', label: 'Visita Abortada por Rotura de Cadena de Frío', tone: 'danger', group: 'sanitary' },
   { code: 'OFFLINE_RESTOCK_VISIT_CONFLICT_DUMP', label: 'Conflicto Offline Archivado en Auditoría', tone: 'warning', group: 'restock' },
+  { code: 'OFFLINE_CASH_COLLECTION_CONFLICT_DUMP', label: 'Conflicto Offline de Recaudación Archivado', tone: 'warning', group: 'restock' },
+  // Módulo 35: el ciclo de vida de la bolsa precintada se audita con tres acciones
+  // propias. Sin catálogo, el visor mostraba el código crudo y el filtro no permitía
+  // localizar el sellado, la recepción en cámara ni el arqueo terminal (Art. III.3).
+  { code: 'CASH_COLLECTION_SEALED', label: 'Recaudación Sellada en Ruta', tone: 'primary', group: 'restock' },
+  { code: 'CASH_COLLECTION_DELIVERED_TO_VAULT', label: 'Bolsa Precintada Recibida en Caja Central', tone: 'info', group: 'restock' },
+  { code: 'CASH_COLLECTION_RECONCILED', label: 'Arqueo Ciego de Caja Central', tone: 'success', group: 'restock' },
   { code: 'NOTIFICATION_MANUAL_RETRY', label: 'Reintento Manual de Notificación', tone: 'warning', group: 'notification' },
   { code: 'NOTIFICATION_MANUAL_CANCEL', label: 'Cancelación Manual de Notificación', tone: 'danger', group: 'notification' },
   { code: 'NOTIFICATION_PERMANENT_FAILURE', label: 'Fallo Definitivo de Notificación', tone: 'danger', group: 'notification' },

@@ -5,53 +5,108 @@
  * Garantiza que el widget solo se instancie para usuarios internos autenticados
  * (Coordinadores o Técnicos de Ruta) y transmita el JWT firmado con HS256.
  *
+ * Desde H-3 del informe E2E del Módulo 35 este módulo no conoce ningún destino
+ * externo: la hoja de estilos, el bundle y el webhook viven en
+ * `config/chatAssistant.js` y admiten sobrescritura por despliegue. Además el
+ * montaje se difiere al primer hueco de inactividad y la importación del bundle
+ * tiene techo de espera, de modo que un CDN lento o caído no retrasa el arranque
+ * de la consola: en el peor caso el asistente no aparece y se avisa por consola.
+ *
  * Cumple con specs/technical/chat_assistant_contracts.md.
  */
 
-const STYLE_HREF = 'https://cdn.jsdelivr.net/npm/@n8n/chat/dist/style.css';
-const BUNDLE_URL = 'https://cdn.jsdelivr.net/npm/@n8n/chat/dist/chat.bundle.es.js';
-const WEBHOOK_URL = 'https://rugsoft.app.n8n.cloud/webhook/a6c77576-7554-4138-8605-ea2f72c0505e/chat';
+import { resolveChatAssistantConfig } from '../config/chatAssistant.js';
+
+/**
+ * Roles con derecho al asistente (`specs/technical/chat_assistant_contracts.md` §1).
+ *
+ * El contrato lo limita a Coordinadores y Técnicos de Ruta; el reponedor y el
+ * responsable de sede quedan fuera. El backend ya no emite `chat_token` a esos
+ * roles, y esta lista es la segunda orilla: un token antiguo en el almacén no
+ * debe montar el widget en una sesión que el contrato no contempla.
+ */
+export const CHAT_ALLOWED_ROLES = Object.freeze(['COORDINATOR', 'TECHNICIAN']);
 
 let isChatMounted = false;
 let currentToken = null;
+let pendingToken = null;
+let mountGeneration = 0;
 
 /**
- * Inyecta la hoja de estilos del widget si no está ya presente en el <head>.
+ * ¿Puede este rol recibir el asistente?
+ * @param {string|null|undefined} role - Rol del usuario autenticado
+ * @returns {boolean}
  */
-function ensureStyle() {
-  if (typeof document === 'undefined') return;
-  if (!document.querySelector(`link[href="${STYLE_HREF}"]`)) {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = STYLE_HREF;
-    link.id = 'n8n-chat-style';
-    document.head.appendChild(link);
+export function isChatRoleAllowed(role) {
+  return CHAT_ALLOWED_ROLES.includes(String(role || '').trim().toUpperCase());
+}
+
+/**
+ * Configuración efectiva: la de despliegue si existe, los valores por defecto si no.
+ * @returns {ReturnType<typeof resolveChatAssistantConfig>}
+ */
+function resolveConfig() {
+  const overrides = typeof window !== 'undefined' ? window.VENDGUARD_CHAT_CONFIG : null;
+  return resolveChatAssistantConfig(overrides);
+}
+
+/**
+ * Importa el bundle del asistente con techo de espera.
+ *
+ * El importador es un parámetro para poder verificar el techo sin red: si el CDN
+ * no responde dentro de `timeoutMs`, la promesa se resuelve con `null` y el
+ * arranque de la consola nunca queda pendiente de un tercero.
+ *
+ * @param {string} bundleUrl - URL absoluta del bundle
+ * @param {number} timeoutMs - Techo de espera en milisegundos
+ * @param {(url: string) => Promise<any>} [importer] - Cargador del bundle
+ * @returns {Promise<{createChat: Function}|null>}
+ */
+export async function loadChatBundle(bundleUrl, timeoutMs, importer = (url) => import(url)) {
+  const limit = Number(timeoutMs) > 0 ? Number(timeoutMs) : 1;
+  let timer = null;
+
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), limit);
+  });
+
+  try {
+    const loaded = await Promise.race([importer(bundleUrl), deadline]);
+    return loaded && typeof loaded.createChat === 'function' ? loaded : null;
+  } catch (_) {
+    return null;
+  } finally {
+    if (timer !== null) clearTimeout(timer);
   }
 }
 
 /**
- * Monta el widget de chat de n8n con el token verificado del usuario.
- * @param {string} token - Token JWT firmado con HS256
- * @param {Object|null} user - Datos del usuario autenticado { id, name, ... }
+ * Inyecta (o reapunta) la hoja de estilos del widget.
+ * @param {string} styleHref - URL absoluta de la hoja
  */
-export async function mountChatWidget(token, user = null) {
-  if (!token || typeof window === 'undefined' || typeof document === 'undefined') {
-    return;
+function ensureStyle(styleHref) {
+  if (typeof document === 'undefined' || !styleHref) return;
+  if (typeof document.getElementById !== 'function') return;
+
+  let link = document.getElementById('n8n-chat-style');
+  if (!link) {
+    link = document.createElement('link');
+    link.id = 'n8n-chat-style';
+    link.rel = 'stylesheet';
+    document.head.appendChild(link);
   }
-
-  // Si ya está montado con el mismo token, no duplicar
-  if (isChatMounted && currentToken === token) {
-    return;
+  if (link.href !== styleHref) {
+    link.href = styleHref;
   }
+}
 
-  // Si cambió de token, limpiar el anterior primero
-  if (isChatMounted) {
-    unmountChatWidget();
-  }
-
-  ensureStyle();
-
-  // Obtener el nombre del usuario (del objeto user o decodificando el claim del JWT)
+/**
+ * Nombre de pila para el saludo: del objeto `user` o del claim del JWT.
+ * @param {string} token
+ * @param {Object|null} user
+ * @returns {string}
+ */
+function firstNameFrom(token, user) {
   let userName = user?.name || '';
   if (!userName && typeof token === 'string') {
     try {
@@ -63,17 +118,41 @@ export async function mountChatWidget(token, user = null) {
       }
     } catch (_) {}
   }
+  return String(userName || '').trim().split(' ')[0] || '';
+}
 
-  const nombre = (userName || '').trim().split(' ')[0]; // solo el nombre de pila
+/**
+ * Montaje efectivo, ya fuera del camino crítico del arranque.
+ * @param {number} generation - Generación del montaje programado
+ * @param {string} token
+ * @param {Object|null} user
+ * @param {ReturnType<typeof resolveChatAssistantConfig>} config
+ */
+async function performMount(generation, token, user, config) {
+  if (generation !== mountGeneration) return;
+
+  const bundle = await loadChatBundle(config.bundleUrl, config.loadTimeoutMs);
+  if (generation !== mountGeneration) return;
+
+  pendingToken = null;
+
+  if (!bundle) {
+    console.warn(
+      'VendGuard: el asistente no está disponible (bundle inalcanzable o fuera de tiempo).'
+    );
+    return;
+  }
+
+  ensureStyle(config.styleHref);
+
+  const nombre = firstNameFrom(token, user);
   const saludo = nombre
     ? `¡Hola, ${nombre}! Soy tu asistente de Vendguard.`
     : '¡Hola! Soy tu asistente de Vendguard.';
 
   try {
-    const { createChat } = await import(BUNDLE_URL);
-
-    createChat({
-      webhookUrl: WEBHOOK_URL,
+    bundle.createChat({
+      webhookUrl: config.webhookUrl,
       metadata: { token },
       defaultLanguage: 'en',
       initialMessages: [
@@ -99,9 +178,66 @@ export async function mountChatWidget(token, user = null) {
 }
 
 /**
- * Desmonta el widget de chat y remueve sus elementos del DOM al cerrar sesión.
+ * Programa el montaje del widget de chat de n8n con el token verificado.
+ *
+ * Devuelve de inmediato: el bundle se carga en el primer hueco de inactividad y
+ * con techo de espera, así que ni el CDN ni su fallo forman parte del arranque
+ * de la consola.
+ *
+ * @param {string} token - Token JWT firmado con HS256
+ * @param {Object|null} user - Datos del usuario autenticado { id, name, role, ... }
+ */
+export function mountChatWidget(token, user = null) {
+  if (!token || typeof window === 'undefined' || typeof document === 'undefined') {
+    return;
+  }
+
+  // Defensa en profundidad (H-2): si la sesión no es de Coordinación ni de Técnico
+  // —o cambió a un rol sin derecho—, el widget se retira en lugar de montarse.
+  if (user !== null && !isChatRoleAllowed(user?.role)) {
+    unmountChatWidget();
+    return;
+  }
+
+  const config = resolveConfig();
+  if (!config.enabled) {
+    unmountChatWidget();
+    return;
+  }
+
+  // Ya montado con el mismo token, o ya programado: no duplicar.
+  if (isChatMounted && currentToken === token) {
+    return;
+  }
+  if (pendingToken === token) {
+    return;
+  }
+  if (isChatMounted) {
+    unmountChatWidget();
+  }
+
+  const generation = ++mountGeneration;
+  pendingToken = token;
+
+  const run = () => {
+    performMount(generation, token, user, config);
+  };
+
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(run, { timeout: 2000 });
+  } else {
+    setTimeout(run, config.mountDelayMs);
+  }
+}
+
+/**
+ * Desmonta el widget, cancela un montaje pendiente y remueve sus elementos del
+ * DOM (y su hoja de estilos) al cerrar sesión.
  */
 export function unmountChatWidget() {
+  mountGeneration++;
+  pendingToken = null;
+
   if (typeof document === 'undefined') return;
 
   const chatSelectors = [
@@ -122,6 +258,15 @@ export function unmountChatWidget() {
       } catch (_) {}
     });
   } catch (_) {}
+
+  if (typeof document.getElementById === 'function') {
+    const style = document.getElementById('n8n-chat-style');
+    if (style && typeof style.remove === 'function') {
+      try {
+        style.remove();
+      } catch (_) {}
+    }
+  }
 
   isChatMounted = false;
   currentToken = null;

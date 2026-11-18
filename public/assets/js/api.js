@@ -1813,6 +1813,31 @@ export class ApiClient {
     getRestockVisit: (visitId) => {
       return this.get(`/coordinator/restock-visits/${encodeURIComponent(visitId)}`);
     },
+
+    // Recaudación, cambio y arqueo de caja (Módulo 35).
+    //
+    // La lectura financiera es exclusiva de Coordinación; las mutaciones de
+    // recepción y arqueo viajan separadas del listado para que el componente no
+    // conozca las rutas ni confunda una transición con una recarga de KPIs.
+    getCashCollections: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/cash-collections${q ? `?${q}` : ''}`);
+    },
+    getCashCollection: (collectionId) => {
+      return this.get(`/coordinator/cash-collections/${encodeURIComponent(collectionId)}`);
+    },
+    deliverCashCollectionToVault: (collectionId) => {
+      return this.post(`/coordinator/cash-collections/${encodeURIComponent(collectionId)}/deliver-to-vault`);
+    },
+    reconcileCashCollection: (collectionId, payload) => {
+      return this.post(`/coordinator/cash-collections/${encodeURIComponent(collectionId)}/reconcile`, payload);
+    },
+    getCashCollectionReceptionReceipt: (collectionId) => {
+      return this.get(`/coordinator/cash-collections/${encodeURIComponent(collectionId)}/reception-receipt`);
+    },
+    exportCashCollectionsCsv: (params = {}) => {
+      return this.downloadFile('/coordinator/cash-collections/export-csv', 'recaudaciones.csv', params);
+    },
     adjustRestockerVanStock: (restockerId, payload) => {
       return this.put(`/coordinator/restocker-van-stocks/${encodeURIComponent(restockerId)}`, payload);
     },
@@ -2129,6 +2154,47 @@ export class ApiClient {
      */
     dumpVisitConflict: (payload) => {
       return this.post('/restocker/visits/conflict-dump', payload);
+    },
+
+    /**
+     * Captura independiente de recaudación, cambio y conserjería (Módulo 35,
+     * RF-02/RF-03, D1/D3). El `restock_visit_id` viaja nulo.
+     * @param {number|string} machineId
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    createCashCollection: (machineId, payload) => {
+      return this.post(`/restocker/machines/${encodeURIComponent(machineId)}/cash-collections`, payload);
+    },
+
+    /**
+     * Historial propio de bolsas precintadas y cambios de ruta bajo Arqueo
+     * Ciego (Módulo 35, RF-05.1, C2, Art. V.4).
+     * @param {{machine_id?: number|string, status?: string, limit?: number|string}} [params={}]
+     * @returns {Promise<Object>}
+     */
+    getCashCollections: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/restocker/cash-collections${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * Comprobante limpio de entrega en conserjería (Módulo 35, QA 2).
+     * @param {number|string} collectionId
+     * @returns {Promise<Object>}
+     */
+    getCashCollectionReceptionReceipt: (collectionId) => {
+      return this.get(`/restocker/cash-collections/${encodeURIComponent(collectionId)}/reception-receipt`);
+    },
+
+    /**
+     * Archiva en auditoría una recaudación offline rechazada con 409
+     * (Módulo 35, RF-05.1, C4, Art. III.3).
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    dumpCashCollectionConflict: (payload) => {
+      return this.post('/restocker/cash-collections/conflict-dump', payload);
     },
 
     /**

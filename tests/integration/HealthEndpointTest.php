@@ -34,11 +34,14 @@ declare(strict_types=1);
  *      en lugar de caerse con él, y de paso certifica que el texto del fallo —que lleva host,
  *      usuario y pista de credencial— **no** se publica.
  *
- *   4. **El contrato de `/api/health` intacto.** Envoltura JSON de identificación del servicio
- *      con sus seis claves históricas, servicio del documento de la aplicación ante
- *      `Accept: text/html` y el mismo manejador compartido que `/`. Se comprueba además bajo
- *      el motor caído: la sonda vieja no puede haber adquirido una dependencia de base de
- *      datos, porque sigue respondiendo `200` cuando no hay motor.
+ *   4. **El contrato de `/api/health` y su enmienda del P2.** Envoltura JSON de identificación
+ *      del servicio con sus seis claves históricas, servicio del documento de la aplicación
+ *      ante `Accept: text/html` y el mismo manejador compartido que `/`. Desde la enmienda
+ *      del 2026-11-17 (P2), la representación **sana** no cambia, pero con el motor
+ *      inalcanzable la sonda degrada con `503` y la envoltura de error: un `200`
+ *      incondicional declaraba operativo un proceso incapaz de atender. Se certifica además
+ *      el defecto de arranque que lo provocaba: el enrutador se monta **con el motor ya
+ *      caído** y debe montarse sin abrir conexión.
  *
  *   5. **Las garantías estructurales de la credencial.** Un predicado público
  *      (`CronAuthMiddleware::hasBatchCredential`), una sola comparación del secreto, ninguna
@@ -406,14 +409,95 @@ try {
         'Rastros encontrados: ' . implode(', ', $foundSecrets)
     );
 
-    // La sonda vieja no puede haber adquirido dependencia del motor: con el motor caído
-    // sigue sirviendo su contrato exacto.
-    $legacyWhileDown = $dispatch('GET', $legacyRoute);
+    // Enmienda 2026-11-17 (P2): la sonda ligera deja de ser un `200` incondicional. Su
+    // representación sana no cambia (Grupo 4), pero con el motor inalcanzable degrada con el
+    // mismo `503` del diagnóstico en lugar de declarar operativo un proceso que no atiende.
+    $legacyWhileDown     = $dispatch('GET', $legacyRoute);
+    $legacyWhileDownBody = $legacyWhileDown->getDecodedBody() ?? [];
     $assert(
-        '3.5 /api/health sigue respondiendo 200 con el motor inalcanzable (no toca la base de datos)',
-        $legacyWhileDown->getStatusCode() === 200
-            && (($legacyWhileDown->getDecodedBody() ?? [])['data']['name'] ?? null) === 'VendGuard API',
+        '3.5 /api/health degrada con 503 y la envoltura de error cuando el motor no responde',
+        $legacyWhileDown->getStatusCode() === 503
+            && ($legacyWhileDownBody['success'] ?? null) === false
+            && ($legacyWhileDownBody['error']['code'] ?? null) === HealthController::ERROR_DATABASE_UNAVAILABLE
+            && ($legacyWhileDownBody['error']['message'] ?? null) === HealthController::UNAVAILABLE_MESSAGE,
         'Código obtenido: ' . $legacyWhileDown->getStatusCode()
+            . ' · cuerpo: ' . substr($legacyWhileDown->getBody(), 0, 200)
+    );
+
+    // Regresión del P2: el enrutador se monta **con el motor ya caído**. Antes, los middleware
+    // resolvían sus repositorios PDO en el constructor, de modo que `AppRouter::create()`
+    // lanzaba durante el montaje y el proceso emitía un fatal en HTML antes de despachar nada.
+    $routerBuiltWhileDown = null;
+    $buildFailure         = null;
+
+    try {
+        $routerBuiltWhileDown = AppRouter::create();
+    } catch (Throwable $exception) {
+        $buildFailure = $exception::class . ': ' . $exception->getMessage();
+    }
+
+    $assert(
+        '3.6 Construir el enrutador con el motor caído no abre conexión ni lanza',
+        $routerBuiltWhileDown instanceof Router,
+        'Excepción al montar el enrutador: ' . (string)$buildFailure
+    );
+
+    /** Despacho por el enrutador montado sin motor; si no existe, un doble que deja el rojo a la vista. */
+    $deadDispatch = static function (string $method, string $path, array $headers = []) use ($routerBuiltWhileDown): Response {
+        if (!$routerBuiltWhileDown instanceof Router) {
+            return new Response('{"success":false}', 599, ['Content-Type' => 'application/json']);
+        }
+
+        return $routerBuiltWhileDown->dispatch(new Request(method: $method, path: $path, headers: $headers));
+    };
+
+    $freshHealth     = $deadDispatch('GET', '/api/health');
+    $freshHealthBody = $freshHealth->getDecodedBody() ?? [];
+    $freshHealthRaw  = $freshHealth->getBody();
+
+    $assert(
+        '3.7 La sonda /api/health responde 503 JSON, no un fatal en HTML',
+        $freshHealth->getStatusCode() === 503
+            && ($freshHealthBody['error']['code'] ?? null) === HealthController::ERROR_DATABASE_UNAVAILABLE
+            && str_contains((string)$freshHealth->getHeader('Content-Type'), 'application/json')
+            && !str_contains($freshHealthRaw, 'Fatal error')
+            && !str_contains($freshHealthRaw, 'Stack trace')
+            && !str_contains($freshHealthRaw, 'SQLSTATE'),
+        'Código: ' . $freshHealth->getStatusCode()
+            . ' · type: ' . var_export($freshHealth->getHeader('Content-Type'), true)
+            . ' · cuerpo: ' . substr($freshHealthRaw, 0, 200)
+    );
+
+    $freshHealthHtml = $deadDispatch('GET', '/api/health', ['Accept' => 'text/html']);
+    $assert(
+        '3.8 La degradación de la sonda es JSON incluso ante Accept: text/html',
+        $freshHealthHtml->getStatusCode() === 503
+            && str_contains((string)$freshHealthHtml->getHeader('Content-Type'), 'application/json')
+    );
+
+    $freshStatus = $deadDispatch('GET', '/api/status');
+    $assert(
+        '3.9 El diagnóstico /api/status responde 503 con el mismo código de error',
+        $freshStatus->getStatusCode() === 503
+            && (($freshStatus->getDecodedBody() ?? [])['error']['code'] ?? null) === HealthController::ERROR_DATABASE_UNAVAILABLE,
+        'Código: ' . $freshStatus->getStatusCode()
+    );
+
+    $freshProtected = $deadDispatch('GET', '/api/restocker/cash-collections');
+    $assert(
+        '3.10 Una ruta protegida sin credencial responde 401 sin tocar el motor (middleware perezoso)',
+        $freshProtected->getStatusCode() === 401
+            && str_contains((string)$freshProtected->getHeader('Content-Type'), 'application/json'),
+        'Código: ' . $freshProtected->getStatusCode()
+            . ' · cuerpo: ' . substr($freshProtected->getBody(), 0, 160)
+    );
+
+    $freshRoot = $deadDispatch('GET', '/', ['Accept' => 'text/html']);
+    $assert(
+        '3.11 La raíz sigue sirviendo el App Shell con el motor caído (la PWA puede arrancar)',
+        $freshRoot->getStatusCode() === 200
+            && str_contains((string)$freshRoot->getHeader('Content-Type'), 'text/html'),
+        'Código: ' . $freshRoot->getStatusCode()
     );
 } finally {
     foreach ($savedEnv as $envName => $envValue) {
@@ -429,7 +513,7 @@ try {
 
 $restored = $dispatch('GET', $statusRoute);
 $assert(
-    '3.6 Restituida la configuración, el diagnóstico vuelve a 200: la suite no deja el banco tocado',
+    '3.12 Restituida la configuración, el diagnóstico vuelve a 200: la suite no deja el banco tocado',
     $restored->getStatusCode() === 200
         && (($restored->getDecodedBody() ?? [])['data']['status'] ?? null) !== HealthCheckResponseDto::STATUS_UNHEALTHY,
     'Código obtenido tras la restitución: ' . $restored->getStatusCode()
@@ -614,6 +698,43 @@ $assert(
     preg_match('/\b(SELECT|INSERT|UPDATE|DELETE|PDO)\b/i', $controllerSource) === 0
         && str_contains($controllerSource, 'HealthCheckService')
         && str_contains($controllerSource, '->check(')
+);
+
+// Guardas estructurales del P2 (2026-11-17): el arranque del enrutador no puede abrir
+// conexión. Se certifica sobre el código de producción porque el riesgo es de deriva —una
+// nueva instanciación en el constructor volvería a atar el montaje al motor— y una prueba de
+// comportamiento aislada no la vería si otro camino mantuviera la conexión cacheada.
+$constructorBuildsCollaborators = static function (string $source): bool {
+    $start = strpos($source, '__construct(');
+    if ($start === false) {
+        return false;
+    }
+
+    $end = strpos($source, '}', $start);
+    if ($end === false) {
+        return false;
+    }
+
+    return str_contains(substr($source, $start, $end - $start), 'new ');
+};
+
+$siteMiddlewareSource     = (string)file_get_contents($baseDir . '/src/Presentation/Http/Middleware/SiteAuthMiddleware.php');
+$internalMiddlewareSource = (string)file_get_contents($baseDir . '/src/Presentation/Http/Middleware/InternalAuthMiddleware.php');
+
+$assert(
+    '5.8 SiteAuthMiddleware resuelve PDO en el primer uso, no al construir',
+    !$constructorBuildsCollaborators($siteMiddlewareSource)
+        && str_contains($siteMiddlewareSource, '??= new AuthService()')
+        && str_contains($siteMiddlewareSource, '??= new PdoLocationRepository()'),
+    'El constructor sigue instanciando colaboradores o falta la resolución perezosa.'
+);
+
+$assert(
+    '5.9 InternalAuthMiddleware resuelve PDO en el primer uso, no al construir',
+    !$constructorBuildsCollaborators($internalMiddlewareSource)
+        && str_contains($internalMiddlewareSource, '??= new AuthService()')
+        && str_contains($internalMiddlewareSource, '??= new PdoUserRepository()'),
+    'El constructor sigue instanciando colaboradores o falta la resolución perezosa.'
 );
 
 // ─────────────────────────────────────────────────────────────────────────

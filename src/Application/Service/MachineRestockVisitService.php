@@ -15,11 +15,13 @@ use VendGuard\Core\Domain\Model\MachineRestockVisit;
 use VendGuard\Core\Domain\Model\MachineRestockVisitItem;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\RestockerVanProductStock;
+use VendGuard\Core\Domain\Repository\CashCollectionRegistrarInterface;
 use VendGuard\Core\Domain\Repository\InSituRestockVisitGatewayInterface;
 use VendGuard\Core\Domain\Repository\MachinePlanogramRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RestockerVanStockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
+use VendGuard\Core\Service\MachineCashCollectionValidator;
 use VendGuard\Core\Service\MachineRestockVisitValidator;
 use VendGuard\Infrastructure\Storage\LocalFileUploader;
 
@@ -70,6 +72,8 @@ final class MachineRestockVisitService
 
     private LocalFileUploader $uploader;
 
+    private ?CashCollectionRegistrarInterface $cashCollections;
+
     public function __construct(
         MachineRestockVisitRepositoryInterface $visits,
         MachinePlanogramRepositoryInterface $planograms,
@@ -77,7 +81,8 @@ final class MachineRestockVisitService
         InSituRestockVisitGatewayInterface $gateway,
         TransactionManagerInterface $transactions,
         AuditLogger $audit,
-        ?LocalFileUploader $uploader = null
+        ?LocalFileUploader $uploader = null,
+        ?CashCollectionRegistrarInterface $cashCollections = null
     ) {
         $this->visits = $visits;
         $this->planograms = $planograms;
@@ -86,6 +91,7 @@ final class MachineRestockVisitService
         $this->transactions = $transactions;
         $this->audit = $audit;
         $this->uploader = $uploader ?? new LocalFileUploader();
+        $this->cashCollections = $cashCollections;
     }
 
     /**
@@ -134,6 +140,14 @@ final class MachineRestockVisitService
             }
 
             $status = RestockVisitStatus::fromString((string)($payload['status'] ?? ''));
+            $cashCollectionPayload = $this->cashCollectionPayload($payload);
+            if ($cashCollectionPayload !== null) {
+                MachineCashCollectionValidator::assertVisitAllowsCashCollection(
+                    $status->value,
+                    $machineId,
+                    null
+                );
+            }
             $checklist = $this->buildChecklist($payload, $machineType);
             $slots = $this->indexSlots($this->gateway->lockActiveSlots($machineId));
             $lines = [];
@@ -245,6 +259,22 @@ final class MachineRestockVisitService
                 }
             }
 
+            $cashCollection = null;
+            if ($cashCollectionPayload !== null) {
+                if ($this->cashCollections === null) {
+                    throw new \LogicException(
+                        'La visita declara cash_collection pero el servicio de recaudación no está configurado.'
+                    );
+                }
+
+                $cashCollection = $this->cashCollections->registerCollectionInTransaction(
+                    $machineId,
+                    $cashCollectionPayload,
+                    $actor,
+                    $visitId
+                );
+            }
+
             $this->audit->logMachineRestockVisitEvent(
                 $visitId,
                 $status->isCompleted()
@@ -269,7 +299,7 @@ final class MachineRestockVisitService
                 ['client_mutation_id' => $mutationId]
             );
 
-            return $this->visits->findById($visitId, false) ?? [
+            $response = $this->visits->findById($visitId, false) ?? [
                 'id' => $visitId,
                 'visit_code' => $persistedVisit->getVisitCode(),
                 'machine_id' => $machineId,
@@ -277,7 +307,44 @@ final class MachineRestockVisitService
                 'status' => $status->value,
                 'triggered_incident_id' => $triggeredIncidentId,
             ];
+
+            if ($cashCollection !== null) {
+                $response['cash_collection'] = $cashCollection;
+            }
+
+            return $response;
         });
+    }
+
+    /**
+     * Detalle de la visita con el resumen opaco de la recaudación vinculada.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findVisitDetail(int $visitId, bool $includeCosts = false): ?array
+    {
+        $visit = $this->visits->findById($visitId, $includeCosts);
+        if ($visit === null) {
+            return null;
+        }
+
+        $visit['cash_collection_summary'] = $this->cashCollections?->summarizeForVisit($visitId);
+
+        return $visit;
+    }
+
+    /**
+     * Contexto de efectivo de la ruta del reponedor para `/my-route` (QA 3).
+     *
+     * @return array{recent_cash_collections: list<array<string, mixed>>, cash_route_summary: array<string, mixed>}
+     */
+    public function routeCashContext(int $restockerId, int $limit = 5): array
+    {
+        if ($this->cashCollections === null) {
+            return ['recent_cash_collections' => [], 'cash_route_summary' => []];
+        }
+
+        return $this->cashCollections->routeCashContext($restockerId, $limit);
     }
 
     /**
@@ -672,6 +739,24 @@ final class MachineRestockVisitService
     private function nextVisitCode(): string
     {
         return sprintf('MRV-%s-%06d', (new DateTimeImmutable('now'))->format('Y'), random_int(1, 999999));
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     *
+     * @return array<string, mixed>|null
+     */
+    private function cashCollectionPayload(array $payload): ?array
+    {
+        if (!array_key_exists('cash_collection', $payload) || $payload['cash_collection'] === null) {
+            return null;
+        }
+
+        if (!is_array($payload['cash_collection'])) {
+            throw new InvalidArgumentException('El campo cash_collection debe ser un objeto.');
+        }
+
+        return $payload['cash_collection'];
     }
 
     private function nullableFloat(mixed $value): ?float

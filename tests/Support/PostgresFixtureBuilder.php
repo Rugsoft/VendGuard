@@ -836,6 +836,21 @@ final class PostgresFixtureBuilder
             // dígitos, guion y guion bajo) y es parte de su identidad única.
             $table === 'machine_restock_visit_items' && $column === 'slot_code'
                 => $variant === 'update' ? 'SLOT_FIXTURE_UPDATE' : 'SLOT_FIXTURE_INSERT',
+            // La recaudación del Módulo 35 declara dos formatos cerrados: el
+            // código legible (`MCC-AAAA-NNNN`) y el precinto
+            // (`^[A-Z0-9_-]{6,40}$` con un bloque numérico de tres dígitos). El
+            // texto sintético genérico violaría ambos CHECK y el alta mínima
+            // mediría un rechazo legítimo del motor.
+            $table === 'machine_cash_collections' && $column === 'collection_code'
+                => $variant === 'update' ? 'MCC-2026-9002' : 'MCC-2026-9001',
+            $table === 'machine_cash_collections' && $column === 'bag_seal_code'
+                => $variant === 'update' ? 'BAG-2026-900002' : 'BAG-2026-900001',
+            // El expediente genérico del banco no representa una emergencia
+            // sanitaria: nace como avería de medios de pago para no dejar un
+            // ticket `TEMPERATURE_COLD` abierto sobre la máquina genérica, que
+            // el cerrojo sanitario del Módulo 35 convertiría en un rechazo
+            // legítimo de la recaudación mínima.
+            $table === 'incidents' && $column === 'category' => 'PAYMENT_SYSTEM',
             $table === 'incidents' && $column === 'sla_target_minutes'
                 => $variant === 'update' ? 720 : 1440,
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,

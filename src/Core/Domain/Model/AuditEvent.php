@@ -123,6 +123,15 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_MACHINE_RESTOCK_VISIT = 'MACHINE_RESTOCK_VISIT';
 
     /**
+     * Recaudaciones y arqueos del Módulo 35.
+     *
+     * Tiene espacio de identificadores propio en `machine_cash_collections`, así
+     * que auditarlo como `MACHINE` apuntaría a otra fila y rompería la
+     * trazabilidad del dinero (Art. III.3).
+     */
+    public const ENTITY_MACHINE_CASH_COLLECTION = 'MACHINE_CASH_COLLECTION';
+
+    /**
      * Guía rápida de diagnóstico por modelo y categoría (Módulo 28, Tabla 39).
      *
      * La migración 024 añadió el valor al enum `audit_entity_type`, pero la
@@ -208,6 +217,7 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_TECHNICIAN_VAN_STOCK,
         self::ENTITY_VAN_RESTOCK_ORDER,
         self::ENTITY_MACHINE_RESTOCK_VISIT,
+        self::ENTITY_MACHINE_CASH_COLLECTION,
         self::ENTITY_ROOT_CAUSE_TAXONOMY,
         self::ENTITY_WORKSHOP_REPAIR_ITEM,
         self::ENTITY_MACHINE_TROUBLESHOOTING_GUIDE,
