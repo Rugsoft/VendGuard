@@ -108,8 +108,8 @@ try {
     );
 
     $assert(
-        'incidents declara sus 52 columnas y las tres piezas del sellado',
-        count($incidentColumns) === 52
+        'incidents declara sus 56 columnas y las tres piezas del sellado',
+        count($incidentColumns) === 56
         && array_key_exists('sla_tier_snapshot', $incidentColumns)
         && array_key_exists('sla_target_minutes', $incidentColumns)
         && array_key_exists('sla_target_at', $incidentColumns),

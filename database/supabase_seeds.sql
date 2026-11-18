@@ -1155,8 +1155,11 @@ WHERE m.stop_type = 'PREVENTIVE_ORDER'
 -- SECCIÓN 17 · root_causes y standard_solutions — taxonomía inicial (Módulo 25)
 -- ============================================================================
 -- QUÉ SIEMBRA
---   Las 16 causas raíz del catálogo inicial, repartidas en las 5 categorías de
---   `incident_category`, y sus 34 soluciones estandarizadas. Cada causa nace con
+--   Las 20 causas raíz del catálogo inicial, repartidas en las 5 categorías de
+--   `incident_category`, y sus 38 soluciones estandarizadas. Las 16 primeras
+--   causas y sus 34 soluciones son el catálogo del Módulo 25; las 4 parejas
+--   `RC-L1-*` / `SS-L1-*` son la taxonomía de Nivel 1 que preselecciona el
+--   reponedor en un toque (Módulo 36, `QA-AMB-01`). Cada causa nace con
 --   exactamente una solución activa marcada como predeterminada (`is_default`),
 --   que es la que el modal de resolución preselecciona en un toque (D1).
 --
@@ -1191,7 +1194,14 @@ VALUES
     ('RC-ELEC-02', 'ELECTRICAL_OFF', 'Fallo en fuente de alimentación conmutada o placa de potencia', NULL, TRUE),
     ('RC-ELEC-03', 'ELECTRICAL_OFF', 'Avería o apagado de pantalla Display LCD frontal', NULL, TRUE),
     ('RC-OTH-01', 'OTHER', 'Obstrucción calcárea o fallo de electroválvula / bomba hidráulica', NULL, TRUE),
-    ('RC-OTH-02', 'OTHER', 'Vandalismo, golpe externo en puerta/botonera o falsa alarma sin fallo', NULL, TRUE)
+    ('RC-OTH-02', 'OTHER', 'Vandalismo, golpe externo en puerta/botonera o falsa alarma sin fallo', NULL, TRUE),
+    -- Módulo 36 · taxonomía de Nivel 1 (`RC-L1-*`, `QA-AMB-01`): causas que el
+    -- reponedor resuelve in situ y cuyo mapeo determinista a `incident_category`
+    -- fija el alta del aviso (`PRODUCT_JAM`, `PAYMENT_SYSTEM` u `OTHER`).
+    ('RC-L1-STOCKOUT', 'PRODUCT_JAM', 'Agotamiento de producto en carril de selección', NULL, TRUE),
+    ('RC-L1-SPIRAL-RELEASE', 'PRODUCT_JAM', 'Envase mal posicionado o trabado leve en boca de espiral', NULL, TRUE),
+    ('RC-L1-EMPTY-TUBES', 'PAYMENT_SYSTEM', 'Tubos de cambio del monedero sin suficiente moneda fraccionaria', NULL, TRUE),
+    ('RC-L1-CONSUMABLES', 'OTHER', 'Falta de vasos, azúcar o paletinas en dispensador', NULL, TRUE)
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO standard_solutions (root_cause_id, code, name, is_default, is_active)
@@ -1231,7 +1241,12 @@ SELECT rc.id, seed.code, seed.name, seed.is_default, TRUE
           ('RC-OTH-01', 'SOL-OTH-01C', 'Sustitución de cartucho filtrante antical', FALSE),
           ('RC-OTH-02', 'SOL-OTH-02A', 'Ajuste mecánico de cerradura/puerta y test funcional completo', TRUE),
           ('RC-OTH-02', 'SOL-OTH-02B', 'Verificación integral sin anomalía técnica reproducible (falsa alarma)', FALSE),
-          ('RC-OTH-02', 'SOL-OTH-02C', 'Reparación de botonera o cristal frontal', FALSE)
+          ('RC-OTH-02', 'SOL-OTH-02C', 'Reparación de botonera o cristal frontal', FALSE),
+          -- Módulo 36 · soluciones predeterminadas de Nivel 1 (`SS-L1-*`, `QA-AMB-01`).
+          ('RC-L1-STOCKOUT', 'SS-L1-RESTOCK-SLOT', 'Reposición de producto en carril y verificación de entrega', TRUE),
+          ('RC-L1-SPIRAL-RELEASE', 'SS-L1-CLEAR-SPIRAL', 'Liberación manual de envase en espiral y reacomodo de carril', TRUE),
+          ('RC-L1-EMPTY-TUBES', 'SS-L1-REFILL-TUBES', 'Recarga de tubos de cambio y comprobación de devolución', TRUE),
+          ('RC-L1-CONSUMABLES', 'SS-L1-REFILL-CUPS-SUGAR', 'Reposición de consumibles (vasos/azúcar/paletinas) y limpieza de tolva', TRUE)
   ) AS seed(cause_code, code, name, is_default)
   JOIN root_causes rc ON rc.code = seed.cause_code
 ON CONFLICT (code) DO NOTHING;

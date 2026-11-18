@@ -599,8 +599,10 @@ class SeedRunner
      * Catálogo inicial de causas raíz y soluciones estandarizadas (Módulo 25).
      *
      * Es el mismo catálogo que declara `database/supabase_seeds.sql` (sección 17):
-     * 16 causas repartidas en las 5 categorías de `incident_category` y 34
-     * soluciones, con exactamente una predeterminada activa por causa (D1). El
+     * 20 causas repartidas en las 5 categorías de `incident_category` y 38
+     * soluciones, con exactamente una predeterminada activa por causa (D1). Las
+     * cuatro parejas `RC-L1-*` / `SS-L1-*` son la taxonomía de Nivel 1 del
+     * Módulo 36 (`QA-AMB-01`). El
      * banco del arnés lo necesita porque sus suites crean incidencias y resuelven
      * con taxonomía, y no deben depender de un fichero SQL externo.
      *
@@ -832,6 +834,40 @@ class SeedRunner
                     ['code' => 'SOL-OTH-02A', 'name' => 'Ajuste mecánico de cerradura/puerta y test funcional completo', 'is_default' => true],
                     ['code' => 'SOL-OTH-02B', 'name' => 'Verificación integral sin anomalía técnica reproducible (falsa alarma)', 'is_default' => false],
                     ['code' => 'SOL-OTH-02C', 'name' => 'Reparación de botonera o cristal frontal', 'is_default' => false],
+                ],
+            ],
+            // Módulo 36 · taxonomía de Nivel 1 (`QA-AMB-01`): las cuatro causas
+            // que el reponedor resuelve in situ, con su solución predeterminada.
+            [
+                'code' => 'RC-L1-STOCKOUT',
+                'category' => 'PRODUCT_JAM',
+                'name' => 'Agotamiento de producto en carril de selección',
+                'solutions' => [
+                    ['code' => 'SS-L1-RESTOCK-SLOT', 'name' => 'Reposición de producto en carril y verificación de entrega', 'is_default' => true],
+                ],
+            ],
+            [
+                'code' => 'RC-L1-SPIRAL-RELEASE',
+                'category' => 'PRODUCT_JAM',
+                'name' => 'Envase mal posicionado o trabado leve en boca de espiral',
+                'solutions' => [
+                    ['code' => 'SS-L1-CLEAR-SPIRAL', 'name' => 'Liberación manual de envase en espiral y reacomodo de carril', 'is_default' => true],
+                ],
+            ],
+            [
+                'code' => 'RC-L1-EMPTY-TUBES',
+                'category' => 'PAYMENT_SYSTEM',
+                'name' => 'Tubos de cambio del monedero sin suficiente moneda fraccionaria',
+                'solutions' => [
+                    ['code' => 'SS-L1-REFILL-TUBES', 'name' => 'Recarga de tubos de cambio y comprobación de devolución', 'is_default' => true],
+                ],
+            ],
+            [
+                'code' => 'RC-L1-CONSUMABLES',
+                'category' => 'OTHER',
+                'name' => 'Falta de vasos, azúcar o paletinas en dispensador',
+                'solutions' => [
+                    ['code' => 'SS-L1-REFILL-CUPS-SUGAR', 'name' => 'Reposición de consumibles (vasos/azúcar/paletinas) y limpieza de tolva', 'is_default' => true],
                 ],
             ],
         ];

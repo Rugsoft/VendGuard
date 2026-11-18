@@ -336,7 +336,30 @@ END $do$;
 
 DO $do$
 BEGIN
-    CREATE TYPE comment_author_type AS ENUM ('REPORTER', 'TECHNICIAN', 'COORDINATOR', 'SYSTEM');
+    CREATE TYPE comment_author_type AS ENUM ('REPORTER', 'TECHNICIAN', 'COORDINATOR', 'SYSTEM', 'RESTOCKER');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+-- Módulo 36 · tipos nativos #43 y #44 de la sinergia reponedor ↔ SAT (D1, D2,
+-- QA-AMB-01). El nivel de despacho vive en el expediente único y el subtipo de
+-- Nivel 1 solo lo sella la pre-clasificación de avisos leves.
+DO $do$
+BEGIN
+    CREATE TYPE incident_dispatch_level AS ENUM (
+        'L1_RESTOCKER',
+        'L2_SAT'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE level1_issue_type AS ENUM (
+        'STOCKOUT_EMPTY_SLOT',
+        'MISSING_CONSUMABLES',
+        'EMPTY_CHANGE_TUBES',
+        'MINOR_SPIRAL_JAM'
+    );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
@@ -1053,6 +1076,15 @@ CREATE TABLE IF NOT EXISTS incidents (
     root_cause_name_snapshot            VARCHAR(150),
     standard_solution_code_snapshot     VARCHAR(32),
     standard_solution_name_snapshot     VARCHAR(150),
+    -- Módulo 36 · nivel operativo del expediente y rastro del escalado in situ
+    -- (D1, D2, QA-CONST-01). `dispatch_level` nace en `'L2_SAT'`: ningún
+    -- expediente histórico se reclasifica a la ruta de reposición por migrar.
+    -- `level1_issue_type` solo lo sella la pre-clasificación de Nivel 1, y el
+    -- par `escalated_from_restocker_id` / `escalated_to_sat_at` viaja junto.
+    dispatch_level              incident_dispatch_level NOT NULL DEFAULT 'L2_SAT',
+    level1_issue_type           level1_issue_type,
+    escalated_from_restocker_id BIGINT,
+    escalated_to_sat_at         TIMESTAMPTZ,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at                  TIMESTAMPTZ,
@@ -1125,7 +1157,27 @@ CREATE TABLE IF NOT EXISTS incidents (
         )
     ),
     CONSTRAINT fk_incidents_chronic_predecessor FOREIGN KEY (chronic_predecessor_incident_id)
-        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_incidents_escalated_from_restocker FOREIGN KEY (escalated_from_restocker_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    -- Guarda constitucional Art. II y QA-LIM-03: jamás un ticket térmico o
+    -- eléctrico en `L1_RESTOCKER`, jamás `PENDING_PARTS` en Nivel 1 y jamás
+    -- medio rastro de escalado.
+    CONSTRAINT chk_incidents_l1_dispatch_coherence CHECK (
+        (
+            dispatch_level = 'L2_SAT'
+            OR (
+                dispatch_level = 'L1_RESTOCKER'
+                AND category NOT IN ('TEMPERATURE_COLD', 'ELECTRICAL_OFF')
+                AND status <> 'PENDING_PARTS'
+                AND pending_parts_reason IS NULL
+            )
+        )
+        AND (
+            (escalated_from_restocker_id IS NULL AND escalated_to_sat_at IS NULL)
+            OR (escalated_from_restocker_id IS NOT NULL AND escalated_to_sat_at IS NOT NULL)
+        )
+    )
 );
 
 -- Módulo 30 · convergencia de bases preexistentes: `CREATE TABLE IF NOT EXISTS`
@@ -1166,6 +1218,20 @@ CREATE INDEX IF NOT EXISTS idx_incidents_technician ON incidents (assigned_techn
 CREATE INDEX IF NOT EXISTS idx_incidents_sla_target_lookup
     ON incidents (status, sla_target_at, sla_target_minutes)
     WHERE deleted_at IS NULL;
+-- Cola de Coordinación por nivel operativo y cartera viva del custodio
+-- (Módulo 36, D1): el filtro `dispatch_level` y la bandeja L1 del reponedor.
+-- En bases preexistentes anteriores al Módulo 36, `CREATE TABLE IF NOT EXISTS
+-- incidents` no añade `dispatch_level` (eso lo hace la migración
+-- `032_restocker_sat_synergy.sql` en el paso 4/6 de `bin/init_cloud_db.php`). Se
+-- tolera `undefined_column` para no abortar el paso 3/6 antes de llegar al
+-- ejecutor, igual que en el índice del Pareto y en los territoriales.
+DO $do$
+BEGIN
+    CREATE INDEX IF NOT EXISTS idx_incidents_dispatch_level_status
+        ON incidents (dispatch_level, status, assigned_technician_id)
+        WHERE deleted_at IS NULL;
+EXCEPTION WHEN duplicate_object OR undefined_column THEN NULL;
+END $do$;
 -- Universo del Pareto 80/20: expedientes vivos resueltos o cerrados, por fecha
 -- de resolución vigente y causa raíz (Módulo 25, QA 2, C3).
 -- En bases preexistentes anteriores al Módulo 25, `CREATE TABLE IF NOT EXISTS
@@ -2854,7 +2920,9 @@ CREATE TABLE IF NOT EXISTS offline_sync_mutations (
         AND client_mutation_id ~ '^[A-Za-z0-9_.:-]+$'
     ),
     CONSTRAINT chk_offline_sync_stop_type CHECK (
-        stop_type IN ('INCIDENT', 'PREVENTIVE_ORDER')
+        -- `MACHINE` cubre el escalado al SAT desde una máquina sin ticket previo
+        -- (Módulo 36, RF-05.1, Rama B).
+        stop_type IN ('INCIDENT', 'PREVENTIVE_ORDER', 'MACHINE')
     ),
     CONSTRAINT chk_offline_sync_operation_type CHECK (
         operation_type IN (
@@ -2866,7 +2934,11 @@ CREATE TABLE IF NOT EXISTS offline_sync_mutations (
             'START_PREVENTIVE',
             'COMPLETE_PREVENTIVE',
             'REINSPECT_PREVENTIVE',
-            'ADD_INCIDENT_COMMENT'
+            'ADD_INCIDENT_COMMENT',
+            -- Mutaciones móviles del reponedor (Módulo 36, C2).
+            'START_L1_INCIDENT',
+            'RESOLVE_L1_INCIDENT',
+            'ESCALATE_INCIDENT_TO_SAT'
         )
     ),
     CONSTRAINT chk_offline_sync_outcome_status CHECK (
@@ -2916,7 +2988,12 @@ BEGIN
         'OPPORTUNISTIC_TAKEOVER',
         'OPPORTUNISTIC_WARRANTY_REOPEN',
         'SHIFT_HANDOVER',
-        'SANITARY_FAILSAFE_GUARD'
+        'SANITARY_FAILSAFE_GUARD',
+        -- Módulo 36 · canales de custodia de la sinergia reponedor ↔ SAT (QA-AMB-02).
+        'RESTOCKER_ESCALATION_TO_SAT',
+        'RESTOCKER_SHIFT_HANDOVER',
+        'QR_AUTO_ESCALATION_TO_SAT',
+        'WARRANTY_REOPEN_ESCALATION_TO_SAT'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -2933,7 +3010,11 @@ BEGIN
         'RESOLVED',
         'CHRONIC_REPLACEMENT_CLOSED',
         'WARRANTY_REOPENED',
-        'CANCELLED'
+        'CANCELLED',
+        -- Módulo 36 · salidas de custodia del reponedor (QA-AMB-02).
+        'ESCALATED_TO_SAT_BY_RESTOCKER',
+        'QR_AUTO_ESCALATED_TO_SAT',
+        'RESTOCKER_SHIFT_HANDOVER'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
