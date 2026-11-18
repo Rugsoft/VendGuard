@@ -133,6 +133,7 @@ export const CoordinatorDashboardView = {
       // Filters
       filterStatus: '',
       filterUrgency: '',
+      filterDispatchLevel: '',
       filterSearch: '',
       filterSlaOnly: false,
 
@@ -148,6 +149,13 @@ export const CoordinatorDashboardView = {
       showAssignModal: false,
       selectedIncident: null,
       assignTechnicianId: 2,
+      // Selector de nivel operativo del Triaje (RF-05.3): el despacho L1 usa la
+      // sugerencia de reponedores de la zona; L2 conserva la asignación SAT.
+      assignDispatchLevel: 'L2_SAT',
+      assignRestockerId: null,
+      restockerSuggestions: [],
+      isLoadingRestockers: false,
+      restockersError: '',
       assignUrgencyOverride: '',
       assignUrgencyReason: '',
       isAssigning: false,
@@ -303,6 +311,13 @@ export const CoordinatorDashboardView = {
     isInactivityReasonValid() {
       return this.inactivityReasonLength >= 20;
     },
+    /** Reponedor #1 recomendado de la zona para el despacho L1 (RF-02.1.1). */
+    recommendedRestocker() {
+      return Array.isArray(this.restockerSuggestions) && this.restockerSuggestions.length > 0
+        ? this.restockerSuggestions[0]
+        : null;
+    },
+
     filteredIncidents() {
       return this.incidents.filter(inc => {
         // Quick filter of the contractual pause (Módulo 11, plan §4.4).
@@ -321,6 +336,11 @@ export const CoordinatorDashboardView = {
 
         // Urgency filter
         if (this.filterUrgency && normalizeUrgency(inc.urgency) !== normalizeUrgency(this.filterUrgency)) {
+          return false;
+        }
+
+        // Nivel operativo (RF-05.3): ALL no filtra; L1 y L2 se comparan tal cual.
+        if (this.filterDispatchLevel && inc.dispatch_level !== this.filterDispatchLevel) {
           return false;
         }
 
@@ -740,7 +760,8 @@ export const CoordinatorDashboardView = {
       this.incidentsError = '';
 
       try {
-        const data = await api.coordinator.getIncidents();
+        const filters = this.filterDispatchLevel ? { dispatch_level: this.filterDispatchLevel } : {};
+        const data = await api.coordinator.getIncidents(filters);
         this.incidents = Array.isArray(data) ? data : [];
         this.lastUpdated = new Date();
         this.$emit('refresh', this.incidents);
@@ -1162,6 +1183,10 @@ export const CoordinatorDashboardView = {
     openAssignModal(incident) {
       this.selectedIncident = incident;
       this.assignTechnicianId = incident.assigned_technician_id || (this.technicians[0]?.id || null);
+      this.assignDispatchLevel = incident.dispatch_level === 'L1_RESTOCKER' ? 'L1_RESTOCKER' : 'L2_SAT';
+      this.assignRestockerId = null;
+      this.restockerSuggestions = [];
+      this.restockersError = '';
       this.assignUrgencyOverride = '';
       this.assignUrgencyReason = '';
       this.assignError = '';
@@ -1174,6 +1199,9 @@ export const CoordinatorDashboardView = {
       // El ranking llega del servidor en paralelo: la apertura del panel no espera a la
       // sugerencia y, si falla, el coordinador conserva el despacho manual (RF-06.3).
       this.loadAssignmentSuggestions(incident.id);
+      if (this.assignDispatchLevel === 'L1_RESTOCKER') {
+        this.loadAssignRestockerSuggestions(incident.id);
+      }
     },
 
     closeAssignModal() {
@@ -1184,6 +1212,53 @@ export const CoordinatorDashboardView = {
       this.suggestionsError = '';
       this.assignOverrideJustification = '';
       this.assignTechnicianChosenByUser = false;
+      this.assignDispatchLevel = 'L2_SAT';
+      this.assignRestockerId = null;
+      this.restockerSuggestions = [];
+      this.isLoadingRestockers = false;
+      this.restockersError = '';
+    },
+
+    /** Al conmutar a L1 se carga el escalafón de reponedores de la zona. */
+    onAssignDispatchLevelChange() {
+      if (this.assignDispatchLevel !== 'L1_RESTOCKER') {
+        this.assignRestockerId = null;
+        this.restockerSuggestions = [];
+        this.restockersError = '';
+        return;
+      }
+      this.loadAssignRestockerSuggestions(this.selectedIncident?.id);
+    },
+
+    /**
+     * Carga los reponedores de la zona del expediente y preselecciona al
+     * `#1 RECOMENDADO ⭐` (RF-02.1.1). Un fallo no bloquea el despacho manual.
+     */
+    async loadAssignRestockerSuggestions(incidentId) {
+      if (incidentId === null || incidentId === undefined || incidentId === '') {
+        return;
+      }
+      this.isLoadingRestockers = true;
+      this.restockersError = '';
+      try {
+        const suggestions = await api.coordinator.getSuggestedRestockers(incidentId);
+        this.restockerSuggestions = Array.isArray(suggestions) ? suggestions : [];
+        if (this.recommendedRestocker && this.assignRestockerId === null) {
+          this.assignRestockerId = this.recommendedRestocker.user_id;
+        }
+      } catch (err) {
+        this.restockerSuggestions = [];
+        this.restockersError = err?.message
+          || 'No se pudo cargar la sugerencia de reponedores. Puede elegir uno manualmente.';
+      } finally {
+        this.isLoadingRestockers = false;
+      }
+    },
+
+    applySuggestedRestocker(restocker) {
+      if (restocker?.user_id !== undefined) {
+        this.assignRestockerId = Number(restocker.user_id);
+      }
     },
 
     /**
@@ -1610,7 +1685,46 @@ export const CoordinatorDashboardView = {
      */
     async submitAssignment() {
       if (!this.selectedIncident) return;
+      if (this.assignDispatchLevel === 'L1_RESTOCKER') {
+        await this.performLevel1Dispatch();
+        return;
+      }
       await this.performAssignment(this.assignTechnicianId);
+    },
+
+    /**
+     * Despacho L1 en un clic (RF-05.2.2/RF-05.3): conmuta el nivel y asigna al
+     * reponedor elegido, con el #1 recomendado preseleccionado.
+     */
+    async performLevel1Dispatch() {
+      if (!this.selectedIncident || !this.assignRestockerId) {
+        this.assignError = 'Selecciona un reponedor de zona antes de confirmar el despacho de Nivel 1.';
+        return;
+      }
+
+      this.assignError = '';
+      this.isAssigning = true;
+      store.setLoading(true);
+      try {
+        const result = await api.coordinator.changeDispatchLevel(
+          this.selectedIncident.id,
+          'L1_RESTOCKER',
+          this.assignRestockerId
+        );
+        store.addAlert(
+          `Incidencia #${this.selectedIncident.ticket_code} despachada al reponedor de zona.`,
+          'success',
+          5000
+        );
+        this.$emit('assigned', result);
+        this.closeAssignModal();
+        await this.loadIncidents();
+      } catch (err) {
+        this.assignError = err.message || 'Error al despachar el aviso de Nivel 1.';
+      } finally {
+        this.isAssigning = false;
+        store.setLoading(false);
+      }
     },
 
     /**
@@ -1739,12 +1853,25 @@ export const CoordinatorDashboardView = {
       this.filterSlaOnly = true;
     },
 
+    /** El filtro de nivel se resuelve en servidor; el cambio recarga la bandeja. */
+    onDispatchLevelFilterChange() {
+      this.loadIncidents(true);
+    },
+
     clearFilters() {
       this.filterStatus = '';
       this.filterUrgency = '';
+      this.filterDispatchLevel = '';
       this.filterSearch = '';
       this.filterSlaOnly = false;
       this.filterPausedOnly = false;
+    },
+
+    /** Etiqueta visible del nivel operativo en la fila de triaje. */
+    dispatchLevelLabel(incident) {
+      return incident?.dispatch_level === 'L1_RESTOCKER'
+        ? '🛒 Reponedor N1'
+        : '🔧 SAT N2';
     },
 
     /**
@@ -2218,6 +2345,19 @@ export const CoordinatorDashboardView = {
               <option value="LOW">Baja</option>
             </select>
 
+            <!-- Nivel operativo (Módulo 36, RF-05.3) -->
+            <select
+              v-model="filterDispatchLevel"
+              class="vg-select"
+              style="max-width: 180px; height: 36px;"
+              data-testid="select-dispatch-level-filter"
+              @change="onDispatchLevelFilterChange"
+            >
+              <option value="">Todos los niveles</option>
+              <option value="L1_RESTOCKER">🛒 Nivel 1 · Reponedor</option>
+              <option value="L2_SAT">🔧 Nivel 2 · SAT</option>
+            </select>
+
             <!-- Only SLA Breach Toggle -->
             <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #991b1b; cursor: pointer;">
               <input type="checkbox" v-model="filterSlaOnly" />
@@ -2233,7 +2373,7 @@ export const CoordinatorDashboardView = {
             </label>
 
             <button
-              v-if="filterStatus || filterUrgency || filterSearch || filterSlaOnly || filterPausedOnly"
+              v-if="filterStatus || filterUrgency || filterDispatchLevel || filterSearch || filterSlaOnly || filterPausedOnly"
               type="button"
               class="vg-btn vg-btn-sm vg-btn-secondary"
               @click="clearFilters"
@@ -2385,6 +2525,13 @@ export const CoordinatorDashboardView = {
                   <td style="padding: 14px 16px; vertical-align: top;">
                     <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
                       <IncidentBadge :value="inc.status" type="status" size="sm" />
+                      <span
+                        data-testid="row-dispatch-level"
+                        style="font-size: 11px; font-weight: 700; color: var(--color-slate, #2c333f);"
+                      >
+                        {{ dispatchLevelLabel(inc) }}
+                        <template v-if="inc.level1_issue_type">· {{ inc.level1_issue_type }}</template>
+                      </span>
                       <IncidentBadge
                         v-if="opportunisticModeLabel(inc)"
                         :value="inc.opportunistic_mode"
@@ -2842,16 +2989,84 @@ export const CoordinatorDashboardView = {
             </p>
           </section>
 
+          <!-- Selector de nivel operativo (RF-05.3, Módulo 36) -->
+          <div style="margin-bottom: 16px;">
+            <label for="assign-dispatch-level" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+              Nivel operativo del despacho
+            </label>
+            <select
+              id="assign-dispatch-level"
+              v-model="assignDispatchLevel"
+              class="vg-select"
+              :disabled="isAssigning"
+              data-testid="assign-dispatch-level-select"
+              @change="onAssignDispatchLevelChange"
+            >
+              <option value="L2_SAT">🔧 Nivel 2 · Técnico SAT</option>
+              <option value="L1_RESTOCKER">🛒 Nivel 1 · Reponedor de zona</option>
+            </select>
+          </div>
+
+          <!-- Reponedor #1 RECOMENDADO ⭐ (Módulo 36, RF-02.1.1) -->
+          <section
+            v-if="assignDispatchLevel === 'L1_RESTOCKER'"
+            data-testid="assign-restocker-suggestions"
+            style="margin-bottom: 16px;"
+          >
+            <div v-if="isLoadingRestockers" style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+              Cargando reponedores de la zona...
+            </div>
+            <div v-else-if="recommendedRestocker" class="vg-alert vg-alert-info">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase;">
+                #1 RECOMENDADO ⭐
+              </div>
+              <div style="margin-top: 4px; font-size: 14px; font-weight: 700;">
+                {{ recommendedRestocker.name }}
+                <span style="font-size: 12px; font-weight: 500;">
+                  · {{ recommendedRestocker.operator_code }} ·
+                  {{ recommendedRestocker.active_l1_incidents_count }} aviso(s) L1
+                </span>
+              </div>
+              <button
+                type="button"
+                class="vg-btn vg-btn-sm vg-btn-primary"
+                data-testid="btn-apply-recommended-restocker"
+                @click="applySuggestedRestocker(recommendedRestocker)"
+              >
+                Despachar al #1 recomendado
+              </button>
+            </div>
+            <p v-else-if="restockersError" style="font-size: 12px; color: #b91c1c;" role="alert">
+              {{ restockersError }}
+            </p>
+            <p v-else style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+              No hay reponedores en turno para la zona de esta sede.
+            </p>
+            <select
+              v-if="restockerSuggestions.length > 0"
+              v-model="assignRestockerId"
+              class="vg-select"
+              style="margin-top: 8px;"
+              data-testid="assign-restocker-select"
+              :disabled="isAssigning"
+            >
+              <option v-for="restocker in restockerSuggestions" :key="restocker.user_id" :value="restocker.user_id">
+                {{ restocker.name }} ({{ restocker.operator_code }}) · {{ restocker.active_l1_incidents_count }} L1
+              </option>
+            </select>
+          </section>
+
           <!-- Technician Selector -->
           <div style="margin-bottom: 16px;">
             <label for="assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
               Seleccionar Técnico de Campo <span style="color: #dc2626;">*</span>
             </label>
             <select
+              v-if="assignDispatchLevel === 'L2_SAT'"
               id="assign-tech-select"
               v-model="assignTechnicianId"
               class="vg-select"
-              required
+              :required="assignDispatchLevel === 'L2_SAT'"
               :disabled="isAssigning"
               data-testid="assign-technician-select"
               @change="onAssignTechnicianChange"
@@ -2956,10 +3171,10 @@ export const CoordinatorDashboardView = {
             <button
               type="submit"
               class="vg-btn vg-btn-primary"
-              :disabled="isAssigning || !assignTechnicianId || !assignOverrideJustificationValid"
+              :disabled="isAssigning || (assignDispatchLevel === 'L1_RESTOCKER' ? !assignRestockerId : !assignTechnicianId) || !assignOverrideJustificationValid"
               data-testid="assign-submit"
             >
-              <span v-if="!isAssigning">Confirmar Asignación</span>
+              <span v-if="!isAssigning">{{ assignDispatchLevel === 'L1_RESTOCKER' ? 'Despachar al Reponedor' : 'Confirmar Asignación' }}</span>
               <span v-else>Guardando...</span>
             </button>
           </div>

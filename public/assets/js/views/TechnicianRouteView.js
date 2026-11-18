@@ -1343,6 +1343,24 @@ export const TechnicianRouteView = {
       }
     },
 
+    /** ¿La parada fue abierta o escalada por un reponedor in situ? (RF-04.1). */
+    wasEscalatedByRestocker(incident) {
+      return Boolean(incident?.escalated_from_restocker_id)
+        || Boolean(incident?.escalated_to_sat_at);
+    },
+
+    /** Reponedores en turno de la misma sede que publica el servidor (D4). */
+    siteCoincidenceFor(incident) {
+      return Array.isArray(incident?.site_coincidence) ? incident.site_coincidence : [];
+    },
+
+    /** Resumen legible de la coincidencia en sede, sin exponer identificadores. */
+    siteCoincidenceSummary(incident) {
+      return this.siteCoincidenceFor(incident)
+        .map((entry) => `${entry.name}${entry.activity_summary ? ` (${entry.activity_summary})` : ''}`)
+        .join(' · ');
+    },
+
     /** Normaliza una parada del paquete local a la forma que pinta la tarjeta. */
     normalizeOfflineStop(stop) {
       const machine = stop?.machine && typeof stop.machine === 'object' ? { ...stop.machine } : {};
@@ -4249,6 +4267,14 @@ export const TechnicianRouteView = {
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <IncidentBadge type="urgency" :value="incident.urgency" />
                 <IncidentBadge type="status" :value="incident.status" />
+                <!-- Insignia de escalado desde la parada del reponedor (Módulo 36, RF-04.1). -->
+                <span
+                  v-if="wasEscalatedByRestocker(incident)"
+                  data-testid="tech-escalated-by-restocker"
+                  style="display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid var(--color-warning-border, #d97706); border-radius: var(--radius-interactive); background-color: var(--color-warning-bg, #fffbeb); color: var(--color-warning-text, #92400e); font-size: 11px; font-weight: 700;"
+                >
+                  ⚡ Escalado por Reponedor In Situ
+                </span>
                 <!-- Insignia de trabajo local pendiente de envío (EARS 03.3.2) -->
                 <span
                   v-if="offlineStopBadgeLabel(incident)"
@@ -4298,6 +4324,18 @@ export const TechnicianRouteView = {
                   {{ slaContractFor(incident).critical_reason === 'COLD_CHAIN' ? '🌡️' : '⏱️' }}
                   {{ slaContractFor(incident).critical_reason_label }}
                 </span>
+              </div>
+
+              <!-- 🤝 Coincidencia en Sede (Módulo 36, D4): reponedores en turno
+                   que ya trabajan esta misma sede. Solo lectura, nunca bloquea. -->
+              <div
+                v-if="siteCoincidenceFor(incident).length > 0"
+                class="vg-alert vg-alert-info"
+                data-testid="tech-site-coincidence"
+                style="margin-top: 6px; font-size: 12px;"
+              >
+                <strong>🤝 Coincidencia en Sede:</strong>
+                {{ siteCoincidenceSummary(incident) }}
               </div>
 
               <!-- Disponibilidad del repuesto en la furgoneta (Módulo 23, RF-05.4 / QA 3).

@@ -1420,6 +1420,31 @@ export class ApiClient {
     },
 
     /**
+     * Escalafón de reponedores de la zona de la sede, con el #1 recomendado
+     * (Módulo 36, RF-02.1.1).
+     * @param {number|string} incidentId
+     * @returns {Promise<Array<Object>>}
+     */
+    getSuggestedRestockers: (incidentId) => {
+      return this.get(`/coordinator/incidents/${encodeURIComponent(incidentId)}/suggested-restockers`);
+    },
+
+    /**
+     * Conmuta el nivel operativo del expediente y asigna su custodio (Módulo 36,
+     * RF-05.3).
+     * @param {number|string} incidentId
+     * @param {'L1_RESTOCKER'|'L2_SAT'} dispatchLevel
+     * @param {number|string} assigneeId
+     * @returns {Promise<Object>}
+     */
+    changeDispatchLevel: (incidentId, dispatchLevel, assigneeId) => {
+      return this.post(`/coordinator/incidents/${encodeURIComponent(incidentId)}/dispatch-level`, {
+        dispatch_level: dispatchLevel,
+        assignee_id: Number(assigneeId)
+      });
+    },
+
+    /**
      * Assigns incident to a technician, with optional urgency reclassification (RF-05).
      * @param {number|string} incidentId
      * @param {number|string} technicianId
