@@ -24,13 +24,14 @@ a un módulo funcional certificado por la batería global.
 - **H-4:** el CSV entrega la etiqueta legible en `Estado` y conserva el código técnico en la columna final `Código de estado`, sin mover las columnas de dinero. **H-5:** los códigos nuevos son correlativos por año en lugar de aleatorios. **H-6:** el arqueo directo desde `SEALED_IN_ROUTE` tiene aserción propia (200, `RECONCILED_OK` y doble sello persistido).
 - El KPI de bolsas pendientes del reponedor se recalcula sobre los filtros activos de máquina, precinto, fechas y estado, y solo cuenta las bolsas que siguen en `SEALED_IN_ROUTE`.
 - El volcado de conflicto offline exige una máquina activa cubierta por las zonas del reponedor (`404`/`403`), acota `client_mutation_id`, `reason`, `bag_seal_code` y `offline_created_at`, y audita el hecho bajo la entidad `MACHINE`.
+- Los comentarios de la migración 031 alinean el correlativo con el formato real `MCC-AAAA-NNNN`, con guarda de regresión en la suite de esquema.
 - `/api/health` degrada a `503 JSON` cuando el motor no responde en vez de provocar un fatal del router, y el visor de auditoría etiqueta las tres acciones de recaudación.
 
 ### Certificación
 
-- `CashCollectionVaultAuditApiTest` (50/50), `CashCollectionVaultAuditConstitutionalTest` (25/25), `CashCollectionConcurrencyTest` (10/10), `CashCollectionLayoutBrowserTest` (32/32 a 360 px en navegador real), `PostgresCashCollectionVaultAuditSchemaTest` (46/46), `PdoMachineCashCollectionRepositoryTest` (47/47), `CashCollectionDomainModelsTest` (123/123), `MachineCashCollectionValidatorTest` (114/114) y `MachineCashCollectionServiceTest` (67/67).
+- `CashCollectionVaultAuditApiTest` (50/50), `CashCollectionVaultAuditConstitutionalTest` (25/25), `CashCollectionConcurrencyTest` (10/10), `CashCollectionLayoutBrowserTest` (32/32 a 360 px en navegador real), `PostgresCashCollectionVaultAuditSchemaTest` (47/47), `PdoMachineCashCollectionRepositoryTest` (47/47), `CashCollectionDomainModelsTest` (123/123), `MachineCashCollectionValidatorTest` (114/114) y `MachineCashCollectionServiceTest` (67/67).
 - Batería global: **436 suites y 16.807 aserciones**, 0 fallos y `DocMetricsGuard` sin desviaciones (193/193 PHP Unit, 105/105 JS Unit, 135/135 de integración y 3/3 E2E manuales).
-- Canal `new_engine`: **66/66 suites y 2.189 aserciones**, 0 no ejecutables, 0 fallos y salida `0`.
+- Canal `new_engine`: **66/66 suites y 2.190 aserciones**, 0 no ejecutables, 0 fallos y salida `0`.
 ## [Certificación] · Batería global y canal new_engine tras los Módulos 25 a 34 — 2026-11-15
 
 **Estado:** Cerrada en verde · cifras canónicas auditadas por `DocMetricsGuard`.

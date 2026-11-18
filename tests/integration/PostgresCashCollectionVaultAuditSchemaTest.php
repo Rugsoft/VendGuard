@@ -28,6 +28,8 @@ declare(strict_types=1);
  *   7. **Inmutabilidad e historial (Art. III.1 y III.3).** El `UPDATE` de la captura en ruta y de
  *      una fila ya arqueada se rechaza con `45000`, el `DELETE` sin ventana de purga también, y
  *      dentro de la ventana del arnés el borrado funciona: la tabla no es un sumidero.
+ *   8. **Guarda documental (PR-09).** Los comentarios de la migración 031 describen el correlativo
+ *      real `MCC-AAAA-NNNN` y no reintroducen el formato obsoleto de seis dígitos.
  *
  * CATEGORÍA: `new_engine`
  *   Exige un PostgreSQL disponible (el motor de `deploy/local/postgres/`). NO pertenece a la
@@ -302,6 +304,16 @@ try {
             count($schemaReport['migrations']),
             json_encode($convergence['pending'])
         )
+    );
+
+    $migrationSql = (string)file_get_contents(
+        $projectRoot . '/database/supabase_migrations/031_cash_collection_vault_audit.sql'
+    );
+    $assert(
+        'Los comentarios de la migración 031 usan el formato real MCC-AAAA-NNNN (PR-09)',
+        preg_match('/MCC-AAAA-N{4}(?!N)/', $migrationSql) === 1
+            && preg_match('/MCC-AAAA-N{5,}/', $migrationSql) === 0,
+        'el correlativo documentado debe coincidir con el CHECK de cuatro o más dígitos'
     );
 
     // ─────────────────────────────────────────────────────────────────────

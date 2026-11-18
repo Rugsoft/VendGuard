@@ -22,7 +22,7 @@
 --      valor `'MACHINE_CASH_COLLECTION'` del enumerado `audit_entity_type`
 --      (Art. III.3).
 --   2. La Tabla 49 `machine_cash_collections` con la identidad legible
---      `collection_code` (`MCC-AAAA-NNNNNN`), el precinto único global
+--      `collection_code` (`MCC-AAAA-NNNN`), el precinto único global
 --      `bag_seal_code` (C1), la idempotencia del móvil
 --      `(restocker_id, client_mutation_id)` (D4), el vínculo opcional a la
 --      visita del Módulo 34 (D1) y al reintegro del Módulo 08 (D3), la captura
@@ -104,7 +104,7 @@ ALTER TYPE audit_entity_type ADD VALUE IF NOT EXISTS 'MACHINE_CASH_COLLECTION';
 -- 2. Tabla 49 · machine_cash_collections — corte de bolsa, cambio y arqueo
 --    (RF-01.1, D1–D4, C1–C3, QA 1, Art. II.2, Art. III.1, Art. III.3, Art. V.1)
 -- ----------------------------------------------------------------------------
--- `collection_code` es la identidad legible e inmutable (`MCC-AAAA-NNNNNN`).
+-- `collection_code` es la identidad legible e inmutable (`MCC-AAAA-NNNN`).
 --   * `bag_seal_code` se normaliza con `UPPER(BTRIM(...))` y es único global:
 --     un precinto no se reutiliza jamás en la historia del sistema (C1).
 --   * `uq_machine_cash_collections_mutation` resuelve la idempotencia del móvil:
