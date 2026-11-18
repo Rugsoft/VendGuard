@@ -130,6 +130,7 @@ try {
     );
     $shiftStmt->execute([':id' => $restockerId]);
     $shiftStmt->execute([':id' => $backupId]);
+    $shiftStmt->execute([':id' => $technicianId]);
 
     $seedIncident = static function (string $code, int $machineId) use ($pdo, $locationId, $restockerId): int {
         $stmt = $pdo->prepare(
@@ -227,6 +228,27 @@ try {
     ], $coordinatorToken);
     $assert('La conmutación a L2 responde 200', $dispatch->getStatusCode() === 200, 'status=' . $dispatch->getStatusCode() . ' ' . $errorCode($dispatch));
     $assert('El nivel conmutado es L2_SAT', ($data($dispatch)['dispatch_level'] ?? '') === 'L2_SAT');
+
+    $filtered = $call('GET', '/api/coordinator/incidents', [], $coordinatorToken, ['dispatch_level' => 'L1_RESTOCKER']);
+    $filteredRows = $data($filtered);
+    $allLevel1 = $filteredRows !== [] && count(array_filter(
+        $filteredRows,
+        static fn (array $row): bool => ($row['dispatch_level'] ?? '') === 'L1_RESTOCKER'
+    )) === count($filteredRows);
+    $assert('El filtro dispatch_level=L1 devuelve solo avisos L1', $allLevel1, 'filas=' . count($filteredRows));
+
+    $invalidFilter = $call('GET', '/api/coordinator/incidents', [], $coordinatorToken, ['dispatch_level' => 'L3']);
+    $assert('Un nivel de filtro inválido responde 400', $invalidFilter->getStatusCode() === 400);
+
+    $technicianRoute = $call('GET', '/api/technician/my-route', [], $technicianToken);
+    $stops = $data($technicianRoute);
+    $coincidence = $stops[0]['site_coincidence'] ?? null;
+    $assert(
+        'La ruta del técnico publica site_coincidence con la reponedora en turno',
+        $technicianRoute->getStatusCode() === 200 && is_array($coincidence)
+            && in_array($restockerId, array_column($coincidence, 'user_id'), true),
+        'status=' . $technicianRoute->getStatusCode()
+    );
 
     echo "\n--- 5. Alta QR y opacidad ---\n";
     $qr = $call('POST', '/api/qr/report', [

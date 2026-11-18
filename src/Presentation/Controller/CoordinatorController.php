@@ -700,7 +700,22 @@ class CoordinatorController
             $filters['active_only'] = true;
         }
 
-        // 6. Consultar repositorio con los filtros aplicados
+        // 6. Filtro opcional por nivel operativo (RF-05.3)
+        $dispatchParam = strtoupper(trim((string)$request->getQuery('dispatch_level')));
+        if ($dispatchParam !== '') {
+            if (!in_array($dispatchParam, ['ALL', 'L1_RESTOCKER', 'L2_SAT'], true)) {
+                return Response::error(
+                    'INVALID_DISPATCH_LEVEL_FILTER',
+                    'El nivel de despacho debe ser ALL, L1_RESTOCKER o L2_SAT.',
+                    400
+                );
+            }
+            if ($dispatchParam !== 'ALL') {
+                $filters['dispatch_level'] = $dispatchParam;
+            }
+        }
+
+        // 7. Consultar repositorio con los filtros aplicados
         $incidents = $this->incidentRepo->findAll($filters);
 
         // 6.b Recuento agregado de las conversaciones de TODA la bandeja en una sola
@@ -774,6 +789,11 @@ class CoordinatorController
 
             // Construir representación final combinando toArray() y contratos específicos
             $item = array_merge($incident->toArray(), [
+                // Coordinación sí ve el nivel operativo (RF-05.3); Portal, QR y
+                // albaranes no lo reciben porque no pasan por esta bandeja.
+                'dispatch_level' => $incident->getDispatchLevel()->value,
+                'dispatch_level_label' => $incident->getDispatchLevel()->label(),
+                'level1_issue_type' => $incident->getLevel1IssueType()?->value,
                 'assigned_technician' => $assignedTechnician,
                 'sla_minutes_elapsed' => $minutesWaiting,
                 'waiting_minutes' => $minutesWaiting,

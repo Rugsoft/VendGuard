@@ -427,6 +427,9 @@ class TechnicianController
             ? $this->routeFromBoard($techId, $routeStatuses)
             : $this->routeFromReads($techId, $routeStatuses);
 
+        // D4: Coincidencia en Sede con reponedores en turno de la misma sede.
+        $routeData = $this->withSiteCoincidence($routeData, $techId);
+
         // Insignia de cobertura de repuestos en cada parada (Módulo 23, RF-05.4,
         // QA 3). Es informativa: no reactiva la avería ni toca sus solicitudes.
         // Un fallo transitorio en la lectura de stock no interrumpe la ruta del técnico.
@@ -473,6 +476,43 @@ class TechnicianController
                 $pendingStops
             ),
         ], 200);
+    }
+
+    /**
+     * Anexa `site_coincidence` a cada parada con reponedores en turno de la
+     * misma sede (D4, Art. V.4). Es informativo y nunca bloquea la ruta.
+     *
+     * @param list<array<string, mixed>> $stops
+     * @return list<array<string, mixed>>
+     */
+    private function withSiteCoincidence(array $stops, int $technicianId): array
+    {
+        $locationIds = [];
+        foreach ($stops as $stop) {
+            $locationId = (int)($stop['location']['id'] ?? 0);
+            if ($locationId > 0) {
+                $locationIds[$locationId] = $locationId;
+            }
+        }
+
+        if ($locationIds === []) {
+            return $stops;
+        }
+
+        try {
+            $coincidences = (new \VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway())
+                ->technicianCoincidences($technicianId, array_values($locationIds));
+        } catch (\Throwable $exception) {
+            return $stops;
+        }
+
+        foreach ($stops as &$stop) {
+            $locationId = (int)($stop['location']['id'] ?? 0);
+            $stop['site_coincidence'] = $coincidences[$locationId] ?? [];
+        }
+        unset($stop);
+
+        return $stops;
     }
 
     /**

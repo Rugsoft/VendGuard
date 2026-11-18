@@ -1142,6 +1142,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $params[':assigned_technician_id'] = (int)$filters['assigned_technician_id'];
         }
 
+        if (!empty($filters['dispatch_level']) && $filters['dispatch_level'] !== 'ALL') {
+            $sql .= " AND i.dispatch_level = :dispatch_level";
+            $params[':dispatch_level'] = (string)$filters['dispatch_level'];
+        }
+
         if (isset($filters['active_only']) && $filters['active_only'] === true) {
             $sql .= " AND {$this->dialect->activeTicketCondition('i')}";
         }
@@ -4252,6 +4257,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 'Sellado defensivo del tramo heredado al reabrir la avería desde el portal de sede.'
             );
             $reopenedAt = new DateTimeImmutable('now');
+            $promoteToSat = \VendGuard\Core\Service\RestockerSatSynergyValidator::isReopenPromotionRequired(
+                $incident->getDispatchLevel()->value,
+                $incident->getResolvedAt(),
+                $reopenedAt
+            );
             $resolvedAt = $incident->getResolvedAt();
             $closedSeconds = 0;
             if ($resolvedAt !== null) {
@@ -4278,6 +4288,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $sql = "
                 UPDATE incidents
                 SET status = 'REOPENED',
+                    dispatch_level = CASE WHEN :promote_to_sat::boolean
+                        THEN 'L2_SAT'::incident_dispatch_level
+                        ELSE dispatch_level END,
                     assigned_technician_id = NULL,
                     assigned_at = NULL,
                     reopened_at = :reopened_at,
@@ -4295,6 +4308,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             $stmt = $this->pdo->prepare($sql);
             $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->bindValue(':promote_to_sat', $promoteToSat ? 'true' : 'false', PDO::PARAM_STR);
             $stmt->bindValue(':reopen_reason', trim($reasonText), PDO::PARAM_STR);
             $stmt->bindValue(':reopened_at', $reopenedAt->format('Y-m-d H:i:sP'), PDO::PARAM_STR);
             $stmt->bindValue(':total_pending_info_seconds', $newTotalPendingInfoSeconds, PDO::PARAM_INT);
@@ -4313,6 +4327,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 'RESOLVED',
                 'REOPENED',
                 "Reapertura solicitada por la sede ({$eventNumber}ª reincidencia). Motivo: " . trim($reasonText)
+                . ($promoteToSat ? ' Reapertura en garantía (< 48 h) promovida automáticamente de Nivel 1 (Reponedor) a Nivel 2 (SAT Técnico).' : '')
             );
 
             $reopened = $this->findById($incidentId);

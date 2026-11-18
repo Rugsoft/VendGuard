@@ -302,6 +302,20 @@ try {
     )->fetchColumn();
     $assert('La resolución deja historia de estado', $history === 1);
 
+    echo "\n--- 6. QA-LIM-02 / Art. V.6: promoción real en reapertura ---\n";
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS9-SNACK-04', ':sanitary' => 'OK']);
+    $machineD = (int)$machineStmt->fetchColumn();
+    $resolvedIncident = $seedIncident('INC-2026-9904', $machineD, 'L1_RESTOCKER', 'PRODUCT_JAM', 'RESOLVED', $restockerId);
+    $pdo->exec("UPDATE incidents SET resolved_at = CURRENT_TIMESTAMP - INTERVAL '5 hours' WHERE id = {$resolvedIncident}");
+    $reopened = (new \VendGuard\Infrastructure\Repository\PdoIncidentRepository($pdo))
+        ->reopen($resolvedIncident, 'El mismo carril vuelve a atascarse tras la resolución');
+    $assert('La reapertura L1 < 48 h promueve a L2_SAT en el repositorio', $reopened->getDispatchLevel()->value === 'L2_SAT');
+    $promotedHistory = (int)$pdo->query(
+        "SELECT COUNT(*) FROM incident_history WHERE incident_id = {$resolvedIncident}
+          AND action_note LIKE '%promovida automáticamente de Nivel 1%'"
+    )->fetchColumn();
+    $assert('La promoción deja la nota exigida por Art. V.6', $promotedHistory === 1);
+
     $deleteBlocked = false;
     try {
         $pdo->exec("DELETE FROM incident_comments WHERE incident_id = {$incidentB} AND is_internal = TRUE");
