@@ -2231,6 +2231,26 @@ export class ApiClient {
       return this.get(`/restocker/machines/${encodeURIComponent(machineId)}/planogram`);
     },
 
+    /** Inicia la intervención de un aviso de Nivel 1 (Módulo 36, RF-03.1). */
+    startL1Incident: (incidentId, payload = {}) => {
+      return this.post(`/restocker/incidents/${encodeURIComponent(incidentId)}/start`, payload);
+    },
+
+    /** Resuelve in situ un aviso de Nivel 1 con taxonomía y textos mínimos (RF-03.2). */
+    resolveL1Incident: (incidentId, payload) => {
+      return this.post(`/restocker/incidents/${encodeURIComponent(incidentId)}/resolve`, payload);
+    },
+
+    /** Escala al SAT desde una máquina de las zonas vivas (RF-04.1, Art. V.5). */
+    escalateMachineToSat: (machineId, payload) => {
+      return this.post(`/restocker/machines/${encodeURIComponent(machineId)}/escalate-to-sat`, payload);
+    },
+
+    /** Archiva en auditoría una operación offline rechazada (C2, Art. III.3). */
+    dumpIncidentConflict: (payload) => {
+      return this.post('/restocker/incidents/conflict-dump', payload);
+    },
+
     /**
      * Stock FEFO del propio reponedor autenticado (Módulo 33, RF-05.2, Art. V.4).
      * La respuesta no transporta costes ni márgenes.
@@ -2238,6 +2258,13 @@ export class ApiClient {
      */
     getVanStocks: () => {
       return this.get('/restocker/van-stocks');
+    },
+
+    /** Sube la evidencia fotográfica de una avería escalada (Art. V.5). */
+    uploadIncidentPhoto: (photo, photoName = null) => {
+      const formData = new FormData();
+      formData.append('photo', photo, photoName || photo?.name || 'incident-evidence');
+      return this.upload('/restocker/visits/photo', formData);
     },
 
     /**

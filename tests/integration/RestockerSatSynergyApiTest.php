@@ -260,6 +260,24 @@ try {
     $qrBody = $data($qr);
     $assert('El alta QR responde 200', $qr->getStatusCode() === 200, 'status=' . $qr->getStatusCode() . ' ' . $errorCode($qr));
     $assert('La respuesta QR no expone dispatch_level', !array_key_exists('dispatch_level', $qrBody) && !array_key_exists('level1_issue_type', $qrBody));
+
+    $restockerRoute = $call('GET', '/api/restocker/my-route', [], $restockerToken);
+    $restockerRouteData = $data($restockerRoute);
+    $assert(
+        'La ruta del reponedor publica el contexto L1 y la coincidencia en sede',
+        $restockerRoute->getStatusCode() === 200
+            && is_array($restockerRouteData['assigned_l1_incidents'] ?? null)
+            && is_array($restockerRouteData['l1_taxonomy_catalog'] ?? null)
+            && is_array($restockerRouteData['site_coincidence'] ?? null),
+        'status=' . $restockerRoute->getStatusCode()
+    );
+    $routeMachine = $restockerRouteData['machines'][0] ?? [];
+    $assert(
+        'Cada máquina declara su aviso L1 y el SAT abierto sin filtrar el nivel al portal',
+        array_key_exists('active_l1_incident', $routeMachine)
+            && array_key_exists('has_active_sat_incident', $routeMachine),
+        'machine_keys=' . implode(',', array_keys($routeMachine))
+    );
     $qrIncidentId = (int)($qrBody['incident_id'] ?? 0);
     $storedStmt = $pdo->prepare('SELECT dispatch_level, level1_issue_type FROM incidents WHERE id = :id');
     $storedStmt->execute([':id' => $qrIncidentId]);

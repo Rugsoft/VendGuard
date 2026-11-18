@@ -70,6 +70,8 @@ use VendGuard\Presentation\Http\Response;
  */
 final class RestockerRouteController
 {
+    private PDO $pdo;
+
     private UserRepositoryInterface $userRepo;
 
     private OperationalZoneRepositoryInterface $zoneRepo;
@@ -104,6 +106,7 @@ final class RestockerRouteController
         ?RestockerSatSynergyService $synergyService = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
+        $this->pdo = $pdo;
         $this->userRepo = $userRepo ?? new PdoUserRepository($pdo);
         $this->zoneRepo = $zoneRepo ?? new PdoOperationalZoneRepository($pdo);
 
@@ -217,6 +220,48 @@ final class RestockerRouteController
             $vanStock = $this->vanStockService->getOwnVanStock($restockerId);
             $cashRoute = $this->cashCollections->enrichRestockerRoute($restockerId, $machines);
 
+            // Módulo 36 (D3/D4): avisos L1 asignados, banderas por máquina,
+            // taxonomía de Nivel 1 y Coincidencia en Sede de las sedes de la ruta.
+            $machineIds = array_map(static fn (array $machine): int => (int)($machine['id'] ?? 0), $cashRoute['machines']);
+            $level1Context = (new \VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway($this->pdo))
+                ->restockerLevel1RouteContext($restockerId, $machineIds);
+            $machineFlags = $level1Context['machine_flags'];
+            $machinesWithLevels = array_map(static function (array $machine) use ($machineFlags): array {
+                $flags = $machineFlags[(int)($machine['id'] ?? 0)] ?? [];
+                $machine['active_l1_incident'] = ($flags['has_active_l1_incident'] ?? false)
+                    ? ['level1_issue_type' => $flags['active_l1_issue_type'] ?? null]
+                    : null;
+                $machine['has_active_sat_incident'] = (bool)($flags['has_active_sat_incident'] ?? false);
+
+                return $machine;
+            }, $cashRoute['machines']);
+
+            $locationIds = [];
+            foreach ($machinesWithLevels as $machine) {
+                $locationId = (int)($machine['location_id'] ?? 0);
+                if ($locationId > 0) {
+                    $locationIds[$locationId] = $locationId;
+                }
+            }
+            foreach ($level1Context['assigned_incidents'] as $incident) {
+                $locationId = (int)($incident['location_id'] ?? 0);
+                if ($locationId > 0) {
+                    $locationIds[$locationId] = $locationId;
+                }
+            }
+            $siteCoincidence = $locationIds !== []
+                ? $this->synergy()->siteCoincidence('RESTOCKER', $restockerId, array_values($locationIds))
+                : [];
+
+            $level1Taxonomy = [];
+            foreach ((new \VendGuard\Infrastructure\Repository\PdoRootCauseRepository($this->pdo))
+                ->findActiveCatalogWithSolutions() as $cause) {
+                if (!str_starts_with($cause->getCode(), 'RC-L1-')) {
+                    continue;
+                }
+                $level1Taxonomy[] = $cause->toArray();
+            }
+
             return Response::json([
                 'restocker' => [
                     'id' => $restocker->getId(),
@@ -235,7 +280,10 @@ final class RestockerRouteController
                     'started_at' => $shift->startedAt,
                     'today_effective_seconds' => (int)($shift->todaySummary['effective_seconds'] ?? 0),
                 ],
-                'machines' => $cashRoute['machines'],
+                'machines' => $machinesWithLevels,
+                'assigned_l1_incidents' => $level1Context['assigned_incidents'],
+                'l1_taxonomy_catalog' => $level1Taxonomy,
+                'site_coincidence' => $siteCoincidence,
                 'route_stops' => [],
                 'active_loading_order' => $loadingContext['active_loading_order'],
                 'last_reconciled_order' => $loadingContext['last_reconciled_order'],

@@ -32,6 +32,12 @@ import { store } from '../../public/assets/js/store.js';
 import { RestockerRouteView } from '../../public/assets/js/components/RestockerRouteView.js';
 import { RestockVisitOfflineQueue } from '../../public/assets/js/utils/RestockVisitOfflineQueue.js';
 import { CashCollectionOfflineQueue } from '../../public/assets/js/utils/CashCollectionOfflineQueue.js';
+import {
+  RestockerIncidentOfflineQueue,
+  RESTOCKER_INCIDENT_PENDING,
+  RESTOCKER_INCIDENT_CONFLICT,
+  RESTOCKER_INCIDENT_OPERATIONS
+} from '../../public/assets/js/utils/RestockerIncidentOfflineQueue.js';
 import { createFakeIndexedDb } from '../Support/FakeIndexedDb.mjs';
 
 console.log('======================================================================');
@@ -1654,7 +1660,7 @@ assert(
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/CashCollectionOfflineQueue.js')
     && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
-      .includes('vendguard-app-shell-v25')
+      .includes('vendguard-app-shell-v26')
 );
 assert(
   'La vista completa no expone ninguna de las cinco claves del Arqueo Ciego',
@@ -1664,6 +1670,221 @@ assert(
     && !viewSource.includes('discrepancy_eur')
     && !viewSource.includes('discrepancy_justification')
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-RSS-11 · Avisos L1, escalado y cola offline del reponedor (Módulo 36)
+// ─────────────────────────────────────────────────────────────────────────────
+const incidentVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+assert(
+  'data() arranca la bandeja L1, la taxonomía y la coincidencia sin inventar datos',
+  Array.isArray(incidentVm.assignedL1Incidents) && incidentVm.assignedL1Incidents.length === 0
+    && Array.isArray(incidentVm.l1TaxonomyCatalog) && incidentVm.l1TaxonomyCatalog.length === 0
+    && typeof incidentVm.siteCoincidence === 'object'
+);
+assert(
+  'La vista rotula la taxonomía L1 y su estado',
+  incidentVm.l1IssueLabel('STOCKOUT_EMPTY_SLOT').includes('Carril vacío')
+    && incidentVm.l1IssueLabel('MISSING_CONSUMABLES').includes('vasos')
+    && incidentVm.l1StatusLabel('IN_PROGRESS') === 'En curso'
+);
+incidentVm.siteCoincidence = {
+  4: [{ user_id: 7, name: 'Jordi SAT', activity_summary: '1 avería SAT activa en esta sede' }]
+};
+assert(
+  'La Coincidencia en Sede se resuelve por sede y se resume sin identificadores',
+  incidentVm.siteCoincidenceForLocation(4).length === 1
+    && incidentVm.siteCoincidenceSummary(4).includes('Jordi SAT')
+    && !incidentVm.siteCoincidenceSummary(4).includes('user_id')
+);
+assert(
+  'La máquina distingue aviso L1 y SAT abierto',
+  incidentVm.machineHasActiveL1({ id: 1, active_l1_incident: { level1_issue_type: 'STOCKOUT_EMPTY_SLOT' } }) === true
+    && incidentVm.machineHasActiveSat({ id: 1, has_active_sat_incident: true }) === true
+    && incidentVm.machineHasActiveL1({ id: 2 }) === false
+);
+
+assert(
+  'La vista incorpora bandeja, badge, banner y botón de escalado L1',
+  viewSource.includes('data-testid="restocker-l1-incidents"')
+    && viewSource.includes('data-testid="restocker-machine-l1-badge"')
+    && viewSource.includes('data-testid="restocker-site-coincidence"')
+    && viewSource.includes('⚡ Escalar Avería al SAT')
+);
+assert(
+  'El modal de resolución exige taxonomía y 20 caracteres en diagnóstico y acción',
+  viewSource.includes('data-testid="restocker-l1-resolve-modal"')
+    && viewSource.includes('data-testid="l1-root-cause"')
+    && viewSource.includes('data-testid="l1-standard-solution"')
+    && viewSource.includes('data-testid="l1-diagnosis"')
+    && viewSource.includes('data-testid="l1-action"')
+);
+assert(
+  'El modal de escalado exige nota interna y foto de hasta 5 MB',
+  viewSource.includes('data-testid="restocker-escalate-modal"')
+    && viewSource.includes('máx. 5 MB')
+    && viewSource.includes('workshop_internal_note')
+    && viewSource.includes('uploadIncidentPhoto')
+);
+
+assert(
+  'El Service Worker precachea la cola L1 y sube la versión',
+  readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
+    .includes('/assets/js/utils/RestockerIncidentOfflineQueue.js')
+    && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
+      .includes('vendguard-app-shell-v26')
+);
+assert(
+  'El cliente API expone inicio, resolución, escalado y volcado de conflicto L1',
+  typeof api.restocker.startL1Incident === 'function'
+    && typeof api.restocker.resolveL1Incident === 'function'
+    && typeof api.restocker.escalateMachineToSat === 'function'
+    && typeof api.restocker.dumpIncidentConflict === 'function'
+);
+
+const incidentQueue = new RestockerIncidentOfflineQueue();
+const queuedStart = await incidentQueue.enqueue({
+  client_mutation_id: 't-rss11-start-1',
+  restocker_id: 12,
+  operation_type: RESTOCKER_INCIDENT_OPERATIONS.START_L1,
+  incident_id: 501,
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  payload: { client_mutation_id: 't-rss11-start-1' }
+});
+assert(
+  'La cola L1 usa memoria cuando no hay IndexedDB y preserva la operación',
+  incidentQueue.isMemoryBacked() === true
+    && queuedStart.status === RESTOCKER_INCIDENT_PENDING
+    && queuedStart.operation_type === 'START_L1_INCIDENT'
+);
+const listedQueue = await incidentQueue.list(12);
+assert('La cola L1 se aísla por restocker_id', listedQueue.length === 1 && listedQueue[0].incident_id === 501);
+incidentQueue.enqueue({
+  client_mutation_id: 't-rss11-start-1',
+  restocker_id: 12,
+  operation_type: RESTOCKER_INCIDENT_OPERATIONS.START_L1,
+  incident_id: 501,
+  machine_id: 7,
+  payload: { client_mutation_id: 't-rss11-start-1' }
+});
+assert('La cola L1 es idempotente por client_mutation_id', (await incidentQueue.list(12)).length === 1);
+await incidentQueue.markConflict('t-rss11-start-1', 'Ticket ya resuelto por otro operario.');
+const conflictedQueue = await incidentQueue.list(12, [RESTOCKER_INCIDENT_CONFLICT]);
+assert(
+  'La cola L1 conserva el motivo de un conflicto irresoluble',
+  conflictedQueue.length === 1 && conflictedQueue[0].conflict_reason.includes('otro operario')
+);
+await incidentQueue.clear(12);
+assert('La cola L1 se vacía al cerrar la sesión del reponedor', (await incidentQueue.list(12)).length === 0);
+
+const originalStartL1 = api.restocker.startL1Incident;
+const originalResolveL1 = api.restocker.resolveL1Incident;
+const originalEscalateMachine = api.restocker.escalateMachineToSat;
+const originalUploadIncidentPhoto = api.restocker.uploadIncidentPhoto;
+let startCalled = 0;
+let resolvePayload = null;
+let escalatedPayload = null;
+let uploadedIncidentPhoto = 0;
+api.restocker.startL1Incident = async () => { startCalled++; return {}; };
+api.restocker.resolveL1Incident = async (_id, payload) => { resolvePayload = payload; return {}; };
+api.restocker.escalateMachineToSat = async (_id, payload) => { escalatedPayload = payload; return {}; };
+api.restocker.uploadIncidentPhoto = async () => {
+  uploadedIncidentPhoto++;
+  return { photo_evidence_url: '/uploads/incidents/t-rss11.png' };
+};
+
+const offlineVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+Object.defineProperty(offlineVm, 'navigatorOnline', { get: () => false });
+const offlineIncident = { id: 501, machine_id: 7, machine_code: 'VEND-0701', status: 'ASSIGNED' };
+await offlineVm.startL1(offlineIncident);
+assert(
+  'Sin conexión el inicio L1 se encola y no golpea la API',
+  startCalled === 0 && offlineIncident.status === 'IN_PROGRESS'
+    && (await offlineVm.ensureIncidentQueue().list(12)).length === 1
+);
+assert(
+  'El primer aviso offline queda pendiente de sincronizar',
+  offlineVm.incidentSyncMessage.includes('cola offline')
+);
+await offlineVm.ensureIncidentQueue().clear(12);
+
+const resolveVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+resolveVm.assignedL1Incidents = [{ id: 501, machine_id: 7, machine_code: 'VEND-0701', status: 'IN_PROGRESS' }];
+resolveVm.loadMyRoute = async () => {};
+resolveVm.l1TaxonomyCatalog = [{
+  id: 31,
+  name: 'Carril vacío',
+  solutions: [{ id: 41, name: 'Reposición de producto' }]
+}];
+resolveVm.openL1Resolve(resolveVm.assignedL1Incidents[0]);
+resolveVm.l1ResolveForm.diagnosis = 'Carril sin producto y muelle correcto';
+resolveVm.l1ResolveForm.action = 'Repongo producto y verifico la entrega completa';
+await resolveVm.submitL1Resolution();
+assert(
+  'La resolución online viaja con máquina, taxonomía y textos',
+  resolvePayload?.machine_id === 7 && resolvePayload?.root_cause_id === 31
+    && resolvePayload?.standard_solution_id === 41
+    && resolvePayload?.diagnosis.includes('Carril sin producto')
+    && resolvePayload?.action.includes('Repongo producto')
+);
+
+const shortResolveVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+shortResolveVm.assignedL1Incidents = [{ id: 502, machine_id: 8, status: 'IN_PROGRESS' }];
+shortResolveVm.openL1Resolve(shortResolveVm.assignedL1Incidents[0]);
+shortResolveVm.l1ResolveForm.diagnosis = 'Corto';
+shortResolveVm.l1ResolveForm.action = 'Corto';
+await shortResolveVm.submitL1Resolution();
+assert(
+  'La resolución L1 bloquea textos de menos de 20 caracteres reales (Art. V.1)',
+  shortResolveVm.l1ResolveError.includes('20 caracteres')
+);
+
+const escalateVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+escalateVm.loadMyRoute = async () => {};
+const escalationMachine = { id: 7, code: 'VEND-0701', location_id: 4 };
+escalateVm.openEscalate(escalationMachine);
+escalateVm.escalateForm.workshop_internal_note = 'Electroválvula con fuga en el grupo de café';
+await escalateVm.submitEscalation();
+assert(
+  'El escalado exige fotografía de evidencia (Art. V.5)',
+  escalateVm.escalateError.includes('fotografía')
+);
+escalateVm.escalatePhotoFile = new Blob(['evidence'], { type: 'image/png' });
+escalateVm.escalatePhotoName = 'fuga.png';
+await escalateVm.submitEscalation();
+assert(
+  'El escalado online sube la foto y sella tamaño y MIME reales',
+  uploadedIncidentPhoto === 1 && escalatedPayload?.photo_path === '/uploads/incidents/t-rss11.png'
+    && escalatedPayload?.photo_mime_type === 'image/png'
+    && Number(escalatedPayload?.photo_size_bytes) === 8
+    && escalatedPayload?.workshop_internal_note.includes('Electroválvula')
+);
+
+const incidentSyncVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+incidentSyncVm.incidentSyncError = '';
+incidentSyncVm.loadMyRoute = async () => {};
+await incidentSyncVm.ensureIncidentQueue().enqueue({
+  client_mutation_id: 't-rss11-escalate-sync',
+  restocker_id: 12,
+  operation_type: RESTOCKER_INCIDENT_OPERATIONS.ESCALATE_TO_SAT,
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  payload: { workshop_internal_note: 'Electroválvula con fuga en el grupo de café' },
+  photo: new Blob(['evidence'], { type: 'image/png' }),
+  photo_name: 'fuga.png'
+});
+await incidentSyncVm.syncPendingIncidentMutations();
+assert(
+  'La sincronización L1 reenvía el escalado con su foto y vacía la cola',
+  uploadedIncidentPhoto === 2
+    && escalatedPayload?.photo_path === '/uploads/incidents/t-rss11.png'
+    && (await incidentSyncVm.ensureIncidentQueue().list(12)).length === 0
+);
+
+api.restocker.startL1Incident = originalStartL1;
+api.restocker.resolveL1Incident = originalResolveL1;
+api.restocker.escalateMachineToSat = originalEscalateMachine;
+api.restocker.uploadIncidentPhoto = originalUploadIncidentPhoto;
 
 api.restocker.createCashCollection = originalCreateCashCollection;
 api.restocker.getCashCollectionReceptionReceipt = originalCashReceipt;

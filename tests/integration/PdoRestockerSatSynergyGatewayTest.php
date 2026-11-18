@@ -223,6 +223,27 @@ try {
 
     echo "  [OK]  Escenario sembrado (7 máquinas, 3 operarios, 6 tramos)\n";
 
+    echo "\n--- Contexto L1 de la ruta del reponedor (T-RSS-11, D3/D4) ---\n";
+    $routeContext = $gateway->restockerLevel1RouteContext($restockerId, $machineIds);
+    $routeAssigned = $routeContext['assigned_incidents'] ?? [];
+    $routeMachineFlags = $routeContext['machine_flags'] ?? [];
+    $assert(
+        'El contexto L1 publica únicamente los avisos activos asignados al reponedor',
+        count($routeAssigned) === 5
+            && array_reduce($routeAssigned, static fn (bool $carry, array $row): bool => $carry && $row['level1_issue_type'] !== null, true)
+    );
+    $assert(
+        'La máquina con L1 activo se marca sin inventar el estado SAT',
+        ($routeMachineFlags[$machineIds[1]]['has_active_l1_incident'] ?? false) === true
+            && ($routeMachineFlags[$machineIds[1]]['has_active_sat_incident'] ?? true) === false
+            && ($routeMachineFlags[$machineIds[1]]['active_l1_issue_type'] ?? null) === 'STOCKOUT_EMPTY_SLOT'
+    );
+    $assert(
+        'La máquina con SAT abierto se marca para no duplicar el expediente',
+        ($routeMachineFlags[$machineIds[3]]['has_active_sat_incident'] ?? false) === true
+            && ($routeMachineFlags[$machineIds[3]]['has_active_l1_incident'] ?? true) === false
+    );
+
     echo "\n--- Inicio de Nivel 1 e idempotencia offline (EARS 03.1, C2) ---\n";
 
     $startMutation = [

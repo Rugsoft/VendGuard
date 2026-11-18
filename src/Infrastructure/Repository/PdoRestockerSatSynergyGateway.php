@@ -590,6 +590,96 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         return $restockers;
     }
 
+    /**
+     * Contexto L1 de la ruta del reponedor: avisos activos asignados y banderas
+     * por máquina (`active_l1_incident`, `has_active_sat_incident`).
+     *
+     * @param list<int> $machineIds
+     * @return array{assigned_incidents: list<array<string, mixed>>, machine_flags: array<int, array<string, mixed>>}
+     */
+    public function restockerLevel1RouteContext(int $restockerId, array $machineIds): array
+    {
+        if ($restockerId <= 0) {
+            return ['assigned_incidents' => [], 'machine_flags' => []];
+        }
+
+        $stmt = $this->pdo->prepare(
+            "SELECT i.id, i.ticket_code, i.machine_id, i.location_id, i.status, i.category,
+                    i.urgency, i.description, i.level1_issue_type, i.started_at, i.created_at,
+                    m.code AS machine_code, l.name AS location_name
+               FROM incidents i
+               LEFT JOIN machines m ON m.id = i.machine_id
+               LEFT JOIN locations l ON l.id = i.location_id
+              WHERE i.assigned_technician_id = :restocker_id
+                AND i.dispatch_level = 'L1_RESTOCKER'
+                AND i.deleted_at IS NULL
+                AND i.status IN ('ASSIGNED', 'IN_PROGRESS', 'PENDING_INFO', 'REOPENED')
+              ORDER BY i.created_at ASC"
+        );
+        $stmt->execute([':restocker_id' => $restockerId]);
+
+        $assigned = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $assigned[] = [
+                'id' => (int)$row['id'],
+                'ticket_code' => (string)$row['ticket_code'],
+                'machine_id' => (int)$row['machine_id'],
+                'location_id' => (int)$row['location_id'],
+                'status' => (string)$row['status'],
+                'category' => (string)$row['category'],
+                'urgency' => (string)$row['urgency'],
+                'description' => (string)$row['description'],
+                'level1_issue_type' => $row['level1_issue_type'] !== null ? (string)$row['level1_issue_type'] : null,
+                'started_at' => $row['started_at'],
+                'created_at' => $row['created_at'],
+                'machine_code' => (string)($row['machine_code'] ?? ''),
+                'location_name' => (string)($row['location_name'] ?? ''),
+            ];
+        }
+
+        $flags = [];
+        $ids = array_values(array_unique(array_filter(array_map('intval', $machineIds), static fn (int $id): bool => $id > 0)));
+        if ($ids !== []) {
+            $placeholders = [];
+            foreach ($ids as $index => $id) {
+                $placeholders[] = ':machine_' . $index;
+            }
+            $flagStmt = $this->pdo->prepare(
+                "SELECT i.machine_id, i.level1_issue_type,
+                        BOOL_OR(i.dispatch_level = 'L1_RESTOCKER') AS has_l1,
+                        BOOL_OR(i.dispatch_level = 'L2_SAT') AS has_sat
+                   FROM incidents i
+                  WHERE i.machine_id IN (" . implode(', ', $placeholders) . ")
+                    AND i.deleted_at IS NULL
+                    AND i.status IN ('REGISTERED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_INFO', 'PENDING_PARTS', 'REOPENED')
+                  GROUP BY i.machine_id, i.level1_issue_type"
+            );
+            foreach ($ids as $index => $id) {
+                $flagStmt->bindValue(':machine_' . $index, $id, PDO::PARAM_INT);
+            }
+            $flagStmt->execute();
+
+            foreach ($flagStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $machineId = (int)$row['machine_id'];
+                $current = $flags[$machineId] ?? [
+                    'has_active_l1_incident' => false,
+                    'has_active_sat_incident' => false,
+                    'active_l1_issue_type' => null,
+                ];
+                $current['has_active_l1_incident'] = $current['has_active_l1_incident'] || $this->toBool($row['has_l1']);
+                $current['has_active_sat_incident'] = $current['has_active_sat_incident'] || $this->toBool($row['has_sat']);
+                if ($current['active_l1_issue_type'] === null && $this->toBool($row['has_l1'])) {
+                    $current['active_l1_issue_type'] = $row['level1_issue_type'] !== null
+                        ? (string)$row['level1_issue_type']
+                        : null;
+                }
+                $flags[$machineId] = $current;
+            }
+        }
+
+        return ['assigned_incidents' => $assigned, 'machine_flags' => $flags];
+    }
+
     public function technicianCoincidences(int $technicianId, array $locationIds): array
     {
         if (!$this->hasOpenShift($technicianId)) {
