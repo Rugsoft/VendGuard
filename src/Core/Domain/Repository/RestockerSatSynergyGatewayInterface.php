@@ -63,6 +63,32 @@ interface RestockerSatSynergyGatewayInterface
     ): array;
 
     /**
+     * Despacha o conmuta el nivel operativo del expediente (EARS 02.1).
+     *
+     * @param array<string, mixed> $incident
+     * @param array<string, mixed> $assignee
+     * @param array<string, mixed> $actor
+     * @return array<string, mixed>
+     */
+    public function assignDispatchLevel(
+        array $incident,
+        string $dispatchLevel,
+        array $assignee,
+        array $actor
+    ): array;
+
+    /**
+     * Archiva en auditoría una mutación offline rechazada de forma irreversible
+     * (RF-05.1.2, Art. III.3).
+     *
+     * @param array<string, mixed> $actor
+     * @param array<string, mixed> $mutation
+     * @param array<string, mixed> $conflict
+     * @return array<string, mixed>
+     */
+    public function recordConflictDump(array $actor, array $mutation, array $conflict): array;
+
+    /**
      * Reponedores recomendados para un expediente, con su carga L1 viva (RF-02.1).
      *
      * @return list<array<string, mixed>>

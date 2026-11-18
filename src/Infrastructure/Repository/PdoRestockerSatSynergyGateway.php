@@ -9,6 +9,7 @@ use RuntimeException;
 use Throwable;
 use VendGuard\Core\Domain\Repository\RestockerSatSynergyGatewayInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 
@@ -129,6 +130,158 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             $this->commit();
 
             return $payload;
+        } catch (Throwable $exception) {
+            $this->rollback();
+            throw $exception;
+        }
+    }
+
+    public function assignDispatchLevel(
+        array $incident,
+        string $dispatchLevel,
+        array $assignee,
+        array $actor
+    ): array {
+        $level = IncidentDispatchLevel::tryFrom(strtoupper(trim($dispatchLevel)));
+        if ($level === null) {
+            return $this->error('INVALID_DISPATCH_LEVEL', 422, 'El nivel de despacho no es válido.');
+        }
+
+        $incidentId = (int)($incident['id'] ?? 0);
+        $assigneeId = (int)($assignee['id'] ?? 0);
+
+        $this->begin();
+        try {
+            $current = $this->lockIncident($incidentId);
+            if ($current === null) {
+                return $this->fail('INCIDENT_NOT_FOUND', 404, 'El expediente no existe o está dado de baja.');
+            }
+
+            $category = IncidentCategory::tryFrom((string)$current['category']);
+            if ($level->isLevel1()
+                && $category !== null
+                && in_array($category, [IncidentCategory::TEMPERATURE_COLD, IncidentCategory::ELECTRICAL_OFF], true)) {
+                return $this->fail(
+                    'L1_DISPATCH_FORBIDDEN_FOR_CATEGORY',
+                    422,
+                    'Una avería térmica o eléctrica no puede despacharse en Nivel 1 (Art. II).'
+                );
+            }
+
+            if ($assigneeId > 0) {
+                $userStmt = $this->pdo->prepare('SELECT role, is_active FROM users WHERE id = :id');
+                $userStmt->execute([':id' => $assigneeId]);
+                $user = $userStmt->fetch();
+                $expectedRole = $level->requiresTechnician() ? 'TECHNICIAN' : 'RESTOCKER';
+                if (!is_array($user)
+                    || strtoupper((string)$user['role']) !== $expectedRole
+                    || !$this->toBool($user['is_active'])) {
+                    return $this->fail(
+                        'INVALID_ASSIGNEE_ROLE_FOR_DISPATCH_LEVEL',
+                        422,
+                        'El rol del operario no coincide con el nivel de despacho (QA-CON-01).'
+                    );
+                }
+            }
+
+            $status = $assigneeId > 0 ? 'ASSIGNED' : 'REGISTERED';
+            $this->closeOpenCustody($incidentId, $actor, 'REASSIGNED_BY_COORDINATOR', 'Cambio de nivel operativo', null);
+
+            $stmt = $this->pdo->prepare(
+                'UPDATE incidents
+                    SET dispatch_level = :dispatch_level::incident_dispatch_level,
+                        assigned_technician_id = :assignee_id,
+                        status = :status,
+                        assigned_at = CASE WHEN :assignee_flag::bigint IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
+                        started_at = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                  WHERE id = :id'
+            );
+            $stmt->execute([
+                ':dispatch_level' => $level->value,
+                ':assignee_id' => $assigneeId > 0 ? $assigneeId : null,
+                ':assignee_flag' => $assigneeId > 0 ? $assigneeId : null,
+                ':status' => $status,
+                ':id' => $incidentId,
+            ]);
+
+            if ($assigneeId > 0) {
+                $this->openCustody($incidentId, $assigneeId, 'COORDINATOR_ASSIGN', $this->actorId($actor), null);
+            }
+
+            $this->insertHistory(
+                $incidentId,
+                $this->actorId($actor),
+                (string)$current['status'],
+                $status,
+                'DISPATCH_LEVEL_CHANGE:' . $level->value
+            );
+            $this->audit(
+                $incidentId,
+                'DISPATCH_LEVEL_CHANGE',
+                $actor,
+                ['dispatch_level' => (string)$current['dispatch_level']],
+                ['dispatch_level' => $level->value, 'assigned_technician_id' => $assigneeId > 0 ? $assigneeId : null]
+            );
+            $this->commit();
+
+            return [
+                'ok' => true,
+                'incident_id' => $incidentId,
+                'dispatch_level' => $level->value,
+                'status' => $status,
+                'assigned_technician_id' => $assigneeId > 0 ? $assigneeId : null,
+            ];
+        } catch (Throwable $exception) {
+            $this->rollback();
+            throw $exception;
+        }
+    }
+
+    public function recordConflictDump(array $actor, array $mutation, array $conflict): array
+    {
+        $mutationId = trim((string)($mutation['client_mutation_id'] ?? ''));
+        if ($mutationId === '') {
+            return $this->error('MISSING_CLIENT_MUTATION_ID', 422, 'El volcado exige client_mutation_id.');
+        }
+
+        $this->begin();
+        try {
+            $occurredAt = $this->occurredAt($mutation);
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO offline_sync_mutations (
+                    technician_id, client_mutation_id, stop_type, stop_id, operation_type,
+                    outcome_status, client_occurred_at, effective_occurred_at,
+                    response_http_status, response_payload
+                 ) VALUES (
+                    :technician_id, :client_mutation_id, :stop_type, :stop_id, :operation_type,
+                    \'CONFLICT_DUMPED\', :client_occurred_at::timestamptz, :effective_occurred_at::timestamptz,
+                    :response_status, :response_payload::jsonb
+                 )
+                 ON CONFLICT (technician_id, client_mutation_id) DO NOTHING'
+            );
+            $stmt->execute([
+                ':technician_id' => $this->actorId($actor),
+                ':client_mutation_id' => $mutationId,
+                ':stop_type' => strtoupper(trim((string)($mutation['stop_type'] ?? 'INCIDENT'))),
+                ':stop_id' => (int)($mutation['stop_id'] ?? 0),
+                ':operation_type' => strtoupper(trim((string)($mutation['operation_type'] ?? 'RESOLVE_L1_INCIDENT'))),
+                ':client_occurred_at' => (string)($mutation['client_occurred_at'] ?? $occurredAt),
+                ':effective_occurred_at' => $occurredAt,
+                ':response_status' => (int)($conflict['http_status'] ?? 409),
+                ':response_payload' => json_encode($conflict, JSON_THROW_ON_ERROR),
+            ]);
+
+            $this->audit(
+                (int)($mutation['stop_id'] ?? 0),
+                'OFFLINE_RESTOCKER_INCIDENT_CONFLICT_DUMP',
+                $actor,
+                [],
+                ['client_mutation_id' => $mutationId, 'conflict' => $conflict]
+            );
+            $this->commit();
+
+            return ['ok' => true, 'client_mutation_id' => $mutationId, 'outcome_status' => 'CONFLICT_DUMPED'];
         } catch (Throwable $exception) {
             $this->rollback();
             throw $exception;
