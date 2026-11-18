@@ -125,10 +125,13 @@ interface MachineCashCollectionRepositoryInterface
      * Resumen de efectivo movilizado en la ruta del reponedor (`QA 3`).
      *
      * Solo suma magnitudes que el propio reponedor declaró (cambio cargado y
-     * conserjería) y cuenta las bolsas aún pendientes de entrega en cámara. No
-     * incluye `expected_cashbox_eur` ni ningún dato del arqueo (C2, Art. V.4).
+     * conserjería) y cuenta las bolsas aún pendientes de entrega en cámara. El
+     * contador de pendientes es un subconjunto del filtro activo (máquina,
+     * precinto, fechas y estado) y solo cuenta las bolsas que siguen en
+     * `SEALED_IN_ROUTE`. No incluye `expected_cashbox_eur` ni ningún dato del
+     * arqueo (C2, Art. V.4).
      *
-     * @param array<string, mixed> $filters `date_from`, `date_to`
+     * @param array<string, mixed> $filters `machine_id`, `status`, `bag_seal_code`, `date_from`, `date_to`
      *
      * @return array{total_collections_count: int, total_change_tubes_loaded_eur: float, total_reception_cash_delivered_eur: float, pending_vault_bags_count: int, last_collected_at: string|null}
      */

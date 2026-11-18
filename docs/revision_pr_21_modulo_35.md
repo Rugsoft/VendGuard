@@ -5,7 +5,7 @@
 - **HEAD revisado:** `09d0f3f` · **Base:** `47ba599` (sin commits nuevos en `main` desde la bifurcación)
 - **Fecha de la revisión:** 2026-11-17
 - **Alcance:** revisión estática del diff completo (76 archivos, +20.345/−155): migración 031 y convergencia con `supabase_init.sql`, dominio, servicio y repositorios, controladores y RBAC, proyección móvil, cola offline, exportación CSV y coherencia documental. Contraste con la spec v2.1, los contratos técnicos y las suites del módulo.
-- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 a PR-06 corregidos** (PR-01 a PR-04 el 2026-11-17; PR-05 y PR-06 el 2026-11-18) con sus pruebas de regresión; quedan **5 hallazgos abiertos** (todos de prioridad baja).
+- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 a PR-07 corregidos** (PR-01 a PR-04 el 2026-11-17; PR-05 a PR-07 el 2026-11-18) con sus pruebas de regresión; quedan **4 hallazgos abiertos** (todos de prioridad baja).
 
 ---
 
@@ -25,7 +25,7 @@ Los defectos se concentran en los bordes del contrato: la exportación financier
 | 4 | `PR-04` | Media | Las carreras de unicidad (precinto o mutación) acaban en 500 | Un conflicto de negocio se presenta como fallo interno y no se reintenta como replay | Corregido (2026-11-17) |
 | 5 | `PR-05` | Media | La cola offline marca como conflicto irreversible cualquier 401, 403 o 5xx | Capturas válidas quedan bloqueadas tras caducar la sesión o un fallo transitorio | Corregido (2026-11-18) |
 | 6 | `PR-06` | Baja | El replay idempotente no está acotado por máquina | Un identificador reutilizado devuelve otra bolsa con 200 y pierde la captura | Corregido (2026-11-18) |
-| 7 | `PR-07` | Baja | El KPI de bolsas pendientes del reponedor ignora los filtros activos | La tarjeta discrepa del listado filtrado | Abierto |
+| 7 | `PR-07` | Baja | El KPI de bolsas pendientes del reponedor ignora los filtros activos | La tarjeta discrepa del listado filtrado | Corregido (2026-11-18) |
 | 8 | `PR-08` | Baja | `dumpConflict` admite cualquier `machine_id` y texto libre sin comprobar pertenencia | Ruido y posible spoofing en `audit_log` | Abierto |
 | 9 | `PR-09` | Baja | Dos comentarios de la migración 031 describen el código como `MCC-AAAA-NNNNNN` | Deriva documental frente al `CHECK`, el modelo y la spec (`NNNN`) | Abierto |
 | 10 | `PR-10` | Baja | La entrada del CHANGELOG cita un estado y un índice incorrectos | Documentación de release inexacta | Abierto |
@@ -194,6 +194,10 @@ Con un filtro de máquina, fechas o estado, la tarjeta de pendientes muestra un 
 
 Aplicar el mismo `WHERE` de filtros a la consulta del contador, salvo el estado si el KPI debe contar solo `SEALED_IN_ROUTE`.
 
+**Corrección aplicada (2026-11-18)**
+
+`summarizeForRestocker()` reutiliza el `WHERE` de los totales en el contador de pendientes: aplica máquina, precinto, fechas y estado, y fuerza `SEALED_IN_ROUTE` sobre ese conjunto. La suite del repositorio añade dos aserciones (47/47): una comprueba que el KPI no arrastra bolsas de otra máquina ni de fechas fuera del rango, y otra fija que el filtro de estado acota el KPI (con `RECONCILED_OK` vale 0 y con `SEALED_IN_ROUTE` cuenta la bolsa pendiente de esa máquina y fecha).
+
 ---
 
 ## 8. `PR-08` · `dumpConflict` admite cualquier máquina y texto libre
@@ -275,15 +279,15 @@ Derivar el año con `DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'))
 ## Verificado y correcto
 
 - **Integración con `main`:** `MERGEABLE`/`CLEAN`, sin commits nuevos en la base desde la bifurcación y sin archivos de solape; la migración 031 es la siguiente libre tras la 030.
-- **Cifras:** batería hermética **436 suites · 16.800 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.184 aserciones · 0 fallos**. Suites del módulo: API 47/47, constitucional 25/25, concurrencia 10/10, layout 32/32, esquema 46/46, repositorio 45/45, dominio 123/123, validador 114/114 y servicio 60/60.
+- **Cifras:** batería hermética **436 suites · 16.800 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.186 aserciones · 0 fallos**. Suites del módulo: API 47/47, constitucional 25/25, concurrencia 10/10, layout 32/32, esquema 46/46, repositorio 47/47, dominio 123/123, validador 114/114 y servicio 60/60.
 - **Opacidad:** el DTO del reponedor publica 18 campos y omite las cinco claves del Arqueo Ciego; el recibo de conserjería expone exactamente nueve campos, sin precinto, PIN ni importes calculados.
 - **Integridad:** ocho `CHECK`, inmutabilidad por etapas con `45000`, guarda sanitaria en aplicación y motor, reserva del código con cerrojo transaccional y arqueo concurrente protegido por `UPDATE` condicionado.
 - **Seguridad:** rutas con `COORDINATOR`/`RESTOCKER`, CSV neutralizado contra fórmulas, sin secretos ni archivos de entorno en el diff.
-- **Documentación:** la matriz de trazabilidad actualizó las filas de la suite de API (47/47 y 10/10), del servicio (60/60) y de la vista móvil (213/213); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
+- **Documentación:** la matriz de trazabilidad actualizó las filas de la suite de API (47/47 y 10/10), del servicio (60/60), del repositorio (47/47) y de la vista móvil (213/213); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
 - **Cota inferior:** se usa la última captura de la máquina; el puerto `lockRestockVisit()` no expone la hora de inicio de la visita, así que no se emplea como cota adicional.
 
 ## Límites de esta revisión
 
 - No hay CI configurado en la PR (`statusCheckRollup` vacío): toda la evidencia de pruebas procede de ejecuciones locales.
 - La revisión original es estática sobre `09d0f3f`; cada corrección se validó con pruebas reales y la batería se reejecutó con las correcciones aplicadas.
-- Las correcciones de `PR-01` a `PR-06` se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17`, la vía independiente rechaza la visita en `3.4g`, las fechas y las carreras de unicidad tienen casos dedicados en servicio y concurrencia, la cola offline conserva las capturas ante red, sesión caducada y 5xx (213/213 en la suite de la vista) y el replay acotado por máquina responde `409` sin devolver la bolsa ajena.
+- Las correcciones de `PR-01` a `PR-07` se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17`, la vía independiente rechaza la visita en `3.4g`, las fechas y las carreras de unicidad tienen casos dedicados en servicio y concurrencia, la cola offline conserva las capturas ante red, sesión caducada y 5xx (213/213 en la suite de la vista), el replay acotado por máquina responde `409` sin devolver la bolsa ajena y el KPI de pendientes del reponedor respeta máquina, precinto, fechas y estado, contando solo las bolsas `SEALED_IN_ROUTE`.

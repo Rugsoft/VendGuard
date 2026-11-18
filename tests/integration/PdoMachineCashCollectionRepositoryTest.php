@@ -602,6 +602,44 @@ try {
             && $summaryB['pending_vault_bags_count'] === 0
     );
 
+    $summaryMachineB = $repo->summarizeForRestocker(
+        $userIds['restocker_a'],
+        ['machine_id' => $machineIds['B']]
+    );
+    $summaryFuture = $repo->summarizeForRestocker(
+        $userIds['restocker_a'],
+        ['date_from' => '2026-11-11']
+    );
+    $assert(
+        'El KPI de pendientes del reponedor respeta máquina y fechas (QA 3)',
+        $summaryMachineB['total_collections_count'] === 1
+            && $summaryMachineB['pending_vault_bags_count'] === 0
+            && $summaryFuture['total_collections_count'] === 0
+            && $summaryFuture['pending_vault_bags_count'] === 0,
+        json_encode(['machine_b' => $summaryMachineB, 'future' => $summaryFuture])
+    );
+
+    $summaryStatusOk = $repo->summarizeForRestocker($userIds['restocker_a'], [
+        'machine_id' => $machineIds['A'],
+        'status' => 'RECONCILED_OK',
+        'date_from' => '2026-11-10',
+        'date_to' => '2026-11-10',
+    ]);
+    $summaryStatusSealed = $repo->summarizeForRestocker($userIds['restocker_a'], [
+        'machine_id' => $machineIds['A'],
+        'status' => 'SEALED_IN_ROUTE',
+        'date_from' => '2026-11-10',
+        'date_to' => '2026-11-10',
+    ]);
+    $assert(
+        'El KPI de pendientes respeta el filtro de estado dentro de máquina y fecha (QA 3)',
+        $summaryStatusOk['total_collections_count'] === 1
+            && $summaryStatusOk['pending_vault_bags_count'] === 0
+            && $summaryStatusSealed['total_collections_count'] === 1
+            && $summaryStatusSealed['pending_vault_bags_count'] === 1,
+        json_encode(['reconciled' => $summaryStatusOk, 'sealed' => $summaryStatusSealed])
+    );
+
     // ─────────────────────────────────────────────────────────────────────
     // 7. Validación de filtros y del arqueo
     // ─────────────────────────────────────────────────────────────────────

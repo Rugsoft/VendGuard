@@ -40,7 +40,9 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  *      contado, descuadre neto y cambio/conserjería movilizados con los filtros
  *      aplicados.
  *   5. **Resumen opaco de ruta (QA 3).** `summarizeForRestocker()` solo suma lo
- *      que declaró el reponedor y cuenta sus bolsas pendientes de cámara.
+ *      que declaró el reponedor y cuenta sus bolsas pendientes de cámara como
+ *      subconjunto del filtro activo (máquina, precinto, fechas y estado); solo
+ *      cuenta las que siguen en `SEALED_IN_ROUTE`.
  *
  * Dogma Vanilla: PHP 8.2+ puro, PDO nativo, sin dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -459,13 +461,16 @@ final class PdoMachineCashCollectionRepository implements MachineCashCollectionR
         $stmt->execute();
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
+        // El KPI es un subconjunto del filtro activo: máquina, precinto, fechas
+        // y estado acotan el universo, y solo cuentan las bolsas que siguen en
+        // SEALED_IN_ROUTE (QA 3).
         $pendingStmt = $this->pdo->prepare("
             SELECT COUNT(*)
             FROM machine_cash_collections c
-            WHERE c.restocker_id = :restocker_id
+            {$where}
               AND c.status = 'SEALED_IN_ROUTE'
         ");
-        $pendingStmt->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        $this->bindParams($pendingStmt, $params);
         $pendingStmt->execute();
 
         return [
