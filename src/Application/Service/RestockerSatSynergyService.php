@@ -175,7 +175,11 @@ final class RestockerSatSynergyService
         }
 
         $result = $this->gateway->escalateToSat($machineId, $actor, $payload, $mutation);
-        if (($result['ok'] ?? false) === true && $this->notifier !== null) {
+        // C2: un reenvío idempotente ya encoló su aviso la primera vez; repetirlo
+        // duplicaría la notificación al técnico y al reponedor.
+        if (($result['ok'] ?? false) === true
+            && ($result['idempotent_replay'] ?? false) !== true
+            && $this->notifier !== null) {
             ($this->notifier)(self::EVENT_ESCALATED_TO_SAT, $result);
         }
 

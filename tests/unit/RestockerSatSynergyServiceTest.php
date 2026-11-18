@@ -63,6 +63,8 @@ final class SynergyGatewayDouble implements RestockerSatSynergyGatewayInterface
     /** @var list<array{method: string, args: array<string, mixed>}> */
     public array $calls = [];
 
+    public bool $escalateReplay = false;
+
     public function startLevel1(int $incidentId, array $actor, ?array $mutation = null): array
     {
         $this->calls[] = ['method' => 'startLevel1', 'args' => compact('incidentId', 'actor', 'mutation')];
@@ -81,7 +83,12 @@ final class SynergyGatewayDouble implements RestockerSatSynergyGatewayInterface
     {
         $this->calls[] = ['method' => 'escalateToSat', 'args' => compact('machineId', 'actor', 'payload', 'mutation')];
 
-        return ['ok' => true, 'incident_id' => 501, 'branch' => 'CREATED_NEW_SAT_TICKET'];
+        return [
+            'ok' => true,
+            'incident_id' => 501,
+            'branch' => 'CREATED_NEW_SAT_TICKET',
+            'idempotent_replay' => $this->escalateReplay,
+        ];
     }
 
     public function assignDispatchLevel(array $incident, string $dispatchLevel, array $assignee, array $actor): array
@@ -249,6 +256,24 @@ assertSynergy(
     'la sugerencia se propaga como assign_technician_id'
 );
 assertSynergy($notified[0][0] === RestockerSatSynergyService::EVENT_ESCALATED_TO_SAT, 'el escalado avisa al outbox');
+
+$gateway->escalateReplay = true;
+$notificationsBeforeReplay = count($notified);
+$replayed = $service->escalateToSat(
+    3,
+    $actor,
+    $escalation + ['assign_technician_id' => 88],
+    ['client_mutation_id' => 'mut-3']
+);
+assertSynergy(($replayed['idempotent_replay'] ?? false) === true, 'el reenvío se identifica como replay');
+assertSynergy(
+    count($notified) === $notificationsBeforeReplay,
+    'el replay idempotente no vuelve a encolar RESTOCKER_ESCALATION_TO_SAT'
+);
+assertSynergy(
+    $gateway->lastCall()['args']['mutation']['client_mutation_id'] === 'mut-3',
+    'el replay conserva el client_mutation_id original'
+);
 
 $gateway = new SynergyGatewayDouble();
 $service = new RestockerSatSynergyService($gateway, static function (): array {
