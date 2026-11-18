@@ -44,6 +44,17 @@ La respuesta de `POST /api/restocker/machines/{machineId}/cash-collections` usa 
 
 La clave canónica es `data.idempotent_replay`. No se publica la clave heredada `data.idempotent`. Un precinto ya usado por otra mutación sigue respondiendo `409 BAG_SEAL_CODE_ALREADY_USED`.
 
+### 1.2. Contrato de reintento de la cola Offline (`RF-05`, `C4`, `D4`)
+
+La sincronización FIFO de visitas y recaudaciones distingue dos desenlaces y no los confunde:
+
+| Respuesta del servidor | Estado en la cola | Efecto |
+| :--- | :---: | :--- |
+| Red caída, `401`, `403` de sesión (`FORBIDDEN`/`FORBIDDEN_ROLE`) o `5xx` | `PENDING` | La captura se conserva; la pasada se detiene y se reintenta al recuperar la sesión, la red o el servicio |
+| `403` de negocio, `409` o `422` | `CONFLICT` | Rechazo irreversible para esa captura; solo sale de la cola con el volcado a `audit_log` |
+
+Un `401`/`403` de sesión no invalida el dato: la sesión caducó durante el periodo offline y volverá a estar vigente al iniciar sesión. Un `5xx` es una avería transitoria del servidor. Un `403` de negocio (máquina fuera de zona, rol sobre la operación o visita ajena) no se reintenta: la captura no puede aplicarse y debe archivarse. `RestockerRouteView::isRetryableSyncFailure()` aplica esta clasificación a ambas colas.
+
 ---
 
 ## 2. Contrato de Esquema de Base de Datos (PostgreSQL 16+ / Supabase)

@@ -15,7 +15,7 @@ a un módulo funcional certificado por la batería global.
 - Correlativo anual `MCC-AAAA-NNNN` reservado en la transacción de captura con `pg_advisory_xact_lock` y `MAX + 1`, relleno de cuatro dígitos y el índice único como última red: dos capturas simultáneas reciben números consecutivos y las semillas `0001`–`0004` siguen su curso por `0005`.
 - Opacidad financiera: `expected_cashbox_eur` nunca se proyecta al reponedor, el recibo de recepción expone nueve campos sin importes calculados, y la entrega en conserjería de hasta `10,00 €` se vincula a un reintegro del Módulo 08 con transición atómica a `DEPOSITED_AT_RECEPTION`.
 - Sub-vista de Coordinación «🪙 Recaudación y Arqueo» con 6 KPIs reactivos al filtro, filtros por reponedor, máquina, sede, estado, precinto y fechas, detalle con enlace a la visita, recepción en un toque, modal de arqueo ciego, recibo y exportación CSV con etiquetas legibles.
-- Captura y cola offline del reponedor: botón rápido por máquina, bloque dentro de la visita, historial sin campos privados y `IndexedDB` FIFO aislada por reponedor con volcado de conflictos `409` a auditoría; Service Worker `vendguard-app-shell-v24`.
+- Captura y cola offline del reponedor: botón rápido por máquina, bloque dentro de la visita, historial sin campos privados y `IndexedDB` FIFO aislada por reponedor con volcado de conflictos `409` a auditoría; Service Worker `vendguard-app-shell-v25`.
 - Blindaje constitucional: disparadores de inmutabilidad por etapas (`45000`), guarda sanitaria en aplicación y motor (Art. II.2), catálogo de errores `403`/`409`/`422` y 12 endpoints REST con RBAC.
 
 ### Corregido
@@ -27,7 +27,7 @@ a un módulo funcional certificado por la batería global.
 ### Certificación
 
 - `CashCollectionVaultAuditApiTest` (46/46), `CashCollectionVaultAuditConstitutionalTest` (25/25), `CashCollectionConcurrencyTest` (10/10), `CashCollectionLayoutBrowserTest` (32/32 a 360 px en navegador real), `PostgresCashCollectionVaultAuditSchemaTest` (46/46), `PdoMachineCashCollectionRepositoryTest` (45/45), `CashCollectionDomainModelsTest` (123/123), `MachineCashCollectionValidatorTest` (114/114) y `MachineCashCollectionServiceTest` (56/56).
-- Batería global: **436 suites y 16.792 aserciones**, 0 fallos y `DocMetricsGuard` sin desviaciones (193/193 PHP Unit, 105/105 JS Unit, 135/135 de integración y 3/3 E2E manuales).
+- Batería global: **436 suites y 16.796 aserciones**, 0 fallos y `DocMetricsGuard` sin desviaciones (193/193 PHP Unit, 105/105 JS Unit, 135/135 de integración y 3/3 E2E manuales).
 - Canal `new_engine`: **66/66 suites y 2.183 aserciones**, 0 no ejecutables, 0 fallos y salida `0`.
 ## [Certificación] · Batería global y canal new_engine tras los Módulos 25 a 34 — 2026-11-15
 

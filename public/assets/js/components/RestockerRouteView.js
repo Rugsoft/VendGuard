@@ -1116,6 +1116,39 @@ export const RestockerRouteView = {
         || error?.code === 'REQUEST_TIMEOUT';
     },
 
+    /**
+     * Fallo que conserva la captura en `PENDING` (`RF-05`, `C4`, `D4`).
+     *
+     * Un 401 o un 403 de la puerta de sesión (`FORBIDDEN`/`FORBIDDEN_ROLE`)
+     * no invalida el dato: la sesión caducó mientras el operario estaba sin
+     * cobertura y volverá a estar vigente al iniciar sesión. Un 5xx es una
+     * avería transitoria del servidor. Los 403 de negocio —máquina fuera de
+     * zona, rol sobre la operación o visita ajena— y los 409/422 siguen siendo
+     * irreversibles para esa captura y se archivan como `CONFLICT`.
+     */
+    isRetryableSyncFailure(error) {
+      if (this.isNetworkFailure(error)) return true;
+      const status = Number(error?.status);
+      if (status === 401) return true;
+      if (status === 403) {
+        const code = String(error?.code || '');
+        return code === 'FORBIDDEN' || code === 'FORBIDDEN_ROLE';
+      }
+      return status >= 500 && status <= 599;
+    },
+
+    /** Motivo visible del reintento; nunca consume la entrada de la cola. */
+    syncRetryMessage(error, noun) {
+      const status = Number(error?.status);
+      if (status === 401 || status === 403) {
+        return `La sesión ha caducado: las ${noun} siguen en la cola. Vuelve a iniciar sesión para sincronizarlas.`;
+      }
+      if (status >= 500) {
+        return `El servidor no está disponible ahora mismo: las ${noun} siguen en la cola y se reintentarán más tarde.`;
+      }
+      return `Se perdió la conexión durante la sincronización. La cola conserva las ${noun} restantes.`;
+    },
+
     validateVisit() {
       this.visitError = '';
       if (!this.visitMachine?.id) {
@@ -1451,8 +1484,8 @@ export const RestockerRouteView = {
             await queue.remove(item.client_mutation_id);
             synced += 1;
           } catch (error) {
-            if (this.isNetworkFailure(error)) {
-              this.visitSyncError = 'Se perdió la conexión durante la sincronización. La cola conserva las visitas restantes.';
+            if (this.isRetryableSyncFailure(error)) {
+              this.visitSyncError = this.syncRetryMessage(error, 'visitas');
               break;
             }
             await queue.markConflict(
@@ -2102,8 +2135,8 @@ export const RestockerRouteView = {
             await queue.remove(item.client_mutation_id);
             synced += 1;
           } catch (error) {
-            if (this.isNetworkFailure(error)) {
-              this.cashSyncError = 'Se perdió la conexión durante la sincronización. La cola conserva las recaudaciones restantes.';
+            if (this.isRetryableSyncFailure(error)) {
+              this.cashSyncError = this.syncRetryMessage(error, 'recaudaciones');
               break;
             }
             await queue.markConflict(

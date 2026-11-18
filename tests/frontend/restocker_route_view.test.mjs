@@ -1446,6 +1446,82 @@ assert(
     && syncCashVm.cashSyncMessage.includes('1 conflicto(s)')
 );
 
+// PR-05 · Un fallo de sesión o del servidor no invalida la captura: sigue PENDING.
+const retryCashQueue = new CashCollectionOfflineQueue({ indexedDB: createFakeIndexedDb() });
+await retryCashQueue.enqueue(cashQueueRecord('retry-cash-1', 1));
+await retryCashQueue.enqueue(cashQueueRecord('retry-cash-2', 2));
+const retryCashVm = buildVm({
+  restocker: bootstrapPayload.data.restocker,
+  cashQueue: retryCashQueue
+});
+const retryCashCalls = [];
+const sessionExpired = new Error('Sesión caducada');
+sessionExpired.status = 401;
+sessionExpired.code = 'UNAUTHORIZED';
+api.restocker.createCashCollection = async (machineId, payload) => {
+  retryCashCalls.push(payload.client_mutation_id);
+  throw sessionExpired;
+};
+await retryCashVm.syncPendingCashCollections();
+assert(
+  'Un 401 de sesión conserva la recaudación en PENDING y no la marca como conflicto',
+  retryCashCalls.length === 1
+    && (await retryCashQueue.list(12, ['PENDING'])).length === 2
+    && (await retryCashQueue.list(12, ['CONFLICT'])).length === 0
+    && retryCashVm.cashSyncError.includes('sesión')
+);
+
+const transientServerError = new Error('Fallo interno transitorio');
+transientServerError.status = 500;
+transientServerError.code = 'INTERNAL_SERVER_ERROR';
+api.restocker.createCashCollection = async (machineId, payload) => {
+  retryCashCalls.push(payload.client_mutation_id);
+  throw transientServerError;
+};
+await retryCashVm.syncPendingCashCollections();
+assert(
+  'Un 500 transitorio conserva la recaudación en PENDING sin consumir la cola',
+  retryCashCalls.length === 2
+    && (await retryCashQueue.list(12, ['PENDING'])).length === 2
+    && (await retryCashQueue.list(12, ['CONFLICT'])).length === 0
+    && retryCashVm.cashSyncError.includes('servidor')
+);
+
+const businessForbidden = new Error('Máquina fuera de las zonas del reponedor');
+businessForbidden.status = 403;
+businessForbidden.code = 'MACHINE_OUTSIDE_RESTOCKER_ZONES';
+api.restocker.createCashCollection = async (machineId, payload) => {
+  retryCashCalls.push(payload.client_mutation_id);
+  throw businessForbidden;
+};
+await retryCashVm.syncPendingCashCollections();
+assert(
+  'Un 403 de negocio sí se archiva como conflicto irreversible',
+  (await retryCashQueue.list(12, ['CONFLICT'])).length === 2
+    && (await retryCashQueue.list(12, ['PENDING'])).length === 0
+    && retryCashVm.cashSyncMessage.includes('2 conflicto(s)')
+);
+
+const retryVisitQueue = new RestockVisitOfflineQueue({ indexedDB: createFakeIndexedDb() });
+await retryVisitQueue.enqueue(queueRecord('retry-visit-1', 1));
+const retryVisitVm = buildVm({
+  restocker: bootstrapPayload.data.restocker,
+  visitQueue: retryVisitQueue
+});
+const forbiddenVisit = new Error('Sesión sin permiso');
+forbiddenVisit.status = 403;
+forbiddenVisit.code = 'FORBIDDEN';
+api.restocker.createRestockVisit = async () => {
+  throw forbiddenVisit;
+};
+await retryVisitVm.syncPendingVisits();
+assert(
+  'Un 403 de sesión conserva la visita en PENDING y no la marca como conflicto',
+  (await retryVisitQueue.list(12, ['PENDING'])).length === 1
+    && (await retryVisitQueue.list(12, ['CONFLICT'])).length === 0
+    && retryVisitVm.visitSyncError.includes('sesión')
+);
+
 const dumpCashCalls = [];
 api.restocker.dumpCashCollectionConflict = async (payload) => {
   dumpCashCalls.push(payload);
@@ -1578,7 +1654,7 @@ assert(
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/CashCollectionOfflineQueue.js')
     && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
-      .includes('vendguard-app-shell-v24')
+      .includes('vendguard-app-shell-v25')
 );
 assert(
   'La vista completa no expone ninguna de las cinco claves del Arqueo Ciego',

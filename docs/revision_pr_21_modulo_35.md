@@ -5,7 +5,7 @@
 - **HEAD revisado:** `09d0f3f` · **Base:** `47ba599` (sin commits nuevos en `main` desde la bifurcación)
 - **Fecha de la revisión:** 2026-11-17
 - **Alcance:** revisión estática del diff completo (76 archivos, +20.345/−155): migración 031 y convergencia con `supabase_init.sql`, dominio, servicio y repositorios, controladores y RBAC, proyección móvil, cola offline, exportación CSV y coherencia documental. Contraste con la spec v2.1, los contratos técnicos y las suites del módulo.
-- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01, PR-02, PR-03 y PR-04 corregidos el 2026-11-17** con sus pruebas de regresión; quedan **7 hallazgos abiertos** (1 media y 6 baja).
+- **Estado:** PR `MERGEABLE`/`CLEAN`. **PR-01 a PR-05 corregidos** (PR-01 a PR-04 el 2026-11-17; PR-05 el 2026-11-18) con sus pruebas de regresión; quedan **6 hallazgos abiertos** (todos de prioridad baja).
 
 ---
 
@@ -23,7 +23,7 @@ Los defectos se concentran en los bordes del contrato: la exportación financier
 | 2 | `PR-02` | **Alta** | La vía independiente acepta `restock_visit_id` de cualquier visita y de cualquier reponedor | Vínculo cruzado fuera de spec, bloqueo del índice único y 500 al dueño legítimo | Corregido (2026-11-17) |
 | 3 | `PR-03` | Media | `collected_at` viaja del cliente sin validar formato ni ventana temporal | 500 ante un valor malformado y alteración de la cadena de contador y del esperado | Corregido (2026-11-17) |
 | 4 | `PR-04` | Media | Las carreras de unicidad (precinto o mutación) acaban en 500 | Un conflicto de negocio se presenta como fallo interno y no se reintenta como replay | Corregido (2026-11-17) |
-| 5 | `PR-05` | Media | La cola offline marca como conflicto irreversible cualquier 401, 403 o 5xx | Capturas válidas quedan bloqueadas tras caducar la sesión o un fallo transitorio | Abierto |
+| 5 | `PR-05` | Media | La cola offline marca como conflicto irreversible cualquier 401, 403 o 5xx | Capturas válidas quedan bloqueadas tras caducar la sesión o un fallo transitorio | Corregido (2026-11-18) |
 | 6 | `PR-06` | Baja | El replay idempotente no está acotado por máquina | Un identificador reutilizado devuelve otra bolsa con 200 y pierde la captura | Abierto |
 | 7 | `PR-07` | Baja | El KPI de bolsas pendientes del reponedor ignora los filtros activos | La tarjeta discrepa del listado filtrado | Abierto |
 | 8 | `PR-08` | Baja | `dumpConflict` admite cualquier `machine_id` y texto libre sin comprobar pertenencia | Ruido y posible spoofing en `audit_log` | Abierto |
@@ -149,6 +149,10 @@ Si el token caducó durante el periodo offline, el primer 401 marca todas las ca
 
 Mantener el elemento en `PENDING` ante 401/403 de sesión y 5xx, renovar sesión o reintentar más tarde, y reservar `CONFLICT` para 409/422 de negocio. Añadir pruebas de la cola con 401 y 500 sin consumir la entrada.
 
+**Corrección aplicada (2026-11-18)**
+
+`RestockerRouteView::isRetryableSyncFailure()` clasifica como reintentable la caída de red, el `401`, el `403` de la puerta de sesión (`FORBIDDEN`/`FORBIDDEN_ROLE`) y cualquier `5xx`; ambas colas (visitas y recaudaciones) conservan esas entradas en `PENDING`, detienen la pasada y muestran un motivo que pide renovar la sesión o reintentar más tarde. Los `403` de negocio —máquina fuera de zona, rol sobre la operación o visita ajena— y los `409`/`422` siguen pasando a `CONFLICT` para su volcado a auditoría. La suite de la vista fija el comportamiento con un `401` y un `500` en recaudaciones (dos entradas conservadas y una sola llamada por pasada), un `403` de sesión en visitas y un `403` de negocio que sí se archiva (213/213).
+
 ---
 
 ## 6. `PR-06` · El replay idempotente no está acotado por máquina
@@ -267,15 +271,15 @@ Derivar el año con `DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'))
 ## Verificado y correcto
 
 - **Integración con `main`:** `MERGEABLE`/`CLEAN`, sin commits nuevos en la base desde la bifurcación y sin archivos de solape; la migración 031 es la siguiente libre tras la 030.
-- **Cifras:** batería hermética **436 suites · 16.792 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.183 aserciones · 0 fallos**. Suites del módulo: API 46/46, constitucional 25/25, concurrencia 10/10, layout 32/32, esquema 46/46, repositorio 45/45, dominio 123/123, validador 114/114 y servicio 56/56.
+- **Cifras:** batería hermética **436 suites · 16.796 aserciones · 0 fallos** con `DocMetricsGuard` coherente; canal `new_engine` **66/66 · 2.183 aserciones · 0 fallos**. Suites del módulo: API 46/46, constitucional 25/25, concurrencia 10/10, layout 32/32, esquema 46/46, repositorio 45/45, dominio 123/123, validador 114/114 y servicio 56/56.
 - **Opacidad:** el DTO del reponedor publica 18 campos y omite las cinco claves del Arqueo Ciego; el recibo de conserjería expone exactamente nueve campos, sin precinto, PIN ni importes calculados.
 - **Integridad:** ocho `CHECK`, inmutabilidad por etapas con `45000`, guarda sanitaria en aplicación y motor, reserva del código con cerrojo transaccional y arqueo concurrente protegido por `UPDATE` condicionado.
 - **Seguridad:** rutas con `COORDINATOR`/`RESTOCKER`, CSV neutralizado contra fórmulas, sin secretos ni archivos de entorno en el diff.
-- **Documentación:** la matriz de trazabilidad actualizó solo las filas de la suite de API (46/46 y 10/10) y del servicio (56/56); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
+- **Documentación:** la matriz de trazabilidad actualizó las filas de la suite de API (46/46 y 10/10), del servicio (56/56) y de la vista móvil (213/213); el `39/39` de `SchemaConvergenceParityTest` quedó intacto.
 - **Cota inferior:** se usa la última captura de la máquina; el puerto `lockRestockVisit()` no expone la hora de inicio de la visita, así que no se emplea como cota adicional.
 
 ## Límites de esta revisión
 
 - No hay CI configurado en la PR (`statusCheckRollup` vacío): toda la evidencia de pruebas procede de ejecuciones locales.
-- La revisión es estática sobre `09d0f3f`; no se ha vuelto a ejecutar la batería porque el último commit solo modifica `CHANGELOG.md`.
-- Las correcciones de `PR-01` y `PR-02` sí se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17` y la vía independiente rechaza la visita en `3.4g`; las guardas de dueño y `COMPLETED` se cubren en `MachineCashCollectionServiceTest`, sin reproducir el cruce por HTTP porque la vía independiente ya lo rechaza antes.
+- La revisión original es estática sobre `09d0f3f`; cada corrección se validó con pruebas reales y la batería se reejecutó con las correcciones aplicadas.
+- Las correcciones de `PR-01` a `PR-05` se validaron con pruebas: el CSV exporta 105 filas reales en `CashCollectionVaultAuditApiTest` `5.17`, la vía independiente rechaza la visita en `3.4g`, las fechas y las carreras de unicidad tienen casos dedicados en servicio y concurrencia, y la cola offline conserva las capturas ante red, sesión caducada y 5xx (213/213 en la suite de la vista).
