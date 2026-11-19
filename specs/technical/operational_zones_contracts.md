@@ -729,7 +729,7 @@ Simultáneamente, para cada sede en `affected_location_ids` se inserta:
 ## 6. Blindaje de Privacidad y Segregación de Datos (Art. V.4)
 
 1. **Aislamiento en Portal de Sede:**  
-   Los controladores `LocationPortalController` y los endpoints de reporte QR (`/api/public/qr/report`, `/api/locations/{site_code}/machines`) **jamás** incluirán los campos `zone_id`, `zone_name`, `technician_zone_assignments` ni scoring interno en sus payloads JSON.
+   Los controladores `LocationPortalController` y los endpoints de reporte QR (`/api/qr/report`, `/api/locations/{site_code}/machines`) **jamás** incluirán los campos `zone_id`, `zone_name`, `technician_zone_assignments` ni scoring interno en sus payloads JSON.
 2. **Anonimización del Técnico:**  
    Aunque el recomendador sugiera al técnico por su afinidad territorial de zona, el responsable de sede solo visualizará:  
    `"Servicio Técnico Oficial · Operador #[Código]"`.

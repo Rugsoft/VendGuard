@@ -8,7 +8,7 @@
 - **Tareas:** [`specs/36-restocker-sat-synergy/tasks.md`](../specs/36-restocker-sat-synergy/tasks.md) · [`odd/tasks/restocker-sat-synergy.md`](../odd/tasks/restocker-sat-synergy.md)
 - **Matriz de trazabilidad:** [`specs/36-restocker-sat-synergy/traceability-matrix.md`](../specs/36-restocker-sat-synergy/traceability-matrix.md)
 - **Fecha de auditoría:** 2026-11-19
-- **Última actualización:** 2026-11-19 · H-36-01 y H-36-02 cerradas; FIX-36-01..08 conservados como historial; reauditoría de aceptación en §10
+- **Última actualización:** 2026-11-19 · H-36-01, H-36-02 y H-36-03 cerradas; FIX-36-01..08 conservados como historial; reauditoría de aceptación en §10
 - **Rama:** `feat/restocker-sat-synergy`
 - **Base auditada:** `95f9af1f1f481b14eeaf4b3acfcd623e791486e8` · árbol limpio antes de crear este acta
 - **Base de la reauditoría:** `d25cbad` · árbol limpio
@@ -17,7 +17,7 @@
 > Este documento es un acta viva de hallazgos: registra la evidencia previa de las brechas y los cierres de FIX-36-01 a FIX-36-08. La matriz, las tareas y el ODD quedaron sincronizados con la evidencia focalizada; la certificación global vigente es **441/16.993**, y el canal `new_engine` queda en **69/70** por el esquema del pooler sin la migración 032.
 
 > [!WARNING]
-> **Reauditoría de aceptación del 2026-11-19 (ver §10).** El veredicto de cierre de este acta queda **superado**: la Spec 36 no está al 100 %. Los FIX-36-01..08 siguen siendo correcciones válidas y **H-36-01 (`RF-04.1`/`D4`) y H-36-02 (`RF-05.2.2`/DoD 3) quedaron cerradas el 2026-11-19**; la reauditoría mantiene brechas en `RF-01.2`, `RNF-03` y la certificación `new_engine`. El estado vigente es **3/4 DoD**, **12/12 tareas marcadas con 1 reserva** y **69/70 en `new_engine`**.
+> **Reauditoría de aceptación del 2026-11-19 (ver §10).** El veredicto de cierre de este acta queda **superado**: la Spec 36 no está al 100 %. Los FIX-36-01..08 siguen siendo correcciones válidas y **H-36-01 (`RF-04.1`/`D4`), H-36-02 (`RF-05.2.2`/DoD 3) y H-36-03 (`RF-01.2`) quedaron cerradas el 2026-11-19**; la reauditoría mantiene brechas en `RNF-03` y la certificación `new_engine`. El estado vigente es **3/4 DoD**, **12/12 tareas marcadas con 1 reserva** y **69/70 en `new_engine`**.
 
 ---
 
@@ -495,7 +495,7 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | `T-RSS-05` | `[x]` | Gateway 24/24 | ✅ coherente |
 | `T-RSS-06` | `[x]` | Servicio 34/34; API 55/55 | ✅ el escalado del reponedor resuelve técnico y encola aviso (bloque 8); QR, C1 y el alta L1 de Coordinación (bloque 9) también están cableados |
 | `T-RSS-07` | `[x]` | Integraciones 27/27 | ✅ `C1` cableado en cierre, ausencia y baja (bloque 7) |
-| `T-RSS-08` | `[x]` | API 55/55; constitucional 17/17 | ✅ el alta de Coordinación ya pre-clasifica L1 (bloque 9); el alta de Portal ya tiene composición (`CreateIncidentEndpointTest` caso 9) |
+| `T-RSS-08` | `[x]` | API 55/55; constitucional 17/17 | ✅ el alta de Coordinación ya pre-clasifica L1 (bloque 9); el alta de Portal compone el caso elegible L1 y la exclusión por cuarentena (`CreateIncidentEndpointTest` caso 9) |
 | `T-RSS-09` | `[x]` | API/constitucional, `site_coincidence`, filtro y promoción | ✅ incluye la composición QR/C1 real (bloques 6 y 7) |
 | `T-RSS-10` | `[x]` | Frontend 18/18 | ✅ coherente |
 | `T-RSS-11` | `[x]` | Frontend 236/236 | ✅ botón de escalado en tarjeta, bandeja L1 y asistente de visita |
@@ -640,7 +640,7 @@ La Spec 36 queda cerrada con estos criterios:
 
 - **Base:** `d25cbad` · árbol limpio · sin cambios de código durante la auditoría.
 - **Alcance:** lectura requisito por requisito de `spec.md` y su espejo funcional, `restocker_sat_synergy_contracts.md` y `docs/design.md`; ejecución de las 25 suites solicitadas, dos guardas adicionales de frontend y el test del pooler; contraste con `tasks.md` y el ODD.
-- **Veredicto vigente:** **la Spec 36 no está 100 % cumplida**. Los FIX-36-01..08 no se reabren: las brechas de §10.6 son hallazgos nuevos de aceptación, no regresiones de esos fixes. H-36-01 y H-36-02 quedaron cerradas; permanecen `RF-01.2`, `RNF-03` y el canal `new_engine`.
+- **Veredicto vigente:** **la Spec 36 no está 100 % cumplida**. Los FIX-36-01..08 no se reabren: las brechas de §10.6 son hallazgos nuevos de aceptación, no regresiones de esos fixes. H-36-01, H-36-02 y H-36-03 quedaron cerradas; permanecen `RNF-03` y el canal `new_engine`.
 
 ### 10.1. Resultado ejecutivo
 
@@ -650,7 +650,7 @@ La diferencia con el cierre anterior no está en las suites del núcleo, sino en
 
 1. `RF-04.1` exigía nombre, `operator_code` y enlace `tel:` del compañero; **H-36-01 quedó cerrada el 2026-11-19** y ambas vistas ya los muestran.
 2. `RF-05.2.2` exigía que la tarjeta del técnico activara la insignia de escalado y destacara la Nota Interna y la foto; **H-36-02 quedó cerrada el 2026-11-19** y el payload real de `/api/technician/my-route` ya publica el rastro, la nota y la foto.
-3. `RF-01.2` describe rutas que no coinciden literalmente con el router real y no tiene una composición de Portal elegible L1.
+3. `RF-01.2` describía rutas que no coincidían literalmente con el router real y no tenía una composición de Portal elegible L1; **H-36-03 quedó cerrada el 2026-11-19** con los paths alineados y el caso positivo compuesto.
 4. `RNF-03` no tiene medición de scroll horizontal a 360 px.
 5. `new_engine` no está al 100 %, por lo que el DoD 4 no se cumple si la certificación incluye el canal.
 
@@ -683,7 +683,7 @@ La diferencia con el cierre anterior no está en las suites del núcleo, sino en
 | `RestockerRbacConstitutionalTest.php` | 27/27 · `exit=0` |
 | `PdoWorkHoursRoleFilterTest.php` | 18/18 · `exit=0` |
 | `LocationPortalReopenAuditTest.php` | 18/18 · auditoría auxiliar |
-| `CreateIncidentEndpointTest.php` | caso 9.1–9.2 · `exit=0` |
+| `CreateIncidentEndpointTest.php` | casos 9.1–9.2 (Portal elegible L1 y cuarentena) · `exit=0` |
 | `ReopenIncidentEndpointTest.php` | caso 9.1–9.5 · `exit=0`; no certifica la promoción `dispatch_level` |
 | `CoordinatorButtonVariantsGuardTest.mjs` | 23/23 · 413 botones |
 | `FrontendTemplateCompileTest.mjs` | 15/15 · 5.157 expresiones |
@@ -707,7 +707,7 @@ Pooler:        16/30 aserciones fallidas · SQLSTATE[42703] · exit=1
 | Criterio | Estado | Evidencia y observación |
 | :--- | :---: | :--- |
 | **RF-01.1** · Tipos #43/#44, columnas, FK, CHECK, 49 tablas y 44 enums | ✅ | Schema 30/30, Domain 36/36, Convergence 42/42, PostgresSchema 153/153, CloudDeploy 55/55. El CHECK incluye el mapeo determinista y el rastro de escalado. |
-| **RF-01.2** · QR, Portal y Coordinación; exclusiones de categoría, cuarentena y reclamación | ⚠️ | Validator 46/46, Integrations 27/27, API 55/55 (QR y Coordinación), CreateIncident caso 9 (solo exclusión por cuarentena). Faltan paths literales y una composición de Portal elegible L1. |
+| **RF-01.2** · QR, Portal y Coordinación; exclusiones de categoría, cuarentena y reclamación | ✅ | Validator 46/46, Integrations 27/27, API 55/55 (QR y Coordinación), `CreateIncidentEndpointTest` caso 9 (Portal elegible L1 y cuarentena, con paths reales). H-36-03 cerrada. |
 | **RF-01.3** · 4 parejas `RC-L1-*` / `SS-L1-*` | ✅ | Schema 30/30: 4 causas, categorías, nombres, solución predeterminada activa y 49 tablas. |
 | **RF-02.1** · Sugerencia de reponedor, carga L1 y despacho/conmutación L1↔L2 | ✅ | Service 34/34, Gateway 24/24, API 55/55. |
 | **RF-02.2** · Auto-escalado en absorción QR grave | ✅ | Integrations 27/27, API 55/55 bloque 6, Constitutional 17/17. |
@@ -728,7 +728,7 @@ Pooler:        16/30 aserciones fallidas · SQLSTATE[42703] · exit=1
 | **RNF-02** · CHECK sanitario, notas internas, foto ≤ 5 MB y DTOs opacos | ✅ / ⚠️ | Validator 46/46, Domain 36/36, Constitutional 17/17, API 55/55 (QR). Portal/A4 no tienen una aserción focalizada propia. |
 | **RNF-03** · PHP/Vue vanilla, tokens y 360 px sin scroll | ⚠️ | Botones 23/23, plantillas 15/15, tokens 3/3, PWA 45/45, móvil 7/7. No hay medición real a 360 px. |
 | **D1** · Expediente único y `dispatch_level` | ✅ | Schema 30/30 y Domain 36/36. |
-| **D2** · Pre-clasificación y despacho dual | ✅ | Validator 46/46, Integrations 27/27, API 55/55. |
+| **D2** · Pre-clasificación y despacho dual | ✅ | Validator 46/46, Integrations 27/27, API 55/55 y `CreateIncidentEndpointTest` caso 9 (Portal elegible L1 y cuarentena). |
 | **D3** · Resolución L1 y escalado en tres ramas | ✅ | Gateway 24/24, Service 34/34, API 55/55, Restocker 236/236. |
 | **D4** · Coincidencia en Sede | ✅ | Backend 24/24 y API 55/55; H-36-01 cerrada: las dos vistas muestran `operator_code` y `tel:`. |
 | **C1** · Cierre, ausencia y baja con relevo | ✅ | API 55/55 bloque 7, Gateway 24/24, Shift 38/38. |
@@ -781,11 +781,13 @@ El gateway devuelve `operator_code`, `phone`, `shift_status` y `activity_summary
 
 **Cierre verificado:** `technician_and_coordinator_synergy.test.mjs` **18/18** (guardas integradas en las aserciones existentes) y `RestockerSatSynergyApiTest.php` **55/55** (bloque 8.3: composición real sobre `/api/technician/my-route` con rastro, nota y foto), ambos `exit=0`; `FrontendTemplateCompileTest.mjs` **15/15**. La reserva de `T-RSS-10` queda cerrada.
 
-#### H-36-03 · `RF-01.2`: desviación literal de endpoints y Portal elegible sin composición · P2
+#### H-36-03 · `RF-01.2`: paths canónicos alineados y alta de Portal elegible L1 compuesta · P2 · ✅ Cerrada (2026-11-19)
 
-La spec y el contrato nombran `/api/public/qr/{code}/report` y `/api/portal/incidents` (`spec.md:131`); el router real expone `/api/qr/report` y `/api/incidents` (`src/Presentation/Routing/AppRouter.php:639,133`). La conducta está probada, pero los paths canónicos no. Además, `CreateIncidentEndpointTest` caso 9 solo prueba la exclusión por cuarentena; no hay composición de un alta de Portal elegible L1.
+La spec y el contrato nombraban `/api/public/qr/{code}/report` y `/api/portal/incidents`; el router real expone `/api/qr/report` y `/api/incidents` (`src/Presentation/Routing/AppRouter.php:639,133`). La conducta estaba probada, pero los paths canónicos no, y `CreateIncidentEndpointTest` caso 9 solo cubría la exclusión por cuarentena.
 
-**Cierre esperado:** alinear spec/contrato y router (o declarar alias) y añadir el caso positivo de Portal.
+**Corrección aplicada:** `spec.md`, el espejo funcional y `restocker_sat_synergy_contracts.md` publican ya los paths reales; también se corrigió la referencia de `operational_zones_contracts.md`. El caso 9 de `CreateIncidentEndpointTest` compone ahora **dos altas reales de Portal**: una elegible `OTHER`/`MISSING_CONSUMABLES` que nace en `L1_RESTOCKER` sin técnico, y una en cuarentena que fuerza `L2_SAT`; ambas respuestas 201 mantienen la opacidad de `dispatch_level`/`level1_issue_type`.
+
+**Cierre verificado:** `CreateIncidentEndpointTest.php` **exit=0**, casos 9.1–9.2 en verde. La reserva documental de `RF-01.2` queda cerrada; `T-RSS-08` mantiene su cierre sin reservas.
 
 #### H-36-04 · `RNF-03`: faltan 360 px medidos · P2
 
@@ -801,6 +803,6 @@ Las guardas de tokens, botones, plantillas, PWA y shell móvil pasan, pero el te
 
 ### 10.7. Veredicto final
 
-**No, la Spec 36 no está 100 % cumplida.** El núcleo de dominio, esquema, gateway, servicios, API y la mayor parte de la interfaz están implementados y verdes; la evidencia focalizada es **11 suites / 561 aserciones**. H-36-01 (`RF-04.1`/`D4`) y H-36-02 (`RF-05.2.2`/DoD 3) quedaron cerradas. Pero `RF-01.2` tiene una desviación contractual y una composición de Portal incompleta, `RNF-03` no está medido a 360 px y el DoD 4 falla si la certificación incluye `new_engine` (69/70; pooler 16/30).
+**No, la Spec 36 no está 100 % cumplida.** El núcleo de dominio, esquema, gateway, servicios, API y la mayor parte de la interfaz están implementados y verdes; la evidencia focalizada es **11 suites / 561 aserciones**. H-36-01 (`RF-04.1`/`D4`), H-36-02 (`RF-05.2.2`/DoD 3) y H-36-03 (`RF-01.2`) quedaron cerradas. Pero `RNF-03` no está medido a 360 px y el DoD 4 falla si la certificación incluye `new_engine` (69/70; pooler 16/30).
 
 Las 12 tareas están marcadas `[x]`, pero **el cierre de `T-RSS-12` no es aceptable como 100 %** con la evidencia actual; `T-RSS-10` queda cerrada por H-36-02 y `T-RSS-11` por H-36-01. La reauditoría inicial no modificó código; H-36-01 y H-36-02 se corrigieron después en las vistas, el payload y sus suites, y esta acta registra los cambios sobre la base `d25cbad`.
