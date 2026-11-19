@@ -36,6 +36,7 @@ use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OpportunisticIncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentWorkshopNotesRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitarySlaWatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
@@ -63,7 +64,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * El orden del triaje no es una diferencia de dialecto —tiene forma común—, pero tampoco se
  * escribe a mano dos veces: se deriva del rango de prioridad que declara el dominio.
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface, OpportunisticIncidentRepositoryInterface, IncidentAssignmentAuditRepositoryInterface, IncidentPauseTransitionRepositoryInterface, IncidentCustodyReleaseInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface, OpportunisticIncidentRepositoryInterface, IncidentAssignmentAuditRepositoryInterface, IncidentPauseTransitionRepositoryInterface, IncidentCustodyReleaseInterface, IncidentWorkshopNotesRepositoryInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -3390,6 +3391,81 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         return $counts;
+    }
+
+    /**
+     * Última Nota Interna de Taller de cada expediente en UNA sola consulta
+     * (Módulo 36, RF-05.2.2; T-HYBRID-27 · RNF-01).
+     *
+     * La tarjeta del técnico SAT necesita la nota y la foto con las que el reponedor
+     * escaló la avería. Pedirlas parada a parada con `getComments()` reintroduciría el
+     * N+1 que la bandeja ya curó; esta lectura agrega el último comentario interno por
+     * expediente y el controlador lo publica en el payload de la parada.
+     *
+     * El «último» se resuelve por `MAX(id)`, el orden de inserción del servidor, que es
+     * el mismo orden cronológico con el que el hilo se escribe. Sólo se leen notas con
+     * `is_internal = TRUE` (Art. V.4); los expedientes sin nota no aparecen en el mapa.
+     *
+     * @param list<int> $incidentIds
+     * @return array<int, array{note: string, author_name: string, photo_path: string|null, created_at: string|null}>
+     */
+    public function findLastInternalNotesForIncidents(array $incidentIds): array
+    {
+        $ids = [];
+        foreach ($incidentIds as $rawId) {
+            $id = (int)$rawId;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach (array_values($ids) as $index => $id) {
+            $key = ":workshop_incident_{$index}";
+            $placeholders[] = $key;
+            $params[$key] = $id;
+        }
+
+        $internal = $this->dialect->booleanLiteral(true);
+        $sql = 'SELECT c.incident_id, c.comment_text, c.author_name, c.photo_path, c.created_at'
+            . ' FROM incident_comments c'
+            . ' JOIN ('
+            . '   SELECT incident_id, MAX(id) AS last_id'
+            . '     FROM incident_comments'
+            . "    WHERE is_internal = {$internal}"
+            . '      AND incident_id IN (' . implode(', ', $placeholders) . ')'
+            . '    GROUP BY incident_id'
+            . ' ) latest ON latest.last_id = c.id';
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $notes = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $photo = isset($row['photo_path']) && trim((string)$row['photo_path']) !== ''
+                ? (string)$row['photo_path']
+                : null;
+            $createdAt = isset($row['created_at']) && trim((string)$row['created_at']) !== ''
+                ? (string)$row['created_at']
+                : null;
+
+            $notes[(int)$row['incident_id']] = [
+                'note' => trim((string)($row['comment_text'] ?? '')),
+                'author_name' => trim((string)($row['author_name'] ?? '')),
+                'photo_path' => $photo,
+                'created_at' => $createdAt,
+            ];
+        }
+
+        return $notes;
     }
 
     /**

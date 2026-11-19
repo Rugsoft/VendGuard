@@ -50,6 +50,7 @@ use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentServiceSheetRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentWorkshopNotesRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineBatchRepositoryInterface;
@@ -704,6 +705,11 @@ class TechnicianController
 
         $commentCounts = $this->incidentRepo->countCommentsForIncidents($incidentIds, true);
 
+        // La última Nota Interna de Taller de cada parada se lee también por LOTE
+        // (RF-05.2.2): el técnico SAT recibe la nota y la foto del escalado en su
+        // tarjeta, sin abrir el hilo y sin una consulta por expediente (RNF-01).
+        $workshopNotes = $this->workshopNotesByIds($incidentIds);
+
         // Las otras tres lecturas de la parada —máquina, sede y ajustes preventivos de la
         // puerta sanitaria— se resuelven también por LOTES, y por el mismo motivo medido:
         // contra el motor remoto cada una costaba una ida y vuelta por parada (patrón N+1,
@@ -723,7 +729,8 @@ class TechnicianController
                 $locations[$incident->getLocationId()] ?? null,
                 $commentCounts[(int)$incident->getId()] ?? 0,
                 $this->siteResponseSincePause($incident),
-                $sanitaryRequirements[(int)$incident->getId()] ?? false
+                $sanitaryRequirements[(int)$incident->getId()] ?? false,
+                $workshopNotes[(int)$incident->getId()] ?? null
             );
         }
 
@@ -755,15 +762,18 @@ class TechnicianController
         $board = $this->incidentRepo->findRouteBoard($technicianId, $routeStatuses);
 
         $incidents         = [];
+        $incidentIds       = [];
         $settingsByMachine = [];
         foreach ($board as $stop) {
             $incidents[] = $stop['incident'];
+            $incidentIds[] = (int)$stop['incident']->getId();
             // Si dos paradas comparten máquina, los ajustes son los mismos: el mapa los resuelve
             // una vez y la regla sanitaria los lee de aquí sin volver a consultar nada.
             $settingsByMachine[$stop['incident']->getMachineId()] = $stop['settings'];
         }
 
         $sanitaryRequirements = $this->pauses()->sanitaryResolutionRequirements($incidents, $settingsByMachine);
+        $workshopNotes = $this->workshopNotesByIds($incidentIds);
 
         $routeData = [];
         foreach ($board as $stop) {
@@ -775,11 +785,31 @@ class TechnicianController
                 $stop['location'],
                 $stop['comments_total'],
                 $stop['site_response_since_pause'],
-                $sanitaryRequirements[(int)$incident->getId()] ?? false
+                $sanitaryRequirements[(int)$incident->getId()] ?? false,
+                $workshopNotes[(int)$incident->getId()] ?? null
             );
         }
 
         return $routeData;
+    }
+
+    /**
+     * Última Nota Interna de Taller por parada (RF-05.2.2, Art. V.4).
+     *
+     * La capacidad es opcional: los dobles de prueba que no la declaran publican
+     * `null` y la tarjeta simplemente no pinta el bloque interno, sin una lectura
+     * por parada ni un contrato distinto.
+     *
+     * @param list<int> $incidentIds
+     * @return array<int, array{note: string, author_name: string, photo_path: string|null, created_at: string|null}>
+     */
+    private function workshopNotesByIds(array $incidentIds): array
+    {
+        if (!$this->incidentRepo instanceof IncidentWorkshopNotesRepositoryInterface) {
+            return [];
+        }
+
+        return $this->incidentRepo->findLastInternalNotesForIncidents($incidentIds);
     }
 
     /**
@@ -805,7 +835,8 @@ class TechnicianController
         ?Location $location,
         int $commentsCount,
         bool $siteResponseSincePause,
-        bool $sanitaryResolutionRequired
+        bool $sanitaryResolutionRequired,
+        ?array $workshopNote = null
     ): array
     {
         return [
@@ -861,6 +892,19 @@ class TechnicianController
             // que lo obtuvo —agregado por lote o recuento del tablero— y sin hilo la parada
             // publica 0, nunca un valor ausente.
             'comments_count'       => $commentsCount,
+            // Rastro del escalado desde la parada del reponedor (RF-04.1, RF-05.2.2):
+            // la tarjeta técnica enciende con estos campos la insignia «⚡ Escalado por
+            // Reponedor In Situ». Sin publicarlos, el payload real nunca la activa.
+            'escalated_from_restocker_id' => $incident->getEscalatedFromRestockerId(),
+            'escalated_to_sat_at'         => $incident->getEscalatedToSatAt(),
+            // Nota Interna de Taller y foto del escalado (RF-05.2.2, Art. V.4): el
+            // técnico SAT es el destinatario legítimo de la nota. La lectura llega por
+            // lote y, sin nota, la parada publica null —nunca un valor inventado—.
+            'workshop_internal_note'        => $workshopNote['note'] ?? null,
+            'workshop_internal_note_at'     => $workshopNote['created_at'] ?? null,
+            'workshop_internal_note_author' => $workshopNote['author_name'] ?? null,
+            'workshop_internal_photo_path'  => $workshopNote['photo_path'] ?? null,
+            'photo_path'                    => $incident->getPhotoPath(),
             // Puerta sanitaria del cierre (RF-03.5.2, Art. II): la consulta es pura
             // —sin escrituras al pintar la ruta— y anticipa en la interfaz el bloqueo
             // que la resolución aplicará de verdad (máquina en cuarentena o reloj

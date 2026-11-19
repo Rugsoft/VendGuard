@@ -212,15 +212,23 @@ assert(
     && technicianSource.includes('entry.operator_code')
 );
 assert(
-  'La insignia detecta el escalado desde reponedor',
+  'La insignia detecta el escalado y la tarjeta reconoce nota/foto internas',
   technician.wasEscalatedByRestocker({ escalated_from_restocker_id: 9 }) === true
     && technician.wasEscalatedByRestocker({ escalated_to_sat_at: '2026-11-18T10:00:00Z' }) === true
     && technician.wasEscalatedByRestocker({ escalated_from_restocker_id: null }) === false
+    && technician.hasWorkshopInternalContext({ workshop_internal_note: 'El carril queda bloqueado.' }) === true
+    && technician.hasWorkshopInternalContext({ photo_path: '/uploads/incidents/rss08_escalation.jpg' }) === true
+    && technician.hasWorkshopInternalContext({}) === false
+    && technician.workshopInternalPhoto({ workshop_internal_photo_path: '/uploads/nota.jpg', photo_path: '/uploads/ticket.jpg' }) === '/uploads/nota.jpg'
 );
 assert(
-  'La tarjeta incluye la insignia ⚡ Escalado por Reponedor In Situ',
+  'La tarjeta incluye la insignia y la Nota Interna/foto del escalado',
   technicianSource.includes('data-testid="tech-escalated-by-restocker"')
     && technicianSource.includes('⚡ Escalado por Reponedor In Situ')
+    && technicianSource.includes('data-testid="tech-workshop-internal-note"')
+    && technicianSource.includes('workshop_internal_note')
+    && technicianSource.includes('workshop_internal_photo_path')
+    && technicianSource.includes('data-testid="tech-workshop-internal-photo"')
 );
 assert(
   'La tarjeta incluye el banner 🤝 Coincidencia en Sede',

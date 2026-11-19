@@ -1349,6 +1349,24 @@ export const TechnicianRouteView = {
         || Boolean(incident?.escalated_to_sat_at);
     },
 
+    /** Nota Interna de Taller con la que se escaló la parada (RF-05.2.2). */
+    workshopInternalNote(incident) {
+      const note = incident?.workshop_internal_note;
+      return typeof note === 'string' ? note.trim() : '';
+    },
+
+    /** Foto del escalado: la de la nota interna o, en su defecto, la del expediente. */
+    workshopInternalPhoto(incident) {
+      const photo = incident?.workshop_internal_photo_path || incident?.photo_path;
+      return typeof photo === 'string' ? photo.trim() : '';
+    },
+
+    /** ¿La parada trae contexto interno que destacar en la tarjeta? */
+    hasWorkshopInternalContext(incident) {
+      return this.workshopInternalNote(incident) !== ''
+        || this.workshopInternalPhoto(incident) !== '';
+    },
+
     /** Reponedores en turno de la misma sede que publica el servidor (D4). */
     siteCoincidenceFor(incident) {
       return Array.isArray(incident?.site_coincidence) ? incident.site_coincidence : [];
@@ -4439,6 +4457,40 @@ export const TechnicianRouteView = {
                 Avería reportada:
               </strong>
               {{ incident.description }}
+            </div>
+
+            <!-- Nota Interna de Taller y foto del escalado (Módulo 36, RF-05.2.2).
+                 El técnico SAT es el destinatario legítimo de la nota (Art. V.4);
+                 se destaca aquí para que no tenga que abrir el hilo del ticket. -->
+            <div
+              v-if="hasWorkshopInternalContext(incident)"
+              data-testid="tech-workshop-internal-note"
+              style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-left: 3px solid var(--color-warning); color: var(--color-warning-text); border-radius: var(--radius-interactive, 4px); padding: 8px 10px; margin-bottom: 12px; font-size: 12px; line-height: 1.35;"
+            >
+              <strong style="display: block; font-size: 11px; text-transform: uppercase; margin-bottom: 3px;">
+                🔒 Nota Interna de Taller (Confidencial)
+              </strong>
+              <p v-if="workshopInternalNote(incident)" style="margin: 0; white-space: pre-line;">
+                {{ workshopInternalNote(incident) }}
+              </p>
+              <div v-if="incident.workshop_internal_note_at" style="margin-top: 3px; font-size: 11px; opacity: 0.85;">
+                {{ formatTime(incident.workshop_internal_note_at) }}
+                <span v-if="incident.workshop_internal_note_author">· {{ incident.workshop_internal_note_author }}</span>
+              </div>
+              <a
+                v-if="workshopInternalPhoto(incident)"
+                :href="workshopInternalPhoto(incident)"
+                target="_blank"
+                rel="noopener"
+                style="display: inline-block; margin-top: 6px;"
+              >
+                <img
+                  :src="workshopInternalPhoto(incident)"
+                  data-testid="tech-workshop-internal-photo"
+                  alt="Evidencia fotográfica del escalado"
+                  style="max-height: 120px; max-width: 100%; border-radius: var(--radius-interactive, 4px); border: 1px solid var(--color-warning-border); object-fit: cover;"
+                />
+              </a>
             </div>
 
             <!-- Status Context Highlights -->

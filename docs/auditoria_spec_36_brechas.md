@@ -8,7 +8,7 @@
 - **Tareas:** [`specs/36-restocker-sat-synergy/tasks.md`](../specs/36-restocker-sat-synergy/tasks.md) · [`odd/tasks/restocker-sat-synergy.md`](../odd/tasks/restocker-sat-synergy.md)
 - **Matriz de trazabilidad:** [`specs/36-restocker-sat-synergy/traceability-matrix.md`](../specs/36-restocker-sat-synergy/traceability-matrix.md)
 - **Fecha de auditoría:** 2026-11-19
-- **Última actualización:** 2026-11-19 · FIX-36-01..08 conservados como historial; reauditoría de aceptación en §10
+- **Última actualización:** 2026-11-19 · H-36-01 y H-36-02 cerradas; FIX-36-01..08 conservados como historial; reauditoría de aceptación en §10
 - **Rama:** `feat/restocker-sat-synergy`
 - **Base auditada:** `95f9af1f1f481b14eeaf4b3acfcd623e791486e8` · árbol limpio antes de crear este acta
 - **Base de la reauditoría:** `d25cbad` · árbol limpio
@@ -17,7 +17,7 @@
 > Este documento es un acta viva de hallazgos: registra la evidencia previa de las brechas y los cierres de FIX-36-01 a FIX-36-08. La matriz, las tareas y el ODD quedaron sincronizados con la evidencia focalizada; la certificación global vigente es **441/16.993**, y el canal `new_engine` queda en **69/70** por el esquema del pooler sin la migración 032.
 
 > [!WARNING]
-> **Reauditoría de aceptación del 2026-11-19 (ver §10).** El veredicto de cierre de este acta queda **superado**: la Spec 36 no está al 100 %. Los FIX-36-01..08 siguen siendo correcciones válidas y **H-36-01 (`RF-04.1`/`D4`) quedó cerrada el 2026-11-19**; la reauditoría mantiene brechas en `RF-05.2.2`, `RF-01.2`, `RNF-03` y la certificación `new_engine`. El estado vigente es **2/4 DoD**, **12/12 tareas marcadas con 2 reservas** y **69/70 en `new_engine`**.
+> **Reauditoría de aceptación del 2026-11-19 (ver §10).** El veredicto de cierre de este acta queda **superado**: la Spec 36 no está al 100 %. Los FIX-36-01..08 siguen siendo correcciones válidas y **H-36-01 (`RF-04.1`/`D4`) y H-36-02 (`RF-05.2.2`/DoD 3) quedaron cerradas el 2026-11-19**; la reauditoría mantiene brechas en `RF-01.2`, `RNF-03` y la certificación `new_engine`. El estado vigente es **3/4 DoD**, **12/12 tareas marcadas con 1 reserva** y **69/70 en `new_engine`**.
 
 ---
 
@@ -480,7 +480,7 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | **3. `RestockerRouteView`, `TechnicianRouteView` y Coordinación implementan la operativa completa, el botón de escalado, el banner, la cola Offline y el filtro/triaje dual** | Frontend 236/236 + 18/18 + guards verdes; el botón «⚡ Escalar Avería al SAT» está en tarjeta, bandeja L1 y asistente de visita | ✅ |
 | **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Evidencia focalizada: **11 suites propias · 561 aserciones · 0 fallos**; `RestockerSatSynergyApiTest` 55/55 (bloques 6–9), `CreateIncidentEndpointTest` caso 9 `exit=0`, guardas 23/23 y frontend 236/236 + 18/18. Global: **441/16.993 · 0 fallos**. `new_engine`: **69/70 · 2.320 aserciones · 1 fallo** de esquema del pooler | ✅ global; ⚠️ `new_engine` no certificable al 100 % hasta aplicar la migración 032 al pooler |
 
-> **Reauditoría 2026-11-19 (§10):** los DoD 1 y 2 se mantienen; **DoD 3 no se cumple** por la falta de cableado de la nota/foto y de los metadatos de escalado en la ruta del técnico (H-36-02). **DoD 4 no se cumple** en la certificación completa mientras `new_engine` siga en 69/70 (16/30 aserciones del pooler). H-36-01, la brecha de `operator_code`/`tel:`, quedó cerrada.
+> **Reauditoría 2026-11-19 (§10):** los DoD 1 y 2 se mantienen y **DoD 3 pasa a cumplirse** tras cerrar H-36-02, el cableado de la insignia, la Nota Interna y la foto en la ruta del técnico. **DoD 4 no se cumple** en la certificación completa mientras `new_engine` siga en 69/70 (16/30 aserciones del pooler). H-36-01, la brecha de `operator_code`/`tel:`, y H-36-02 quedaron cerradas.
 
 ---
 
@@ -503,7 +503,7 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 
 **Las 12 tareas están cerradas y respaldadas por la composición real o por la evidencia focalizada.**
 
-> **Reauditoría 2026-11-19 (§10):** la marca `[x]` se conserva en las 12 tareas, pero **`T-RSS-10` y el cierre de `T-RSS-12` tienen reservas de aceptación**. `T-RSS-10` no puede activar la insignia técnica con el payload real; `T-RSS-12` certifica la documentación, no un `new_engine` al 100 %. La reserva de `T-RSS-11` quedó cerrada con H-36-01: ambas vistas muestran `operator_code` y `tel:`.
+> **Reauditoría 2026-11-19 (§10):** la marca `[x]` se conserva en las 12 tareas, pero **el cierre de `T-RSS-12` tiene reserva de aceptación**. `T-RSS-12` certifica la documentación, no un `new_engine` al 100 %. Las reservas de `T-RSS-11` y `T-RSS-10` quedaron cerradas con H-36-01 y H-36-02: ambas vistas muestran `operator_code`/`tel:` y la tarjeta técnica pinta insignia, nota interna y foto desde el payload real.
 
 ---
 
@@ -640,7 +640,7 @@ La Spec 36 queda cerrada con estos criterios:
 
 - **Base:** `d25cbad` · árbol limpio · sin cambios de código durante la auditoría.
 - **Alcance:** lectura requisito por requisito de `spec.md` y su espejo funcional, `restocker_sat_synergy_contracts.md` y `docs/design.md`; ejecución de las 25 suites solicitadas, dos guardas adicionales de frontend y el test del pooler; contraste con `tasks.md` y el ODD.
-- **Veredicto vigente:** **la Spec 36 no está 100 % cumplida**. Los FIX-36-01..08 no se reabren: las brechas de §10.6 son hallazgos nuevos de aceptación, no regresiones de esos fixes.
+- **Veredicto vigente:** **la Spec 36 no está 100 % cumplida**. Los FIX-36-01..08 no se reabren: las brechas de §10.6 son hallazgos nuevos de aceptación, no regresiones de esos fixes. H-36-01 y H-36-02 quedaron cerradas; permanecen `RF-01.2`, `RNF-03` y el canal `new_engine`.
 
 ### 10.1. Resultado ejecutivo
 
@@ -649,7 +649,7 @@ La evidencia focalizada sigue siendo sólida: **11 suites propias, 561 asercione
 La diferencia con el cierre anterior no está en las suites del núcleo, sino en la **aceptación de la interfaz y de la certificación completa**:
 
 1. `RF-04.1` exigía nombre, `operator_code` y enlace `tel:` del compañero; **H-36-01 quedó cerrada el 2026-11-19** y ambas vistas ya los muestran.
-2. `RF-05.2.2` exige que la tarjeta del técnico active la insignia de escalado y destaque la Nota Interna y la foto; el payload real de `/api/technician/my-route` no publica esos campos.
+2. `RF-05.2.2` exigía que la tarjeta del técnico activara la insignia de escalado y destacara la Nota Interna y la foto; **H-36-02 quedó cerrada el 2026-11-19** y el payload real de `/api/technician/my-route` ya publica el rastro, la nota y la foto.
 3. `RF-01.2` describe rutas que no coinciden literalmente con el router real y no tiene una composición de Portal elegible L1.
 4. `RNF-03` no tiene medición de scroll horizontal a 360 px.
 5. `new_engine` no está al 100 %, por lo que el DoD 4 no se cumple si la certificación incluye el canal.
@@ -717,7 +717,7 @@ Pooler:        16/30 aserciones fallidas · SQLSTATE[42703] · exit=1
 | **RF-04.1** · Coincidencia en Sede y banner con nombre, código y `tel:` | ✅ | Backend y tests de servicio/API verdes; H-36-01 cerrada: ambas vistas muestran `operator_code` y enlace `tel:`; `restocker_route_view` 236/236 y `technician_and_coordinator_synergy` 18/18. |
 | **RF-04.2** · Bloqueo y relevo de turno/ausencia/baja | ✅ | API 55/55 bloque 7, Gateway 24/24, Integrations 27/27, Shift 38/38. |
 | **RF-05.1** · Cola Offline, idempotencia y volcado de conflicto | ✅ | Schema 30/30, API 55/55, Restocker 236/236, Service 34/34. |
-| **RF-05.2** · Superficies Restocker y Técnico | ❌ | Restocker 236/236; Técnico 181/181 y 18/18, pero el payload real no publica la insignia ni la nota/foto. Ver §10.6, H-36-02. |
+| **RF-05.2** · Superficies Restocker y Técnico | ✅ | Restocker 236/236; Técnico 181/181, 18/18 y composición HTTP real (bloque 8.3) con rastro de escalado, Nota Interna y foto. H-36-02 cerrada. |
 | **RF-05.3** · Horas, filtro y triaje dual | ✅ | Shift 38/38, WorkHours 18/18, Frontend 18/18, API 55/55. |
 
 ### 10.4. RNF, decisiones, casos límite y QA
@@ -752,18 +752,18 @@ Los cuatro casos límite del §6 pasan: QR térmico (API bloque 6 e Integrations
 | :--- | :---: | :--- |
 | **1** · Migración, convergencia, tipos, columnas, CHECK y semillas | ✅ | Convergence 42/42, CloudDeploy 55/55, Schema 30/30. |
 | **2** · Servicios de aplicación completos | ✅ | Service 34/34, Integrations 27/27, Gateway 24/24, API 55/55. |
-| **3** · Frontend completo | ❌ | Falta cablear la insignia/nota/foto del técnico (H-36-02); el banner de coincidencia ya muestra `operator_code` y `tel:` (H-36-01 cerrada). |
+| **3** · Frontend completo | ✅ | H-36-01 y H-36-02 cerradas: el banner muestra `operator_code`/`tel:` y la tarjeta técnica pinta insignia, Nota Interna y foto desde el payload real. |
 | **4** · Toda la batería al 100 % | ❌ | Global 441/16.993 verde; `new_engine` 69/70 y pooler 16/30. |
 
-**Resultado: 2/4 DoD.** Las 12 tareas conservan `[x]` en `tasks.md` y ✅ en el ODD, pero la aceptación de dos de ellas queda condicionada:
+**Resultado: 3/4 DoD.** Las 12 tareas conservan `[x]` en `tasks.md` y ✅ en el ODD; sólo el cierre de `T-RSS-12` queda condicionado:
 
 | Tarea | Marca | Reserva |
 | :--- | :---: | :--- |
 | `T-RSS-01` a `T-RSS-09` y `T-RSS-11` | `[x]` | Sin reservas; H-36-01 cerrada y evidencia focalizada verde. |
-| `T-RSS-10` | `[x]` | La insignia técnica no se activa con el payload real; ver H-36-02. |
+| `T-RSS-10` | `[x]` | Sin reservas; H-36-02 cerrada: payload, tarjeta y composición HTTP certificados. |
 | `T-RSS-12` | `[x]` | Documentación y cifras correctas, pero `new_engine` sigue 69/70; ver H-36-05. |
 
-### 10.6. Brechas de aceptación y cierre de H-36-01
+### 10.6. Brechas de aceptación y cierres de H-36-01/H-36-02
 
 #### H-36-01 · `RF-04.1` / `D4`: el banner ya muestra código y teléfono del compañero · P1 · ✅ Cerrada (2026-11-19)
 
@@ -771,13 +771,15 @@ El gateway devuelve `operator_code`, `phone`, `shift_status` y `activity_summary
 
 **Corrección aplicada:** `RestockerRouteView.js` y `TechnicianRouteView.js` incorporan `siteCoincidenceLabel(entry)` y renderizan una fila por compañero con `Nombre (operator_code)`, actividad y enlace `tel:` cuando `phone` existe. Los `user_id` siguen fuera de la UI. Se ampliaron las aserciones existentes para que fallen si desaparecen `operator_code` o `tel:`.
 
-**Cierre verificado:** `restocker_route_view.test.mjs` **236/236** y `technician_and_coordinator_synergy.test.mjs` **18/18**, ambos `exit=0`; `FrontendTemplateCompileTest.mjs` 15/15, 79 plantillas y 5.157 expresiones. La reserva de `T-RSS-11` queda cerrada; la de `T-RSS-10` sigue abierta por H-36-02.
+**Cierre verificado:** `restocker_route_view.test.mjs` **236/236** y `technician_and_coordinator_synergy.test.mjs` **18/18**, ambos `exit=0`; `FrontendTemplateCompileTest.mjs` 15/15, 79 plantillas y 5.157 expresiones. La reserva de `T-RSS-11` queda cerrada; la de `T-RSS-10` quedó cerrada después con H-36-02 (§10.6).
 
-#### H-36-02 · `RF-05.2.2`: la insignia y la nota/foto del técnico no están cableadas · P1
+#### H-36-02 · `RF-05.2.2`: insignia, Nota Interna y foto del técnico cableadas · P1 · ✅ Cerrada (2026-11-19)
 
-`TechnicianRouteView.js:1348-1350` decide la insignia con `escalated_from_restocker_id`/`escalated_to_sat_at`, pero `TechnicianController::stopPayload()` (`src/Presentation/Controller/TechnicianController.php:802-870`) no publica ninguno de esos campos, ni `workshop_internal_note` ni `photo_path`. La insignia no puede activarse en una ruta real y la vista rápida no tiene la Nota Interna ni la foto. `tests/frontend/technician_and_coordinator_synergy.test.mjs:197-213` usa un objeto sintético y `tests/integration/RestockerSatSynergyApiTest.php:354-358` solo comprueba `site_coincidence`; por eso las suites verdes no detectan el fallo.
+`TechnicianRouteView.js` decidía la insignia con `escalated_from_restocker_id`/`escalated_to_sat_at`, pero `TechnicianController::stopPayload()` no publicaba ninguno de esos campos, ni `workshop_internal_note` ni `photo_path`. La insignia no podía activarse en una ruta real y la vista rápida no tenía la Nota Interna ni la foto. Las suites verdes no lo detectaban porque el test de frontend usaba un objeto sintético y la composición HTTP solo miraba `site_coincidence`.
 
-**Cierre esperado:** ampliar `stopPayload()` con el rastro de escalado y la última nota interna/foto, renderizarlos en la tarjeta y añadir una composición HTTP real sobre `/api/technician/my-route`.
+**Corrección aplicada:** nueva capacidad `IncidentWorkshopNotesRepositoryInterface::findLastInternalNotesForIncidents()`, implementada por `PdoIncidentRepository` con una única consulta agregada de la última nota interna por expediente. `TechnicianController::stopPayload()` publica `escalated_from_restocker_id`, `escalated_to_sat_at`, `workshop_internal_note`, `workshop_internal_note_at`, `workshop_internal_note_author`, `workshop_internal_photo_path` y `photo_path`; los dos caminos de la ruta (tablero y lecturas) pasan la nota por lote. `TechnicianRouteView.js` pinta el bloque `🔒 Nota Interna de Taller (Confidencial)` con la foto ampliable cuando existe, sin exponer `user_id` ni `dispatch_level` en la plantilla.
+
+**Cierre verificado:** `technician_and_coordinator_synergy.test.mjs` **18/18** (guardas integradas en las aserciones existentes) y `RestockerSatSynergyApiTest.php` **55/55** (bloque 8.3: composición real sobre `/api/technician/my-route` con rastro, nota y foto), ambos `exit=0`; `FrontendTemplateCompileTest.mjs` **15/15**. La reserva de `T-RSS-10` queda cerrada.
 
 #### H-36-03 · `RF-01.2`: desviación literal de endpoints y Portal elegible sin composición · P2
 
@@ -799,6 +801,6 @@ Las guardas de tokens, botones, plantillas, PWA y shell móvil pasan, pero el te
 
 ### 10.7. Veredicto final
 
-**No, la Spec 36 no está 100 % cumplida.** El núcleo de dominio, esquema, gateway, servicios, API y la mayor parte de la interfaz están implementados y verdes; la evidencia focalizada es **11 suites / 561 aserciones**. H-36-01 (`RF-04.1`/`D4`) quedó cerrada. Pero `RF-05.2.2` sigue sin cablear, `RF-01.2` tiene una desviación contractual y una composición de Portal incompleta, `RNF-03` no está medido a 360 px, el DoD 3 falla por H-36-02 y el DoD 4 falla si la certificación incluye `new_engine` (69/70; pooler 16/30).
+**No, la Spec 36 no está 100 % cumplida.** El núcleo de dominio, esquema, gateway, servicios, API y la mayor parte de la interfaz están implementados y verdes; la evidencia focalizada es **11 suites / 561 aserciones**. H-36-01 (`RF-04.1`/`D4`) y H-36-02 (`RF-05.2.2`/DoD 3) quedaron cerradas. Pero `RF-01.2` tiene una desviación contractual y una composición de Portal incompleta, `RNF-03` no está medido a 360 px y el DoD 4 falla si la certificación incluye `new_engine` (69/70; pooler 16/30).
 
-Las 12 tareas están marcadas `[x]`, pero **`T-RSS-10` y el cierre de `T-RSS-12` no son aceptables como 100 %** con la evidencia actual; `T-RSS-11` queda cerrada por H-36-01. La reauditoría inicial no modificó código; H-36-01 se corrigió después en las dos vistas y sus suites, y esta acta registra el cambio sobre la base `d25cbad`.
+Las 12 tareas están marcadas `[x]`, pero **el cierre de `T-RSS-12` no es aceptable como 100 %** con la evidencia actual; `T-RSS-10` queda cerrada por H-36-02 y `T-RSS-11` por H-36-01. La reauditoría inicial no modificó código; H-36-01 y H-36-02 se corrigieron después en las vistas, el payload y sus suites, y esta acta registra los cambios sobre la base `d25cbad`.

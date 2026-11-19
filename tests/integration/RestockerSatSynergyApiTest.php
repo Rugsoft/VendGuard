@@ -758,9 +758,32 @@ try {
             AND deleted_at IS NULL"
     );
     $assignmentOutboxStmt->execute([':id' => $cleanIncidentId, ':technician' => $technicianId]);
+    $assignmentOutboxCount = (int)$assignmentOutboxStmt->fetchColumn();
+
+    // Composición HTTP real de RF-05.2.2: la tarjeta del técnico recibe el rastro del
+    // escalado y la última Nota Interna de Taller con su foto, no un objeto sintético.
+    $technicianRouteAfterEscalation = $call('GET', '/api/technician/my-route', [], $technicianToken);
+    $technicianStops = $data($technicianRouteAfterEscalation);
+    $escalatedStop = null;
+    foreach ($technicianStops as $stop) {
+        if ((int)($stop['id'] ?? 0) === $cleanIncidentId) {
+            $escalatedStop = $stop;
+            break;
+        }
+    }
+
     $assert(
-        '8.3 El escalado real encola el aviso de asignación al técnico',
-        (int)$assignmentOutboxStmt->fetchColumn() >= 1
+        '8.3 El escalado real encola el aviso y la ruta técnica publica nota interna y foto',
+        $assignmentOutboxCount >= 1
+            && $technicianRouteAfterEscalation->getStatusCode() === 200
+            && is_array($escalatedStop)
+            && (int)($escalatedStop['escalated_from_restocker_id'] ?? 0) === $restockerId
+            && ($escalatedStop['escalated_to_sat_at'] ?? null) !== null
+            && ($escalatedStop['workshop_internal_note'] ?? '') === 'El carril queda bloqueado y la espiral no gira al pulsar el botón.'
+            && ($escalatedStop['workshop_internal_photo_path'] ?? '') === '/uploads/incidents/rss08_escalation.jpg'
+            && ($escalatedStop['photo_path'] ?? '') === '/uploads/incidents/rss08_escalation.jpg',
+        'status=' . $technicianRouteAfterEscalation->getStatusCode()
+            . ' stop=' . json_encode($escalatedStop)
     );
 
     $pdo->prepare('UPDATE users SET is_active = FALSE WHERE id = :id')
