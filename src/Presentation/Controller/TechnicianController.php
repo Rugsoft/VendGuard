@@ -762,18 +762,15 @@ class TechnicianController
         $board = $this->incidentRepo->findRouteBoard($technicianId, $routeStatuses);
 
         $incidents         = [];
-        $incidentIds       = [];
         $settingsByMachine = [];
         foreach ($board as $stop) {
             $incidents[] = $stop['incident'];
-            $incidentIds[] = (int)$stop['incident']->getId();
             // Si dos paradas comparten máquina, los ajustes son los mismos: el mapa los resuelve
             // una vez y la regla sanitaria los lee de aquí sin volver a consultar nada.
             $settingsByMachine[$stop['incident']->getMachineId()] = $stop['settings'];
         }
 
         $sanitaryRequirements = $this->pauses()->sanitaryResolutionRequirements($incidents, $settingsByMachine);
-        $workshopNotes = $this->workshopNotesByIds($incidentIds);
 
         $routeData = [];
         foreach ($board as $stop) {
@@ -786,7 +783,7 @@ class TechnicianController
                 $stop['comments_total'],
                 $stop['site_response_since_pause'],
                 $sanitaryRequirements[(int)$incident->getId()] ?? false,
-                $workshopNotes[(int)$incident->getId()] ?? null
+                $stop['workshop_note'] ?? null
             );
         }
 
