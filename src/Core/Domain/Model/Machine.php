@@ -64,6 +64,7 @@ class Machine implements ArrayAccess, JsonSerializable
     /** @var array<string, mixed>|null */
     private ?array $activeIncident;
     private bool $isBlockedNoAccess;
+    private ?string $sanitaryStatus;
 
     /**
      * @param int $id
@@ -79,6 +80,7 @@ class Machine implements ArrayAccess, JsonSerializable
      * @param string|null $deletedAt
      * @param array<string, mixed>|null $activeIncident
      * @param bool $isBlockedNoAccess Estado formal fuera de servicio por acceso bloqueado (RF-04.4).
+     * @param string|null $sanitaryStatus Estado higiénico-sanitario de la máquina (D2).
      */
     public function __construct(
         int $id,
@@ -93,7 +95,8 @@ class Machine implements ArrayAccess, JsonSerializable
         ?string $updatedAt = null,
         ?string $deletedAt = null,
         ?array $activeIncident = null,
-        bool $isBlockedNoAccess = false
+        bool $isBlockedNoAccess = false,
+        ?string $sanitaryStatus = null
     ) {
         $this->id = $id;
         $this->locationId = $locationId;
@@ -108,6 +111,7 @@ class Machine implements ArrayAccess, JsonSerializable
         $this->deletedAt = $deletedAt;
         $this->activeIncident = $activeIncident;
         $this->isBlockedNoAccess = $isBlockedNoAccess;
+        $this->sanitaryStatus = $sanitaryStatus !== null ? trim($sanitaryStatus) : null;
     }
 
     /**
@@ -142,7 +146,8 @@ class Machine implements ArrayAccess, JsonSerializable
             isset($row['updated_at']) ? (string)$row['updated_at'] : null,
             isset($row['deleted_at']) && $row['deleted_at'] !== null ? (string)$row['deleted_at'] : null,
             $activeIncident,
-            $isBlockedNoAccess
+            $isBlockedNoAccess,
+            isset($row['sanitary_status']) ? (string)$row['sanitary_status'] : null
         );
     }
 
@@ -198,6 +203,16 @@ class Machine implements ArrayAccess, JsonSerializable
     public function isBlockedNoAccess(): bool
     {
         return $this->isBlockedNoAccess;
+    }
+
+    /**
+     * Estado higiénico-sanitario con el que la máquina participa en la
+     * pre-clasificación de un aviso (D2, EARS 01.2). `QUARANTINE` excluye el
+     * Nivel 1 aunque el motivo rápido declarado sea elegible.
+     */
+    public function getSanitaryStatus(): ?string
+    {
+        return $this->sanitaryStatus;
     }
 
     /**

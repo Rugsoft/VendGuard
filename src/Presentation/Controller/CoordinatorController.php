@@ -488,6 +488,34 @@ class CoordinatorController
             );
         }
 
+        // D2 / EARS 01.2: las exclusiones de Nivel 1 también miran la
+        // reclamación declarada en el alta, no solo el motivo rápido. El
+        // estado sanitario viaja hidratado en la máquina.
+        $retainedMoneyRaw = $request->getBodyParam('retained_money_amount');
+        $retainedMoney = null;
+        if ($retainedMoneyRaw !== null && trim((string)$retainedMoneyRaw) !== '') {
+            if (!is_numeric($retainedMoneyRaw)) {
+                return Response::error(
+                    'INVALID_MONEY_AMOUNT',
+                    'El importe retenido debe ser un valor numérico.',
+                    422
+                );
+            }
+            $retainedMoney = (float)$retainedMoneyRaw;
+            if ($retainedMoney < 0) {
+                return Response::error(
+                    'INVALID_MONEY_AMOUNT',
+                    'El importe de dinero retenido no puede ser negativo.',
+                    422
+                );
+            }
+        }
+
+        $rawRefundMethod = $request->getBodyParam('refund_method');
+        $refundMethod = $rawRefundMethod !== null && trim((string)$rawRefundMethod) !== ''
+            ? trim((string)$rawRefundMethod)
+            : null;
+
         // RF-01.2 / D2.2: la pre-clasificación de Coordinación comparte el
         // predicado de Portal y QR. La categoría solicitada solo se conserva
         // cuando la clasificación no impone el mapeo QA-AMB-01.
@@ -496,7 +524,10 @@ class CoordinatorController
         $level1IssueType = $rawIssueType !== '' ? Level1IssueType::tryFrom($rawIssueType) : null;
         $classification = RestockerSatSynergyValidator::classifyCreation(
             $level1IssueType,
-            $requestedCategory
+            $requestedCategory,
+            $machine->getSanitaryStatus(),
+            $retainedMoney,
+            $refundMethod
         );
         $category = $classification['category'];
         $dispatchLevel = $classification['dispatch_level'];
@@ -537,6 +568,7 @@ class CoordinatorController
                     $slaTargetAt,
                     $reporterName,
                     $userId,
+                    $retainedMoney,
                     $dispatchLevel,
                     $level1IssueType
                 ): Incident {
@@ -551,6 +583,7 @@ class CoordinatorController
                         status: IncidentStatus::REGISTERED,
                         assignedTechnicianId: null,
                         reporterName: $reporterName,
+                        retainedMoneyAmount: $retainedMoney,
                         cycleStartedAt: $now->format(DATE_ATOM),
                         slaTargetAt: $slaTargetAt->format(DATE_ATOM),
                         slaTierSnapshot: $slaTier,

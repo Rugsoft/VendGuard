@@ -36,7 +36,7 @@ PostgresSchemaTest                     153/153
 PostgresConstitutionalTest              86/86
 SchemaConvergenceParityTest             42/42
 PdoRestockerSatSynergyGatewayTest       24/24
-RestockerSatSynergyApiTest              52/52
+RestockerSatSynergyApiTest              55/55
 RestockerSatSynergyConstitutionalTest   17/17
 CloudDeploySchemaParityTest             55/55
 ```
@@ -47,10 +47,10 @@ Y las 12 tareas están marcadas `[x]` en `tasks.md` y en el ODD.
 
 En concreto:
 
-1. **`QA-LIM-01` / Art. II — ✅ corregido el 2026-11-19:** el QR real ya inyecta la sinergia, propaga el método de reembolso y relee el expediente antes de ajustar urgencia/SLA. La composición se certifica en `RestockerSatSynergyApiTest` bloques 6 a 8 (52/52).
+1. **`QA-LIM-01` / Art. II — ✅ corregido el 2026-11-19:** el QR real ya inyecta la sinergia, propaga el método de reembolso y relee el expediente antes de ajustar urgencia/SLA. La composición se certifica en `RestockerSatSynergyApiTest` bloques 6 a 8 (55/55).
 2. **`C1` — ✅ corregido el 2026-11-19:** el cierre de turno, la ausencia y la baja inyectan la sinergia, comprueban el resultado de `handoverLevel1()` y ejecutan el relevo antes de cerrar o desactivar. La composición se certifica en `RestockerSatSynergyApiTest` bloque 7.
 3. **`D3` / `RF-03.2` — ✅ corregido el 2026-11-19:** el escalado del reponedor ya inyecta el resolvedor de técnico y el notificador; la composición se certifica en `RestockerSatSynergyApiTest` bloque 8.
-4. **`D2.2` / `RF-01.2` — ✅ corregido el 2026-11-19:** el alta de Coordinación lee `level1_issue_type`, aplica `classifyCreation()` y persiste `dispatch_level`/`level1_issue_type`; la composición se certifica en `RestockerSatSynergyApiTest` bloque 9.
+4. **`D2.2` / `RF-01.2` — ✅ corregido el 2026-11-19:** el alta de Coordinación lee `level1_issue_type`, aplica `classifyCreation()` con las exclusiones de cuarentena y reclamación y persiste `dispatch_level`/`level1_issue_type`; la composición se certifica en `RestockerSatSynergyApiTest` bloque 9.
 
 Además, falta el botón de escalado dentro del asistente de Visita de Reposición (`RF-05.2.1`) y el mapeo determinista de `level1_issue_type` no es un invariante duro de dominio/SQL (`EARS 01.1.2`).
 
@@ -269,7 +269,7 @@ El reponedor escalaba una avería y el ticket quedaba en la cola de Coordinació
 
 Cerrada el 2026-11-19 con evidencia reproducible:
 
-- **Composición real:** `RestockerSatSynergyApiTest` bloque 8, **52/52** en total, exit 0. 8.1-8.3 verifican `L2_SAT`, `ASSIGNED`, `assigned_technician_id=7` y la fila `TECHNICIAN_ASSIGNED` del outbox; 8.4-8.6 verifican `REGISTERED`, `assigned_technician_id=NULL` y la alerta `SLA_IMMINENCE_2H_UNASSIGNED` con `recipient_role=COORDINATOR`.
+- **Composición real:** `RestockerSatSynergyApiTest` bloque 8, **55/55** en total, exit 0. 8.1-8.3 verifican `L2_SAT`, `ASSIGNED`, `assigned_technician_id=7` y la fila `TECHNICIAN_ASSIGNED` del outbox; 8.4-8.6 verifican `REGISTERED`, `assigned_technician_id=NULL` y la alerta `SLA_IMMINENCE_2H_UNASSIGNED` con `recipient_role=COORDINATOR`.
 - **Regresiones:** `RestockerSatSynergyServiceTest` 34/34, `PdoRestockerSatSynergyGatewayTest` 24/24, `SuggestedTechniciansApiTest` 24/24 y `php -l` sin errores en los cinco archivos modificados.
 - **Alcance:** no se modificaron FIX-36-01 ni FIX-36-02; sus bloques 6 y 7 siguen verdes dentro de la misma suite.
 
@@ -308,9 +308,9 @@ El constructor de `Incident` aplicaba el valor por defecto `L2_SAT`. Por tanto, 
 
 #### Corrección aplicada
 
-1. `CoordinatorController::createIncident()` lee `level1_issue_type`, lo normaliza con `Level1IssueType::tryFrom()` —vacío o inválido queda en `null`— y ejecuta `RestockerSatSynergyValidator::classifyCreation()` antes de calcular urgencia y SLA, igual que Portal y QR. La categoría solicitada solo se conserva cuando la clasificación no impone el mapeo `QA-AMB-01`.
+1. `CoordinatorController::createIncident()` lee `level1_issue_type`, lo normaliza con `Level1IssueType::tryFrom()` —vacío o inválido queda en `null`— y ejecuta `RestockerSatSynergyValidator::classifyCreation()` antes de calcular urgencia y SLA, igual que Portal y QR. Le pasa el estado sanitario hidratado en `Machine`, el importe retenido y el método de devolución, de modo que las cuatro exclusiones de `D2` se evalúan también en Coordinación. La categoría solicitada solo se conserva cuando la clasificación no impone el mapeo `QA-AMB-01`.
 2. El `Incident` se construye con `dispatchLevel` y `level1IssueType`. `PdoIncidentRepository::create()` los persiste en las dos ramas de inserción: la genérica y la CTE de PostgreSQL. La rama CTE era la que los omitía y hacía que la base aplicara `L2_SAT`/`NULL` por defecto.
-3. `RestockerSatSynergyApiTest` bloque 9 cubre el alta real desde Coordinación en HTTP/PostgreSQL: 9.1-9.2 crean con `MISSING_CONSUMABLES` y verifican `L1_RESTOCKER`, `OTHER`, `MISSING_CONSUMABLES` y `REGISTERED`; 9.3-9.4 crean con `TEMPERATURE_COLD` y verifican que la exclusión térmica fuerza `L2_SAT`.
+3. `RestockerSatSynergyApiTest` bloque 9 cubre el alta real desde Coordinación en HTTP/PostgreSQL: 9.1-9.2 crean con `MISSING_CONSUMABLES` y verifican `L1_RESTOCKER`, `OTHER`, `MISSING_CONSUMABLES` y `REGISTERED`; 9.3-9.4 fuerzan `TEMPERATURE_COLD`; 9.5 cubre una máquina en `QUARANTINE`; 9.6 una reclamación de 10,01 €; y 9.7 el método digital `BIZUM`. Los cuatro escenarios excluyentes persisten `L2_SAT` con `level1_issue_type` como rastro.
 
 #### Criterios de aceptación
 
@@ -320,9 +320,9 @@ El constructor de `Incident` aplicaba el valor por defecto `L2_SAT`. Por tanto, 
 
 #### Cierre verificado
 
-- **Composición real:** `RestockerSatSynergyApiTest` bloque 9, **52/52** en total, exit 0. La fila 9.2 queda en `dispatch_level=L1_RESTOCKER`, `category=OTHER`, `level1_issue_type=MISSING_CONSUMABLES`, `status=REGISTERED`; la fila 9.4 queda en `dispatch_level=L2_SAT`, `category=TEMPERATURE_COLD` y conserva `level1_issue_type=MISSING_CONSUMABLES` como rastro.
-- **Regresiones:** `php -l` sin errores en el controlador, el repositorio y la suite; los bloques 6 a 8 de QR/C1/escalado siguen verdes dentro de la misma suite.
-- **Alcance:** no se modificaron FIX-36-01, FIX-36-02 ni FIX-36-03.
+- **Composición real:** `RestockerSatSynergyApiTest` bloque 9, **55/55** en total, exit 0. La fila 9.2 queda en `dispatch_level=L1_RESTOCKER`, `category=OTHER`, `level1_issue_type=MISSING_CONSUMABLES`, `status=REGISTERED`; las filas 9.4-9.7 fuerzan `L2_SAT` por térmica, cuarentena, importe de 10,01 € y método digital, conservando `level1_issue_type` como rastro.
+- **Regresiones:** `php -l` sin errores en `Machine`, `PdoMachineRepository`, el controlador, el repositorio de incidencias y la suite; los bloques 6 a 8 de QR/C1/escalado siguen verdes dentro de la misma suite.
+- **Alcance:** se añadió el estado sanitario a la hidratación de `Machine` y se persistió el importe retenido declarado en el alta; no se modificaron FIX-36-01, FIX-36-02 ni FIX-36-03.
 
 ---
 
@@ -401,7 +401,7 @@ A fecha de cierre de FIX-36-01, FIX-36-02, FIX-36-03 y FIX-36-04, sigue sin prue
 
 - alta de Portal con `level1_issue_type`.
 
-La absorción QR, el relevo C1, el escalado real y el alta L1 de Coordinación ya tienen composición en `RestockerSatSynergyApiTest` bloques 6 a 9 (52/52). El alta de Portal sigue probándose con dobles o colaboradores inyectados.
+La absorción QR, el relevo C1, el escalado real y el alta L1 de Coordinación ya tienen composición en `RestockerSatSynergyApiTest` bloques 6 a 9 (55/55). El alta de Portal sigue probándose con dobles o colaboradores inyectados.
 
 #### Impacto
 
@@ -423,8 +423,8 @@ Añadir pruebas de integración HTTP/PostgreSQL para cada flujo anterior, con as
 
 #### Evidencia
 
-- `specs/36-restocker-sat-synergy/traceability-matrix.md` declara `C1` cubierto por `RestockerSatSynergyIntegrationsTest` 27/27 y `PdoRestockerSatSynergyGatewayTest` 24/24; ambas pruebas ejercitan el servicio/gateway, no la ruta real que debería inyectarlo. La composición real ya existe en `RestockerSatSynergyApiTest` bloques 6 a 9 (52/52), pero la matriz aún no la cita.
-- La misma matriz declara `QA-LIM-01` cubierto por `RestockerSatSynergyIntegrationsTest` 27/27 y `RestockerSatSynergyConstitutionalTest` 17/17; la primera usa un gateway falso y la segunda prueba la absorción sobre un L2 preexistente, no la promoción L1→L2 desde QR. La composición real ya existe en `RestockerSatSynergyApiTest` bloques 6 a 9 (52/52), pero la matriz aún no la cita.
+- `specs/36-restocker-sat-synergy/traceability-matrix.md` declara `C1` cubierto por `RestockerSatSynergyIntegrationsTest` 27/27 y `PdoRestockerSatSynergyGatewayTest` 24/24; ambas pruebas ejercitan el servicio/gateway, no la ruta real que debería inyectarlo. La composición real ya existe en `RestockerSatSynergyApiTest` bloques 6 a 9 (55/55), pero la matriz aún no la cita.
+- La misma matriz declara `QA-LIM-01` cubierto por `RestockerSatSynergyIntegrationsTest` 27/27 y `RestockerSatSynergyConstitutionalTest` 17/17; la primera usa un gateway falso y la segunda prueba la absorción sobre un L2 preexistente, no la promoción L1→L2 desde QR. La composición real ya existe en `RestockerSatSynergyApiTest` bloques 6 a 9 (55/55), pero la matriz aún no la cita.
 - `docs/auditoria_spec_36_brechas.md` (este documento) es la corrección de esa sobrecertificación.
 - La matriz cita `LocationPortalReopenAuditTest` con 9/9; la ejecución real produce 18 líneas `[PASS]`. Es una imprecisión menor, ajena al núcleo del módulo.
 - `tasks.md` y el ODD marcan 12/12 tareas `[x]`, pero los cierres de `T-RSS-06`, `T-RSS-07`, `T-RSS-08`, `T-RSS-11` y `T-RSS-12` contienen afirmaciones que la composición real no respalda o que la matriz aún no enlaza:
@@ -460,7 +460,7 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | **1. Migración `032` y convergencia 1:1 con tipos #43/#44, ampliaciones, columnas, CHECK y 4 semillas** | `032_restocker_sat_synergy.sql` (11.724 bytes) con tipos, columnas, FK, CHECK, índice, operaciones Offline y las 4 parejas `RC-L1-*`/`SS-L1-*`; `supabase_seeds.sql` con 11 referencias; `SchemaConvergenceParityTest` 42/42; `PostgresRestockerSatSynergySchemaTest` 28/28; `CloudDeploySchemaParityTest` 55/55 | ✅ |
 | **2. Los servicios de aplicación imponen pre-clasificación, resolución L1, escalado en 3 ramas, auto-escalado QR, reapertura, `site_coincidence`, relevo C1, horas y opacidad** | Servicios y gateway verdes; QR, C1, el escalado y el alta L1 de Coordinación ya inyectan sinergia y tienen composición real; queda la cobertura del alta de Portal (FIX-36-07) | ✅ |
 | **3. `RestockerRouteView`, `TechnicianRouteView` y Coordinación implementan la operativa completa, el botón de escalado, el banner, la cola Offline y el filtro/triaje dual** | Frontend 234/234 + 18/18 + guards verdes; falta el botón de escalado dentro del asistente de Visita de Reposición | ⚠️ |
-| **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Batería limpia 441/441 · 16.987 aserciones · 0 fallos · `DocMetricsGuard` coherente · exit 0; 8 suites `new_engine` de la auditoría 8/8 verdes; la suite de composición actual queda en 52/52. Es verde y cubre la absorción QR, el relevo C1, el escalado real y el alta L1 de Coordinación; queda el alta de Portal (FIX-36-07) | ✅ en lo literal; insuficiente como certificación funcional |
+| **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Batería limpia 441/441 · 16.987 aserciones · 0 fallos · `DocMetricsGuard` coherente · exit 0; 8 suites `new_engine` de la auditoría 8/8 verdes; la suite de composición actual queda en 55/55. Es verde y cubre la absorción QR, el relevo C1, el escalado real y el alta L1 de Coordinación; queda el alta de Portal (FIX-36-07) | ✅ en lo literal; insuficiente como certificación funcional |
 
 ---
 
@@ -473,9 +473,9 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | `T-RSS-03` | `[x]` | Domain models 34/34 | ✅ coherente |
 | `T-RSS-04` | `[x]` | Validador 46/46 | ✅ coherente |
 | `T-RSS-05` | `[x]` | Gateway 24/24 | ✅ coherente |
-| `T-RSS-06` | `[x]` | Servicio 34/34; API 52/52 | ✅ el escalado del reponedor resuelve técnico y encola aviso (bloque 8); QR, C1 y el alta L1 de Coordinación (bloque 9) también están cableados |
+| `T-RSS-06` | `[x]` | Servicio 34/34; API 55/55 | ✅ el escalado del reponedor resuelve técnico y encola aviso (bloque 8); QR, C1 y el alta L1 de Coordinación (bloque 9) también están cableados |
 | `T-RSS-07` | `[x]` | Integraciones 27/27 | ✅ `C1` cableado en cierre, ausencia y baja (bloque 7) |
-| `T-RSS-08` | `[x]` | API 52/52; constitucional 17/17 | ✅ el alta de Coordinación ya pre-clasifica L1 (bloque 9); el alta de Portal aún no tiene prueba de composición (FIX-36-07) |
+| `T-RSS-08` | `[x]` | API 55/55; constitucional 17/17 | ✅ el alta de Coordinación ya pre-clasifica L1 (bloque 9); el alta de Portal aún no tiene prueba de composición (FIX-36-07) |
 | `T-RSS-09` | `[x]` | API/constitucional, `site_coincidence`, filtro y promoción | ✅ incluye la composición QR/C1 real (bloques 6 y 7) |
 | `T-RSS-10` | `[x]` | Frontend 18/18 | ✅ coherente |
 | `T-RSS-11` | `[x]` | Frontend 234/234 | ⚠️ falta el botón de escalado en el asistente de visita |
@@ -512,7 +512,7 @@ Nota: una primera corrida concurrente con otras suites sobre la misma base produ
 | `tests/unit/RestockerShiftAndWorkHoursTest.php` | 38/38 | 0 |
 | `tests/integration/PostgresRestockerSatSynergySchemaTest.php` | 28/28 | 0 |
 | `tests/integration/PdoRestockerSatSynergyGatewayTest.php` | 24/24 | 0 |
-| `tests/integration/RestockerSatSynergyApiTest.php` | 52/52 | 0 |
+| `tests/integration/RestockerSatSynergyApiTest.php` | 55/55 | 0 |
 | `tests/integration/RestockerSatSynergyConstitutionalTest.php` | 17/17 | 0 |
 | `tests/integration/SchemaConvergenceParityTest.php` | 42/42 | 0 |
 | `tests/integration/PostgresSchemaTest.php` | 153/153 | 0 |
@@ -554,13 +554,13 @@ La Spec 36 podrá declararse al 100 % cuando:
 - [x] El QR real auto-escale una absorción térmica/eléctrica sobre un L1, cierre la custodia, asigne SAT o deje `REGISTERED` con alerta, y encole en `notification_outbox`. Cerrado el 2026-11-19; `RestockerSatSynergyApiTest` 42/42.
 - [x] El cierre de turno bloquee un L1 `IN_PROGRESS` con `409` y releve `ASSIGNED`/`PENDING_INFO`. Cerrado el 2026-11-19; aserciones 7.1-7.6 sobre un `ASSIGNED`; la consulta de relevo incluye ambos estados.
 - [x] La ausencia y la baja de cuenta releven los L1 vivos. Cerrado el 2026-11-19; aserciones 7.7-7.15.
-- [x] El escalado del reponedor asigne técnico y encole aviso sin `assign_technician_id`. Cerrado el 2026-11-19; aserciones 8.1-8.6 de `RestockerSatSynergyApiTest` 52/52.
-- [x] El alta de Coordinación pre-clasifique L1. Cerrado el 2026-11-19; aserciones 9.1-9.4 de `RestockerSatSynergyApiTest` 52/52.
+- [x] El escalado del reponedor asigne técnico y encole aviso sin `assign_technician_id`. Cerrado el 2026-11-19; aserciones 8.1-8.6 de `RestockerSatSynergyApiTest` 55/55.
+- [x] El alta de Coordinación pre-clasifique L1 y respete las exclusiones de cuarentena y reclamación. Cerrado el 2026-11-19; aserciones 9.1-9.7 de `RestockerSatSynergyApiTest` 55/55.
 - [ ] El botón de escalado exista dentro del asistente de visita.
 - [ ] El mapeo `level1_issue_type` ↔ `category` sea un invariante de dominio o exista una enmienda aprobada.
 - [ ] Existan pruebas de composición que fallen si se elimina cualquiera de los cableados anteriores.
 - [ ] La matriz, las tareas y el ODD reflejen la evidencia real, sin declarar cubierto lo que no se ejecuta.
-- [x] La batería global (`441/441 · 16.987`) y el canal `new_engine` sigan en verde tras las correcciones. Verificado el 2026-11-19: `RestockerSatSynergyApiTest` 52/52 y batería global 0 fallos.
+- [x] La batería global (`441/441 · 16.987`) y el canal `new_engine` sigan en verde tras las correcciones. Verificado el 2026-11-19: `RestockerSatSynergyApiTest` 55/55 y batería global 0 fallos.
 
 ---
 
@@ -574,7 +574,7 @@ La Spec 36 podrá declararse al 100 % cuando:
 - [`specs/36-restocker-sat-synergy/traceability-matrix.md`](../specs/36-restocker-sat-synergy/traceability-matrix.md) · matriz a corregir tras los FIX.
 - `src/Presentation/Controller/QrScanController.php` · composición real de `QrReportService` con sinergia, sugeridor de técnicos y outbox.
 - `src/Application/Service/QrReportService.php` · propagación de `refund_method`, relectura tras la promoción y encolado de la asignación.
-- `tests/integration/RestockerSatSynergyApiTest.php` · bloques 6 a 9 de composición QR/C1/escalado/alta de Coordinación (52/52).
+- `tests/integration/RestockerSatSynergyApiTest.php` · bloques 6 a 9 de composición QR/C1/escalado/alta de Coordinación (55/55).
 - `src/Infrastructure/Repository/PdoIncidentRepository.php:2792-2825` · `update()` que reescribe la categoría/asignación desde el objeto obsoleto.
 - `src/Presentation/Controller/TechnicianShiftController.php` · composición de `ShiftLifecycleService` con la sinergia real.
 - `src/Application/Service/ShiftLifecycleService.php` · comprobación del resultado de `handoverLevel1()` y traducción a 409.

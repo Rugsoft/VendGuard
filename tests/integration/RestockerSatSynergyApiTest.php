@@ -146,10 +146,17 @@ try {
         'RSS8-SNACK-11',
         'RSS8-SNACK-12',
         'RSS8-SNACK-13',
+        'RSS8-SNACK-14',
+        'RSS8-SNACK-15',
+        'RSS8-SNACK-16',
     ] as $fixtureMachineCode) {
         $machineStmt->execute([':location_id' => $locationId, ':code' => $fixtureMachineCode]);
         $fixtureMachines[$fixtureMachineCode] = (int)$machineStmt->fetchColumn();
     }
+
+    // D2 / EARS 01.2: una máquina en cuarentena no puede nacer en L1.
+    $pdo->prepare("UPDATE machines SET sanitary_status = 'QUARANTINE' WHERE id = :id")
+        ->execute([':id' => $fixtureMachines['RSS8-SNACK-14']]);
 
     $zoneAssignmentStmt = $pdo->prepare(
         "INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
@@ -859,6 +866,78 @@ try {
             && $thermalCreationRow['dispatch_level'] === 'L2_SAT'
             && $thermalCreationRow['category'] === 'TEMPERATURE_COLD',
         'row=' . json_encode($thermalCreationRow)
+    );
+
+    $quarantineMachineId = $fixtureMachines['RSS8-SNACK-14'];
+    $quarantineCreation = $call('POST', '/api/coordinator/incidents', [
+        'machine_id' => $quarantineMachineId,
+        'category' => 'OTHER',
+        'description' => 'La máquina está en cuarentena sanitaria y requiere revisión del SAT.',
+        'level1_issue_type' => 'MISSING_CONSUMABLES',
+    ], $coordinatorToken);
+    $quarantineCreationData = $data($quarantineCreation);
+    $quarantineStmt = $pdo->prepare(
+        'SELECT dispatch_level, category, level1_issue_type FROM incidents WHERE id = :id'
+    );
+    $quarantineStmt->execute([':id' => (int)($quarantineCreationData['id'] ?? 0)]);
+    $quarantineRow = $quarantineStmt->fetch();
+    $assert(
+        '9.5 La cuarentena sanitaria fuerza L2_SAT aunque se informe un motivo L1',
+        $quarantineCreation->getStatusCode() === 201
+            && is_array($quarantineRow)
+            && $quarantineRow['dispatch_level'] === 'L2_SAT'
+            && $quarantineRow['category'] === 'OTHER'
+            && $quarantineRow['level1_issue_type'] === 'MISSING_CONSUMABLES',
+        'status=' . $quarantineCreation->getStatusCode() . ' row=' . json_encode($quarantineRow)
+    );
+
+    $claimMachineId = $fixtureMachines['RSS8-SNACK-15'];
+    $claimCreation = $call('POST', '/api/coordinator/incidents', [
+        'machine_id' => $claimMachineId,
+        'category' => 'OTHER',
+        'description' => 'Reclamación de dinero retenido superior al límite de conserjería.',
+        'level1_issue_type' => 'MISSING_CONSUMABLES',
+        'retained_money_amount' => 10.01,
+    ], $coordinatorToken);
+    $claimCreationData = $data($claimCreation);
+    $claimStmt = $pdo->prepare(
+        'SELECT dispatch_level, category, level1_issue_type, retained_money_amount FROM incidents WHERE id = :id'
+    );
+    $claimStmt->execute([':id' => (int)($claimCreationData['id'] ?? 0)]);
+    $claimRow = $claimStmt->fetch();
+    $assert(
+        '9.6 Una reclamación superior a 10 € fuerza L2_SAT aunque se informe un motivo L1',
+        $claimCreation->getStatusCode() === 201
+            && is_array($claimRow)
+            && $claimRow['dispatch_level'] === 'L2_SAT'
+            && $claimRow['category'] === 'OTHER'
+            && $claimRow['level1_issue_type'] === 'MISSING_CONSUMABLES'
+            && (float)$claimRow['retained_money_amount'] === 10.01,
+        'status=' . $claimCreation->getStatusCode() . ' row=' . json_encode($claimRow)
+    );
+
+    $digitalMachineId = $fixtureMachines['RSS8-SNACK-16'];
+    $digitalCreation = $call('POST', '/api/coordinator/incidents', [
+        'machine_id' => $digitalMachineId,
+        'category' => 'OTHER',
+        'description' => 'La devolución solicitada se abonará por un método digital.',
+        'level1_issue_type' => 'MISSING_CONSUMABLES',
+        'refund_method' => 'BIZUM',
+    ], $coordinatorToken);
+    $digitalCreationData = $data($digitalCreation);
+    $digitalStmt = $pdo->prepare(
+        'SELECT dispatch_level, category, level1_issue_type FROM incidents WHERE id = :id'
+    );
+    $digitalStmt->execute([':id' => (int)($digitalCreationData['id'] ?? 0)]);
+    $digitalRow = $digitalStmt->fetch();
+    $assert(
+        '9.7 Un método de devolución digital fuerza L2_SAT aunque se informe un motivo L1',
+        $digitalCreation->getStatusCode() === 201
+            && is_array($digitalRow)
+            && $digitalRow['dispatch_level'] === 'L2_SAT'
+            && $digitalRow['category'] === 'OTHER'
+            && $digitalRow['level1_issue_type'] === 'MISSING_CONSUMABLES',
+        'status=' . $digitalCreation->getStatusCode() . ' row=' . json_encode($digitalRow)
     );
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");
