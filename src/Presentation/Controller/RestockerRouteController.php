@@ -15,6 +15,7 @@ use VendGuard\Application\Service\ProductLoadingOrderService;
 use VendGuard\Application\Service\RestockerSatSynergyService;
 use VendGuard\Application\Service\RestockerVanStockService;
 use VendGuard\Application\Service\ShiftLifecycleService;
+use VendGuard\Application\Service\SuggestedTechniciansService;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
@@ -33,6 +34,7 @@ use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoInSituRestockVisitGateway;
+use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionGateway;
 use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionRepository;
 use VendGuard\Infrastructure\Repository\PdoMachinePlanogramRepository;
@@ -40,8 +42,10 @@ use VendGuard\Infrastructure\Repository\PdoMachineRestockVisitRepository;
 use VendGuard\Infrastructure\Repository\PdoOperationalZoneRepository;
 use VendGuard\Infrastructure\Repository\PdoProductLoadingOrderRepository;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
+use VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway;
 use VendGuard\Infrastructure\Repository\PdoRestockerVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianSuggestionRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
@@ -163,9 +167,7 @@ final class RestockerRouteController
             $pdo
         );
 
-        $this->synergyService = $synergyService ?? new RestockerSatSynergyService(
-            new \VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway($pdo)
-        );
+        $this->synergyService = $synergyService ?? $this->buildSynergyService($pdo);
 
         $this->visitService = $visitService ?? new MachineRestockVisitService(
             $this->visitRepository,
@@ -179,6 +181,83 @@ final class RestockerRouteController
             new AuditLogger(),
             null,
             $this->cashCollections
+        );
+    }
+
+    /**
+     * Compone el escalado real: resuelve el técnico con el recomendador de
+     * siempre y encola el aviso en el outbox de notificaciones.
+     */
+    private function buildSynergyService(PDO $pdo): RestockerSatSynergyService
+    {
+        $suggestions = new SuggestedTechniciansService(
+            new PdoTechnicianSuggestionRepository($pdo)
+        );
+        $incidents = new PdoIncidentRepository($pdo);
+        $notifications = NotificationOutboxEnqueuerFactory::create($pdo);
+
+        $resolver = static function (int $machineId, array $payload) use ($suggestions, $incidents): ?array {
+            $incident = $incidents->findActiveByMachineId($machineId);
+            $suggestion = $incident !== null
+                ? $suggestions->getSuggestions($incident->getId())
+                : $suggestions->getSuggestionsForMachine(
+                    $machineId,
+                    (string)($payload['category'] ?? 'OTHER'),
+                    isset($payload['urgency']) ? (string)$payload['urgency'] : null,
+                    isset($payload['sla_tier_snapshot']) ? (string)$payload['sla_tier_snapshot'] : null,
+                    isset($payload['sla_target_minutes']) ? (int)$payload['sla_target_minutes'] : null
+                );
+
+            if ($suggestion === null) {
+                return null;
+            }
+
+            $topId = (int)($suggestion->recommendation['top_technician_id'] ?? 0);
+            if ($topId <= 0) {
+                return null;
+            }
+
+            foreach ($suggestion->rankedTechnicians as $candidate) {
+                if ((int)($candidate['technician_id'] ?? 0) === $topId) {
+                    return [
+                        'id' => $topId,
+                        'name' => (string)($candidate['name'] ?? ''),
+                    ];
+                }
+            }
+
+            return ['id' => $topId];
+        };
+
+        $notifier = static function (string $event, array $payload) use ($notifications, $incidents): void {
+            if ($event !== RestockerSatSynergyService::EVENT_ESCALATED_TO_SAT
+                || ($payload['ok'] ?? false) !== true
+                || ($payload['idempotent_replay'] ?? false) === true
+                || ($payload['escalation_outcome'] ?? '') === 'MERGED_INTO_EXISTING_SAT_TICKET') {
+                return;
+            }
+
+            $incidentId = (int)($payload['incident_id'] ?? 0);
+            $incident = $incidentId > 0 ? $incidents->findById($incidentId) : null;
+            if ($incident === null) {
+                return;
+            }
+
+            if (($payload['status'] ?? '') === 'ASSIGNED') {
+                $notifications->enqueueAssignment($incident, $incident);
+
+                return;
+            }
+
+            // Sin candidato la avería queda REGISTERED: Coordinación recibe la
+            // alerta de cobertura para que el triaje no dependa de mirar el panel.
+            $notifications->enqueueSla2hUnassignedAlert($incident);
+        };
+
+        return new RestockerSatSynergyService(
+            new PdoRestockerSatSynergyGateway($pdo),
+            $resolver,
+            $notifier
         );
     }
 

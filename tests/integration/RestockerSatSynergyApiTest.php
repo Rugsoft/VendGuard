@@ -142,6 +142,8 @@ try {
         'RSS8-SNACK-07',
         'RSS8-SNACK-08',
         'RSS8-SNACK-09',
+        'RSS8-SNACK-10',
+        'RSS8-SNACK-11',
     ] as $fixtureMachineCode) {
         $machineStmt->execute([':location_id' => $locationId, ':code' => $fixtureMachineCode]);
         $fixtureMachines[$fixtureMachineCode] = (int)$machineStmt->fetchColumn();
@@ -703,6 +705,100 @@ try {
             && $staffShiftRow['status'] === 'OFF_SHIFT'
             && $staffShiftRow['close_reason'] === AdminStaffService::DEACTIVATION_CLOSE_REASON,
         'row=' . json_encode($staffShiftRow)
+    );
+
+    echo "\n--- 8. Escalado real sin assign_technician_id (FIX-36-03) ---\n";
+
+    $cleanMachineId = $fixtureMachines['RSS8-SNACK-10'];
+    $escalation = $call('POST', "/api/restocker/machines/{$cleanMachineId}/escalate-to-sat", [
+        'category' => 'PRODUCT_JAM',
+        'workshop_internal_note' => 'El carril queda bloqueado y la espiral no gira al pulsar el botón.',
+        'photo_path' => '/uploads/incidents/rss08_escalation.jpg',
+        'urgency' => 'HIGH',
+        'sla_target_minutes' => 480,
+        'client_mutation_id' => 'rss08-escalate-0001',
+        'client_occurred_at' => '2026-11-18 11:00:00+00',
+    ], $restockerToken);
+    $escalationData = $data($escalation);
+    $assert(
+        '8.1 El escalado sin assign_technician_id crea el ticket L2',
+        $escalation->getStatusCode() === 201
+            && ($escalationData['escalation_outcome'] ?? '') === 'CREATED_NEW_SAT_TICKET',
+        'status=' . $escalation->getStatusCode() . ' body=' . json_encode($escalationData)
+    );
+
+    $cleanIncidentId = (int)($escalationData['incident_id'] ?? 0);
+    $cleanIncidentStmt = $pdo->prepare(
+        'SELECT status, assigned_technician_id FROM incidents WHERE id = :id'
+    );
+    $cleanIncidentStmt->execute([':id' => $cleanIncidentId]);
+    $cleanIncidentRow = $cleanIncidentStmt->fetch();
+    $assert(
+        '8.2 El recomendador asigna el mejor técnico SAT de la zona',
+        is_array($cleanIncidentRow)
+            && $cleanIncidentRow['status'] === 'ASSIGNED'
+            && (int)($cleanIncidentRow['assigned_technician_id'] ?? 0) === $technicianId,
+        'row=' . json_encode($cleanIncidentRow) . ' technician=' . $technicianId
+    );
+
+    $assignmentOutboxStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM notification_outbox
+          WHERE incident_id = :id
+            AND template = 'TECHNICIAN_ASSIGNED'
+            AND recipient_user_id = :technician
+            AND deleted_at IS NULL"
+    );
+    $assignmentOutboxStmt->execute([':id' => $cleanIncidentId, ':technician' => $technicianId]);
+    $assert(
+        '8.3 El escalado real encola el aviso de asignación al técnico',
+        (int)$assignmentOutboxStmt->fetchColumn() >= 1
+    );
+
+    $pdo->prepare('UPDATE users SET is_active = FALSE WHERE id = :id')
+        ->execute([':id' => $technicianId]);
+
+    $noCandidateMachineId = $fixtureMachines['RSS8-SNACK-11'];
+    $noCandidate = $call('POST', "/api/restocker/machines/{$noCandidateMachineId}/escalate-to-sat", [
+        'category' => 'PRODUCT_JAM',
+        'workshop_internal_note' => 'La espiral vuelve a atascarse y no hay técnico disponible en la zona.',
+        'photo_path' => '/uploads/incidents/rss08_escalation_unassigned.jpg',
+        'urgency' => 'MEDIUM',
+        'client_mutation_id' => 'rss08-escalate-0002',
+        'client_occurred_at' => '2026-11-18 11:05:00+00',
+    ], $restockerToken);
+    $noCandidateData = $data($noCandidate);
+    $assert(
+        '8.4 Sin candidato el escalado deja el ticket en la cola de Coordinación',
+        $noCandidate->getStatusCode() === 201
+            && ($noCandidateData['escalation_outcome'] ?? '') === 'CREATED_NEW_SAT_TICKET',
+        'status=' . $noCandidate->getStatusCode() . ' body=' . json_encode($noCandidateData)
+    );
+
+    $unassignedIncidentId = (int)($noCandidateData['incident_id'] ?? 0);
+    $unassignedIncidentStmt = $pdo->prepare(
+        'SELECT status, assigned_technician_id FROM incidents WHERE id = :id'
+    );
+    $unassignedIncidentStmt->execute([':id' => $unassignedIncidentId]);
+    $unassignedIncidentRow = $unassignedIncidentStmt->fetch();
+    $assert(
+        '8.5 Sin candidato el ticket queda REGISTERED sin técnico',
+        is_array($unassignedIncidentRow)
+            && $unassignedIncidentRow['status'] === 'REGISTERED'
+            && $unassignedIncidentRow['assigned_technician_id'] === null,
+        'row=' . json_encode($unassignedIncidentRow)
+    );
+
+    $coordinationOutboxStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM notification_outbox
+          WHERE incident_id = :id
+            AND template = 'SLA_IMMINENCE_2H_UNASSIGNED'
+            AND recipient_role = 'COORDINATOR'
+            AND deleted_at IS NULL"
+    );
+    $coordinationOutboxStmt->execute([':id' => $unassignedIncidentId]);
+    $assert(
+        '8.6 Sin candidato se encola la alerta de cobertura a Coordinación',
+        (int)$coordinationOutboxStmt->fetchColumn() >= 1
     );
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");
