@@ -566,7 +566,8 @@ class LocationPortalController
         $classification = RestockerSatSynergyValidator::classifyCreation(
             $level1IssueType,
             $requestedCategory,
-            null,
+            // D2 / EARS 01.2: the hydrated sanitary status also excludes L1 from the Portal.
+            $machine->getSanitaryStatus(),
             $retainedMoney,
             $request->getBodyParam('refund_method') !== null ? (string)$request->getBodyParam('refund_method') : null
         );

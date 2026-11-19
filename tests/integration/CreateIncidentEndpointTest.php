@@ -532,6 +532,56 @@ $assert("8.7 Expediente formal persistido en tabla refund_requests", $refundRow 
 $assert("8.8 Estado inicial es PENDING_INSPECTION", ($refundRow['status'] ?? '') === 'PENDING_INSPECTION');
 $assert("8.9 Importe reclamado persistido como 2.50", (float)($refundRow['claimed_amount'] ?? 0) === 2.50);
 
+// =========================================================================
+// CASE 9: Sanitary quarantine excludes L1 creation from the Portal (D2 / EARS 01.2)
+// =========================================================================
+echo "\n--- Caso 9: La cuarentena sanitaria fuerza L2_SAT en el alta de Portal ---\n";
+
+// The hot-drinks machine has no live incident after Case 4; clear any residue
+// from Case 2 and mark it as quarantined in PostgreSQL.
+TestDataCleaner::purgeIncidentsByMachine($pdo, $hotDrinksMachine->getId());
+$pdo->prepare("UPDATE machines SET sanitary_status = 'QUARANTINE' WHERE id = :id")
+    ->execute([':id' => $hotDrinksMachine->getId()]);
+
+$req9 = new Request(
+    method: 'POST',
+    path: '/api/incidents',
+    queryParams: [],
+    parsedBody: [
+        'machine_id' => (string)$hotDrinksMachine->getId(),
+        'category' => 'OTHER',
+        'description' => 'La máquina está en cuarentena sanitaria y requiere revisión del SAT.',
+        'level1_issue_type' => 'MISSING_CONSUMABLES',
+    ],
+    headers: [
+        'Authorization' => "Bearer {$tokenLoc1}",
+        'Content-Type' => 'application/x-www-form-urlencoded',
+    ]
+);
+
+$res9 = $router->dispatch($req9);
+$body9 = $res9->getDecodedBody();
+$data9 = $body9['data'] ?? [];
+$assert("9.1 El alta de Portal en cuarentena responde HTTP 201 Created", $res9->getStatusCode() === 201, "Status obtenido: {$res9->getStatusCode()}");
+
+$stmt9 = $pdo->prepare('SELECT dispatch_level, category, level1_issue_type, status FROM incidents WHERE id = :id');
+$stmt9->execute([':id' => (int)($data9['id'] ?? 0)]);
+$row9 = $stmt9->fetch(PDO::FETCH_ASSOC);
+$assert(
+    '9.2 La cuarentena hidratada fuerza L2_SAT aunque el Portal informe un motivo L1',
+    is_array($row9)
+        && $row9['dispatch_level'] === 'L2_SAT'
+        && $row9['category'] === 'OTHER'
+        && $row9['level1_issue_type'] === 'MISSING_CONSUMABLES'
+        && $row9['status'] === 'REGISTERED',
+    'row=' . json_encode($row9)
+);
+
+// Restore the park so later suites are not contaminated.
+$pdo->prepare("UPDATE machines SET sanitary_status = 'OK' WHERE id = :id")
+    ->execute([':id' => $hotDrinksMachine->getId()]);
+TestDataCleaner::purgeIncidentsByMachine($pdo, $hotDrinksMachine->getId());
+
 // Resumen final
 echo "\n======================================================================\n";
 if ($failures === 0) {

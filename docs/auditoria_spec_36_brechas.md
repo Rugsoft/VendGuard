@@ -43,7 +43,7 @@ CloudDeploySchemaParityTest             55/55
 
 Y las 12 tareas están marcadas `[x]` en `tasks.md` y en el ODD.
 
-**Sin embargo, aún quedan una brecha funcional de frontend y una brecha de defensa en profundidad.** Los tests de componentes pasan porque ejercitan servicios y gateways directamente con dobles o con colaboradores inyectados; las composiciones de QR, C1, escalado y alta de Coordinación ya están cubiertas, pero el alta de Portal sigue sin prueba de composición.
+**Sin embargo, aún quedan una brecha funcional de frontend y una brecha de defensa en profundidad.** Los tests de componentes pasan porque ejercitan servicios y gateways directamente con dobles o con colaboradores inyectados; las composiciones de QR, C1, escalado, alta de Coordinación y alta de Portal ya están cubiertas.
 
 En concreto:
 
@@ -54,7 +54,7 @@ En concreto:
 
 Además, falta el botón de escalado dentro del asistente de Visita de Reposición (`RF-05.2.1`) y el mapeo determinista de `level1_issue_type` no es un invariante duro de dominio/SQL (`EARS 01.1.2`).
 
-**Conclusión corta:** FIX-36-01, FIX-36-02, FIX-36-03 y FIX-36-04 están cerrados y su composición real queda protegida por prueba. La batería ya cubre las composiciones de QR, C1, escalado y alta de Coordinación; el alta de Portal sigue pendiente de composición y el verde de `run_all` no equivale al cumplimiento funcional completo de la Spec 36.
+**Conclusión corta:** FIX-36-01, FIX-36-02, FIX-36-03, FIX-36-04 y FIX-36-07 están cerrados y su composición real queda protegida por prueba. La batería ya cubre las composiciones de QR, C1, escalado, alta de Coordinación y alta de Portal; el verde de `run_all` no equivale al cumplimiento funcional completo de la Spec 36.
 
 ---
 
@@ -68,7 +68,7 @@ Además, falta el botón de escalado dentro del asistente de Visita de Reposici�
 | **4** | **FIX-36-04** | **P1 · Alto** | El alta de Coordinación no leía `level1_issue_type` ni fijaba `dispatch_level`; siempre creaba `L2_SAT` | `RF-01.2`, `D2.2` | **Cerrada (2026-11-19)** |
 | **5** | **FIX-36-05** | **P1 · Alto** | El botón «⚡ Escalar Avería al SAT» no existe dentro del asistente de Visita de Reposición del Módulo 34 | `RF-05.2.1` | **Abierta** |
 | **6** | **FIX-36-06** | **P2 · Medio** | El mapeo determinista `level1_issue_type` ↔ `category` no se impone en el constructor de `Incident` ni en el CHECK SQL; solo en `classifyCreation()` | `EARS 01.1.2`, `RNF-02` | **Abierta** |
-| **7** | **FIX-36-07** | **P2 · Medio** | Falta prueba de composición del alta de Portal con L1; la absorción QR, el relevo C1, el escalado y el alta de Coordinación ya están cubiertos | DoD 2, DoD 4, cobertura | **Abierta** |
+| **7** | **FIX-36-07** | **P2 · Medio** | El alta de Portal con L1 ya tiene composición HTTP/PostgreSQL; QR, relevo C1, escalado y Coordinación también están cubiertos | DoD 2, DoD 4, cobertura | **Cerrada** |
 | **8** | **FIX-36-08** | **P3 · Documental** | La matriz y los cierres de tareas declaran cubiertas C1 y `QA-LIM-01` con tests que no ejercitan la composición real; las composiciones QR/C1/Coordinación aún no se citan y hay una cifra desactualizada | Trazabilidad, DoD, tareas | **Abierta** |
 
 ### Lectura de prioridades
@@ -389,7 +389,7 @@ Una escritura directa desde el repositorio o una futura ruta que construya `Inci
 
 ---
 
-### FIX-36-07 · Faltan pruebas de composición · P2 · Abierta
+### FIX-36-07 · Pruebas de composición de los flujos · P2 · Cerrada
 
 #### Requisito
 
@@ -397,11 +397,9 @@ El DoD 2 exige que los servicios de aplicación impongan las reglas, y el DoD 4 
 
 #### Evidencia
 
-A fecha de cierre de FIX-36-01, FIX-36-02, FIX-36-03 y FIX-36-04, sigue sin prueba de composición:
+El alta de Portal con `level1_issue_type` era el último flujo sin composición real. Se cubre ahora en `CreateIncidentEndpointTest` caso 9: la máquina se marca `QUARANTINE` en PostgreSQL, el Portal despacha `POST /api/incidents` con `MISSING_CONSUMABLES` y la fila persistida queda en `L2_SAT`, `OTHER`, `MISSING_CONSUMABLES` y `REGISTERED`.
 
-- alta de Portal con `level1_issue_type`.
-
-La absorción QR, el relevo C1, el escalado real y el alta L1 de Coordinación ya tienen composición en `RestockerSatSynergyApiTest` bloques 6 a 9 (55/55). El alta de Portal sigue probándose con dobles o colaboradores inyectados.
+La absorción QR, el relevo C1, el escalado real, el alta L1 de Coordinación y el alta de Portal ya tienen composición en `RestockerSatSynergyApiTest` bloques 6 a 9 y `CreateIncidentEndpointTest` caso 9.
 
 #### Impacto
 
@@ -413,9 +411,15 @@ Añadir pruebas de integración HTTP/PostgreSQL para cada flujo anterior, con as
 
 #### Criterios de aceptación
 
-- [ ] Cada flujo de composición tiene una prueba que falla si se elimina la inyección correspondiente.
-- [ ] Las pruebas verifican el estado en PostgreSQL, no solo el retorno HTTP.
-- [ ] La matriz enlaza cada prueba con su requisito.
+- [x] Cada flujo de composición tiene una prueba que falla si se elimina la inyección correspondiente.
+- [x] Las pruebas verifican el estado en PostgreSQL, no solo el retorno HTTP.
+- [ ] La matriz enlaza cada prueba con su requisito; el enlace pendiente se mantiene en FIX-36-08.
+
+#### Cierre verificado
+
+- **Composición real:** `CreateIncidentEndpointTest` caso 9 (9.1-9.2), exit 0. La cuarentena se hidrata desde `Machine`, el alta responde 201 y PostgreSQL conserva `dispatch_level=L2_SAT`, `category=OTHER`, `level1_issue_type=MISSING_CONSUMABLES` y `status=REGISTERED`.
+- **Regresiones:** la suite completa de creación de incidencias sigue en verde; `php -l` sin errores en el controlador y la prueba.
+- **Alcance:** el alta de Portal ahora comparte el estado sanitario hidratado con Coordinación y QR. El enlace de la matriz queda en FIX-36-08.
 
 ---
 
@@ -428,11 +432,11 @@ Añadir pruebas de integración HTTP/PostgreSQL para cada flujo anterior, con as
 - `docs/auditoria_spec_36_brechas.md` (este documento) es la corrección de esa sobrecertificación.
 - La matriz cita `LocationPortalReopenAuditTest` con 9/9; la ejecución real produce 18 líneas `[PASS]`. Es una imprecisión menor, ajena al núcleo del módulo.
 - `tasks.md` y el ODD marcan 12/12 tareas `[x]`, pero los cierres de `T-RSS-06`, `T-RSS-07`, `T-RSS-08`, `T-RSS-11` y `T-RSS-12` contienen afirmaciones que la composición real no respalda o que la matriz aún no enlaza:
-  - `T-RSS-06`: aviso al outbox y sugerencia de técnico en el escalado; el escalado del reponedor ya los inyecta (bloque 8) y el alta L1 de Coordinación está cubierta (bloque 9). Queda el alta de Portal como flujo pendiente de composición.
+  - `T-RSS-06`: aviso al outbox y sugerencia de técnico en el escalado; el escalado del reponedor ya los inyecta (bloque 8), el alta L1 de Coordinación está cubierta (bloque 9) y el alta de Portal también (`CreateIncidentEndpointTest` caso 9); falta el enlace en la matriz.
   - `T-RSS-07`: `ShiftLifecycleService`/`TechnicianAbsenceService` ya relevan L1 en producción; la matriz aún no cita la composición del bloque 7.
-  - `T-RSS-08`: rutas RBAC y controladores; el alta de Coordinación ya pre-clasifica L1 (bloque 9); queda la cobertura del alta de Portal.
+  - `T-RSS-08`: rutas RBAC y controladores; el alta de Coordinación ya pre-clasifica L1 (bloque 9) y el alta de Portal también tiene composición (`CreateIncidentEndpointTest` caso 9); falta el enlace en la matriz.
   - `T-RSS-11`: botón de escalado en ticket/máquina/visita; falta en la visita.
-  - `T-RSS-12`: batería global en verde; QR, C1, escalado y alta de Coordinación ya tienen composición, pero el alta de Portal y el botón de visita no.
+  - `T-RSS-12`: batería global en verde; QR, C1, escalado, alta de Coordinación y alta de Portal ya tienen composición; faltan el botón de visita y el enlace de matriz.
 
 #### Impacto
 
@@ -440,7 +444,7 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 
 #### Corrección propuesta
 
-1. No cerrar la Spec 36 hasta que FIX-36-05 esté corregido y cubierto por prueba de composición (FIX-36-01 a FIX-36-04 ya están cerrados).
+1. No cerrar la Spec 36 hasta que FIX-36-05 esté corregido y cubierto por prueba de composición (FIX-36-01 a FIX-36-04 y FIX-36-07 ya están cerrados).
 2. Actualizar la matriz para que cada fila enlace una prueba que ejecute la ruta real, no solo el servicio.
 3. Corregir el recuento de `LocationPortalReopenAuditTest` o retirar la cita si no es una suite del módulo.
 4. Reabrir o anotar los cierres de `T-RSS-06/07/08/11/12` hasta que la evidencia los respalde.
@@ -458,9 +462,9 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | DoD | Comprobación | Estado |
 | :--- | :--- | :--- |
 | **1. Migración `032` y convergencia 1:1 con tipos #43/#44, ampliaciones, columnas, CHECK y 4 semillas** | `032_restocker_sat_synergy.sql` (11.724 bytes) con tipos, columnas, FK, CHECK, índice, operaciones Offline y las 4 parejas `RC-L1-*`/`SS-L1-*`; `supabase_seeds.sql` con 11 referencias; `SchemaConvergenceParityTest` 42/42; `PostgresRestockerSatSynergySchemaTest` 28/28; `CloudDeploySchemaParityTest` 55/55 | ✅ |
-| **2. Los servicios de aplicación imponen pre-clasificación, resolución L1, escalado en 3 ramas, auto-escalado QR, reapertura, `site_coincidence`, relevo C1, horas y opacidad** | Servicios y gateway verdes; QR, C1, el escalado y el alta L1 de Coordinación ya inyectan sinergia y tienen composición real; queda la cobertura del alta de Portal (FIX-36-07) | ✅ |
+| **2. Los servicios de aplicación imponen pre-clasificación, resolución L1, escalado en 3 ramas, auto-escalado QR, reapertura, `site_coincidence`, relevo C1, horas y opacidad** | Servicios y gateway verdes; QR, C1, el escalado, el alta L1 de Coordinación y el alta de Portal ya inyectan sinergia y tienen composición real (`CreateIncidentEndpointTest` caso 9); falta enlazar la evidencia en la matriz | ✅ |
 | **3. `RestockerRouteView`, `TechnicianRouteView` y Coordinación implementan la operativa completa, el botón de escalado, el banner, la cola Offline y el filtro/triaje dual** | Frontend 234/234 + 18/18 + guards verdes; falta el botón de escalado dentro del asistente de Visita de Reposición | ⚠️ |
-| **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Batería limpia 441/441 · 16.987 aserciones · 0 fallos · `DocMetricsGuard` coherente · exit 0; 8 suites `new_engine` de la auditoría 8/8 verdes; la suite de composición actual queda en 55/55. Es verde y cubre la absorción QR, el relevo C1, el escalado real y el alta L1 de Coordinación; queda el alta de Portal (FIX-36-07) | ✅ en lo literal; insuficiente como certificación funcional |
+| **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Batería limpia 441/441 · 16.987 aserciones · 0 fallos · `DocMetricsGuard` coherente · exit 0; 8 suites `new_engine` de la auditoría 8/8 verdes; la suite de composición actual queda en 55/55 y `CreateIncidentEndpointTest` cubre el alta de Portal en su caso 9. Es verde y cubre la absorción QR, el relevo C1, el escalado real, el alta L1 de Coordinación y el alta de Portal | ✅ en lo literal; insuficiente como certificación funcional |
 
 ---
 
@@ -475,11 +479,11 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | `T-RSS-05` | `[x]` | Gateway 24/24 | ✅ coherente |
 | `T-RSS-06` | `[x]` | Servicio 34/34; API 55/55 | ✅ el escalado del reponedor resuelve técnico y encola aviso (bloque 8); QR, C1 y el alta L1 de Coordinación (bloque 9) también están cableados |
 | `T-RSS-07` | `[x]` | Integraciones 27/27 | ✅ `C1` cableado en cierre, ausencia y baja (bloque 7) |
-| `T-RSS-08` | `[x]` | API 55/55; constitucional 17/17 | ✅ el alta de Coordinación ya pre-clasifica L1 (bloque 9); el alta de Portal aún no tiene prueba de composición (FIX-36-07) |
+| `T-RSS-08` | `[x]` | API 55/55; constitucional 17/17 | ✅ el alta de Coordinación ya pre-clasifica L1 (bloque 9); el alta de Portal ya tiene composición (`CreateIncidentEndpointTest` caso 9) |
 | `T-RSS-09` | `[x]` | API/constitucional, `site_coincidence`, filtro y promoción | ✅ incluye la composición QR/C1 real (bloques 6 y 7) |
 | `T-RSS-10` | `[x]` | Frontend 18/18 | ✅ coherente |
 | `T-RSS-11` | `[x]` | Frontend 234/234 | ⚠️ falta el botón de escalado en el asistente de visita |
-| `T-RSS-12` | `[x]` | Batería 441/441 · 16.987 | ⚠️ verde real; QR, C1, escalado y alta de Coordinación ya están cubiertos, pero faltan el alta de Portal y el botón de visita |
+| `T-RSS-12` | `[x]` | Batería 441/441 · 16.987 | ⚠️ verde real; QR, C1, escalado, alta de Coordinación y alta de Portal ya están cubiertos; faltan el botón de visita y el enlace de matriz |
 
 **Las 12 tareas están cerradas administrativamente; no todas están respaldadas funcionalmente por la composición real.**
 
@@ -539,11 +543,11 @@ Nota: una primera corrida concurrente con otras suites sobre la misma base produ
 4. ✅ FIX-36-04  Pre-clasificación L1 en el alta de Coordinación · cerrado 2026-11-19
 5. FIX-36-05  Botón de escalado dentro del asistente de visita
 6. FIX-36-06  Invariante de mapeo en dominio/SQL
-7. FIX-36-07  Pruebas de composición de todos los flujos anteriores
+7. ✅ FIX-36-07  Pruebas de composición de todos los flujos anteriores · cerrado 2026-11-19
 8. FIX-36-08  Actualizar matriz, tareas y ODD tras cerrar los anteriores
 ```
 
-FIX-36-01 a FIX-36-04 ya están cerrados. FIX-36-05 completa un requisito funcional. Los FIX-36-06 a FIX-36-08 son defensa en profundidad, cobertura y trazabilidad; no deben cerrarse antes que el P1 restante.
+FIX-36-01 a FIX-36-04 y FIX-36-07 ya están cerrados. FIX-36-05 completa un requisito funcional. FIX-36-06 y FIX-36-08 son defensa en profundidad y trazabilidad; no deben cerrarse antes que el P1 restante.
 
 ---
 
@@ -556,6 +560,7 @@ La Spec 36 podrá declararse al 100 % cuando:
 - [x] La ausencia y la baja de cuenta releven los L1 vivos. Cerrado el 2026-11-19; aserciones 7.7-7.15.
 - [x] El escalado del reponedor asigne técnico y encole aviso sin `assign_technician_id`. Cerrado el 2026-11-19; aserciones 8.1-8.6 de `RestockerSatSynergyApiTest` 55/55.
 - [x] El alta de Coordinación pre-clasifique L1 y respete las exclusiones de cuarentena y reclamación. Cerrado el 2026-11-19; aserciones 9.1-9.7 de `RestockerSatSynergyApiTest` 55/55.
+- [x] El alta de Portal pre-clasifique L1 y respete la cuarentena. Cerrado el 2026-11-19; aserciones 9.1-9.2 de `CreateIncidentEndpointTest`.
 - [ ] El botón de escalado exista dentro del asistente de visita.
 - [ ] El mapeo `level1_issue_type` ↔ `category` sea un invariante de dominio o exista una enmienda aprobada.
 - [ ] Existan pruebas de composición que fallen si se elimina cualquiera de los cableados anteriores.
