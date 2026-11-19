@@ -1346,6 +1346,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         string $reason,
         ?string $unassignedAt
     ): void {
+        $closedBy = $this->actorId($actor);
         $stmt = $this->pdo->prepare(
             'UPDATE incident_assignments
                 SET unassigned_at = GREATEST(assigned_at, COALESCE(:unassigned_at::timestamptz, CURRENT_TIMESTAMP)),
@@ -1358,7 +1359,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         );
         $stmt->execute([
             ':unassigned_at' => $unassignedAt,
-            ':closed_by' => $this->actorId($actor),
+            ':closed_by' => $closedBy > 0 ? $closedBy : null,
             ':closed_by_name' => $this->actorName($actor),
             ':reason_type' => $reasonType,
             ':reason' => mb_substr($reason !== '' ? $reason : 'Cierre de custodia', 0, 1000),

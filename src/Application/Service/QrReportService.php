@@ -51,6 +51,7 @@ class QrReportService
     private ?TransactionManagerInterface $transactionManager;
     private ?IncidentTicketAllocator $ticketAllocator;
     private ?RestockerSatSynergyService $synergyService;
+    private ?SuggestedTechniciansService $technicianSuggester;
 
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
@@ -59,7 +60,8 @@ class QrReportService
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
         ?TransactionManagerInterface $transactionManager = null,
         ?IncidentTicketAllocator $ticketAllocator = null,
-        ?RestockerSatSynergyService $synergyService = null
+        ?RestockerSatSynergyService $synergyService = null,
+        ?SuggestedTechniciansService $technicianSuggester = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
@@ -68,6 +70,7 @@ class QrReportService
         $this->transactionManager = $transactionManager;
         $this->ticketAllocator = $ticketAllocator;
         $this->synergyService = $synergyService;
+        $this->technicianSuggester = $technicianSuggester;
     }
 
     /**
@@ -171,6 +174,10 @@ class QrReportService
             $retainedMoney = $val;
         }
 
+        $refundMethod = isset($payload['refund_method']) && trim((string)$payload['refund_method']) !== ''
+            ? strtoupper(trim((string)$payload['refund_method']))
+            : null;
+
         // RF-01.2 / QA-LIM-01: la pre-clasificación L1 solo se sella si la
         // categoría, el estado sanitario y la reclamación lo permiten.
         $level1IssueType = null;
@@ -183,7 +190,7 @@ class QrReportService
             $category,
             null,
             $retainedMoney,
-            isset($payload['refund_method']) ? (string)$payload['refund_method'] : null
+            $refundMethod
         );
         $category = $classification['category'];
         $dispatchLevel = $classification['dispatch_level'];
@@ -205,6 +212,7 @@ class QrReportService
                 $reporterName,
                 $reporterEmail,
                 $retainedMoney,
+                $refundMethod,
                 $photoPath
             );
         }
@@ -302,6 +310,7 @@ class QrReportService
                     $reporterName,
                     $reporterEmail,
                     $retainedMoney,
+                    $refundMethod,
                     $photoPath,
                     true
                 );
@@ -324,6 +333,7 @@ class QrReportService
         ?string $reporterName,
         ?string $reporterEmail,
         ?float $retainedMoney,
+        ?string $refundMethod,
         ?string $photoPath,
         bool $isRaceCondition = false
     ): array {
@@ -340,16 +350,44 @@ class QrReportService
 
         // QA-LIM-01: una absorción grave sobre un aviso L1 lo auto-escala en la
         // misma unidad de trabajo, antes de anexar la nueva observación.
+        $before = $incident;
+        $promotedIncident = null;
+        $assignTechnicianId = null;
+
         if ($this->synergyService !== null) {
+            if (RestockerSatSynergyService::shouldAutoEscalateQrMerge(
+                $incident->getDispatchLevel(),
+                $incomingCategory,
+                $retainedMoney,
+                $refundMethod
+            )) {
+                $assignTechnicianId = $this->resolveQrMergeTechnician((int)$incident->getId());
+            }
+
             $promotion = $this->synergyService->autoEscalateQrMerge(
                 (int)$incident->getId(),
                 $incident->getDispatchLevel(),
                 $incomingCategory,
                 $retainedMoney,
-                null,
+                $refundMethod,
                 ['id' => 0, 'name' => 'QR Auto-Escalation', 'role' => 'SYSTEM'],
-                null
+                $assignTechnicianId
             );
+
+            if (($promotion['ok'] ?? false) !== true) {
+                throw new RuntimeException('No se pudo auto-escalar el expediente fusionado por QR.');
+            }
+
+            if (($promotion['promoted'] ?? false) === true) {
+                // El gateway ya conmutó nivel, categoría, estado y custodio. Se
+                // relee antes de tocar urgencia/SLA para que el update posterior
+                // no reescriba esos campos desde la foto L1 obsoleta.
+                $promotedIncident = $this->incidentRepo->findById((int)$incident->getId());
+                if ($promotedIncident === null) {
+                    throw new RuntimeException('No se pudo releer el expediente auto-escalado por QR.');
+                }
+                $incident = $promotedIncident;
+            }
         }
 
         if ($incomingUrgency->priorityRank() > $incident->getUrgency()->priorityRank()
@@ -429,6 +467,10 @@ class QrReportService
             });
         }
 
+        if ($promotedIncident !== null && $this->notificationEnqueuer !== null) {
+            $this->notificationEnqueuer->enqueueAssignment($before, $incident);
+        }
+
         return [
             // Un segundo consumidor sobre el mismo ticket genera su propio
             // expediente de reintegro (RF-REF-08, caso límite 4), así que también
@@ -452,6 +494,32 @@ class QrReportService
             ],
             'message' => "Otro usuario acaba de reportar una avería en esta máquina hace un momento (Ticket {$incident->getTicketCode()}). Hemos registrado tus observaciones en dicho ticket.",
         ];
+    }
+
+    /**
+     * RF-02.2 / QA-LIM-01: mejor Técnico SAT para una absorción QR.
+     *
+     * Si no hay sugeridor compuesto o no existe candidato elegible, devuelve
+     * `null` y el gateway deja el expediente en `REGISTERED`.
+     */
+    private function resolveQrMergeTechnician(int $incidentId): ?int
+    {
+        if ($this->technicianSuggester === null) {
+            return null;
+        }
+
+        try {
+            $suggestions = $this->technicianSuggester->getSuggestions($incidentId);
+        } catch (\Throwable $exception) {
+            // La promoción es la salvaguarda sanitaria: un fallo del recomendador
+            // no puede dejar el ticket en L1. Se degrada a "sin candidato".
+            error_log('[vendguard] No se pudo resolver el Técnico SAT para la absorción QR: ' . $exception);
+            return null;
+        }
+
+        $topId = (int)($suggestions?->recommendation['top_technician_id'] ?? 0);
+
+        return $topId > 0 ? $topId : null;
     }
 
     /**

@@ -119,10 +119,25 @@ try {
     $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-SNACK-02']);
     $dispatchMachineId = (int)$machineStmt->fetchColumn();
 
+    $perishableStmt = $pdo->prepare(
+        "INSERT INTO machines (location_id, code, model, machine_type, floor_wing)
+         VALUES (:location_id, :code, 'Modelo RSS8', 'PERISHABLE_FOOD', 'Planta baja') RETURNING id"
+    );
+    $perishableStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-PERISH-03']);
+    $thermalMachineId = (int)$perishableStmt->fetchColumn();
+
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-SNACK-04']);
+    $refundMachineId = (int)$machineStmt->fetchColumn();
+
     $pdo->prepare(
         "INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
          VALUES (:id, :zone, 'PRIMARY', TRUE)"
     )->execute([':id' => $restockerId, ':zone' => $zoneId]);
+
+    $pdo->prepare(
+        "INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary)
+         VALUES (:id, :zone, TRUE)"
+    )->execute([':id' => $technicianId, ':zone' => $zoneId]);
 
     $shiftStmt = $pdo->prepare(
         "INSERT INTO technician_shifts (technician_id, shift_date, status, started_at)
@@ -156,6 +171,22 @@ try {
 
     $incidentId = $seedIncident('INC-2026-8801', $machineId);
     $dispatchIncidentId = $seedIncident('INC-2026-8802', $dispatchMachineId);
+    $thermalIncidentId = $seedIncident('INC-2026-8803', $thermalMachineId);
+    $refundIncidentId = $seedIncident('INC-2026-8804', $refundMachineId);
+
+    $seedCustody = static function (int $seedIncidentId) use ($pdo, $restockerId): void {
+        $stmt = $pdo->prepare(
+            "INSERT INTO incident_assignments (
+                incident_id, technician_id, technician_name_snapshot, technician_code_snapshot,
+                assignment_source, assigned_at
+             ) VALUES (
+                :incident, :restocker, 'Reponedora T-RSS-08', 'RSS8-REST', 'COORDINATOR_ASSIGN', CURRENT_TIMESTAMP
+             )"
+        );
+        $stmt->execute([':incident' => $seedIncidentId, ':restocker' => $restockerId]);
+    };
+    $seedCustody($thermalIncidentId);
+    $seedCustody($refundIncidentId);
 
     $userRepo = new PdoUserRepository($pdo);
     $authService = new AuthService(null, $userRepo);
@@ -283,6 +314,125 @@ try {
     $storedStmt->execute([':id' => $qrIncidentId]);
     $stored = $storedStmt->fetch();
     $assert('El alta QR se persiste como L1_RESTOCKER', is_array($stored) && $stored['dispatch_level'] === 'L1_RESTOCKER');
+
+    echo "\n--- 6. Auto-escalado QR real (FIX-36-01) ---\n";
+
+    $qrThermal = $call('POST', '/api/qr/report', [
+        'machine_code' => 'RSS8-PERISH-03',
+        'category' => 'TEMPERATURE_COLD',
+        'description' => 'La máquina no enfría y el producto perecedero está a temperatura ambiente',
+    ]);
+    $qrThermalBody = $data($qrThermal);
+    $assert(
+        '6.1 El reporte QR térmico se absorbe en el L1 existente',
+        $qrThermal->getStatusCode() === 200 && ($qrThermalBody['merged'] ?? false) === true,
+        'status=' . $qrThermal->getStatusCode() . ' ' . $errorCode($qrThermal)
+    );
+
+    $thermalStmt = $pdo->prepare(
+        'SELECT dispatch_level, category, status, assigned_technician_id, urgency, sla_target_minutes
+           FROM incidents WHERE id = :id'
+    );
+    $thermalStmt->execute([':id' => $thermalIncidentId]);
+    $thermalRow = $thermalStmt->fetch();
+    $assert(
+        '6.2 La absorción QR promociona a L2_SAT con categoría térmica',
+        is_array($thermalRow)
+            && $thermalRow['dispatch_level'] === 'L2_SAT'
+            && $thermalRow['category'] === 'TEMPERATURE_COLD',
+        'row=' . json_encode($thermalRow)
+    );
+    $assert(
+        '6.3 El update posterior no revierte la asignación ni el estado',
+        is_array($thermalRow)
+            && (int)($thermalRow['assigned_technician_id'] ?? 0) === $technicianId
+            && $thermalRow['status'] === 'ASSIGNED',
+        'assigned=' . ($thermalRow['assigned_technician_id'] ?? 'null') . ' status=' . ($thermalRow['status'] ?? 'null')
+    );
+    $assert(
+        '6.4 El SLA se endurece a 240 min tras la promoción',
+        is_array($thermalRow)
+            && $thermalRow['urgency'] === 'CRITICAL'
+            && (int)$thermalRow['sla_target_minutes'] === 240,
+        'urgency=' . ($thermalRow['urgency'] ?? 'null') . ' sla=' . ($thermalRow['sla_target_minutes'] ?? 'null')
+    );
+
+    $custodyStmt = $pdo->prepare(
+        "SELECT technician_id, assignment_source, unassignment_reason_type
+           FROM incident_assignments
+          WHERE incident_id = :id
+          ORDER BY id ASC"
+    );
+    $custodyStmt->execute([':id' => $thermalIncidentId]);
+    $custodyRows = $custodyStmt->fetchAll();
+    $closedRestockerCustody = array_filter(
+        $custodyRows,
+        static fn (array $row): bool => (int)$row['technician_id'] === $restockerId
+            && $row['unassignment_reason_type'] === 'QR_AUTO_ESCALATED_TO_SAT'
+    );
+    $openTechnicianCustody = array_filter(
+        $custodyRows,
+        static fn (array $row): bool => (int)$row['technician_id'] === $technicianId
+            && $row['assignment_source'] === 'QR_AUTO_ESCALATION_TO_SAT'
+            && $row['unassignment_reason_type'] === null
+    );
+    $assert(
+        '6.5 La custodia del reponedor se cierra y la del SAT se abre',
+        $closedRestockerCustody !== [] && $openTechnicianCustody !== [],
+        'rows=' . json_encode($custodyRows)
+    );
+
+    $outboxStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM notification_outbox
+          WHERE incident_id = :id
+            AND template IN ('TECHNICIAN_ASSIGNED', 'TECHNICIAN_UNASSIGNED')"
+    );
+    $outboxStmt->execute([':id' => $thermalIncidentId]);
+    $assert(
+        '6.6 El auto-escalado encola el aviso de asignación',
+        (int)$outboxStmt->fetchColumn() >= 1
+    );
+
+    $coordinatorAlertStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM notification_outbox
+          WHERE incident_id = :id
+            AND template = 'COLD_CHAIN_IMMEDIATE_ALERT'
+            AND recipient_role = 'COORDINATOR'"
+    );
+    $coordinatorAlertStmt->execute([':id' => $thermalIncidentId]);
+    $assert(
+        '6.7 El auto-escalado térmico alerta a Coordinación por cadena de frío',
+        (int)$coordinatorAlertStmt->fetchColumn() >= 1
+    );
+
+    $qrRefund = $call('POST', '/api/qr/report', [
+        'machine_code' => 'RSS8-SNACK-04',
+        'category' => 'OTHER',
+        'description' => 'No me devuelve el cambio y he pagado con Bizum',
+        'retained_money_amount' => 5.00,
+        'refund_method' => 'BIZUM',
+    ]);
+    $qrRefundBody = $data($qrRefund);
+    $assert(
+        '6.8 El reporte QR con reclamación digital se absorbe en el L1 existente',
+        $qrRefund->getStatusCode() === 200 && ($qrRefundBody['merged'] ?? false) === true,
+        'status=' . $qrRefund->getStatusCode() . ' ' . $errorCode($qrRefund)
+    );
+
+    $refundStmt = $pdo->prepare(
+        'SELECT dispatch_level, category, status, assigned_technician_id
+           FROM incidents WHERE id = :id'
+    );
+    $refundStmt->execute([':id' => $refundIncidentId]);
+    $refundRow = $refundStmt->fetch();
+    $assert(
+        '6.9 El método de reembolso BIZUM auto-escala aunque el importe sea <= 10 €',
+        is_array($refundRow)
+            && $refundRow['dispatch_level'] === 'L2_SAT'
+            && $refundRow['category'] === 'OTHER'
+            && (int)($refundRow['assigned_technician_id'] ?? 0) === $technicianId,
+        'row=' . json_encode($refundRow)
+    );
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");
 } finally {
