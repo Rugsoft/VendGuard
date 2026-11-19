@@ -144,6 +144,8 @@ try {
         'RSS8-SNACK-09',
         'RSS8-SNACK-10',
         'RSS8-SNACK-11',
+        'RSS8-SNACK-12',
+        'RSS8-SNACK-13',
     ] as $fixtureMachineCode) {
         $machineStmt->execute([':location_id' => $locationId, ':code' => $fixtureMachineCode]);
         $fixtureMachines[$fixtureMachineCode] = (int)$machineStmt->fetchColumn();
@@ -799,6 +801,64 @@ try {
     $assert(
         '8.6 Sin candidato se encola la alerta de cobertura a Coordinación',
         (int)$coordinationOutboxStmt->fetchColumn() >= 1
+    );
+
+    echo "\n--- 9. Alta de Coordinación con pre-clasificación L1 (FIX-36-04) ---\n";
+
+    $level1MachineId = $fixtureMachines['RSS8-SNACK-12'];
+    $level1Creation = $call('POST', '/api/coordinator/incidents', [
+        'machine_id' => $level1MachineId,
+        'category' => 'OTHER',
+        'description' => 'Falta de vasos y azúcar detectada durante la revisión de la máquina.',
+        'level1_issue_type' => 'MISSING_CONSUMABLES',
+    ], $coordinatorToken);
+    $assert(
+        '9.1 El alta de Coordinación con un motivo L1 responde 201',
+        $level1Creation->getStatusCode() === 201,
+        'status=' . $level1Creation->getStatusCode() . ' code=' . $errorCode($level1Creation)
+    );
+
+    $level1CreationData = $data($level1Creation);
+    $level1IncidentStmt = $pdo->prepare(
+        'SELECT dispatch_level, category, level1_issue_type, status FROM incidents WHERE id = :id'
+    );
+    $level1IncidentStmt->execute([':id' => (int)($level1CreationData['id'] ?? 0)]);
+    $level1IncidentRow = $level1IncidentStmt->fetch();
+    $assert(
+        '9.2 El expediente nace en L1_RESTOCKER con la categoría mapeada',
+        is_array($level1IncidentRow)
+            && $level1IncidentRow['dispatch_level'] === 'L1_RESTOCKER'
+            && $level1IncidentRow['category'] === 'OTHER'
+            && $level1IncidentRow['level1_issue_type'] === 'MISSING_CONSUMABLES'
+            && $level1IncidentRow['status'] === 'REGISTERED',
+        'row=' . json_encode($level1IncidentRow)
+    );
+
+    $thermalMachineId = $fixtureMachines['RSS8-SNACK-13'];
+    $thermalCreation = $call('POST', '/api/coordinator/incidents', [
+        'machine_id' => $thermalMachineId,
+        'category' => 'TEMPERATURE_COLD',
+        'description' => 'La máquina no enfría y el producto está a temperatura ambiente.',
+        'level1_issue_type' => 'MISSING_CONSUMABLES',
+    ], $coordinatorToken);
+    $assert(
+        '9.3 El alta de Coordinación con una exclusión térmica responde 201',
+        $thermalCreation->getStatusCode() === 201,
+        'status=' . $thermalCreation->getStatusCode() . ' code=' . $errorCode($thermalCreation)
+    );
+
+    $thermalCreationData = $data($thermalCreation);
+    $thermalCreationStmt = $pdo->prepare(
+        'SELECT dispatch_level, category, level1_issue_type FROM incidents WHERE id = :id'
+    );
+    $thermalCreationStmt->execute([':id' => (int)($thermalCreationData['id'] ?? 0)]);
+    $thermalCreationRow = $thermalCreationStmt->fetch();
+    $assert(
+        '9.4 La exclusión térmica fuerza L2_SAT aunque se informe un motivo L1',
+        is_array($thermalCreationRow)
+            && $thermalCreationRow['dispatch_level'] === 'L2_SAT'
+            && $thermalCreationRow['category'] === 'TEMPERATURE_COLD',
+        'row=' . json_encode($thermalCreationRow)
     );
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");

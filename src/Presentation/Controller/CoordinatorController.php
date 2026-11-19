@@ -47,9 +47,11 @@ use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\Level1IssueType;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\ColdChainOverridePolicy;
+use VendGuard\Core\Service\RestockerSatSynergyValidator;
 use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Core\Service\ResolutionTaxonomyValidator;
@@ -486,6 +488,20 @@ class CoordinatorController
             );
         }
 
+        // RF-01.2 / D2.2: la pre-clasificación de Coordinación comparte el
+        // predicado de Portal y QR. La categoría solicitada solo se conserva
+        // cuando la clasificación no impone el mapeo QA-AMB-01.
+        $requestedCategory = $category;
+        $rawIssueType = strtoupper(trim((string)($request->getBodyParam('level1_issue_type') ?? '')));
+        $level1IssueType = $rawIssueType !== '' ? Level1IssueType::tryFrom($rawIssueType) : null;
+        $classification = RestockerSatSynergyValidator::classifyCreation(
+            $level1IssueType,
+            $requestedCategory
+        );
+        $category = $classification['category'];
+        $dispatchLevel = $classification['dispatch_level'];
+        $level1IssueType = $classification['level1_issue_type'];
+
         // 3. Urgencia automática y sellado contractual. El perfil sale de la
         //    sede en este instante; el objetivo, de la matriz RF-01 y del techo
         //    sanitario. El vencimiento se ancla al mismo reloj que la apertura.
@@ -520,7 +536,9 @@ class CoordinatorController
                     $now,
                     $slaTargetAt,
                     $reporterName,
-                    $userId
+                    $userId,
+                    $dispatchLevel,
+                    $level1IssueType
                 ): Incident {
                     $incident = new Incident(
                         id: null,
@@ -536,7 +554,9 @@ class CoordinatorController
                         cycleStartedAt: $now->format(DATE_ATOM),
                         slaTargetAt: $slaTargetAt->format(DATE_ATOM),
                         slaTierSnapshot: $slaTier,
-                        slaTargetMinutes: $slaTargetMinutes
+                        slaTargetMinutes: $slaTargetMinutes,
+                        dispatchLevel: $dispatchLevel,
+                        level1IssueType: $level1IssueType
                     );
 
                     $enqueuer = $this->notifications();

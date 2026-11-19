@@ -208,6 +208,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             reporter_email,
                             cycle_started_at,
                             category,
+                            dispatch_level,
+                            level1_issue_type,
                             description,
                             retained_money_amount,
                             photo_path,
@@ -249,6 +251,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             :reporter_email,
                             :cycle_started_at,
                             :category,
+                            :dispatch_level,
+                            :level1_issue_type,
                             :description,
                             :retained_money_amount,
                             :photo_path,
@@ -322,6 +326,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     PDO::PARAM_STR
                 );
                 $stmt->bindValue(':category', $incident->getCategory()->value, PDO::PARAM_STR);
+                $stmt->bindValue(':dispatch_level', $incident->getDispatchLevel()->value, PDO::PARAM_STR);
+                $stmt->bindValue(
+                    ':level1_issue_type',
+                    $incident->getLevel1IssueType()?->value,
+                    $incident->getLevel1IssueType() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+                );
                 $stmt->bindValue(':description', $incident->getDescription(), PDO::PARAM_STR);
                 $stmt->bindValue(':retained_money_amount', $incident->getRetainedMoneyAmount(), $incident->getRetainedMoneyAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':photo_path', $incident->getPhotoPath(), $incident->getPhotoPath() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
