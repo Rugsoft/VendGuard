@@ -8,12 +8,12 @@
 - **Tareas:** [`specs/36-restocker-sat-synergy/tasks.md`](../specs/36-restocker-sat-synergy/tasks.md) · [`odd/tasks/restocker-sat-synergy.md`](../odd/tasks/restocker-sat-synergy.md)
 - **Matriz de trazabilidad:** [`specs/36-restocker-sat-synergy/traceability-matrix.md`](../specs/36-restocker-sat-synergy/traceability-matrix.md)
 - **Fecha de auditoría:** 2026-11-19
-- **Última actualización:** 2026-11-19 · FIX-36-01, FIX-36-02, FIX-36-03 y FIX-36-04 cerrados con composición real
+- **Última actualización:** 2026-11-19 · FIX-36-01, FIX-36-02, FIX-36-03, FIX-36-04, FIX-36-05 y FIX-36-07 cerrados con composición real
 - **Rama:** `feat/restocker-sat-synergy`
 - **Base auditada:** `95f9af1f1f481b14eeaf4b3acfcd623e791486e8` · árbol limpio antes de crear este acta
-- **Alcance:** auditoría de los `RF-01`–`RF-05`, sus criterios EARS, `RNF-01`–`RNF-03`, las decisiones `D1`–`D4`, los casos `C1`–`C2`, las 9 salvaguardas `QA-*`, el §6, los 4 criterios de Definition of Done y las 12 tareas `T-RSS-01`–`T-RSS-12`, con ejecución real de las suites. FIX-36-01, FIX-36-02, FIX-36-03 y FIX-36-04 se corrigieron con prueba de composición; el resto se mantiene como hallazgos de solo lectura.
+- **Alcance:** auditoría de los `RF-01`–`RF-05`, sus criterios EARS, `RNF-01`–`RNF-03`, las decisiones `D1`–`D4`, los casos `C1`–`C2`, las 9 salvaguardas `QA-*`, el §6, los 4 criterios de Definition of Done y las 12 tareas `T-RSS-01`–`T-RSS-12`, con ejecución real de las suites. FIX-36-01 a FIX-36-05 y FIX-36-07 se corrigieron con prueba de composición; FIX-36-06 y FIX-36-08 permanecen abiertos.
 
-> Este documento es un acta viva de hallazgos: registra la evidencia previa de las brechas y los cierres de FIX-36-01, FIX-36-02, FIX-36-03 y FIX-36-04. El resto de brechas permanece abierto. No modifica la Spec, la matriz ni las tareas.
+> Este documento es un acta viva de hallazgos: registra la evidencia previa de las brechas y los cierres de FIX-36-01 a FIX-36-05 y FIX-36-07. FIX-36-06 y FIX-36-08 permanecen abiertos. Cuando un cierre exige actualizar la matriz, las tareas o el ODD, esta acta enlaza la evidencia corregida en esos documentos.
 
 ---
 
@@ -43,7 +43,7 @@ CloudDeploySchemaParityTest             55/55
 
 Y las 12 tareas están marcadas `[x]` en `tasks.md` y en el ODD.
 
-**Sin embargo, aún quedan una brecha funcional de frontend y una brecha de defensa en profundidad.** Los tests de componentes pasan porque ejercitan servicios y gateways directamente con dobles o con colaboradores inyectados; las composiciones de QR, C1, escalado, alta de Coordinación y alta de Portal ya están cubiertas.
+**Sin embargo, aún quedan una brecha de defensa en profundidad y deudas de trazabilidad.** Los tests de componentes pasan porque ejercitan servicios y gateways directamente con dobles o con colaboradores inyectados; las composiciones de QR, C1, escalado, alta de Coordinación y alta de Portal ya están cubiertas, y el escalado ya está disponible también dentro del asistente de visita.
 
 En concreto:
 
@@ -52,9 +52,9 @@ En concreto:
 3. **`D3` / `RF-03.2` — ✅ corregido el 2026-11-19:** el escalado del reponedor ya inyecta el resolvedor de técnico y el notificador; la composición se certifica en `RestockerSatSynergyApiTest` bloque 8.
 4. **`D2.2` / `RF-01.2` — ✅ corregido el 2026-11-19:** el alta de Coordinación lee `level1_issue_type`, aplica `classifyCreation()` con las exclusiones de cuarentena y reclamación y persiste `dispatch_level`/`level1_issue_type`; la composición se certifica en `RestockerSatSynergyApiTest` bloque 9.
 
-Además, falta el botón de escalado dentro del asistente de Visita de Reposición (`RF-05.2.1`) y el mapeo determinista de `level1_issue_type` no es un invariante duro de dominio/SQL (`EARS 01.1.2`).
+El botón de escalado dentro del asistente de Visita de Reposición (`RF-05.2.1`) ya está cubierto; queda el mapeo determinista de `level1_issue_type` como invariante duro de dominio/SQL (`EARS 01.1.2`).
 
-**Conclusión corta:** FIX-36-01, FIX-36-02, FIX-36-03, FIX-36-04 y FIX-36-07 están cerrados y su composición real queda protegida por prueba. La batería ya cubre las composiciones de QR, C1, escalado, alta de Coordinación y alta de Portal; el verde de `run_all` no equivale al cumplimiento funcional completo de la Spec 36.
+**Conclusión corta:** FIX-36-01, FIX-36-02, FIX-36-03, FIX-36-04, FIX-36-05 y FIX-36-07 están cerrados y su composición real queda protegida por prueba. La batería ya cubre las composiciones de QR, C1, escalado, alta de Coordinación, alta de Portal y el botón de escalado dentro de la visita; el verde de `run_all` no equivale al cumplimiento funcional completo de la Spec 36.
 
 ---
 
@@ -66,7 +66,7 @@ Además, falta el botón de escalado dentro del asistente de Visita de Reposici�
 | **2** | **FIX-36-02** | **P0 · Bloqueante C1** | El cierre de turno, la ausencia y la baja no invocaban `handoverLevel1` en producción; el cierre además ignoraba el resultado `ok=false` | `RF-04.2`, `C1`, Art. V.3 | **Cerrada (2026-11-19)** |
 | **3** | **FIX-36-03** | **P0 · Bloqueante D3** | El escalado del reponedor se construye solo con el gateway: sin `technicianResolver` ni `notifier`, queda en `REGISTERED` y sin aviso en el outbox | `RF-03.2`, `D3`, Art. V.3 | **Cerrada (2026-11-19)** |
 | **4** | **FIX-36-04** | **P1 · Alto** | El alta de Coordinación no leía `level1_issue_type` ni fijaba `dispatch_level`; siempre creaba `L2_SAT` | `RF-01.2`, `D2.2` | **Cerrada (2026-11-19)** |
-| **5** | **FIX-36-05** | **P1 · Alto** | El botón «⚡ Escalar Avería al SAT» no existe dentro del asistente de Visita de Reposición del Módulo 34 | `RF-05.2.1` | **Abierta** |
+| **5** | **FIX-36-05** | **P1 · Alto** | El botón «⚡ Escalar Avería al SAT» no existía dentro del asistente de Visita de Reposición del Módulo 34 | `RF-05.2.1` | **Cerrada (2026-11-19)** |
 | **6** | **FIX-36-06** | **P2 · Medio** | El mapeo determinista `level1_issue_type` ↔ `category` no se impone en el constructor de `Incident` ni en el CHECK SQL; solo en `classifyCreation()` | `EARS 01.1.2`, `RNF-02` | **Abierta** |
 | **7** | **FIX-36-07** | **P2 · Medio** | El alta de Portal con L1 ya tiene composición HTTP/PostgreSQL; QR, relevo C1, escalado y Coordinación también están cubiertos | DoD 2, DoD 4, cobertura | **Cerrada** |
 | **8** | **FIX-36-08** | **P3 · Documental** | La matriz y los cierres de tareas declaran cubiertas C1 y `QA-LIM-01` con tests que no ejercitan la composición real; las composiciones QR/C1/Coordinación aún no se citan y hay una cifra desactualizada | Trazabilidad, DoD, tareas | **Abierta** |
@@ -326,7 +326,7 @@ El constructor de `Incident` aplicaba el valor por defecto `L2_SAT`. Por tanto, 
 
 ---
 
-### FIX-36-05 · Falta el escalado dentro del asistente de visita · P1 · Abierta
+### FIX-36-05 · Escalado dentro del asistente de visita · P1 · ✅ Cerrada (2026-11-19)
 
 #### Requisito
 
@@ -334,27 +334,29 @@ El constructor de `Incident` aplicaba el valor por defecto `L2_SAT`. Por tanto, 
 
 #### Evidencia
 
-`public/assets/js/components/RestockerRouteView.js` solo invoca `openEscalate()` en:
-
-- línea 3249 — tarjeta de máquina;
-- línea 3333 — bandeja de avisos L1.
-
-El modal de visita comienza en la línea 3960 (`data-testid="modal-restock-visit"`) y no contiene ninguna llamada a `openEscalate()` ni el literal «⚡ Escalar Avería al SAT». El test `restocker_route_view.test.mjs` 234/234 certifica el botón en la tarjeta y en la bandeja, pero no en el asistente de visita.
+La brecha consistía en que `public/assets/js/components/RestockerRouteView.js` solo invocaba `openEscalate()` desde la tarjeta de máquina y la bandeja de avisos L1. El modal `data-testid="modal-restock-visit"` no ofrecía ninguna acción de escalado, de modo que una avería descubierta a puerta abierta obligaba a cerrar el asistente y buscar la tarjeta.
 
 #### Impacto
 
-El reponedor puede escalar desde la tarjeta de la máquina, pero no desde el flujo guiado de visita, que es el contexto natural donde descubre la avería con la máquina abierta. Es una desviación de alcance funcional, no un fallo de backend.
+El reponedor podía escalar desde la tarjeta, pero no desde el flujo guiado de visita, que es el contexto natural donde descubre la avería con la máquina abierta. Era una desviación de alcance funcional, no un fallo de backend.
 
-#### Corrección propuesta
+#### Corrección aplicada
 
-1. Añadir el botón en el modal de visita, junto a las acciones de la visita, reutilizando `openEscalate(machine)` y conservando el contexto de la máquina.
-2. Añadir una aserción en `restocker_route_view.test.mjs` que compruebe el botón dentro de `modal-restock-visit` y que abre el modal de escalado con la máquina de la visita.
+1. El asistente de visita incorpora un botón «⚡ Escalar Avería al SAT» (`data-testid="btn-escalate-from-visit"`) junto a las acciones de cierre. Invoca `openEscalate(visitMachine, visitMachine?.active_l1_incident || null)`, conserva la máquina abierta y propaga la incidencia L1 cuando existe.
+2. `RestockerRouteView` mantiene el asistente de visita debajo del modal de escalado (`z-index` 75 frente a 86), por lo que el reponedor no pierde el contexto al reportar la avería.
+3. `restocker_route_view.test.mjs` extrae el bloque completo de `modal-restock-visit`, comprueba que el botón y su expresión de apertura están dentro, y ejecuta `openEscalate()` con la máquina y su aviso L1.
 
 #### Criterios de aceptación
 
-- [ ] El botón «⚡ Escalar Avería al SAT» aparece dentro del asistente de visita.
-- [ ] Abre el modal de escalado con la máquina y la incidencia correctas.
-- [ ] La prueba falla si se retira del modal de visita.
+- [x] El botón «⚡ Escalar Avería al SAT» aparece dentro del asistente de visita.
+- [x] Abre el modal de escalado con la máquina y la incidencia correctas.
+- [x] La prueba falla si se retira del modal de visita.
+
+#### Cierre verificado
+
+- **Composición real:** `node tests/frontend/restocker_route_view.test.mjs` → **236/236 aserciones, 0 fallos, exit 0**. Las dos aserciones nuevas verifican el botón dentro de `visitModalSource` y que `openEscalate()` conserva `visitMachine` y su `active_l1_incident`.
+- **Regresiones:** la suite completa de `RestockerRouteView` sigue verde, incluidos los flujos de visita, FEFO, evidencia, cola offline y L1.
+- **Alcance:** el botón queda disponible en tarjeta, bandeja L1 y asistente de visita; no se modificó el contrato de escalado ni el backend.
 
 ---
 
@@ -431,12 +433,11 @@ Añadir pruebas de integración HTTP/PostgreSQL para cada flujo anterior, con as
 - La misma matriz declara `QA-LIM-01` cubierto por `RestockerSatSynergyIntegrationsTest` 27/27 y `RestockerSatSynergyConstitutionalTest` 17/17; la primera usa un gateway falso y la segunda prueba la absorción sobre un L2 preexistente, no la promoción L1→L2 desde QR. La composición real ya existe en `RestockerSatSynergyApiTest` bloques 6 a 9 (55/55), pero la matriz aún no la cita.
 - `docs/auditoria_spec_36_brechas.md` (este documento) es la corrección de esa sobrecertificación.
 - La matriz cita `LocationPortalReopenAuditTest` con 9/9; la ejecución real produce 18 líneas `[PASS]`. Es una imprecisión menor, ajena al núcleo del módulo.
-- `tasks.md` y el ODD marcan 12/12 tareas `[x]`, pero los cierres de `T-RSS-06`, `T-RSS-07`, `T-RSS-08`, `T-RSS-11` y `T-RSS-12` contienen afirmaciones que la composición real no respalda o que la matriz aún no enlaza:
+- `tasks.md` y el ODD marcan 12/12 tareas `[x]`, pero los cierres de `T-RSS-06`, `T-RSS-07`, `T-RSS-08` y `T-RSS-12` contienen afirmaciones que la composición real no respalda o que la matriz aún no enlaza:
   - `T-RSS-06`: aviso al outbox y sugerencia de técnico en el escalado; el escalado del reponedor ya los inyecta (bloque 8), el alta L1 de Coordinación está cubierta (bloque 9) y el alta de Portal también (`CreateIncidentEndpointTest` caso 9); falta el enlace en la matriz.
   - `T-RSS-07`: `ShiftLifecycleService`/`TechnicianAbsenceService` ya relevan L1 en producción; la matriz aún no cita la composición del bloque 7.
   - `T-RSS-08`: rutas RBAC y controladores; el alta de Coordinación ya pre-clasifica L1 (bloque 9) y el alta de Portal también tiene composición (`CreateIncidentEndpointTest` caso 9); falta el enlace en la matriz.
-  - `T-RSS-11`: botón de escalado en ticket/máquina/visita; falta en la visita.
-  - `T-RSS-12`: batería global en verde; QR, C1, escalado, alta de Coordinación y alta de Portal ya tienen composición; faltan el botón de visita y el enlace de matriz.
+  - `T-RSS-12`: batería global en verde; QR, C1, escalado, alta de Coordinación, alta de Portal y botón de visita ya tienen composición; falta el enlace de matriz.
 
 #### Impacto
 
@@ -444,7 +445,7 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 
 #### Corrección propuesta
 
-1. No cerrar la Spec 36 hasta que FIX-36-05 esté corregido y cubierto por prueba de composición (FIX-36-01 a FIX-36-04 y FIX-36-07 ya están cerrados).
+1. No cerrar la Spec 36 hasta que FIX-36-06 esté corregido y cubierto por prueba (FIX-36-01 a FIX-36-05 y FIX-36-07 ya están cerrados).
 2. Actualizar la matriz para que cada fila enlace una prueba que ejecute la ruta real, no solo el servicio.
 3. Corregir el recuento de `LocationPortalReopenAuditTest` o retirar la cita si no es una suite del módulo.
 4. Reabrir o anotar los cierres de `T-RSS-06/07/08/11/12` hasta que la evidencia los respalde.
@@ -463,7 +464,7 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | :--- | :--- | :--- |
 | **1. Migración `032` y convergencia 1:1 con tipos #43/#44, ampliaciones, columnas, CHECK y 4 semillas** | `032_restocker_sat_synergy.sql` (11.724 bytes) con tipos, columnas, FK, CHECK, índice, operaciones Offline y las 4 parejas `RC-L1-*`/`SS-L1-*`; `supabase_seeds.sql` con 11 referencias; `SchemaConvergenceParityTest` 42/42; `PostgresRestockerSatSynergySchemaTest` 28/28; `CloudDeploySchemaParityTest` 55/55 | ✅ |
 | **2. Los servicios de aplicación imponen pre-clasificación, resolución L1, escalado en 3 ramas, auto-escalado QR, reapertura, `site_coincidence`, relevo C1, horas y opacidad** | Servicios y gateway verdes; QR, C1, el escalado, el alta L1 de Coordinación y el alta de Portal ya inyectan sinergia y tienen composición real (`CreateIncidentEndpointTest` caso 9); falta enlazar la evidencia en la matriz | ✅ |
-| **3. `RestockerRouteView`, `TechnicianRouteView` y Coordinación implementan la operativa completa, el botón de escalado, el banner, la cola Offline y el filtro/triaje dual** | Frontend 234/234 + 18/18 + guards verdes; falta el botón de escalado dentro del asistente de Visita de Reposición | ⚠️ |
+| **3. `RestockerRouteView`, `TechnicianRouteView` y Coordinación implementan la operativa completa, el botón de escalado, el banner, la cola Offline y el filtro/triaje dual** | Frontend 236/236 + 18/18 + guards verdes; el botón «⚡ Escalar Avería al SAT» está en tarjeta, bandeja L1 y asistente de visita | ✅ |
 | **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Batería limpia 441/441 · 16.987 aserciones · 0 fallos · `DocMetricsGuard` coherente · exit 0; 8 suites `new_engine` de la auditoría 8/8 verdes; la suite de composición actual queda en 55/55 y `CreateIncidentEndpointTest` cubre el alta de Portal en su caso 9. Es verde y cubre la absorción QR, el relevo C1, el escalado real, el alta L1 de Coordinación y el alta de Portal | ✅ en lo literal; insuficiente como certificación funcional |
 
 ---
@@ -482,8 +483,8 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | `T-RSS-08` | `[x]` | API 55/55; constitucional 17/17 | ✅ el alta de Coordinación ya pre-clasifica L1 (bloque 9); el alta de Portal ya tiene composición (`CreateIncidentEndpointTest` caso 9) |
 | `T-RSS-09` | `[x]` | API/constitucional, `site_coincidence`, filtro y promoción | ✅ incluye la composición QR/C1 real (bloques 6 y 7) |
 | `T-RSS-10` | `[x]` | Frontend 18/18 | ✅ coherente |
-| `T-RSS-11` | `[x]` | Frontend 234/234 | ⚠️ falta el botón de escalado en el asistente de visita |
-| `T-RSS-12` | `[x]` | Batería 441/441 · 16.987 | ⚠️ verde real; QR, C1, escalado, alta de Coordinación y alta de Portal ya están cubiertos; faltan el botón de visita y el enlace de matriz |
+| `T-RSS-11` | `[x]` | Frontend 236/236 | ✅ botón de escalado en tarjeta, bandeja L1 y asistente de visita |
+| `T-RSS-12` | `[x]` | Batería 441/441 · 16.987 | ⚠️ verde real; QR, C1, escalado, alta de Coordinación, alta de Portal y botón de visita ya están cubiertos; falta el enlace de matriz |
 
 **Las 12 tareas están cerradas administrativamente; no todas están respaldadas funcionalmente por la composición real.**
 
@@ -525,7 +526,7 @@ Nota: una primera corrida concurrente con otras suites sobre la misma base produ
 | `tests/integration/RestockerRbacConstitutionalTest.php` | 27/27 | 0 |
 | `tests/integration/PdoWorkHoursRoleFilterTest.php` | 18/18 | 0 |
 | `tests/frontend/technician_and_coordinator_synergy.test.mjs` | 18/18 | 0 |
-| `tests/frontend/restocker_route_view.test.mjs` | 234/234 | 0 |
+| `tests/frontend/restocker_route_view.test.mjs` | 236/236 | 0 |
 | `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` | 23/23 | 0 |
 | `tests/unit/FrontendTemplateCompileTest.mjs` | 15/15 | 0 |
 | `tests/unit/DesignTokenDebtRatchetTest.mjs` | 3/3 | 0 |
@@ -541,13 +542,13 @@ Nota: una primera corrida concurrente con otras suites sobre la misma base produ
 2. ✅ FIX-36-02  Cablear C1: cierre de turno, ausencia y baja · cerrado 2026-11-19
 3. ✅ FIX-36-03  Inyectar resolvedor de técnico y notificador en el escalado · cerrado 2026-11-19
 4. ✅ FIX-36-04  Pre-clasificación L1 en el alta de Coordinación · cerrado 2026-11-19
-5. FIX-36-05  Botón de escalado dentro del asistente de visita
+5. ✅ FIX-36-05  Botón de escalado dentro del asistente de visita · cerrado 2026-11-19
 6. FIX-36-06  Invariante de mapeo en dominio/SQL
 7. ✅ FIX-36-07  Pruebas de composición de todos los flujos anteriores · cerrado 2026-11-19
 8. FIX-36-08  Actualizar matriz, tareas y ODD tras cerrar los anteriores
 ```
 
-FIX-36-01 a FIX-36-04 y FIX-36-07 ya están cerrados. FIX-36-05 completa un requisito funcional. FIX-36-06 y FIX-36-08 son defensa en profundidad y trazabilidad; no deben cerrarse antes que el P1 restante.
+FIX-36-01 a FIX-36-05 y FIX-36-07 ya están cerrados. FIX-36-06 y FIX-36-08 son defensa en profundidad y trazabilidad; deben cerrarse antes de declarar la Spec 36 completa.
 
 ---
 
@@ -561,7 +562,7 @@ La Spec 36 podrá declararse al 100 % cuando:
 - [x] El escalado del reponedor asigne técnico y encole aviso sin `assign_technician_id`. Cerrado el 2026-11-19; aserciones 8.1-8.6 de `RestockerSatSynergyApiTest` 55/55.
 - [x] El alta de Coordinación pre-clasifique L1 y respete las exclusiones de cuarentena y reclamación. Cerrado el 2026-11-19; aserciones 9.1-9.7 de `RestockerSatSynergyApiTest` 55/55.
 - [x] El alta de Portal pre-clasifique L1 y respete la cuarentena. Cerrado el 2026-11-19; aserciones 9.1-9.2 de `CreateIncidentEndpointTest`.
-- [ ] El botón de escalado exista dentro del asistente de visita.
+- [x] El botón de escalado exista dentro del asistente de visita. Cerrado el 2026-11-19; `restocker_route_view.test.mjs` 236/236, aserciones del botón y de `openEscalate()` con la máquina y su aviso L1.
 - [ ] El mapeo `level1_issue_type` ↔ `category` sea un invariante de dominio o exista una enmienda aprobada.
 - [ ] Existan pruebas de composición que fallen si se elimina cualquiera de los cableados anteriores.
 - [ ] La matriz, las tareas y el ODD reflejen la evidencia real, sin declarar cubierto lo que no se ejecuta.

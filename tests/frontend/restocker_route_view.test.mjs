@@ -891,6 +891,23 @@ assert('El botón de visita se deshabilita con aviso explícito', viewSource.inc
 
 await visitVm.openVisitAssistant(visitVm.machines[0]);
 assert('La visita carga el planograma de la máquina elegida', loadedVisitMachineId === 7 && visitVm.showVisitModal === true && visitVm.visitPlanogram.slots.length === 3);
+assert(
+  'El asistente de visita ofrece el escalado al SAT con la máquina y su aviso L1',
+  visitModalSource.includes('data-testid="btn-escalate-from-visit"')
+    && visitModalSource.includes('@click="openEscalate(visitMachine, visitMachine?.active_l1_incident || null)"')
+    && visitModalSource.includes('⚡ Escalar Avería al SAT')
+);
+const visitEscalationIncident = { id: 501, machine_id: 7, status: 'ASSIGNED' };
+const visitEscalationMachine = { ...visitVm.visitMachine, active_l1_incident: visitEscalationIncident };
+visitVm.openEscalate(visitEscalationMachine, visitEscalationMachine.active_l1_incident);
+assert(
+  'El escalado desde la visita abre el modal con la máquina y la incidencia abiertas',
+  visitVm.showEscalateModal === true
+    && visitVm.showVisitModal === true
+    && visitVm.escalateMachine === visitEscalationMachine
+    && visitVm.escalateIncident === visitEscalationIncident
+);
+visitVm.showEscalateModal = false;
 assert('La visita inicializa un ítem por carril y un client_mutation_id', visitVm.visitForm.items.length === 3 && visitVm.visitForm.client_mutation_id.length > 8 && visitVm.visitForm.started_at.length > 10);
 assert('La visita preselecciona el lote FEFO recomendado', visitVm.visitForm.items[0].loaded_batch_code === 'LOTE-NEW1' && visitVm.visitForm.items[1].loaded_batch_code === 'LOTE-NEW2');
 assert('El checklist inicial adapta los cinco bloques al tipo de máquina', visitVm.visitHygieneItems.length === 5 && visitVm.visitHygieneMissing.length === 4 && visitVm.visitForm.hygiene_checklist.cabin_spills_checked === null);

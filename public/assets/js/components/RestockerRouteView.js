@@ -4244,6 +4244,17 @@ export const RestockerRouteView = {
                 </div>
               </div>
 
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary"
+                data-testid="btn-escalate-from-visit"
+                :data-machine-id="visitMachine?.id"
+                style="width: 100%; margin-top: 14px;"
+                @click="openEscalate(visitMachine, visitMachine?.active_l1_incident || null)"
+              >
+                ⚡ Escalar Avería al SAT
+              </button>
+
               <div style="display: flex; gap: 8px; margin-top: 14px;">
                 <button type="button" class="vg-btn vg-btn-lg vg-btn-secondary flex-grow-1" @click="closeVisitAssistant">
                   Cancelar
