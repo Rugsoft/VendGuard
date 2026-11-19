@@ -268,7 +268,22 @@ final class ShiftLifecycleService
 
             // C1: un L1 en IN_PROGRESS bloquea el cierre; los ASSIGNED se
             // relevan al suplente o vuelven a REGISTERED antes de cerrar.
-            $this->synergyService?->handoverLevel1($technicianId, 'SHIFT_CLOSE', $cleanReason);
+            $handover = $this->synergyService?->handoverLevel1($technicianId, 'SHIFT_CLOSE', $cleanReason);
+            if (is_array($handover) && ($handover['ok'] ?? false) !== true) {
+                $blockedCodes = array_values(array_map(
+                    static fn (mixed $code): string => (string)$code,
+                    (array)($handover['blocked_ticket_codes'] ?? [])
+                ));
+                $detail = $blockedCodes !== []
+                    ? ' Avisos en curso: ' . implode(', ', $blockedCodes) . '.'
+                    : '';
+
+                throw new InvalidShiftTransitionException(
+                    'No se puede cerrar el turno porque hay avisos L1 en curso.' . $detail,
+                    (string)($handover['error_code'] ?? 'SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1'),
+                    (int)($handover['http_status'] ?? 409)
+                );
+            }
 
             $now = new DateTimeImmutable('now');
             $closed = $this->shiftRepo->closeShift(

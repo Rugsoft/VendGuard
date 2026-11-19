@@ -12,6 +12,8 @@ declare(strict_types=1);
  *   3. Volcado de conflicto offline (Art. III.3).
  *   4. Coordinación: sugerencia de reponedores y conmutación de nivel.
  *   5. Opacidad del alta QR: `level1_issue_type` no se expone al ciudadano.
+ *   6. Auto-escalado QR real (FIX-36-01).
+ *   7. Relevo L1 en cierre, ausencia y baja (FIX-36-02).
  *
  * CATEGORÍA: `new_engine`. Exige PostgreSQL; sin motor responde código 2. El
  * esquema aislado se retira con `CASCADE` en el `finally`.
@@ -22,6 +24,7 @@ require_once __DIR__ . '/../Support/PostgresFixtureBuilder.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SqlScriptSplitter.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/PostgresMigrationRunner.php';
 
+use VendGuard\Application\Service\AdminStaffService;
 use VendGuard\Application\Service\AuthService;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
@@ -90,6 +93,9 @@ try {
     $coordinatorId = $createUser('coord', 'COORDINATOR', 'Coordinación T-RSS-08');
     $restockerId = $createUser('rest', 'RESTOCKER', 'Reponedora T-RSS-08');
     $backupId = $createUser('backup', 'RESTOCKER', 'Reponedor Suplente T-RSS-08');
+    $shiftRestockerId = $createUser('shift', 'RESTOCKER', 'Reponedora de Cierre T-RSS-08');
+    $deactivateRestockerId = $createUser('deact', 'RESTOCKER', 'Reponedora de Baja T-RSS-08');
+    $staffRestockerId = $createUser('staff', 'RESTOCKER', 'Reponedora de Staff T-RSS-08');
     $technicianId = $createUser('sat', 'TECHNICIAN', 'Técnico SAT T-RSS-08');
 
     $zoneId = (int)$pdo->query(
@@ -129,10 +135,31 @@ try {
     $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-SNACK-04']);
     $refundMachineId = (int)$machineStmt->fetchColumn();
 
-    $pdo->prepare(
+    $fixtureMachines = [];
+    foreach ([
+        'RSS8-SNACK-05',
+        'RSS8-SNACK-06',
+        'RSS8-SNACK-07',
+        'RSS8-SNACK-08',
+        'RSS8-SNACK-09',
+    ] as $fixtureMachineCode) {
+        $machineStmt->execute([':location_id' => $locationId, ':code' => $fixtureMachineCode]);
+        $fixtureMachines[$fixtureMachineCode] = (int)$machineStmt->fetchColumn();
+    }
+
+    $zoneAssignmentStmt = $pdo->prepare(
         "INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
          VALUES (:id, :zone, 'PRIMARY', TRUE)"
-    )->execute([':id' => $restockerId, ':zone' => $zoneId]);
+    );
+    foreach ([
+        $restockerId,
+        $backupId,
+        $shiftRestockerId,
+        $deactivateRestockerId,
+        $staffRestockerId,
+    ] as $zoneRestockerId) {
+        $zoneAssignmentStmt->execute([':id' => $zoneRestockerId, ':zone' => $zoneId]);
+    }
 
     $pdo->prepare(
         "INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary)
@@ -141,13 +168,20 @@ try {
 
     $shiftStmt = $pdo->prepare(
         "INSERT INTO technician_shifts (technician_id, shift_date, status, started_at)
-         VALUES (:id, CURRENT_DATE, 'ON_SHIFT', CURRENT_TIMESTAMP) RETURNING id"
+         VALUES (:id, CURRENT_DATE, 'ON_SHIFT', CURRENT_TIMESTAMP - INTERVAL '2 hours') RETURNING id"
     );
     $shiftStmt->execute([':id' => $restockerId]);
     $shiftStmt->execute([':id' => $backupId]);
+    $shiftStmt->execute([':id' => $shiftRestockerId]);
+    $shiftStmt->execute([':id' => $staffRestockerId]);
     $shiftStmt->execute([':id' => $technicianId]);
 
-    $seedIncident = static function (string $code, int $machineId) use ($pdo, $locationId, $restockerId): int {
+    $seedIncident = static function (
+        string $code,
+        int $machineId,
+        ?int $assigneeId = null,
+        string $status = 'ASSIGNED'
+    ) use ($pdo, $locationId, $restockerId): int {
         $stmt = $pdo->prepare(
             "INSERT INTO incidents (
                 ticket_code, machine_id, location_id, category, description, urgency, status,
@@ -155,7 +189,7 @@ try {
                 sla_tier_snapshot, sla_target_minutes, cycle_started_at
              ) VALUES (
                 :code, :machine, :location, 'PRODUCT_JAM', 'Envase atascado en el carril de salida',
-                'MEDIUM', 'ASSIGNED', 'L1_RESTOCKER', 'MINOR_SPIRAL_JAM', :restocker, CURRENT_TIMESTAMP,
+                'MEDIUM', :status, 'L1_RESTOCKER', 'MINOR_SPIRAL_JAM', :restocker, CURRENT_TIMESTAMP,
                 'STANDARD', 1440, CURRENT_TIMESTAMP
              ) RETURNING id"
         );
@@ -163,7 +197,8 @@ try {
             ':code' => $code,
             ':machine' => $machineId,
             ':location' => $locationId,
-            ':restocker' => $restockerId,
+            ':restocker' => $assigneeId ?? $restockerId,
+            ':status' => $status,
         ]);
 
         return (int)$stmt->fetchColumn();
@@ -173,8 +208,34 @@ try {
     $dispatchIncidentId = $seedIncident('INC-2026-8802', $dispatchMachineId);
     $thermalIncidentId = $seedIncident('INC-2026-8803', $thermalMachineId);
     $refundIncidentId = $seedIncident('INC-2026-8804', $refundMachineId);
+    $shiftBlockIncidentId = $seedIncident(
+        'INC-2026-8805',
+        $fixtureMachines['RSS8-SNACK-05'],
+        $shiftRestockerId,
+        'IN_PROGRESS'
+    );
+    $shiftHandoverIncidentId = $seedIncident(
+        'INC-2026-8806',
+        $fixtureMachines['RSS8-SNACK-06'],
+        $shiftRestockerId
+    );
+    $absenceIncidentId = $seedIncident(
+        'INC-2026-8807',
+        $fixtureMachines['RSS8-SNACK-07'],
+        $restockerId
+    );
+    $deactivateIncidentId = $seedIncident(
+        'INC-2026-8808',
+        $fixtureMachines['RSS8-SNACK-08'],
+        $deactivateRestockerId
+    );
+    $staffDeactivateIncidentId = $seedIncident(
+        'INC-2026-8809',
+        $fixtureMachines['RSS8-SNACK-09'],
+        $staffRestockerId
+    );
 
-    $seedCustody = static function (int $seedIncidentId) use ($pdo, $restockerId): void {
+    $seedCustody = static function (int $seedIncidentId, ?int $assigneeId = null) use ($pdo, $restockerId): void {
         $stmt = $pdo->prepare(
             "INSERT INTO incident_assignments (
                 incident_id, technician_id, technician_name_snapshot, technician_code_snapshot,
@@ -183,15 +244,21 @@ try {
                 :incident, :restocker, 'Reponedora T-RSS-08', 'RSS8-REST', 'COORDINATOR_ASSIGN', CURRENT_TIMESTAMP
              )"
         );
-        $stmt->execute([':incident' => $seedIncidentId, ':restocker' => $restockerId]);
+        $stmt->execute([':incident' => $seedIncidentId, ':restocker' => $assigneeId ?? $restockerId]);
     };
     $seedCustody($thermalIncidentId);
     $seedCustody($refundIncidentId);
+    $seedCustody($shiftBlockIncidentId, $shiftRestockerId);
+    $seedCustody($shiftHandoverIncidentId, $shiftRestockerId);
+    $seedCustody($absenceIncidentId, $restockerId);
+    $seedCustody($deactivateIncidentId, $deactivateRestockerId);
+    $seedCustody($staffDeactivateIncidentId, $staffRestockerId);
 
     $userRepo = new PdoUserRepository($pdo);
     $authService = new AuthService(null, $userRepo);
     $coordinatorToken = $authService->generateInternalToken($userRepo->findById($coordinatorId));
     $restockerToken = $authService->generateInternalToken($userRepo->findById($restockerId));
+    $shiftRestockerToken = $authService->generateInternalToken($userRepo->findById($shiftRestockerId));
     $technicianToken = $authService->generateInternalToken($userRepo->findById($technicianId));
 
     $router = AppRouter::create();
@@ -432,6 +499,210 @@ try {
             && $refundRow['category'] === 'OTHER'
             && (int)($refundRow['assigned_technician_id'] ?? 0) === $technicianId,
         'row=' . json_encode($refundRow)
+    );
+
+    echo "\n--- 7. Relevo L1 en cierre, ausencia y baja (FIX-36-02) ---\n";
+
+    $blockedClose = $call('POST', '/api/technician/shifts/close', [
+        'close_reason' => 'Fin de jornada con un aviso L1 en curso',
+    ], $shiftRestockerToken);
+    $assert(
+        '7.1 El cierre con un L1 IN_PROGRESS responde 409 SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1',
+        $blockedClose->getStatusCode() === 409
+            && $errorCode($blockedClose) === 'SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1',
+        'status=' . $blockedClose->getStatusCode() . ' code=' . $errorCode($blockedClose)
+    );
+
+    $openShiftStmt = $pdo->prepare(
+        'SELECT status, closed_at FROM technician_shifts
+          WHERE technician_id = :id AND closed_at IS NULL
+          ORDER BY id DESC LIMIT 1'
+    );
+    $openShiftStmt->execute([':id' => $shiftRestockerId]);
+    $openShiftRow = $openShiftStmt->fetch();
+    $assert(
+        '7.2 El turno bloqueado sigue abierto',
+        is_array($openShiftRow) && $openShiftRow['closed_at'] === null,
+        'row=' . json_encode($openShiftRow)
+    );
+
+    $pdo->prepare("UPDATE incidents SET status = 'RESOLVED' WHERE id = :id")
+        ->execute([':id' => $shiftBlockIncidentId]);
+
+    $close = $call('POST', '/api/technician/shifts/close', [
+        'close_reason' => 'Fin de jornada tras resolver el aviso',
+    ], $shiftRestockerToken);
+    $assert(
+        '7.3 El cierre con un L1 ASSIGNED responde 200',
+        $close->getStatusCode() === 200,
+        'status=' . $close->getStatusCode() . ' ' . $errorCode($close)
+    );
+
+    $closedShiftStmt = $pdo->prepare(
+        'SELECT status, closed_at FROM technician_shifts
+          WHERE technician_id = :id ORDER BY id DESC LIMIT 1'
+    );
+    $closedShiftStmt->execute([':id' => $shiftRestockerId]);
+    $closedShiftRow = $closedShiftStmt->fetch();
+    $assert(
+        '7.4 El turno queda cerrado tras el relevo',
+        is_array($closedShiftRow)
+            && $closedShiftRow['status'] === 'OFF_SHIFT'
+            && $closedShiftRow['closed_at'] !== null,
+        'row=' . json_encode($closedShiftRow)
+    );
+
+    $shiftIncidentStmt = $pdo->prepare(
+        'SELECT status, assigned_technician_id FROM incidents WHERE id = :id'
+    );
+    $shiftIncidentStmt->execute([':id' => $shiftHandoverIncidentId]);
+    $shiftIncidentRow = $shiftIncidentStmt->fetch();
+    $assert(
+        '7.5 El L1 ASSIGNED se releva al reponedor suplente',
+        is_array($shiftIncidentRow)
+            && $shiftIncidentRow['status'] === 'ASSIGNED'
+            && (int)($shiftIncidentRow['assigned_technician_id'] ?? 0) === $backupId,
+        'row=' . json_encode($shiftIncidentRow)
+    );
+
+    $handoverCustodyStmt = $pdo->prepare(
+        'SELECT technician_id, assignment_source, unassignment_reason_type
+           FROM incident_assignments
+          WHERE incident_id = :id
+          ORDER BY id DESC LIMIT 1'
+    );
+    $handoverCustodyStmt->execute([':id' => $shiftHandoverIncidentId]);
+    $handoverCustodyRow = $handoverCustodyStmt->fetch();
+    $assert(
+        '7.6 La custodia del cierre usa RESTOCKER_SHIFT_HANDOVER',
+        is_array($handoverCustodyRow)
+            && (int)$handoverCustodyRow['technician_id'] === $backupId
+            && $handoverCustodyRow['assignment_source'] === 'RESTOCKER_SHIFT_HANDOVER'
+            && $handoverCustodyRow['unassignment_reason_type'] === null,
+        'row=' . json_encode($handoverCustodyRow)
+    );
+
+    $absence = $call('POST', "/api/coordinator/technicians/{$restockerId}/absences", [
+        'reason' => 'SICK_LEAVE',
+        'starts_at' => date('Y-m-d'),
+        'ends_at' => date('Y-m-d', strtotime('+1 day')),
+        'notes' => 'Cobertura de ausencia para FIX-36-02',
+    ], $coordinatorToken);
+    $assert(
+        '7.7 El alta de ausencia vigente responde 201',
+        $absence->getStatusCode() === 201,
+        'status=' . $absence->getStatusCode() . ' ' . $errorCode($absence)
+    );
+
+    $absenceIncidentStmt = $pdo->prepare(
+        'SELECT status, assigned_technician_id FROM incidents WHERE id = :id'
+    );
+    $absenceIncidentStmt->execute([':id' => $absenceIncidentId]);
+    $absenceIncidentRow = $absenceIncidentStmt->fetch();
+    $assert(
+        '7.8 El L1 de la ausencia se reasigna al suplente',
+        is_array($absenceIncidentRow)
+            && $absenceIncidentRow['status'] === 'ASSIGNED'
+            && (int)($absenceIncidentRow['assigned_technician_id'] ?? 0) === $backupId,
+        'row=' . json_encode($absenceIncidentRow)
+    );
+
+    $absenceCustodyStmt = $pdo->prepare(
+        'SELECT technician_id, assignment_source, unassignment_reason_type
+           FROM incident_assignments
+          WHERE incident_id = :id
+          ORDER BY id DESC LIMIT 1'
+    );
+    $absenceCustodyStmt->execute([':id' => $absenceIncidentId]);
+    $absenceCustodyRow = $absenceCustodyStmt->fetch();
+    $assert(
+        '7.9 La custodia de la ausencia usa ABSENCE_COVERAGE_REASSIGN',
+        is_array($absenceCustodyRow)
+            && (int)$absenceCustodyRow['technician_id'] === $backupId
+            && $absenceCustodyRow['assignment_source'] === 'ABSENCE_COVERAGE_REASSIGN'
+            && $absenceCustodyRow['unassignment_reason_type'] === null,
+        'row=' . json_encode($absenceCustodyRow)
+    );
+
+    $directDeactivate = $call('PATCH', "/api/coordinator/users/{$deactivateRestockerId}/deactivate", [], $coordinatorToken);
+    $assert(
+        '7.10 La baja directa de una reponedora responde 200',
+        $directDeactivate->getStatusCode() === 200,
+        'status=' . $directDeactivate->getStatusCode() . ' ' . $errorCode($directDeactivate)
+    );
+
+    $deactivatedUserStmt = $pdo->prepare('SELECT is_active, deleted_at FROM users WHERE id = :id');
+    $deactivatedUserStmt->execute([':id' => $deactivateRestockerId]);
+    $deactivatedUserRow = $deactivatedUserStmt->fetch();
+    $assert(
+        '7.11 La cuenta queda inactiva',
+        is_array($deactivatedUserRow)
+            && (bool)$deactivatedUserRow['is_active'] === false
+            && $deactivatedUserRow['deleted_at'] !== null,
+        'row=' . json_encode($deactivatedUserRow)
+    );
+
+    $deactivateIncidentStmt = $pdo->prepare(
+        'SELECT status, assigned_technician_id FROM incidents WHERE id = :id'
+    );
+    $deactivateIncidentStmt->execute([':id' => $deactivateIncidentId]);
+    $deactivateIncidentRow = $deactivateIncidentStmt->fetch();
+    $reassignedRestockerId = (int)($deactivateIncidentRow['assigned_technician_id'] ?? 0);
+    $reassignedUserStmt = $pdo->prepare('SELECT is_active FROM users WHERE id = :id');
+    $reassignedUserStmt->execute([':id' => $reassignedRestockerId]);
+    $reassignedUserRow = $reassignedUserStmt->fetch();
+    $assert(
+        '7.12 El L1 no queda asignado a la cuenta inactiva',
+        is_array($deactivateIncidentRow)
+            && $deactivateIncidentRow['status'] === 'ASSIGNED'
+            && $reassignedRestockerId > 0
+            && $reassignedRestockerId !== $deactivateRestockerId
+            && is_array($reassignedUserRow)
+            && (bool)$reassignedUserRow['is_active'] === true,
+        'row=' . json_encode($deactivateIncidentRow) . ' assigned_user=' . json_encode($reassignedUserRow)
+    );
+
+    $staffDeactivate = $call('PUT', "/api/coordinator/staff/{$staffRestockerId}", [
+        'is_active' => false,
+    ], $coordinatorToken);
+    $assert(
+        '7.13 La baja por staff responde 200',
+        $staffDeactivate->getStatusCode() === 200,
+        'status=' . $staffDeactivate->getStatusCode() . ' ' . $errorCode($staffDeactivate)
+    );
+
+    $staffIncidentStmt = $pdo->prepare(
+        'SELECT status, assigned_technician_id FROM incidents WHERE id = :id'
+    );
+    $staffIncidentStmt->execute([':id' => $staffDeactivateIncidentId]);
+    $staffIncidentRow = $staffIncidentStmt->fetch();
+    $staffReassignedId = (int)($staffIncidentRow['assigned_technician_id'] ?? 0);
+    $staffReassignedUserStmt = $pdo->prepare('SELECT is_active FROM users WHERE id = :id');
+    $staffReassignedUserStmt->execute([':id' => $staffReassignedId]);
+    $staffReassignedUserRow = $staffReassignedUserStmt->fetch();
+    $assert(
+        '7.14 El L1 se releva antes de cerrar el turno por staff',
+        is_array($staffIncidentRow)
+            && $staffIncidentRow['status'] === 'ASSIGNED'
+            && $staffReassignedId > 0
+            && $staffReassignedId !== $staffRestockerId
+            && is_array($staffReassignedUserRow)
+            && (bool)$staffReassignedUserRow['is_active'] === true,
+        'row=' . json_encode($staffIncidentRow) . ' assigned_user=' . json_encode($staffReassignedUserRow)
+    );
+
+    $staffShiftStmt = $pdo->prepare(
+        'SELECT status, close_reason FROM technician_shifts
+          WHERE technician_id = :id ORDER BY id DESC LIMIT 1'
+    );
+    $staffShiftStmt->execute([':id' => $staffRestockerId]);
+    $staffShiftRow = $staffShiftStmt->fetch();
+    $assert(
+        '7.15 El turno de la baja por staff queda cerrado con el motivo contractual',
+        is_array($staffShiftRow)
+            && $staffShiftRow['status'] === 'OFF_SHIFT'
+            && $staffShiftRow['close_reason'] === AdminStaffService::DEACTIVATION_CLOSE_REASON,
+        'row=' . json_encode($staffShiftRow)
     );
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");

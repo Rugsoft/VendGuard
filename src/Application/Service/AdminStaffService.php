@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use InvalidArgumentException;
 use RuntimeException;
 use Throwable;
+use VendGuard\Core\Domain\Exception\PendingIncidentsBlockedException;
 use VendGuard\Core\Domain\Exception\RestockerCannotBeOnCallException;
 use VendGuard\Core\Domain\Exception\RoleChangeForbiddenException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
@@ -62,6 +63,7 @@ class AdminStaffService
     private AuditLogger $auditLogger;
     private ?TechnicianShiftLogRepositoryInterface $shiftLogRepo;
     private ?TransactionManagerInterface $transactions;
+    private ?RestockerSatSynergyService $synergyService;
 
     public function __construct(
         AdminUserService $adminUsers,
@@ -69,7 +71,8 @@ class AdminStaffService
         TechnicianShiftRepositoryInterface $shiftRepo,
         ?AuditLogger $auditLogger = null,
         ?TechnicianShiftLogRepositoryInterface $shiftLogRepo = null,
-        ?TransactionManagerInterface $transactions = null
+        ?TransactionManagerInterface $transactions = null,
+        ?RestockerSatSynergyService $synergyService = null
     ) {
         $this->adminUsers = $adminUsers;
         $this->userRepo = $userRepo;
@@ -77,6 +80,7 @@ class AdminStaffService
         $this->auditLogger = $auditLogger ?? new AuditLogger();
         $this->shiftLogRepo = $shiftLogRepo;
         $this->transactions = $transactions;
+        $this->synergyService = $synergyService;
     }
 
     /**
@@ -178,11 +182,41 @@ class AdminStaffService
      */
     public function deactivateUser(int $id, array $actor, ?string $clientIp = null): bool
     {
-        if ($this->requireUser($id) === null) {
+        $target = $this->requireUser($id);
+        if ($target === null) {
             throw new UserNotFoundException($id);
         }
+        $isRestocker = $target->getRole()->isRestocker();
 
-        return (bool)$this->runAtomically(function () use ($id, $actor, $clientIp): bool {
+        return (bool)$this->runAtomically(function () use ($id, $actor, $clientIp, $isRestocker): bool {
+            // C1: el relevo ocurre antes de cerrar el turno. Si hay un L1 en
+            // IN_PROGRESS, la baja se bloquea y la transacción se deshace.
+            if ($isRestocker && $this->synergyService !== null) {
+                $handover = $this->synergyService->handoverLevel1(
+                    $id,
+                    'DEACTIVATION',
+                    self::DEACTIVATION_CLOSE_REASON
+                );
+
+                if (($handover['ok'] ?? false) !== true) {
+                    $blockedCodes = array_values(array_map(
+                        static fn (mixed $code): string => (string)$code,
+                        (array)($handover['blocked_ticket_codes'] ?? [])
+                    ));
+                    $detail = $blockedCodes !== []
+                        ? ' Avisos en curso: ' . implode(', ', $blockedCodes) . '.'
+                        : '';
+
+                    throw new PendingIncidentsBlockedException(
+                        count($blockedCodes),
+                        $id,
+                        'No se puede dar de baja al reponedor porque tiene avisos L1 en curso.' . $detail,
+                        (string)($handover['error_code'] ?? 'SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1'),
+                        (int)($handover['http_status'] ?? 409)
+                    );
+                }
+            }
+
             $activeShift = $this->shiftRepo->findActiveShiftByTechnician($id);
             $closedShift = $this->closeOpenShift($activeShift, $actor);
 

@@ -55,6 +55,12 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
 
     private PDO $pdo;
 
+    /** Profundidad de las unidades de trabajo abiertas por esta instancia. */
+    private int $transactionDepth = 0;
+
+    /** Solo quien abrió la transacción puede confirmarla o deshacerla. */
+    private bool $ownsTransaction = false;
+
     /** @var callable(): string */
     private mixed $ticketCodeGenerator;
 
@@ -1559,20 +1565,37 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
     {
         if (!$this->pdo->inTransaction()) {
             $this->pdo->beginTransaction();
+            $this->ownsTransaction = true;
         }
+
+        $this->transactionDepth++;
     }
 
     private function commit(): void
     {
-        if ($this->pdo->inTransaction()) {
-            $this->pdo->commit();
+        if ($this->transactionDepth > 0) {
+            $this->transactionDepth--;
+        }
+
+        if ($this->transactionDepth === 0 && $this->ownsTransaction) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->commit();
+            }
+            $this->ownsTransaction = false;
         }
     }
 
     private function rollback(): void
     {
-        if ($this->pdo->inTransaction()) {
-            $this->pdo->rollBack();
+        if ($this->transactionDepth > 0) {
+            $this->transactionDepth--;
+        }
+
+        if ($this->transactionDepth === 0 && $this->ownsTransaction) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            $this->ownsTransaction = false;
         }
     }
 

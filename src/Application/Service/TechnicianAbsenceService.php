@@ -78,15 +78,9 @@ final class TechnicianAbsenceService
             throw InvalidAbsenceException::invalidDateRange();
         }
 
-        // C1: una ausencia que empieza ahora releva los L1 asignados del
-        // reponedor antes de registrarla; un L1 en IN_PROGRESS la bloquea.
-        if ($this->synergyService !== null && $starts <= new \DateTimeImmutable('now')) {
-            $this->synergyService->handoverLevel1(
-                $technicianId,
-                'ABSENCE',
-                'Ausencia registrada: ' . trim($reason)
-            );
-        }
+        // C1: una ausencia que empieza ahora ejecuta el relevo dentro de la
+        // misma transacción que el alta; un L1 en IN_PROGRESS la bloquea.
+        $isCurrentAbsence = $starts <= new \DateTimeImmutable('now');
 
         // RF-01.1: las notas son opcionales pero nunca superan 500 caracteres.
         // El repositorio inserta directamente, así que la validación debe ocurrir
@@ -121,7 +115,9 @@ final class TechnicianAbsenceService
             $cleanNotes,
             $createdBy,
             $tech,
-            $creator
+            $creator,
+            $isCurrentAbsence,
+            $reason
         ): TechnicianAbsence {
             if (!$this->lockRepo->lockTechnicianForUpdate($technicianId)) {
                 throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
@@ -129,6 +125,30 @@ final class TechnicianAbsenceService
 
             if ($this->absenceRepo->hasOverlappingAbsence($technicianId, $starts, $ends)) {
                 throw InvalidAbsenceException::overlap();
+            }
+
+            if ($this->synergyService !== null && $isCurrentAbsence) {
+                $handover = $this->synergyService->handoverLevel1(
+                    $technicianId,
+                    'ABSENCE',
+                    'Ausencia registrada: ' . trim($reason)
+                );
+
+                if (($handover['ok'] ?? false) !== true) {
+                    $blockedCodes = array_values(array_map(
+                        static fn (mixed $code): string => (string)$code,
+                        (array)($handover['blocked_ticket_codes'] ?? [])
+                    ));
+                    $detail = $blockedCodes !== []
+                        ? ' Avisos en curso: ' . implode(', ', $blockedCodes) . '.'
+                        : '';
+
+                    throw new InvalidAbsenceException(
+                        'No se puede registrar la ausencia porque hay avisos L1 en curso.' . $detail,
+                        (string)($handover['error_code'] ?? 'SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1'),
+                        (int)($handover['http_status'] ?? 409)
+                    );
+                }
             }
 
             $absence = $this->absenceRepo->create(

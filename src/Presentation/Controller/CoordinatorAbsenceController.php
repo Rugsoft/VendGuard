@@ -6,6 +6,7 @@ namespace VendGuard\Presentation\Controller;
 
 use PDO;
 use Throwable;
+use VendGuard\Application\Service\RestockerSatSynergyService;
 use VendGuard\Application\Service\SuggestedTechniciansService;
 use VendGuard\Application\Service\TechnicianAbsenceService;
 use VendGuard\Core\Domain\Exception\InvalidAbsenceException;
@@ -15,6 +16,7 @@ use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoOperationalZoneRepository;
+use VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
@@ -44,7 +46,10 @@ final class CoordinatorAbsenceController
                 new PdoTransactionManager($pdo),
                 $users,
                 new SuggestedTechniciansService(),
-                new PdoOperationalZoneRepository($pdo)
+                new PdoOperationalZoneRepository($pdo),
+                new RestockerSatSynergyService(
+                    new PdoRestockerSatSynergyGateway($pdo)
+                )
             );
         }
     }
