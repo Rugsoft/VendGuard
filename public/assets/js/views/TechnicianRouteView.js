@@ -1354,10 +1354,17 @@ export const TechnicianRouteView = {
       return Array.isArray(incident?.site_coincidence) ? incident.site_coincidence : [];
     },
 
-    /** Resumen legible de la coincidencia en sede, sin exponer identificadores. */
+    /** Etiqueta legible de un compañero: nombre y código de operador, sin `user_id`. */
+    siteCoincidenceLabel(entry) {
+      const name = entry?.name || 'Compañero';
+      const code = String(entry?.operator_code ?? '').trim();
+      return code ? `${name} (${code})` : name;
+    },
+
+    /** Resumen legible de la coincidencia en sede, sin exponer identificadores internos. */
     siteCoincidenceSummary(incident) {
       return this.siteCoincidenceFor(incident)
-        .map((entry) => `${entry.name}${entry.activity_summary ? ` (${entry.activity_summary})` : ''}`)
+        .map((entry) => `${this.siteCoincidenceLabel(entry)}${entry.activity_summary ? ` · ${entry.activity_summary}` : ''}`)
         .join(' · ');
     },
 
@@ -4335,7 +4342,19 @@ export const TechnicianRouteView = {
                 style="margin-top: 6px; font-size: 12px;"
               >
                 <strong>🤝 Coincidencia en Sede:</strong>
-                {{ siteCoincidenceSummary(incident) }}
+                <div
+                  v-for="entry in siteCoincidenceFor(incident)"
+                  :key="entry.user_id || entry.operator_code || entry.name"
+                  style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px;"
+                >
+                  <span>{{ siteCoincidenceLabel(entry) }}</span>
+                  <span v-if="entry.activity_summary">· {{ entry.activity_summary }}</span>
+                  <a
+                    v-if="entry.phone"
+                    :href="'tel:' + entry.phone"
+                    style="color: inherit; font-weight: 600; text-decoration: underline;"
+                  >📞 {{ entry.phone }}</a>
+                </div>
               </div>
 
               <!-- Disponibilidad del repuesto en la furgoneta (Módulo 23, RF-05.4 / QA 3).

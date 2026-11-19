@@ -1376,9 +1376,15 @@ export const RestockerRouteView = {
       return Array.isArray(rows) ? rows : [];
     },
 
+    siteCoincidenceLabel(entry) {
+      const name = entry?.name || 'Compañero';
+      const code = String(entry?.operator_code ?? '').trim();
+      return code ? `${name} (${code})` : name;
+    },
+
     siteCoincidenceSummary(locationId) {
       return this.siteCoincidenceForLocation(locationId)
-        .map((entry) => `${entry.name}${entry.activity_summary ? ` (${entry.activity_summary})` : ''}`)
+        .map((entry) => `${this.siteCoincidenceLabel(entry)}${entry.activity_summary ? ` · ${entry.activity_summary}` : ''}`)
         .join(' · ');
     },
 
@@ -3226,7 +3232,20 @@ export const RestockerRouteView = {
                 data-testid="restocker-site-coincidence"
                 style="font-size: 11px; background-color: var(--color-info-bg); color: var(--color-info-text); border-radius: var(--radius-interactive); padding: 6px 8px; margin-top: 8px;"
               >
-                🤝 <strong>Coincidencia en Sede:</strong> {{ siteCoincidenceSummary(machine.location_id) }}
+                <div style="font-weight: 600; margin-bottom: 2px;">🤝 Coincidencia en Sede</div>
+                <div
+                  v-for="entry in siteCoincidenceForLocation(machine.location_id)"
+                  :key="entry.user_id || entry.operator_code || entry.name"
+                  style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;"
+                >
+                  <span>{{ siteCoincidenceLabel(entry) }}</span>
+                  <span v-if="entry.activity_summary">· {{ entry.activity_summary }}</span>
+                  <a
+                    v-if="entry.phone"
+                    :href="'tel:' + entry.phone"
+                    style="color: inherit; font-weight: 600; text-decoration: underline;"
+                  >📞 {{ entry.phone }}</a>
+                </div>
               </div>
               <div v-if="machineHasActiveL1(machine) || machineHasActiveSat(machine)" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
                 <span v-if="machineHasActiveL1(machine)" data-testid="restocker-machine-l1-badge" style="font-size: 10px; font-weight: 600; padding: 3px 7px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text);">🛒 Aviso Nivel 1</span>

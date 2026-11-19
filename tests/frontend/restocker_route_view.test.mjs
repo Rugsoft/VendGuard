@@ -1705,13 +1705,23 @@ assert(
     && incidentVm.l1StatusLabel('IN_PROGRESS') === 'En curso'
 );
 incidentVm.siteCoincidence = {
-  4: [{ user_id: 7, name: 'Jordi SAT', activity_summary: '1 avería SAT activa en esta sede' }]
+  4: [{
+    user_id: 7,
+    name: 'Jordi SAT',
+    operator_code: 'SAT-07',
+    phone: '+34 600 123 456',
+    activity_summary: '1 avería SAT activa en esta sede'
+  }]
 };
 assert(
-  'La Coincidencia en Sede se resuelve por sede y se resume sin identificadores',
+  'La Coincidencia en Sede muestra el código y el enlace tel: sin user_id',
   incidentVm.siteCoincidenceForLocation(4).length === 1
-    && incidentVm.siteCoincidenceSummary(4).includes('Jordi SAT')
+    && incidentVm.siteCoincidenceSummary(4).includes('Jordi SAT (SAT-07)')
     && !incidentVm.siteCoincidenceSummary(4).includes('user_id')
+    && viewSource.includes('v-for="entry in siteCoincidenceForLocation(machine.location_id)"')
+    && viewSource.includes('{{ siteCoincidenceLabel(entry) }}')
+    && viewSource.includes("'tel:' + entry.phone")
+    && viewSource.includes('entry.operator_code')
 );
 assert(
   'La máquina distingue aviso L1 y SAT abierto',

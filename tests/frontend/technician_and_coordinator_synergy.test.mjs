@@ -180,8 +180,20 @@ store.setLoading = originalSetLoading;
 // ─────────────────────────────────────────────────────────────────────────────
 const technician = buildVm(TechnicianRouteView);
 const coincidence = [
-  { user_id: 9, name: 'Lucía Gómez', activity_summary: '1 aviso(s) L1 activo(s) en esta sede' },
-  { user_id: 10, name: 'Mario Ruiz', activity_summary: 'Cobertura de zona activa en esta sede' }
+  {
+    user_id: 9,
+    name: 'Lucía Gómez',
+    operator_code: 'REP-09',
+    phone: '+34 600 111 222',
+    activity_summary: '1 aviso(s) L1 activo(s) en esta sede'
+  },
+  {
+    user_id: 10,
+    name: 'Mario Ruiz',
+    operator_code: 'REP-10',
+    phone: '+34 600 333 444',
+    activity_summary: 'Cobertura de zona activa en esta sede'
+  }
 ];
 
 assert(
@@ -190,9 +202,14 @@ assert(
     && technician.siteCoincidenceFor({}).length === 0
 );
 assert(
-  'La coincidencia se resume con nombre y actividad',
-  technician.siteCoincidenceSummary({ site_coincidence: coincidence }).includes('Lucía Gómez')
+  'La coincidencia se resume y el banner muestra nombre, código y tel:',
+  technician.siteCoincidenceSummary({ site_coincidence: coincidence }).includes('Lucía Gómez (REP-09)')
     && technician.siteCoincidenceSummary({ site_coincidence: coincidence }).includes('1 aviso')
+    && !technician.siteCoincidenceSummary({ site_coincidence: coincidence }).includes('user_id')
+    && technicianSource.includes('v-for="entry in siteCoincidenceFor(incident)"')
+    && technicianSource.includes('{{ siteCoincidenceLabel(entry) }}')
+    && technicianSource.includes("'tel:' + entry.phone")
+    && technicianSource.includes('entry.operator_code')
 );
 assert(
   'La insignia detecta el escalado desde reponedor',
