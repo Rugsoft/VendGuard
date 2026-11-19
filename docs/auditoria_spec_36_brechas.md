@@ -13,19 +13,19 @@
 - **Base auditada:** `95f9af1f1f481b14eeaf4b3acfcd623e791486e8` · árbol limpio antes de crear este acta
 - **Alcance:** auditoría de los `RF-01`–`RF-05`, sus criterios EARS, `RNF-01`–`RNF-03`, las decisiones `D1`–`D4`, los casos `C1`–`C2`, las 9 salvaguardas `QA-*`, el §6, los 4 criterios de Definition of Done y las 12 tareas `T-RSS-01`–`T-RSS-12`, con ejecución real de las suites. FIX-36-01 a FIX-36-07 se corrigieron con prueba de composición o de invariante; FIX-36-08 cerró la trazabilidad con la evidencia focalizada del 2026-11-19.
 
-> Este documento es un acta viva de hallazgos: registra la evidencia previa de las brechas y los cierres de FIX-36-01 a FIX-36-08. La matriz, las tareas y el ODD quedaron sincronizados con la evidencia focalizada; la cifra global 441/16.987 se conserva como certificación L14 previa a los FIX.
+> Este documento es un acta viva de hallazgos: registra la evidencia previa de las brechas y los cierres de FIX-36-01 a FIX-36-08. La matriz, las tareas y el ODD quedaron sincronizados con la evidencia focalizada; la certificación global vigente es **441/16.993**, y el canal `new_engine` queda en **69/70** por el esquema del pooler sin la migración 032.
 
 ---
 
 ## 1. Veredicto ejecutivo
 
-**La Spec 36 queda cerrada documentalmente con la evidencia focalizada de los FIX-36; la última certificación global completa es L14, previa a los FIX.**
+**La Spec 36 queda cerrada documentalmente con la evidencia focalizada de los FIX-36; la certificación global del 2026-11-19 está en verde y el canal `new_engine` queda en 69/70 por una deriva de esquema del pooler.**
 
-La implementación de esquema, dominio, gateway, servicios, API y frontend es amplia, y sus suites focalizadas están en verde. La corrida global L14 conserva este resultado:
+La implementación de esquema, dominio, gateway, servicios, API y frontend es amplia, y sus suites focalizadas están en verde. La corrida global vigente deja este resultado:
 
 ```text
-php tests/run_all.php   # certificación L14, previa a los FIX-36
-441 suites · 16.987 aserciones · 0 fallos · DocMetricsGuard coherente · exit=0
+php tests/run_all.php   # certificación global del 2026-11-19
+441 suites · 16.993 aserciones · 0 fallos · DocMetricsGuard coherente · exit=0
 ```
 
 Las 8 suites focalizadas de esquema/API ejecutadas (4 del módulo y 4 de convergencia/paridad global) también pasan:
@@ -54,7 +54,7 @@ En concreto:
 
 El botón de escalado dentro del asistente de Visita de Reposición (`RF-05.2.1`) ya está cubierto y el mapeo determinista de `level1_issue_type` ya es un invariante duro de dominio/SQL (`EARS 01.1.2`).
 
-**Conclusión corta:** FIX-36-01 a FIX-36-08 están cerrados. La evidencia focalizada cubre las composiciones de QR, C1, escalado, alta de Coordinación, alta de Portal, el botón de escalado dentro de la visita y el mapeo determinista L1 en dominio y motor: **11 suites propias, 561 aserciones, 0 fallos**. La cifra global 441/16.987 es L14 y no se reejecutó tras los FIX; no se usa como certificación posterior.
+**Conclusión corta:** FIX-36-01 a FIX-36-08 están cerrados. La evidencia focalizada cubre las composiciones de QR, C1, escalado, alta de Coordinación, alta de Portal, el botón de escalado dentro de la visita y el mapeo determinista L1 en dominio y motor: **11 suites propias, 561 aserciones, 0 fallos**. La certificación global del 2026-11-19 queda en **441/16.993, 0 fallos**; el canal `new_engine` queda en **69/70** por el esquema del pooler sin la migración 032, no por una regresión del módulo.
 
 ---
 
@@ -69,7 +69,7 @@ El botón de escalado dentro del asistente de Visita de Reposición (`RF-05.2.1`
 | **5** | **FIX-36-05** | **P1 · Alto** | El botón «⚡ Escalar Avería al SAT» no existía dentro del asistente de Visita de Reposición del Módulo 34 | `RF-05.2.1` | **Cerrada (2026-11-19)** |
 | **6** | **FIX-36-06** | **P2 · Medio** | El mapeo determinista `level1_issue_type` ↔ `category` no se impone en el constructor de `Incident` ni en el CHECK SQL; solo en `classifyCreation()` | `EARS 01.1.2`, `RNF-02` | **Cerrada (2026-11-19)** |
 | **7** | **FIX-36-07** | **P2 · Medio** | El alta de Portal con L1 ya tiene composición HTTP/PostgreSQL; QR, relevo C1, escalado y Coordinación también están cubiertos | DoD 2, DoD 4, cobertura | **Cerrada (2026-11-19)** |
-| **8** | **FIX-36-08** | **P3 · Documental** | La matriz y los cierres de tareas ya citan las composiciones reales (bloques 6–9), corrigen la ruta y recuento de `LocationPortalReopenAuditTest` y distinguen la certificación L14 de la evidencia focalizada | Trazabilidad, DoD, tareas | **Cerrada (2026-11-19)** |
+| **8** | **FIX-36-08** | **P3 · Documental** | La matriz y los cierres de tareas ya citan las composiciones reales (bloques 6–9), corrigen la ruta y recuento de `LocationPortalReopenAuditTest` y distinguen la certificación global vigente y el 69/70 de `new_engine` de la evidencia focalizada | Trazabilidad, DoD, tareas | **Cerrada (2026-11-19)** |
 
 ### Lectura de prioridades
 
@@ -157,7 +157,7 @@ Cerrada el 2026-11-19 con evidencia reproducible:
 - **Composición real:** `RestockerSatSynergyApiTest` bloque 6, **55/55** en total, exit 0. El escenario térmico verifica `dispatch_level=L2_SAT`, `category=TEMPERATURE_COLD`, `status=ASSIGNED`, `assigned_technician_id=7`, `urgency=CRITICAL`, `sla_target_minutes=240`, custodia `QR_AUTO_ESCALATED_TO_SAT` cerrada y `QR_AUTO_ESCALATION_TO_SAT` abierta, aviso de asignación y alerta de cadena de frío a Coordinación. El escenario digital con `BIZUM` y 9,50 € promociona a L2 con `category=OTHER`.
 - **No reversión:** la aserción 6.3 comprueba que el `update()` posterior conserva la asignación al técnico SAT y `status=ASSIGNED`.
 - **Regresiones:** `PdoRestockerSatSynergyGatewayTest` 24/24, `RestockerSatSynergyConstitutionalTest` 17/17, `QrRefundCaptureTest` 105 aserciones, `QrSanitaryQuarantineModeTest` 35 aserciones (con `.env.battery`), `QrEndpointsIntegrationTest` 0 fallos y `PublicRefundTrackingApiTest` 58/58 en batería limpia.
-- **Batería global L14 (previa a los FIX):** `441/441 suites · 16.987 aserciones · 0 fallos · exit 0`; no reejecutada en el cierre documental.
+- **Batería global (2026-11-19):** `441/441 suites · 16.993 aserciones · 0 fallos · exit 0`; `DocMetricsGuard` corregido en la repetición. La cifra 441/16.987 queda solo como referencia histórica L14.
 
 ---
 
@@ -213,7 +213,7 @@ Cerrada el 2026-11-19 con evidencia reproducible:
 
 - **Composición real:** `RestockerSatSynergyApiTest` bloque 7, **55/55** en total, exit 0. 7.1/7.2 verifican el 409 y que el turno sigue abierto; 7.3-7.6 el cierre con un L1 `ASSIGNED` reasignado al suplente y la custodia `RESTOCKER_SHIFT_HANDOVER`; 7.7-7.9 el alta de ausencia vigente y la custodia `ABSENCE_COVERAGE_REASSIGN`; 7.10-7.12 la baja directa sin dejar el L1 en la cuenta inactiva; 7.13-7.15 la baja por staff con el turno cerrado y el motivo contractual.
 - **Regresiones:** `ShiftLifecycleServiceTest` 12/12, `TechnicianAbsenceServiceTest` 17/17, `RestockerSatSynergyIntegrationsTest` 27/27, `AdminUserServiceTest` 74 aserciones, `AdminStaffRestockerServiceTest` 26/26, `RestockerShiftAndWorkHoursTest` 38/38, `PdoRestockerSatSynergyGatewayTest` 24/24, `QrEndpointsIntegrationTest` 0 fallos, `CoordinatorAbsenceApiTest` 23/23 y `RestockerStaffHttpTest` 18/18.
-- **Batería global L14:** **441/441 suites · 16.987 aserciones · 0 fallos · exit 0**, previa a los FIX. La evidencia focalizada posterior deja `RestockerSatSynergyApiTest` en **55/55**.
+- **Batería global (2026-11-19):** **441/441 suites · 16.993 aserciones · 0 fallos · exit 0**. La evidencia focalizada deja `RestockerSatSynergyApiTest` en **55/55**.
 
 ---
 
@@ -394,7 +394,7 @@ Una escritura directa desde el repositorio o una futura ruta que construya `Inci
 - **Dominio:** `php tests/unit/RestockerSatSynergyDomainModelsTest.php` → **36/36 aserciones, exit 0**. Rechaza `STOCKOUT_EMPTY_SLOT` con `PAYMENT_SYSTEM` en L1 y acepta un `L2_SAT` térmico que conserva `STOCKOUT_EMPTY_SLOT` como rastro histórico.
 - **Motor:** `source deploy/local/postgres/.env.docker-tls && php tests/integration/PostgresRestockerSatSynergySchemaTest.php` → **30/30 aserciones, exit 0**. La pareja incoherente en L1 se rechaza con `23514` y la fila `L2_SAT` con rastro histórico se persiste.
 - **Convergencia:** `php tests/integration/SchemaConvergenceParityTest.php` → **42/42 aserciones, exit 0**; el DDL base y las 32 migraciones convergen y la restricción conserva su nombre.
-- **Alcance:** no se reejecutó la batería global en este cierre; las suites afectadas y la convergencia sí quedaron verificadas. La cifra global de la sección 6.1 es la certificación previa.
+- **Alcance:** la batería global se reejecutó el 2026-11-19 y quedó en 441/16.993 · 0 fallos; las suites afectadas y la convergencia también quedaron verificadas. El canal `new_engine` queda en 69/70 por el esquema del pooler sin la migración 032.
 
 ---
 
@@ -440,7 +440,7 @@ Añadir pruebas de integración HTTP/PostgreSQL para cada flujo anterior, con as
 - La misma matriz cita `QA-LIM-01` con `RestockerSatSynergyApiTest` bloque 6 (55/55), que ejecuta la absorción QR real con asignación y outbox; `RestockerSatSynergyIntegrationsTest` 27/27 y `RestockerSatSynergyConstitutionalTest` 17/17 quedan como cobertura complementaria, no como certificación única.
 - `docs/auditoria_spec_36_brechas.md` (este documento) registra la corrección y enlaza la evidencia.
 - `LocationPortalReopenAuditTest` se cita con su ruta real, [`tests/unit/LocationPortalReopenAuditTest.php`](../tests/unit/LocationPortalReopenAuditTest.php), 18/18, y se identifica como auditoría auxiliar que no certifica la promoción `dispatch_level`.
-- `tasks.md` y el ODD mantienen las 12 tareas `[x]`, pero sus cierres ya se contrastaron con la composición real: `T-RSS-06` cita el bloque 8 y el alta de Coordinación del bloque 9; `T-RSS-07` cita el bloque 7; `T-RSS-08` cita el bloque 9 y `CreateIncidentEndpointTest` caso 9; `T-RSS-11` cita el botón de visita; y `T-RSS-12` distingue la evidencia focalizada (11 suites, 561 aserciones) de la certificación global L14 (441/16.987). La matriz ya enlaza todas esas composiciones.
+- `tasks.md` y el ODD mantienen las 12 tareas `[x]`, pero sus cierres ya se contrastaron con la composición real: `T-RSS-06` cita el bloque 8 y el alta de Coordinación del bloque 9; `T-RSS-07` cita el bloque 7; `T-RSS-08` cita el bloque 9 y `CreateIncidentEndpointTest` caso 9; `T-RSS-11` cita el botón de visita; y `T-RSS-12` distingue la evidencia focalizada (11 suites, 561 aserciones) de la certificación global vigente (441/16.993); el canal `new_engine` queda en 69/70 por el esquema del pooler sin la migración 032. La matriz ya enlaza todas esas composiciones.
 
 #### Impacto
 
@@ -451,19 +451,19 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 1. La matriz cita las composiciones HTTP/PostgreSQL reales de los bloques 6–9 para `QA-LIM-01`, `C1`, `D2`, `D3` y `RF-02`–`RF-05`.
 2. `LocationPortalReopenAuditTest` queda en `tests/unit/` con 18/18 y marcada como auditoría auxiliar; `ReopenIncidentEndpointTest` se cita con la salvedad de que no certifica la promoción `dispatch_level`.
 3. `tasks.md` y el ODD corrigen las cifras (`28/28` → `30/30`, dominio `34/34` → `36/36`, API `13/16/18` → `55/55`) y enlazan los fixes con sus commits reales.
-4. La cifra global 441/16.987 se etiqueta como L14 previa a los FIX y no se presenta como recuento actual; la evidencia focalizada es 11 suites propias / 561 aserciones.
+4. La cifra global vigente es 441/16.993; la evidencia focalizada es 11 suites propias / 561 aserciones. El canal `new_engine` se publica en 69/70 por el fallo de esquema de `PoolerLatencyMeasurementTest`, sin ocultarlo tras la cifra global.
 
 #### Criterios de aceptación
 
 - [x] La matriz no declara `C1` ni `QA-LIM-01` cubiertos por pruebas que no ejecutan la composición real; cita los bloques 6 a 9.
 - [x] Las 12 tareas tienen evidencia reproducible y coherente con el código de producción.
-- [x] El estado del módulo refleja la realidad: cerrado documentalmente, con la certificación global L14 identificada como previa a los FIX.
+- [x] El estado del módulo refleja la realidad: cerrado documentalmente, con la certificación global vigente 441/16.993 y el canal `new_engine` en 69/70 por el esquema del pooler.
 
 #### Cierre verificado
 
 - **Composición:** `RestockerSatSynergyApiTest` 55/55 (bloques 6–9), `CreateIncidentEndpointTest` caso 9 `exit=0` y `RestockerSatSynergyConstitutionalTest` 17/17.
 - **Trazabilidad:** las 11 suites propias suman 561 aserciones verdes; `LocationPortalReopenAuditTest` 18/18; `CoordinatorButtonVariantsGuardTest` 23/23; `restocker_route_view.test.mjs` 236/236; `FrontendTemplateCompileTest` 15/15.
-- **Alcance:** no se reabrió ningún fix funcional. La única regresión de guarda (geometría en línea del botón `btn-escalate-from-visit`) se corrigió con `w-100 mt-3`. La batería global no se reejecutó; 441/16.987 queda como L14.
+- **Alcance:** no se reabrió ningún fix funcional. La única regresión de guarda (geometría en línea del botón `btn-escalate-from-visit`) se corrigió con `w-100 mt-3`. La batería global se reejecutó: 441/16.993, 0 fallos; el canal `new_engine` queda en 69/70 por el esquema del pooler sin la migración 032.
 
 ---
 
@@ -474,7 +474,7 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | **1. Migración `032` y convergencia 1:1 con tipos #43/#44, ampliaciones, columnas, CHECK y 4 semillas** | `032_restocker_sat_synergy.sql` con tipos, columnas, FK, CHECK —incluido el mapeo determinista L1—, índice, operaciones Offline y las 4 parejas `RC-L1-*`/`SS-L1-*`; `supabase_seeds.sql` con 11 referencias; `SchemaConvergenceParityTest` 42/42; `PostgresRestockerSatSynergySchemaTest` 30/30; `CloudDeploySchemaParityTest` 55/55 | ✅ |
 | **2. Los servicios de aplicación imponen pre-clasificación, resolución L1, escalado en 3 ramas, auto-escalado QR, reapertura, `site_coincidence`, relevo C1, horas y opacidad** | Servicios y gateway verdes; QR, C1, el escalado, el alta L1 de Coordinación y el alta de Portal inyectan sinergia y tienen composición real (`RestockerSatSynergyApiTest` bloques 6–9 y `CreateIncidentEndpointTest` caso 9); la matriz enlaza cada composición | ✅ |
 | **3. `RestockerRouteView`, `TechnicianRouteView` y Coordinación implementan la operativa completa, el botón de escalado, el banner, la cola Offline y el filtro/triaje dual** | Frontend 236/236 + 18/18 + guards verdes; el botón «⚡ Escalar Avería al SAT» está en tarjeta, bandeja L1 y asistente de visita | ✅ |
-| **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Evidencia focalizada: **11 suites propias · 561 aserciones · 0 fallos**; `RestockerSatSynergyApiTest` 55/55 (bloques 6–9), `CreateIncidentEndpointTest` caso 9 `exit=0`, guardas 23/23 y frontend 236/236 + 18/18. La certificación global L14 (441/441 · 16.987 · 0) es previa a los FIX y no se reejecutó en este cierre | ✅ con la salvedad expresa de que la última global es L14 |
+| **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Evidencia focalizada: **11 suites propias · 561 aserciones · 0 fallos**; `RestockerSatSynergyApiTest` 55/55 (bloques 6–9), `CreateIncidentEndpointTest` caso 9 `exit=0`, guardas 23/23 y frontend 236/236 + 18/18. Global: **441/16.993 · 0 fallos**. `new_engine`: **69/70 · 2.320 aserciones · 1 fallo** de esquema del pooler | ✅ global; ⚠️ `new_engine` no certificable al 100 % hasta aplicar la migración 032 al pooler |
 
 ---
 
@@ -493,7 +493,7 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | `T-RSS-09` | `[x]` | API/constitucional, `site_coincidence`, filtro y promoción | ✅ incluye la composición QR/C1 real (bloques 6 y 7) |
 | `T-RSS-10` | `[x]` | Frontend 18/18 | ✅ coherente |
 | `T-RSS-11` | `[x]` | Frontend 236/236 | ✅ botón de escalado en tarjeta, bandeja L1 y asistente de visita |
-| `T-RSS-12` | `[x]` | 11 suites propias · 561 aserciones; global L14 441/441 · 16.987 | ✅ evidencia focalizada real; la matriz enlaza QR, C1, escalado, alta de Coordinación, alta de Portal y botón de visita. La cifra global se identifica como previa a los FIX |
+| `T-RSS-12` | `[x]` | 11 suites propias · 561 aserciones; global 441/441 · 16.993; `new_engine` 69/70 | ✅ evidencia focalizada real; la matriz enlaza QR, C1, escalado, alta de Coordinación, alta de Portal y botón de visita. El fallo de `PoolerLatencyMeasurementTest` se declara como deriva de esquema del pooler |
 
 **Las 12 tareas están cerradas y respaldadas por la composición real o por la evidencia focalizada.**
 
@@ -501,19 +501,19 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 
 ## 6. Evidencia ejecutada
 
-### 6.1. Batería global L14 (previa a los FIX)
+### 6.1. Batería global (2026-11-19)
 
 ```text
-php tests/run_all.php   # certificación L14, anterior a FIX-36-01..08
+php tests/run_all.php   # certificación global del 2026-11-19
 Total Suites Ejecutadas    : 441
-Total Aserciones Evaluadas : 16987
+Total Aserciones Evaluadas : 16993
 Fallos Detectados          : 0
 Cifras documentadas        : COHERENTES
 RESULTADO: 100% EN VERDE. (0 errors, 0 failures)
 RUN_ALL_CLEAN_EXIT:0
 ```
 
-Nota: esta salida corresponde a la certificación L14, previa a los FIX-36. Una primera corrida concurrente con otras suites sobre la misma base produjo 2 deadlocks transitorios en `CustodyChainPerformanceTest` y `CustodyClosureTest`; ambas pasaron aisladas con 0 fallos y la corrida limpia posterior quedó en 441/441 · 16.987 · 0. No se reejecutó `run_all.php` tras los FIX; la evidencia de cierre es la focalizada de 11 suites y 561 aserciones.
+Nota: la primera pasada de esta corrida terminó con 0 fallos de suites pero con 4 desviaciones de `DocMetricsGuard` porque README y `features_pendientes.md` aún declaraban 16.987. Se corrigieron las cifras a 16.993 y la repetición quedó en 441/441 · 16.993 · 0, con `DocMetricsGuard` coherente. La evidencia focalizada de cierre sigue siendo 11 suites y 561 aserciones.
 
 ### 6.2. Suites del módulo y guardas
 
@@ -542,6 +542,21 @@ Nota: esta salida corresponde a la certificación L14, previa a los FIX-36. Una 
 | `tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs` | 45/45 | 0 |
 | `tests/unit/MobileShellLayoutGuardTest.mjs` | 7/7 | 0 |
 
+### 6.3. Canal `new_engine` (2026-11-19)
+
+```text
+source deploy/local/postgres/.env.docker-tls
+php tests/run_new_engine.php
+Suites evaluadas    : 70
+Suites en verde     : 69
+No ejecutables      : 0
+Aserciones          : 2320
+Fallos              : 1
+RESULTADO: FALLO. Revisa: PoolerLatencyMeasurementTest.php
+```
+
+`PoolerLatencyMeasurementTest` falla con `SQLSTATE[42703]`: el esquema del pooler de certificación (`deploy/local/supabase/.env.local`, Supavisor 6543) no tiene `incidents.dispatch_level`, porque la migración `032_restocker_sat_synergy.sql` no está aplicada en ese destino. Sin la columna, el alta L1 del camino real no persiste y la suite no recoge las 20 muestras por operación; 16 de sus 30 aserciones quedan rojas. Las otras 69 suites están verdes, incluidas `RestockerSatSynergyApiTest` 55/55 y `RestockerSatSynergyConstitutionalTest` 17/17. No se modificó el esquema del pooler ni se sustituyó la medición remota por el motor local.
+
 ---
 
 ## 7. Orden de corrección recomendado
@@ -557,7 +572,7 @@ Nota: esta salida corresponde a la certificación L14, previa a los FIX-36. Una 
 8. ✅ FIX-36-08  Matriz, tareas, ODD y acta sincronizados · cerrado 2026-11-19
 ```
 
-FIX-36-01 a FIX-36-08 están cerrados. La Spec 36 queda cerrada documentalmente con la salvedad de que la última batería global completa es L14 y no se reejecutó tras los FIX.
+FIX-36-01 a FIX-36-08 están cerrados. La Spec 36 queda cerrada documentalmente con la certificación global vigente 441/16.993 y el canal `new_engine` en 69/70 por el esquema del pooler sin la migración 032.
 
 ---
 
@@ -575,7 +590,7 @@ La Spec 36 queda cerrada con estos criterios:
 - [x] El mapeo `level1_issue_type` ↔ `category` sea un invariante de dominio y SQL. Cerrado el 2026-11-19; dominio 36/36 y esquema 30/30.
 - [x] Existan pruebas de composición que fallen si se elimina cualquiera de los cableados anteriores. Cerrado el 2026-11-19; bloques 6–9 de `RestockerSatSynergyApiTest` y caso 9 de `CreateIncidentEndpointTest`.
 - [x] La matriz, las tareas y el ODD reflejen la evidencia real, sin declarar cubierto lo que no se ejecuta. Cerrado el 2026-11-19; matriz con 11 suites propias/561 aserciones y enlaces a las composiciones reales.
-- [x] La evidencia focalizada (`11 suites · 561 aserciones`) quede en verde tras las correcciones. Verificado el 2026-11-19: `RestockerSatSynergyApiTest` 55/55, guardas 23/23 y frontend 236/236. La batería global `441/441 · 16.987` es L14 y no se reejecutó en este cierre.
+- [x] La evidencia focalizada (`11 suites · 561 aserciones`) quede en verde tras las correcciones. Verificado el 2026-11-19: `RestockerSatSynergyApiTest` 55/55, guardas 23/23 y frontend 236/236. La batería global se reejecutó y quedó en `441/441 · 16.993 · 0`; el canal `new_engine` queda en 69/70 por el esquema del pooler sin la migración 032.
 
 ---
 

@@ -4,11 +4,11 @@
 
 **Esquema de referencia canónico:** `RF-01` clasificación L1 y guardas · `RF-02` triaje, despacho y auto-escalados · `RF-03` operativa móvil del reponedor y escalado al SAT · `RF-04` Coincidencia en Sede y relevo de turno · `RF-05` cola Offline, superficies y métricas.
 
-**Corrida de certificación:** L14 del 2026-11-18 (batería global completa) · evidencia focalizada de cierre FIX-36-01 a FIX-36-07 ejecutada el 2026-11-19 · PostgreSQL 16.15 local con TLS (`vendguard_pg_test` y `vendguard_battery`).
+**Corrida de certificación:** 2026-11-19 · batería global **441 suites · 16.993 aserciones · 0 fallos** · evidencia focalizada de cierre FIX-36-01 a FIX-36-07: **11 suites propias · 561 aserciones** · canal `new_engine`: **70 evaluadas · 69 verdes · 2.320 aserciones · 1 fallo** (`PoolerLatencyMeasurementTest`, esquema del pooler sin `incidents.dispatch_level`) · PostgreSQL 16.15 local con TLS (`vendguard_pg_test` y `vendguard_battery`).
 
-**Estado:** ✅ Módulo 36 cerrado · 12/12 tareas (`T-RSS-01` a `T-RSS-12`) · **11 suites propias con 561 aserciones verdes** en la evidencia focalizada · migración `032_restocker_sat_synergy.sql` convergida en `supabase_init.sql` y `supabase_seeds.sql` · matriz, tareas y ODD sincronizados por FIX-36-08.
+**Estado:** ✅ Módulo 36 cerrado · 12/12 tareas (`T-RSS-01` a `T-RSS-12`) · **11 suites propias con 561 aserciones verdes** en la evidencia focalizada · certificación global hermética **441/16.993 en verde** · ⚠️ canal `new_engine` **69/70**, con un fallo de esquema del pooler ajeno a los FIX-36 · migración `032_restocker_sat_synergy.sql` convergida en `supabase_init.sql` y `supabase_seeds.sql` · matriz, tareas y ODD sincronizados.
 
-**Nota de alcance:** la cifra global **441 suites · 16.987 aserciones** es la certificación L14, anterior a los FIX-36; no se reejecutó `run_all.php` durante el cierre documental. Las cifras por suite de esta matriz son ejecuciones reales del 2026-11-19 y sustituyen a los recuentos obsoletos de la primera certificación.
+**Nota de alcance:** la batería global **441/16.993** es la certificación hermética del 2026-11-19 y **no incluye** las 70 suites del canal `new_engine`; la evidencia focalizada del módulo (11 suites, 561 aserciones) sí incluye sus suites de integración y frontend. El canal `new_engine` queda en **69/70** porque el esquema del pooler de certificación no tiene `incidents.dispatch_level` (migración `032` no aplicada); el resto del canal, incluidas las 55 aserciones de `RestockerSatSynergyApiTest`, está en verde.
 
 ---
 
@@ -96,8 +96,8 @@
 
 | Puerta | Comando | Resultado |
 | :--- | :--- | :--- |
-| Batería global L14 (previa a los FIX) | `php tests/run_all.php` | **441 suites · 16.987 aserciones · 0 fallos** · `DocMetricsGuard` coherente · `exit=0` · **no reejecutada tras los FIX-36** |
-| Canal `new_engine` L14 (previo a los FIX) | `php tests/run_new_engine.php` | **70/70 suites · 2.281 aserciones · 0 no ejecutables · 0 fallos** · `exit=0` |
+| Batería global (2026-11-19) | `php tests/run_all.php` | **441 suites · 16.993 aserciones · 0 fallos** · `DocMetricsGuard` corregido · `exit=0` |
+| Canal `new_engine` (2026-11-19) | `source deploy/local/postgres/.env.docker-tls && php tests/run_new_engine.php` | **70 evaluadas · 69 verdes · 2.320 aserciones · 1 fallo** · `PoolerLatencyMeasurementTest` (16 aserciones) por `incidents.dispatch_level` ausente en el pooler; 0 no ejecutables |
 | Evidencia focalizada FIX-36-01..07 (2026-11-19) | Las 11 suites propias del mapa 1.1 | **561 aserciones · 0 fallos · `exit=0`** |
 | Esquema y constitución | `PostgresSchemaTest` + `PostgresConstitutionalTest` + `SchemaConvergenceParityTest` | **153/153 · 86/86 · 42/42** · `exit=0` |
 | Paridad de despliegue | `php tests/integration/CloudDeploySchemaParityTest.php` | **55/55** · `exit=0` |
@@ -105,4 +105,4 @@
 | Guardas de interfaz | Botones + plantillas + tokens + PWA + móvil | **23/23 · 15/15 · 3/3 · 45/45 · 7/7** |
 | Residuo de esquemas temporales | Consulta a `pg_namespace` tras las suites | 0 esquemas `t_*` del Módulo 36 |
 
-**Nota de cierre:** el desfase preexistente del libro de la batería (huella de la migración 031 anterior a `c8fc88d`) quedó resuelto al reconstruir `vendguard_battery` desde el DDL base y el libro actual; la ruta de despliegue y el esquema probado declaran los mismos 44 tipos `ENUM`, las mismas 49 tablas y las mismas 56 columnas de `incidents`. La cifra global L14 se conserva como referencia histórica y no se presenta como certificación posterior a los FIX. El techo de deuda cromática baja de 2.268 a 2.242 literales porque las superficies del módulo consumen tokens sin duplicar sus valores de respaldo.
+**Nota de cierre:** el desfase preexistente del libro de la batería (huella de la migración 031 anterior a `c8fc88d`) quedó resuelto al reconstruir `vendguard_battery` desde el DDL base y el libro actual; la ruta de despliegue y el esquema probado declaran los mismos 44 tipos `ENUM`, las mismas 49 tablas y las mismas 56 columnas de `incidents`. La cifra global L14 (441/16.987) se conserva solo como referencia histórica; la certificación vigente es 441/16.993. El fallo de `PoolerLatencyMeasurementTest` no invalida las 69 suites restantes del canal ni las 11 suites propias, pero impide declarar `new_engine` al 100 % hasta aplicar la migración 032 al esquema de certificación del pooler. El techo de deuda cromática baja de 2.268 a 2.242 literales porque las superficies del módulo consumen tokens sin duplicar sus valores de respaldo.

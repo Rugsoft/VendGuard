@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-441%20Suites%20%7C%2016.987%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-441%20Suites%20%7C%2016.993%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -747,7 +747,7 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 441 suites · 16.987 aserciones
+batería global: 441 suites · 16.993 aserciones
 
 ```text
 ======================================================================
@@ -760,7 +760,7 @@ batería global: 441 suites · 16.987 aserciones
  Suites E2E Manuales (T-40): 3 / 3 pasadas
  ──────────────────────────────────────────────────────────────────
  Total Suites Ejecutadas    : 441
- Total Aserciones Evaluadas : 16.987
+ Total Aserciones Evaluadas : 16.993
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -806,7 +806,7 @@ php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 
 El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla. La medición del pooler remoto sigue siendo la evidencia de RNF-01: si el enlace del proveedor incumple el presupuesto de 250 ms en alguna operación, el canal publica el fallo con su mediana y su p95, sin convertirlo en omisión.
 
-Corrida del 18 de noviembre de 2026 (canal cerrado · **70/70 suites en verde**, 0 no ejecutables bajo `.env.docker-tls`):
+Corrida histórica del 18 de noviembre de 2026 (canal cerrado · **70/70 suites en verde**, 0 no ejecutables bajo `.env.docker-tls`):
 
 ```text
 ======================================================================
@@ -820,9 +820,11 @@ Corrida del 18 de noviembre de 2026 (canal cerrado · **70/70 suites en verde**,
 ======================================================================
 ```
 
-`PostgresTieredSlaMetricsPerformanceTest` declara un contrato de entorno propio (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`) cuyo DSN exige TLS (`sslmode=verify-full`): bajo `.env.local` (puerto 5432, sin TLS) el canal la enumera como no ejecutable (`SQLSTATE[08006]`), mientras que con `.env.docker-tls` (puerto 55433 con TLS local) completa sus **34/34 aserciones** y cierra las **70/70 suites** en verde.
+> **Corrida del 19 de noviembre de 2026:** **70 suites evaluadas · 69 en verde · 2.320 aserciones · 1 fallo**. El fallo es `PoolerLatencyMeasurementTest`: el esquema del pooler de certificación (`deploy/local/supabase/.env.local`, Supavisor 6543) no tiene `incidents.dispatch_level`, porque la migración `032` no está aplicada en ese destino; la suite no puede crear el expediente L1 y no mide las 20 muestras de RNF-01. El resto del canal queda en verde, incluida `RestockerSatSynergyApiTest` 55/55. No se ha modificado el esquema del pooler.
 
-El pooler remoto queda en verde y estable: `PoolerLatencyMeasurementTest` completa sus 20 rondas y pasa 30/30 aserciones en tres corridas. La optimización de `asignar` integró el cierre y la apertura de custodia en el CTE atómico y trasladó la revalidación de estado, titular y urgencia al propio `UPDATE` condicionado, eliminando en PostgreSQL la lectura bloqueada previa. Las medianas de «asignar» fueron **166,8 ms**, **165,6 ms** y **174,3 ms** (p95 194,2 / 224,6 / 241,1 ms) frente al presupuesto de 250 ms; el enlace base se mantuvo en 43,8–44,1 ms.
+En esa misma corrida histórica, `PostgresTieredSlaMetricsPerformanceTest` declara un contrato de entorno propio (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`) cuyo DSN exige TLS (`sslmode=verify-full`): bajo `.env.local` (puerto 5432, sin TLS) el canal la enumera como no ejecutable (`SQLSTATE[08006]`), mientras que con `.env.docker-tls` (puerto 55433 con TLS local) completa sus **34/34 aserciones** y cierra las **70/70 suites** en verde.
+
+En la corrida histórica del 18 de noviembre, el pooler remoto quedó en verde y estable: `PoolerLatencyMeasurementTest` completa sus 20 rondas y pasa 30/30 aserciones en tres corridas. La optimización de `asignar` integró el cierre y la apertura de custodia en el CTE atómico y trasladó la revalidación de estado, titular y urgencia al propio `UPDATE` condicionado, eliminando en PostgreSQL la lectura bloqueada previa. Las medianas de «asignar» fueron **166,8 ms**, **165,6 ms** y **174,3 ms** (p95 194,2 / 224,6 / 241,1 ms) frente al presupuesto de 250 ms; el enlace base se mantuvo en 43,8–44,1 ms.
 
 El cerrojo entre pestañas también queda certificado: `OfflineSyncLockBrowserTest` completa sus **16/16 aserciones**. El runner prefiere Chrome/Chromium del sistema, después el Chromium que Playwright tenga en su caché local y, por último, Edge; así evita el arranque de Edge 157, que en este puesto termina con código 0 antes de publicar DevTools, sin instalar dependencias ni rebajar la exigencia de navegador real.
 
