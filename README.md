@@ -800,7 +800,7 @@ Las suites que declaran `VENDGUARD_TEST_CATEGORY = 'new_engine'` exigen un Postg
 
 ```bash
 source deploy/local/postgres/.env.local     # motor local; .env.docker-tls para el TLS
-php tests/run_new_engine.php                # las 70 suites del canal
+php tests/run_new_engine.php                # las 71 suites del canal
 php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 ```
 
@@ -820,7 +820,9 @@ Corrida histórica del 18 de noviembre de 2026 (canal cerrado · **70/70 suites 
 ======================================================================
 ```
 
-> **Corrida del 19 de noviembre de 2026:** **70 suites evaluadas · 69 en verde · 2.320 aserciones · 1 fallo**. El fallo es `PoolerLatencyMeasurementTest`: el esquema del pooler de certificación (`deploy/local/supabase/.env.local`, Supavisor 6543) no tiene `incidents.dispatch_level`, porque la migración `032` no está aplicada en ese destino; la suite no puede crear el expediente L1 y no mide las 20 muestras de RNF-01. El resto del canal queda en verde, incluida `RestockerSatSynergyApiTest` 55/55. No se ha modificado el esquema del pooler.
+> **Corrida del 19 de noviembre de 2026 (previa a H-36-04):** **70 suites evaluadas · 69 en verde · 2.320 aserciones · 1 fallo**. El fallo es `PoolerLatencyMeasurementTest`: el esquema del pooler de certificación (`deploy/local/supabase/.env.local`, Supavisor 6543) no tiene `incidents.dispatch_level`, porque la migración `032` no está aplicada en ese destino; la suite no puede crear el expediente L1 y no mide las 20 muestras de RNF-01. El resto del canal queda en verde, incluida `RestockerSatSynergyApiTest` 55/55. No se ha modificado el esquema del pooler.
+
+> **H-36-04 (19 de noviembre de 2026):** se añadió `RestockerSatLayoutBrowserTest`, que certifica **22/22** a `360 × 800` en Chromium real las superficies L1 y SAT (documento, bandeja, tarjeta, nota interna, foto, coincidencia en sede y acciones alcanzables). Sumada a la corrida anterior, el canal queda en **71 suites · 70 verdes · 2.342 aserciones · 1 fallo**, el mismo del pooler. No se reejecutó la totalidad del canal por límite de tiempo: las 70 suites restantes conservan el resultado de la corrida previa.
 
 En esa misma corrida histórica, `PostgresTieredSlaMetricsPerformanceTest` declara un contrato de entorno propio (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`) cuyo DSN exige TLS (`sslmode=verify-full`): bajo `.env.local` (puerto 5432, sin TLS) el canal la enumera como no ejecutable (`SQLSTATE[08006]`), mientras que con `.env.docker-tls` (puerto 55433 con TLS local) completa sus **34/34 aserciones** y cierra las **70/70 suites** en verde.
 

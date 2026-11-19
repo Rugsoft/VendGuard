@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VendGuard · sonda 360 · L1 RestockerRouteView</title>
+  <link rel="stylesheet" href="/assets/css/design-tokens.css">
+  <link rel="stylesheet" href="/assets/css/styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; min-height: 100%; scrollbar-width: none; }
+    html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; width: 0; height: 0; }
+    body { background: var(--color-canvas, #f9fafb); font-family: var(--font-body, Inter, sans-serif); color: var(--color-slate, #2c333f); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import * as Vue from '/assets/js/vendor/vue.esm-browser.prod.js';
+    window.Vue = Vue;
+    const { api } = await import('/assets/js/api.js');
+    const { store } = await import('/assets/js/store.js');
+    const { RestockerRouteView } = await import('/assets/js/components/RestockerRouteView.js');
+
+    const machine = {
+      id: 7,
+      code: 'VEND-0701',
+      model: 'Jofemar Vision',
+      machine_type: 'COMBO',
+      location_id: 1,
+      location_name: 'Hospital del Mar',
+      site_code: 'HOSP-MAR',
+      zone_id: 1,
+      zone_code: 'ZONA-BCN-NORTE',
+      zone_name: 'Barcelona Litoral y Norte',
+      sanitary_status: 'OK',
+      has_physical_reception: true,
+      has_prior_cash_collection: false,
+      can_restock: true,
+      pending_reception_refunds_count: 0,
+      active_slots_count: 6,
+      stockout_slots_count: 1,
+      low_stock_slots_count: 0,
+      ok_slots_count: 5,
+      inactive_product_slots_count: 0,
+      total_capacity: 60,
+      total_estimated_qty: 38,
+      fill_rate_percent: 63.33
+    };
+
+    const l1Incident = {
+      id: 501,
+      ticket_code: 'INC-2026-0501',
+      status: 'ASSIGNED',
+      level1_issue_type: 'STOCKOUT_EMPTY_SLOT',
+      machine_id: 7,
+      machine_code: 'VEND-0701',
+      location_name: 'Hospital del Mar',
+      description: 'El carril 21 de sándwiches está vacío y la sede pide reposición inmediata antes del cierre de urgencias.'
+    };
+
+    const bootstrap = {
+      data: {
+        restocker: {
+          id: 12,
+          name: 'Lucía Gómez',
+          email: 'lucia.restocker@vendguard.local',
+          operator_code: 'REP-01',
+          role: 'RESTOCKER'
+        },
+        zones: {
+          primary_zone: { id: 1, code: 'ZONA-BCN-NORTE', name: 'Barcelona Litoral y Norte', role_in_zone: 'PRIMARY' },
+          backup_zones: []
+        },
+        shift: { status: 'ACTIVE', active_shift_id: 45, today_effective_seconds: 7200 },
+        machines: [machine],
+        route_stops: [{ machine_id: 7, stop_order: 1, status: 'PENDING' }],
+        assigned_l1_incidents: [l1Incident],
+        l1_taxonomy_catalog: [],
+        site_coincidence: {
+          '1': [{
+            user_id: 21,
+            name: 'Mario Ruiz',
+            operator_code: 'REP-10',
+            role: 'RESTOCKER',
+            phone: '+34 600 333 444',
+            activity_summary: '1 aviso L1 activo en esta sede'
+          }]
+        },
+        recent_visits: [],
+        pending_reception_refunds: [],
+        recent_cash_collections: [],
+        cash_route_summary: {},
+        van_product_stocks: []
+      }
+    };
+
+    api.get = async (url) => {
+      if (url === '/restocker/my-route') return bootstrap;
+      if (url === '/technician/shift/status') {
+        return { data: { status: 'ACTIVE', active_shift_id: 45, today_effective_seconds: 7200 } };
+      }
+      return { data: [] };
+    };
+    api.post = async (url) => {
+      throw new Error('POST inesperado: ' + url);
+    };
+
+    store.state.user = { id: 12, name: 'Lucía Gómez', role: 'RESTOCKER', operator_code: 'REP-01' };
+
+    const app = Vue.createApp(RestockerRouteView);
+    const vm = app.mount('#app');
+    window.__vm = vm;
+
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      if (!vm.isLoading && vm.assignedL1Incidents.length > 0 && vm.machines.length > 0) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    await document.fonts.ready;
+    await vm.$nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    window.__harnessState = {
+      l1Incidents: vm.assignedL1Incidents.length,
+      machines: vm.machines.length,
+      loadError: vm.loadError
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

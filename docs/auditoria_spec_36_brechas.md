@@ -8,16 +8,16 @@
 - **Tareas:** [`specs/36-restocker-sat-synergy/tasks.md`](../specs/36-restocker-sat-synergy/tasks.md) · [`odd/tasks/restocker-sat-synergy.md`](../odd/tasks/restocker-sat-synergy.md)
 - **Matriz de trazabilidad:** [`specs/36-restocker-sat-synergy/traceability-matrix.md`](../specs/36-restocker-sat-synergy/traceability-matrix.md)
 - **Fecha de auditoría:** 2026-11-19
-- **Última actualización:** 2026-11-19 · H-36-01, H-36-02 y H-36-03 cerradas; FIX-36-01..08 conservados como historial; reauditoría de aceptación en §10
+- **Última actualización:** 2026-11-19 · H-36-01, H-36-02, H-36-03 y H-36-04 cerradas; FIX-36-01..08 conservados como historial; reauditoría de aceptación en §10
 - **Rama:** `feat/restocker-sat-synergy`
 - **Base auditada:** `95f9af1f1f481b14eeaf4b3acfcd623e791486e8` · árbol limpio antes de crear este acta
 - **Base de la reauditoría:** `d25cbad` · árbol limpio
 - **Alcance:** auditoría de los `RF-01`–`RF-05`, sus criterios EARS, `RNF-01`–`RNF-03`, las decisiones `D1`–`D4`, los casos `C1`–`C2`, las 9 salvaguardas `QA-*`, el §6, los 4 criterios de Definition of Done y las 12 tareas `T-RSS-01`–`T-RSS-12`, con ejecución real de las suites. FIX-36-01 a FIX-36-07 se corrigieron con prueba de composición o de invariante; FIX-36-08 cerró la trazabilidad con la evidencia focalizada del 2026-11-19.
 
-> Este documento es un acta viva de hallazgos: registra la evidencia previa de las brechas y los cierres de FIX-36-01 a FIX-36-08. La matriz, las tareas y el ODD quedaron sincronizados con la evidencia focalizada; la certificación global vigente es **441/16.993**, y el canal `new_engine` queda en **69/70** por el esquema del pooler sin la migración 032.
+> Este documento es un acta viva de hallazgos: registra la evidencia previa de las brechas y los cierres de FIX-36-01 a FIX-36-08. La matriz, las tareas y el ODD quedaron sincronizados con la evidencia focalizada; la certificación global vigente es **441/16.993**, y el canal `new_engine` queda en **70/71** por el esquema del pooler sin la migración 032; H-36-04 añadió la medición real de layout a 360 px.
 
 > [!WARNING]
-> **Reauditoría de aceptación del 2026-11-19 (ver §10).** El veredicto de cierre de este acta queda **superado**: la Spec 36 no está al 100 %. Los FIX-36-01..08 siguen siendo correcciones válidas y **H-36-01 (`RF-04.1`/`D4`), H-36-02 (`RF-05.2.2`/DoD 3) y H-36-03 (`RF-01.2`) quedaron cerradas el 2026-11-19**; la reauditoría mantiene brechas en `RNF-03` y la certificación `new_engine`. El estado vigente es **3/4 DoD**, **12/12 tareas marcadas con 1 reserva** y **69/70 en `new_engine`**.
+> **Reauditoría de aceptación del 2026-11-19 (ver §10).** El veredicto de cierre de este acta queda **superado**: la Spec 36 no está al 100 %. Los FIX-36-01..08 siguen siendo correcciones válidas y **H-36-01 (`RF-04.1`/`D4`), H-36-02 (`RF-05.2.2`/DoD 3), H-36-03 (`RF-01.2`) y H-36-04 (`RNF-03`) quedaron cerradas el 2026-11-19**; la reauditoría mantiene como única brecha la certificación `new_engine`. El estado vigente es **3/4 DoD**, **12/12 tareas marcadas con 1 reserva** y **70/71 en `new_engine`**.
 
 ---
 
@@ -478,9 +478,9 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | **1. Migración `032` y convergencia 1:1 con tipos #43/#44, ampliaciones, columnas, CHECK y 4 semillas** | `032_restocker_sat_synergy.sql` con tipos, columnas, FK, CHECK —incluido el mapeo determinista L1—, índice, operaciones Offline y las 4 parejas `RC-L1-*`/`SS-L1-*`; `supabase_seeds.sql` con 11 referencias; `SchemaConvergenceParityTest` 42/42; `PostgresRestockerSatSynergySchemaTest` 30/30; `CloudDeploySchemaParityTest` 55/55 | ✅ |
 | **2. Los servicios de aplicación imponen pre-clasificación, resolución L1, escalado en 3 ramas, auto-escalado QR, reapertura, `site_coincidence`, relevo C1, horas y opacidad** | Servicios y gateway verdes; QR, C1, el escalado, el alta L1 de Coordinación y el alta de Portal inyectan sinergia y tienen composición real (`RestockerSatSynergyApiTest` bloques 6–9 y `CreateIncidentEndpointTest` caso 9); la matriz enlaza cada composición | ✅ |
 | **3. `RestockerRouteView`, `TechnicianRouteView` y Coordinación implementan la operativa completa, el botón de escalado, el banner, la cola Offline y el filtro/triaje dual** | Frontend 236/236 + 18/18 + guards verdes; el botón «⚡ Escalar Avería al SAT» está en tarjeta, bandeja L1 y asistente de visita | ✅ |
-| **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Evidencia focalizada: **11 suites propias · 561 aserciones · 0 fallos**; `RestockerSatSynergyApiTest` 55/55 (bloques 6–9), `CreateIncidentEndpointTest` caso 9 `exit=0`, guardas 23/23 y frontend 236/236 + 18/18. Global: **441/16.993 · 0 fallos**. `new_engine`: **69/70 · 2.320 aserciones · 1 fallo** de esquema del pooler | ✅ global; ⚠️ `new_engine` no certificable al 100 % hasta aplicar la migración 032 al pooler |
+| **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Evidencia focalizada: **11 suites propias · 561 aserciones · 0 fallos** + `RestockerSatLayoutBrowserTest` **22/22** a 360 × 800; `RestockerSatSynergyApiTest` 55/55 (bloques 6–9), `CreateIncidentEndpointTest` caso 9 `exit=0`, guardas 23/23 y frontend 236/236 + 18/18. Global: **441/16.993 · 0 fallos**. `new_engine`: **70/71 · 2.342 aserciones · 1 fallo** de esquema del pooler | ✅ global; ⚠️ `new_engine` no certificable al 100 % hasta aplicar la migración 032 al pooler |
 
-> **Reauditoría 2026-11-19 (§10):** los DoD 1 y 2 se mantienen y **DoD 3 pasa a cumplirse** tras cerrar H-36-02, el cableado de la insignia, la Nota Interna y la foto en la ruta del técnico. **DoD 4 no se cumple** en la certificación completa mientras `new_engine` siga en 69/70 (16/30 aserciones del pooler). H-36-01, la brecha de `operator_code`/`tel:`, y H-36-02 quedaron cerradas.
+> **Reauditoría 2026-11-19 (§10):** los DoD 1 y 2 se mantienen y **DoD 3 pasa a cumplirse** tras cerrar H-36-02, el cableado de la insignia, la Nota Interna y la foto en la ruta del técnico. **DoD 4 no se cumple** en la certificación completa mientras `new_engine` siga en 70/71 (16/30 aserciones del pooler). H-36-01, H-36-02, H-36-03 y H-36-04 quedaron cerradas; `RNF-03` ya tiene medición real a 360 px.
 
 ---
 
@@ -499,11 +499,11 @@ La matriz y las tareas son la base de la certificación. Si declaran cubierto lo
 | `T-RSS-09` | `[x]` | API/constitucional, `site_coincidence`, filtro y promoción | ✅ incluye la composición QR/C1 real (bloques 6 y 7) |
 | `T-RSS-10` | `[x]` | Frontend 18/18 | ✅ coherente |
 | `T-RSS-11` | `[x]` | Frontend 236/236 | ✅ botón de escalado en tarjeta, bandeja L1 y asistente de visita |
-| `T-RSS-12` | `[x]` | 11 suites propias · 561 aserciones; global 441/441 · 16.993; `new_engine` 69/70 | ✅ evidencia focalizada real; la matriz enlaza QR, C1, escalado, alta de Coordinación, alta de Portal y botón de visita. El fallo de `PoolerLatencyMeasurementTest` se declara como deriva de esquema del pooler |
+| `T-RSS-12` | `[x]` | 11 suites propias · 561 aserciones + layout L1/SAT 22/22; global 441/441 · 16.993; `new_engine` 70/71 | ✅ evidencia focalizada real; la matriz enlaza QR, C1, escalado, alta de Coordinación, alta de Portal, botón de visita y medición 360 px. El fallo de `PoolerLatencyMeasurementTest` se declara como deriva de esquema del pooler |
 
 **Las 12 tareas están cerradas y respaldadas por la composición real o por la evidencia focalizada.**
 
-> **Reauditoría 2026-11-19 (§10):** la marca `[x]` se conserva en las 12 tareas, pero **el cierre de `T-RSS-12` tiene reserva de aceptación**. `T-RSS-12` certifica la documentación, no un `new_engine` al 100 %. Las reservas de `T-RSS-11` y `T-RSS-10` quedaron cerradas con H-36-01 y H-36-02: ambas vistas muestran `operator_code`/`tel:` y la tarjeta técnica pinta insignia, nota interna y foto desde el payload real.
+> **Reauditoría 2026-11-19 (§10):** la marca `[x]` se conserva en las 12 tareas, pero **el cierre de `T-RSS-12` tiene reserva de aceptación**. `T-RSS-12` certifica la documentación, no un `new_engine` al 100 %. Las reservas de `T-RSS-11` y `T-RSS-10` quedaron cerradas con H-36-01 y H-36-02: ambas vistas muestran `operator_code`/`tel:` y la tarjeta técnica pinta insignia, nota interna y foto desde el payload real. H-36-04 cerró la reserva de `RNF-03` con la suite de navegador a 360 × 800.
 
 ---
 
@@ -550,7 +550,7 @@ Nota: la primera pasada de esta corrida terminó con 0 fallos de suites pero con
 | `tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs` | 45/45 | 0 |
 | `tests/unit/MobileShellLayoutGuardTest.mjs` | 7/7 | 0 |
 
-### 6.3. Canal `new_engine` (2026-11-19)
+### 6.3. Canal `new_engine` (corrida previa a H-36-04 · 2026-11-19)
 
 ```text
 source deploy/local/postgres/.env.docker-tls
@@ -563,7 +563,7 @@ Fallos              : 1
 RESULTADO: FALLO. Revisa: PoolerLatencyMeasurementTest.php
 ```
 
-`PoolerLatencyMeasurementTest` falla con `SQLSTATE[42703]`: el esquema del pooler de certificación (`deploy/local/supabase/.env.local`, Supavisor 6543) no tiene `incidents.dispatch_level`, porque la migración `032_restocker_sat_synergy.sql` no está aplicada en ese destino. Sin la columna, el alta L1 del camino real no persiste y la suite no recoge las 20 muestras por operación; 16 de sus 30 aserciones quedan rojas. Las otras 69 suites están verdes, incluidas `RestockerSatSynergyApiTest` 55/55 y `RestockerSatSynergyConstitutionalTest` 17/17. No se modificó el esquema del pooler ni se sustituyó la medición remota por el motor local.
+`PoolerLatencyMeasurementTest` falla con `SQLSTATE[42703]`: el esquema del pooler de certificación (`deploy/local/supabase/.env.local`, Supavisor 6543) no tiene `incidents.dispatch_level`, porque la migración `032_restocker_sat_synergy.sql` no está aplicada en ese destino. Sin la columna, el alta L1 del camino real no persiste y la suite no recoge las 20 muestras por operación; 16 de sus 30 aserciones quedan rojas. Las otras 69 suites están verdes, incluidas `RestockerSatSynergyApiTest` 55/55 y `RestockerSatSynergyConstitutionalTest` 17/17. No se modificó el esquema del pooler ni se sustituyó la medición remota por el motor local. La suite `RestockerSatLayoutBrowserTest` (H-36-04) añade **22/22** aserciones verdes; sumada a esta corrida, el canal queda en **71 suites · 70 verdes · 2.342 aserciones · 1 fallo**, sin reejecutar las 70 restantes.
 
 ---
 
@@ -640,23 +640,23 @@ La Spec 36 queda cerrada con estos criterios:
 
 - **Base:** `d25cbad` · árbol limpio · sin cambios de código durante la auditoría.
 - **Alcance:** lectura requisito por requisito de `spec.md` y su espejo funcional, `restocker_sat_synergy_contracts.md` y `docs/design.md`; ejecución de las 25 suites solicitadas, dos guardas adicionales de frontend y el test del pooler; contraste con `tasks.md` y el ODD.
-- **Veredicto vigente:** **la Spec 36 no está 100 % cumplida**. Los FIX-36-01..08 no se reabren: las brechas de §10.6 son hallazgos nuevos de aceptación, no regresiones de esos fixes. H-36-01, H-36-02 y H-36-03 quedaron cerradas; permanecen `RNF-03` y el canal `new_engine`.
+- **Veredicto vigente:** **la Spec 36 no está 100 % cumplida**. Los FIX-36-01..08 no se reabren: las brechas de §10.6 son hallazgos nuevos de aceptación, no regresiones de esos fixes. H-36-01, H-36-02, H-36-03 y H-36-04 quedaron cerradas; permanece el canal `new_engine`.
 
 ### 10.1. Resultado ejecutivo
 
-La evidencia focalizada sigue siendo sólida: **11 suites propias, 561 aserciones, 0 fallos**. La batería hermética global está en **441 suites / 16.993 aserciones / 0 fallos**. El canal `new_engine` sigue en **69/70**, con **2.320 aserciones y 1 fallo**; el fallo es `PoolerLatencyMeasurementTest`, que deja **16 de sus 30 aserciones** en rojo porque el esquema del pooler de certificación no tiene `incidents.dispatch_level` (migración 032 no aplicada allí).
+La evidencia focalizada sigue siendo sólida: **11 suites propias, 561 aserciones, 0 fallos**, más `RestockerSatLayoutBrowserTest` **22/22** a 360 × 800. La batería hermética global está en **441 suites / 16.993 aserciones / 0 fallos**. El canal `new_engine` queda en **70/71**, con **2.342 aserciones y 1 fallo** (corrida previa 70/69/2.320 + suite de layout 22/22); el fallo es `PoolerLatencyMeasurementTest`, que deja **16 de sus 30 aserciones** en rojo porque el esquema del pooler de certificación no tiene `incidents.dispatch_level` (migración 032 no aplicada allí).
 
 La diferencia con el cierre anterior no está en las suites del núcleo, sino en la **aceptación de la interfaz y de la certificación completa**:
 
 1. `RF-04.1` exigía nombre, `operator_code` y enlace `tel:` del compañero; **H-36-01 quedó cerrada el 2026-11-19** y ambas vistas ya los muestran.
 2. `RF-05.2.2` exigía que la tarjeta del técnico activara la insignia de escalado y destacara la Nota Interna y la foto; **H-36-02 quedó cerrada el 2026-11-19** y el payload real de `/api/technician/my-route` ya publica el rastro, la nota y la foto.
 3. `RF-01.2` describía rutas que no coincidían literalmente con el router real y no tenía una composición de Portal elegible L1; **H-36-03 quedó cerrada el 2026-11-19** con los paths alineados y el caso positivo compuesto.
-4. `RNF-03` no tiene medición de scroll horizontal a 360 px.
+4. `RNF-03` ya tiene medición real de scroll horizontal a 360 px; **H-36-04 quedó cerrada el 2026-11-19**.
 5. `new_engine` no está al 100 %, por lo que el DoD 4 no se cumple si la certificación incluye el canal.
 
 ### 10.2. Evidencia ejecutada
 
-**Suites focalizadas del módulo (suma 561):**
+**Suites focalizadas del módulo (561 aserciones de dominio/frontend + 22 de layout):**
 
 | Suite | Resultado |
 | :--- | ---: |
@@ -671,6 +671,7 @@ La diferencia con el cierre anterior no está en las suites del núcleo, sino en
 | `RestockerSatSynergyConstitutionalTest.php` | 17/17 · `exit=0` |
 | `restocker_route_view.test.mjs` | 236/236 · `exit=0` |
 | `technician_and_coordinator_synergy.test.mjs` | 18/18 · `exit=0` |
+| `RestockerSatLayoutBrowserTest.php` (H-36-04) | 22/22 · `exit=0` · Chromium real a 360 × 800 |
 
 **Esquema, composición y guardas:**
 
@@ -698,7 +699,8 @@ La diferencia con el cierre anterior no está en las suites del núcleo, sino en
 
 ```text
 Batería global: 441 suites · 16.993 aserciones · 0 fallos · exit=0
-new_engine:    70 evaluadas · 69 verdes · 2.320 aserciones · 1 fallo
+new_engine:    71 evaluadas · 70 verdes · 2.342 aserciones · 1 fallo
+               (70/69/2.320 previas + RestockerSatLayoutBrowserTest 22/22)
 Pooler:        16/30 aserciones fallidas · SQLSTATE[42703] · exit=1
 ```
 
@@ -726,7 +728,7 @@ Pooler:        16/30 aserciones fallidas · SQLSTATE[42703] · exit=1
 | :--- | :---: | :--- |
 | **RNF-01** · 49 tablas, 44 enums, borrado físico e inmutabilidad | ✅ local / ⚠️ remoto | PostgresSchema 153/153, PostgresConstitutional 86/86, Schema 30/30, Convergence 42/42. El pooler remoto no tiene la 032. |
 | **RNF-02** · CHECK sanitario, notas internas, foto ≤ 5 MB y DTOs opacos | ✅ / ⚠️ | Validator 46/46, Domain 36/36, Constitutional 17/17, API 55/55 (QR). Portal/A4 no tienen una aserción focalizada propia. |
-| **RNF-03** · PHP/Vue vanilla, tokens y 360 px sin scroll | ⚠️ | Botones 23/23, plantillas 15/15, tokens 3/3, PWA 45/45, móvil 7/7. No hay medición real a 360 px. |
+| **RNF-03** · PHP/Vue vanilla, tokens y 360 px sin scroll | ✅ | Botones 23/23, plantillas 15/15, tokens 3/3, PWA 45/45, móvil 7/7 y `RestockerSatLayoutBrowserTest` **22/22** en Chromium real a 360 × 800 (L1 y SAT). H-36-04 cerrada. |
 | **D1** · Expediente único y `dispatch_level` | ✅ | Schema 30/30 y Domain 36/36. |
 | **D2** · Pre-clasificación y despacho dual | ✅ | Validator 46/46, Integrations 27/27, API 55/55 y `CreateIncidentEndpointTest` caso 9 (Portal elegible L1 y cuarentena). |
 | **D3** · Resolución L1 y escalado en tres ramas | ✅ | Gateway 24/24, Service 34/34, API 55/55, Restocker 236/236. |
@@ -753,7 +755,7 @@ Los cuatro casos límite del §6 pasan: QR térmico (API bloque 6 e Integrations
 | **1** · Migración, convergencia, tipos, columnas, CHECK y semillas | ✅ | Convergence 42/42, CloudDeploy 55/55, Schema 30/30. |
 | **2** · Servicios de aplicación completos | ✅ | Service 34/34, Integrations 27/27, Gateway 24/24, API 55/55. |
 | **3** · Frontend completo | ✅ | H-36-01 y H-36-02 cerradas: el banner muestra `operator_code`/`tel:` y la tarjeta técnica pinta insignia, Nota Interna y foto desde el payload real. |
-| **4** · Toda la batería al 100 % | ❌ | Global 441/16.993 verde; `new_engine` 69/70 y pooler 16/30. |
+| **4** · Toda la batería al 100 % | ❌ | Global 441/16.993 verde; `new_engine` 70/71 y pooler 16/30. |
 
 **Resultado: 3/4 DoD.** Las 12 tareas conservan `[x]` en `tasks.md` y ✅ en el ODD; sólo el cierre de `T-RSS-12` queda condicionado:
 
@@ -761,9 +763,9 @@ Los cuatro casos límite del §6 pasan: QR térmico (API bloque 6 e Integrations
 | :--- | :---: | :--- |
 | `T-RSS-01` a `T-RSS-09` y `T-RSS-11` | `[x]` | Sin reservas; H-36-01 cerrada y evidencia focalizada verde. |
 | `T-RSS-10` | `[x]` | Sin reservas; H-36-02 cerrada: payload, tarjeta y composición HTTP certificados. |
-| `T-RSS-12` | `[x]` | Documentación y cifras correctas, pero `new_engine` sigue 69/70; ver H-36-05. |
+| `T-RSS-12` | `[x]` | Documentación y cifras correctas, pero `new_engine` sigue 70/71; ver H-36-05. |
 
-### 10.6. Brechas de aceptación y cierres de H-36-01/H-36-02
+### 10.6. Brechas de aceptación y cierres de H-36-01 a H-36-04
 
 #### H-36-01 · `RF-04.1` / `D4`: el banner ya muestra código y teléfono del compañero · P1 · ✅ Cerrada (2026-11-19)
 
@@ -789,20 +791,22 @@ La spec y el contrato nombraban `/api/public/qr/{code}/report` y `/api/portal/in
 
 **Cierre verificado:** `CreateIncidentEndpointTest.php` **exit=0**, casos 9.1–9.2 en verde. La reserva documental de `RF-01.2` queda cerrada; `T-RSS-08` mantiene su cierre sin reservas.
 
-#### H-36-04 · `RNF-03`: faltan 360 px medidos · P2
+#### H-36-04 · `RNF-03`: medición real a 360 px de L1/SAT · P2 · ✅ Cerrada (2026-11-19)
 
-Las guardas de tokens, botones, plantillas, PWA y shell móvil pasan, pero el test de restocker solo valida `max-width: 480px` y ausencia de `min-width: 1024px` (`tests/frontend/restocker_route_view.test.mjs:355-358`). No hay una medición de `scrollWidth` a 360 px como la que existe en otros módulos.
+Las guardas de tokens, botones, plantillas, PWA y shell móvil pasaban, pero el test de restocker solo validaba `max-width: 480px` y ausencia de `min-width: 1024px` (`tests/frontend/restocker_route_view.test.mjs:355-358`). No había una medición de `scrollWidth` a 360 px como la que existe en otros módulos.
 
-**Cierre esperado:** añadir una prueba de navegador a 360 × 800 sobre las superficies L1/SAT, o corregir la spec si el viewport mínimo no es 360 px.
+**Corrección aplicada:** nueva suite `tests/integration/RestockerSatLayoutBrowserTest.php` (`new_engine`) y runner `tests/Support/RestockerSatLayoutBrowserRunner.mjs`, con dos arneses que montan `RestockerRouteView` y `TechnicianRouteView` con los estilos de producción. A 360 × 800, con Chromium real y la barra de scroll oculta, se miden `document.documentElement.scrollWidth`, `body.scrollWidth`, los rectángulos de la bandeja y tarjeta L1, la coincidencia en sede, la insignia de escalado, la Nota Interna, la foto y las acciones alcanzables; cualquier elemento visible fuera de 0–360 px hace fallar la suite.
+
+**Cierre verificado:** `php tests/integration/RestockerSatLayoutBrowserTest.php` → **22/22 aserciones · `exit=0`**. L1 y SAT no generan scroll horizontal del documento ni de sus contenedores; la tarjeta, la nota, la foto y los botones quedan dentro de 0–360 px. No hubo desbordamiento real que corregir en producción.
 
 #### H-36-05 · DoD 4: el pooler de certificación no tiene la migración 032 · P0 de certificación
 
-`PoolerLatencyMeasurementTest` falla con `SQLSTATE[42703]`: el esquema del pooler no tiene `incidents.dispatch_level`. La creación se aborta y caen 16 de 30 aserciones; el canal queda en 69/70. No es una regresión del Módulo 36 ni de los FIX-36, pero impide declarar el 100 %.
+`PoolerLatencyMeasurementTest` falla con `SQLSTATE[42703]`: el esquema del pooler no tiene `incidents.dispatch_level`. La creación se aborta y caen 16 de 30 aserciones; el canal queda en 70/71. No es una regresión del Módulo 36 ni de los FIX-36, pero impide declarar el 100 %.
 
 **Cierre esperado:** aplicar `032_restocker_sat_synergy.sql` al pooler de certificación con autorización explícita, o declarar formalmente que el DoD 4 se limita a la batería hermética y excluye `new_engine`. No se modificó el esquema remoto en esta auditoría.
 
 ### 10.7. Veredicto final
 
-**No, la Spec 36 no está 100 % cumplida.** El núcleo de dominio, esquema, gateway, servicios, API y la mayor parte de la interfaz están implementados y verdes; la evidencia focalizada es **11 suites / 561 aserciones**. H-36-01 (`RF-04.1`/`D4`), H-36-02 (`RF-05.2.2`/DoD 3) y H-36-03 (`RF-01.2`) quedaron cerradas. Pero `RNF-03` no está medido a 360 px y el DoD 4 falla si la certificación incluye `new_engine` (69/70; pooler 16/30).
+**No, la Spec 36 no está 100 % cumplida.** El núcleo de dominio, esquema, gateway, servicios, API y la mayor parte de la interfaz están implementados y verdes; la evidencia focalizada es **11 suites / 561 aserciones**. H-36-01 (`RF-04.1`/`D4`), H-36-02 (`RF-05.2.2`/DoD 3), H-36-03 (`RF-01.2`) y H-36-04 (`RNF-03`) quedaron cerradas. El DoD 4 sigue fallando si la certificación incluye `new_engine` (70/71; pooler 16/30).
 
-Las 12 tareas están marcadas `[x]`, pero **el cierre de `T-RSS-12` no es aceptable como 100 %** con la evidencia actual; `T-RSS-10` queda cerrada por H-36-02 y `T-RSS-11` por H-36-01. La reauditoría inicial no modificó código; H-36-01 y H-36-02 se corrigieron después en las vistas, el payload y sus suites, y esta acta registra los cambios sobre la base `d25cbad`.
+Las 12 tareas están marcadas `[x]`, pero **el cierre de `T-RSS-12` no es aceptable como 100 %** con la evidencia actual; `T-RSS-10` queda cerrada por H-36-02 y `T-RSS-11` por H-36-01. La reauditoría inicial no modificó código; H-36-01, H-36-02, H-36-03 y H-36-04 se corrigieron después en las vistas, el payload, los paths y la suite de navegador, y esta acta registra los cambios sobre la base `d25cbad`.
