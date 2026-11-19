@@ -346,6 +346,16 @@ class Incident implements ArrayAccess, JsonSerializable
                     'El Nivel 1 no admite el bloqueo por repuestos: debe resolverse o escalarse (QA-LIM-03).'
                 );
             }
+            // La pareja motivo/categoría solo se exige en L1: en L2 el motivo
+            // puede sobrevivir como rastro histórico (EARS 01.1.2, QA-AMB-01).
+            if ($level1IssueType !== null && !$level1IssueType->isCompatibleWith($category)) {
+                throw new InvalidArgumentException(sprintf(
+                    'El motivo de Nivel 1 «%s» exige la categoría «%s»; se recibió «%s» (QA-AMB-01).',
+                    $level1IssueType->value,
+                    $level1IssueType->mappedCategory()->value,
+                    $category->value
+                ));
+            }
         }
 
         $normalizedEscalatedAt = $escalatedToSatAt !== null && trim($escalatedToSatAt) !== ''

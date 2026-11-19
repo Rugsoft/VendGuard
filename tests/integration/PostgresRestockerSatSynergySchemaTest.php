@@ -18,9 +18,11 @@ declare(strict_types=1);
  *   2. **Forma de `incidents` (D1, D2).** Cincuenta y seis columnas, con `dispatch_level` NOT NULL
  *      y defecto `L2_SAT`, `level1_issue_type` nulo, el custodio de origen del escalado con su
  *      clave foránea `RESTRICT` y `escalated_to_sat_at` opcional.
- *   3. **Guarda constitucional en el motor (Art. II, QA-LIM-03, QA-CONST-01).** `L1_RESTOCKER` es
- *      imposible en `TEMPERATURE_COLD` y `ELECTRICAL_OFF`, imposible con `PENDING_PARTS` o con
- *      `pending_parts_reason`, y el rastro de escalado es todo-o-nada.
+ *   3. **Guarda constitucional en el motor (Art. II, QA-LIM-03, QA-AMB-01, QA-CONST-01).**
+ *      `L1_RESTOCKER` es imposible en `TEMPERATURE_COLD` y `ELECTRICAL_OFF`, imposible con
+ *      `PENDING_PARTS` o con `pending_parts_reason`, la pareja `level1_issue_type`/`category`
+ *      del alta L1 es determinista y el rastro de escalado es todo-o-nada. Un `L2_SAT` puede
+ *      conservar el motivo L1 como rastro histórico aunque su categoría cambie.
  *   4. **Índice de cola (D1).** `idx_incidents_dispatch_level_status` sirve el filtro de
  *      Coordinación y la bandeja L1 del reponedor.
  *   5. **Cola Offline (RF-05.1, C2).** `offline_sync_mutations` acepta `MACHINE` como parada y las
@@ -290,7 +292,7 @@ try {
     // ─────────────────────────────────────────────────────────────────────
     // 3. Guarda constitucional Art. II / QA-LIM-03 (QA-CONST-01)
     // ─────────────────────────────────────────────────────────────────────
-    echo "\n--- Guarda chk_incidents_l1_dispatch_coherence ---\n";
+    echo "\n--- Guarda chk_incidents_l1_dispatch_coherence y mapeo determinista L1 ---\n";
 
     $guardStmt = $pgPdo->prepare(
         "SELECT constraint_name FROM information_schema.table_constraints
@@ -309,6 +311,7 @@ try {
     // El índice uq_machine_active_ticket impide dos expedientes vivos por máquina:
     // el rastro de escalado se certifica sobre una segunda máquina limpia.
     $escalationMachineId = $createMachine($pgPdo, $locationId, 'VEND-RSS-002');
+    $historicalTraceMachineId = $createMachine($pgPdo, $locationId, 'VEND-RSS-003');
 
     $attemptIncident = static function (array $overrides, ?int $machineOverride = null) use ($pgPdo, $locationId, $machineId, $restockerId): array {
         return PostgresFixtureBuilder::insertIncident(
@@ -388,6 +391,20 @@ try {
             && $validL1['level1_issue_type'] === 'MINOR_SPIRAL_JAM'
     );
 
+    $incompatibleL1Pair = PostgresFixtureBuilder::expectRejection(static function () use ($attemptIncident, $escalationMachineId): void {
+        $attemptIncident([
+            'category' => 'PAYMENT_SYSTEM',
+            'dispatch_level' => 'L1_RESTOCKER',
+            'level1_issue_type' => 'STOCKOUT_EMPTY_SLOT',
+        ], $escalationMachineId);
+    });
+    $assert(
+        'Un L1_RESTOCKER rechaza una pareja motivo/categoría incoherente (23514, QA-AMB-01)',
+        $incompatibleL1Pair !== null && $incompatibleL1Pair['state'] === '23514'
+            && str_contains($incompatibleL1Pair['message'], 'chk_incidents_l1_dispatch_coherence'),
+        $incompatibleL1Pair === null ? 'la pareja incoherente se persistió' : 'estado=' . $incompatibleL1Pair['state']
+    );
+
     $halfEscalation = PostgresFixtureBuilder::expectRejection(static function () use ($attemptIncident, $restockerId, $escalationMachineId): void {
         $attemptIncident([
             'category' => 'PAYMENT_SYSTEM',
@@ -416,6 +433,27 @@ try {
         is_array($fullEscalation)
             && (int)$fullEscalation['escalated_from_restocker_id'] === $restockerId
             && $fullEscalation['dispatch_level'] === 'L2_SAT'
+    );
+
+    $historicalL2 = null;
+    try {
+        $historicalL2 = $attemptIncident([
+            'category' => 'TEMPERATURE_COLD',
+            'dispatch_level' => 'L2_SAT',
+            'level1_issue_type' => 'STOCKOUT_EMPTY_SLOT',
+            'escalated_from_restocker_id' => $restockerId,
+            'escalated_to_sat_at' => '2026-11-18 11:00:00+00',
+        ], $historicalTraceMachineId);
+    } catch (Throwable $exception) {
+        $historicalL2 = null;
+    }
+    $assert(
+        'Un L2_SAT conserva el motivo L1 histórico aunque la categoría pase a térmica',
+        is_array($historicalL2)
+            && $historicalL2['dispatch_level'] === 'L2_SAT'
+            && $historicalL2['category'] === 'TEMPERATURE_COLD'
+            && $historicalL2['level1_issue_type'] === 'STOCKOUT_EMPTY_SLOT'
+            && (int)$historicalL2['escalated_from_restocker_id'] === $restockerId
     );
 
     // ─────────────────────────────────────────────────────────────────────

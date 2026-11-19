@@ -1160,9 +1160,10 @@ CREATE TABLE IF NOT EXISTS incidents (
         REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT fk_incidents_escalated_from_restocker FOREIGN KEY (escalated_from_restocker_id)
         REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
-    -- Guarda constitucional Art. II y QA-LIM-03: jamás un ticket térmico o
-    -- eléctrico en `L1_RESTOCKER`, jamás `PENDING_PARTS` en Nivel 1 y jamás
-    -- medio rastro de escalado.
+    -- Guarda constitucional Art. II, QA-LIM-03 y QA-AMB-01: jamás un ticket
+    -- térmico o eléctrico en `L1_RESTOCKER`, jamás `PENDING_PARTS` en Nivel 1,
+    -- la pareja motivo/categoría determinista en L1 y jamás medio rastro de
+    -- escalado.
     CONSTRAINT chk_incidents_l1_dispatch_coherence CHECK (
         (
             dispatch_level = 'L2_SAT'
@@ -1171,6 +1172,13 @@ CREATE TABLE IF NOT EXISTS incidents (
                 AND category NOT IN ('TEMPERATURE_COLD', 'ELECTRICAL_OFF')
                 AND status <> 'PENDING_PARTS'
                 AND pending_parts_reason IS NULL
+                AND (
+                    level1_issue_type IS NULL
+                    OR (level1_issue_type = 'STOCKOUT_EMPTY_SLOT' AND category = 'PRODUCT_JAM')
+                    OR (level1_issue_type = 'MINOR_SPIRAL_JAM' AND category = 'PRODUCT_JAM')
+                    OR (level1_issue_type = 'EMPTY_CHANGE_TUBES' AND category = 'PAYMENT_SYSTEM')
+                    OR (level1_issue_type = 'MISSING_CONSUMABLES' AND category = 'OTHER')
+                )
             )
         )
         AND (

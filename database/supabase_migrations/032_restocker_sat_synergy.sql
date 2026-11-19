@@ -23,7 +23,7 @@
 --   3. Las columnas `dispatch_level`, `level1_issue_type`,
 --      `escalated_from_restocker_id` y `escalated_to_sat_at` en `incidents`,
 --      su clave foránea y la restricción `chk_incidents_l1_dispatch_coherence`
---      (Art. II, QA-LIM-03, QA-CONST-01).
+--      (Art. II, QA-LIM-03, QA-AMB-01, QA-CONST-01).
 --   4. La ampliación de `offline_sync_mutations` para las tres mutaciones
 --      móviles de Nivel 1 y escalado (RF-05.1, C2).
 --   5. La siembra idempotente de las 4 parejas de taxonomía de Nivel 1
@@ -34,7 +34,8 @@
 --   persistir, pero una consola SQL o un importador no pasan por ellos. La
 --   restricción `chk_incidents_l1_dispatch_coherence` impide que un ticket
 --   térmico o eléctrico quede en `L1_RESTOCKER`, que un Nivel 1 declare
---   `PENDING_PARTS` (QA-LIM-03) y que el rastro de escalado quede a medias.
+--   `PENDING_PARTS` (QA-LIM-03), que la pareja motivo/categoría del alta L1
+--   sea la determinista (QA-AMB-01) y que el rastro de escalado quede a medias.
 --   La emergencia alimentaria no admite una salvaguarda que dependa del cliente.
 --
 -- POR QUÉ ES IDEMPOTENTE
@@ -134,10 +135,12 @@ BEGIN
             REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE;
     END IF;
 
-    -- Guarda constitucional Art. II y QA-LIM-03:
+    -- Guarda constitucional Art. II, QA-LIM-03 y QA-AMB-01:
     -- 1. Jamás L1_RESTOCKER en TEMPERATURE_COLD ni ELECTRICAL_OFF.
     -- 2. Jamás PENDING_PARTS ni pending_parts_reason en L1_RESTOCKER.
-    -- 3. Coherencia todo-o-nada entre escalated_from_restocker_id y escalated_to_sat_at.
+    -- 3. En L1, el motivo de Nivel 1 exige su categoría determinista. En L2
+    --    puede conservarse como rastro histórico aunque la categoría cambie.
+    -- 4. Coherencia todo-o-nada entre escalated_from_restocker_id y escalated_to_sat_at.
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
          WHERE conname = 'chk_incidents_l1_dispatch_coherence'
@@ -153,6 +156,13 @@ BEGIN
                         AND category NOT IN ('TEMPERATURE_COLD', 'ELECTRICAL_OFF')
                         AND status <> 'PENDING_PARTS'
                         AND pending_parts_reason IS NULL
+                        AND (
+                            level1_issue_type IS NULL
+                            OR (level1_issue_type = 'STOCKOUT_EMPTY_SLOT' AND category = 'PRODUCT_JAM')
+                            OR (level1_issue_type = 'MINOR_SPIRAL_JAM' AND category = 'PRODUCT_JAM')
+                            OR (level1_issue_type = 'EMPTY_CHANGE_TUBES' AND category = 'PAYMENT_SYSTEM')
+                            OR (level1_issue_type = 'MISSING_CONSUMABLES' AND category = 'OTHER')
+                        )
                     )
                 )
                 AND (

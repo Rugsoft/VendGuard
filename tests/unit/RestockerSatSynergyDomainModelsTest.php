@@ -329,6 +329,14 @@ try {
         'Un L1_RESTOCKER no puede declarar motivo de repuestos'
     );
     assertRssRejects(
+        static fn () => makeRssIncident([
+            'category' => IncidentCategory::PAYMENT_SYSTEM,
+            'dispatch_level' => IncidentDispatchLevel::L1_RESTOCKER,
+            'level1_issue_type' => Level1IssueType::STOCKOUT_EMPTY_SLOT,
+        ]),
+        'Un L1_RESTOCKER no puede declarar un motivo incompatible con su categoría'
+    );
+    assertRssRejects(
         static fn () => makeRssIncident(['escalated_from_restocker_id' => 42]),
         'El custodio de origen sin marca temporal se rechaza'
     );
@@ -344,7 +352,20 @@ try {
         $fullTrail->wasEscalatedToSat(),
         'El rastro completo se acepta sobre un expediente L2_SAT'
     );
-    echo "  [OK]   Térmico, eléctrico, repuestos y rastro a medias rechazados\n";
+    $escalatedThermalTrace = makeRssIncident([
+        'category' => IncidentCategory::TEMPERATURE_COLD,
+        'dispatch_level' => IncidentDispatchLevel::L2_SAT,
+        'level1_issue_type' => Level1IssueType::STOCKOUT_EMPTY_SLOT,
+        'escalated_from_restocker_id' => 42,
+        'escalated_to_sat_at' => '2026-11-18 11:00:00+00',
+    ]);
+    assertRssCondition(
+        $escalatedThermalTrace->getCategory() === IncidentCategory::TEMPERATURE_COLD
+            && $escalatedThermalTrace->getLevel1IssueType() === Level1IssueType::STOCKOUT_EMPTY_SLOT
+            && $escalatedThermalTrace->wasEscalatedToSat(),
+        'Un expediente L2_SAT conserva el motivo L1 histórico aunque la categoría pase a térmica'
+    );
+    echo "  [OK]   Térmico, eléctrico, repuestos, mapeo incompatible y rastro a medias rechazados\n";
 
     echo "--- Opacidad de la proyección genérica (QA-CONST-03, Art. V.4) ---\n";
 
