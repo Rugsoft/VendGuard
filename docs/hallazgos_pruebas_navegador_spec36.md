@@ -3,11 +3,11 @@
 - **Fecha:** 2026-11-20
 - **Rama:** `feat/restocker-sat-synergy`
 - **HEAD de la corrida original:** `9d72fea` · `fix(restocker): update the route empty state copy`
-- **Árbol:** la corrida original no modificó código, esquema ni tests. Las correcciones posteriores de `H-36-06` a `H-36-10` sí cambian gateway, repositorio, servicios, UI y suites; se registran en sus commits de corrección, sin push.
+- **Árbol:** la corrida original no modificó código, esquema ni tests. Las correcciones posteriores de `H-36-06` a `H-36-10` y de `O-36-01` sí cambian gateway, repositorio, servicios, UI y suites; se registran en sus commits de corrección, sin push.
 - **Alcance:** recorrido manual en navegador de los flujos de la Spec 36 (`RF-01`–`RF-05`, `D1`–`D4`, `C1`–`C2`) con los cuatro perfiles: Responsable de Sede, Coordinación, Reponedor y Técnico SAT.
 - **Entorno:** app local `http://127.0.0.1:8000` contra `vendguard_battery` (PostgreSQL local `127.0.0.1:54331`). Estado inicial: 0 tickets activos y 0 turnos.
-- **Naturaleza:** acta de verificación funcional. La corrida original no aplicó correcciones y dejó los hallazgos abiertos; `H-36-06` a `H-36-10` se corrigieron después.
-- **Actualización (2026-11-20):** `H-36-06` corregido y cubierto por una prueba de composición HTTP/PostgreSQL; `H-36-07` corregido en alta de Sede y despacho manual L1, con validación y persistencia del motivo; `H-36-08` corregido con filtrado de causas por categoría/motivo, preselección coherente y rechazo 422 de causas de otra categoría; `H-36-09` corregido con la derivación de urgencia desde tipo de máquina y categoría y la herencia del perfil SLA de la sede en la rama de ticket SAT nuevo; `H-36-10` corregido al publicar `location_id` en el DTO de máquina, con composición HTTP/PostgreSQL y bootstrap de la vista. La evidencia original se conserva; los estados actualizados están en la tabla resumen y en las secciones de cada hallazgo.
+- **Naturaleza:** acta de verificación funcional. La corrida original no aplicó correcciones y dejó los hallazgos abiertos; `H-36-06` a `H-36-10` y `O-36-01` se corrigieron después.
+- **Actualización (2026-11-20):** `H-36-06` corregido y cubierto por una prueba de composición HTTP/PostgreSQL; `H-36-07` corregido en alta de Sede y despacho manual L1, con validación y persistencia del motivo; `H-36-08` corregido con filtrado de causas por categoría/motivo, preselección coherente y rechazo 422 de causas de otra categoría; `H-36-09` corregido con la derivación de urgencia desde tipo de máquina y categoría y la herencia del perfil SLA de la sede en la rama de ticket SAT nuevo; `H-36-10` corregido al publicar `location_id` en el DTO de máquina, con composición HTTP/PostgreSQL y bootstrap de la vista; `O-36-01` corregido al recargar la ruta técnica tras iniciar turno, con prueba de regresión del banner. La evidencia original se conserva; los estados actualizados están en la tabla resumen y en las secciones de cada hallazgo.
 - **Relación con documentos previos:** complementa [`informe_verificacion_rama_restocker_sat_synergy.md`](informe_verificacion_rama_restocker_sat_synergy.md) y [`auditoria_spec_36_brechas.md`](auditoria_spec_36_brechas.md). Los cierres `V-01`–`V-03` y `FIX-36-01`–`FIX-36-08` siguen siendo válidos. La corrida de navegador abrió `H-36-06`–`H-36-10`; `H-36-06` a `H-36-10` quedan resueltos.
 
 > Los identificadores `H-36-06` a `H-36-10` son nuevos para no reutilizar los `H-36-01`–`H-36-05` ya cerrados en la auditoría. Las observaciones menores se numeran aparte como `O-36-01` y `O-36-02`.
@@ -33,7 +33,7 @@ El flujo **queda cerrado tras las correcciones**: la corrida detectó un bloquea
 | `H-36-08` | P2 · Alto | Causa raíz preseleccionada incompatible con la categoría | `RF-02`, `D3` | **Resuelto (2026-11-20)** |
 | `H-36-09` | P2 · Alto | El escalado a SAT desde máquina sin aviso previo pierde el SLA de la sede | `RF-03.2`, `D3` | **Resuelto (2026-11-20)** |
 | `H-36-10` | P2 · Medio | «Coincidencia en Sede» no se renderiza en la vista del Reponedor | `RF-04.1`, `D4` | **Resuelto (2026-11-20)** |
-| `O-36-01` | P3 · Menor | El banner de coincidencia del Técnico no aparece hasta refrescar | `D4` | Observación |
+| `O-36-01` | P3 · Menor | El banner de coincidencia del Técnico no aparece hasta refrescar | `D4` | **Resuelto (2026-11-20)** |
 | `O-36-02` | P3 · Menor | Error genérico de resolución L1, sin detalle de validación | `RF-02` | Observación |
 
 **Lectura de prioridades:** P1 impide completar un flujo principal o certificar el módulo; P2 deja un requisito funcional sin cumplir o produce un dato operativo incorrecto; P3 es deuda de usabilidad o de actualización de datos, sin bloqueo.
@@ -440,6 +440,21 @@ No se trata de un fallo de datos: la API devuelve la coincidencia al recargar. E
 
 **Recomendación:** recargar la ruta al iniciar turno o refrescar la coincidencia en el mismo ciclo que actualiza el estado del turno.
 
+#### Corrección aplicada
+
+- **Ciclo de turno:** [`TechnicianRouteView.js`](../public/assets/js/views/TechnicianRouteView.js) recarga la ruta con `loadRoute()` dentro de `startShift()`, después de sellar `ON_SHIFT` y la copia offline del turno. La coincidencia se recalcula ya con el turno abierto, así que el banner aparece sin refrescar la página.
+- **Prueba de regresión:** [`technician_and_coordinator_synergy.test.mjs`](../tests/frontend/technician_and_coordinator_synergy.test.mjs) simula `POST /technician/shift/start` y una ruta con `site_coincidence`; exige una única recarga de ruta, el estado `ON_SHIFT` y la coincidencia publicada en la parada.
+
+#### Evidencia de la corrección (2026-11-20)
+
+| Suite | Resultado |
+| :--- | :--- |
+| `tests/frontend/technician_and_coordinator_synergy.test.mjs` | **19/19** aserciones · 0 fallos (recarga al iniciar turno y banner) |
+| `tests/unit/TechnicianRouteViewTest.mjs` | **181/181** aserciones · 0 fallos |
+| `tests/unit/TechnicianShiftViewTest.mjs` | **43/43** aserciones · 0 fallos |
+| Canal `new_engine` | **71/71 suites · 2.356 aserciones · 0 fallos · `exit=0`** (sin cambios en PHP) |
+| Evidencia focalizada del Módulo 36 | **580** aserciones |
+
 ### O-36-02 · P3 · Error genérico al fallar la resolución L1
 
 La UI muestra «⚠️ No se pudo completar la operación de Nivel 1.» sin indicar el campo, la causa ni el código HTTP. En el caso de `H-36-06`, el problema real es una violación de coherencia de taxonomía; el operario no tiene forma de saberlo.
@@ -525,7 +540,7 @@ SELECT ticket_code, status, dispatch_level, level1_issue_type,
 | `H-36-08` | **No · resuelto el 2026-11-20** | Filtro por categoría/motivo, preselección coherente y 422 de categoría cubiertos |
 | `H-36-09` | **No · resuelto el 2026-11-20** | Urgencia derivada de máquina/categoría y perfil SLA de la sede heredado en la rama B |
 | `H-36-10` | **No · resuelto el 2026-11-20** | DTO publica `location_id`; composición HTTP/PostgreSQL y bootstrap de la vista cubiertos |
-| `O-36-01` | No | Refrescar coincidencia al iniciar turno |
+| `O-36-01` | **No · resuelto el 2026-11-20** | `startShift()` recarga la ruta; regresión frontend **19/19** |
 | `O-36-02` | No | Mensajes de error de validación útiles |
 
-**Conclusión:** la Spec 36 puede declararse cerrada con esta corrida. `H-36-06` ya no bloquea el flujo principal de resolución L1: la hidratación y la composición HTTP/PostgreSQL están cubiertas. `H-36-07` queda resuelto con el selector de motivo en Sede y la validación/persistencia en el despacho manual L1. `H-36-08` queda resuelto con el filtrado por categoría/motivo, la preselección coherente y el rechazo 422 de causas de otra categoría. `H-36-09` queda resuelto al derivar la urgencia de máquina/categoría y heredar el perfil SLA de la sede en la rama de ticket SAT nuevo. `H-36-10` queda resuelto al publicar `location_id` en el DTO de máquina y exigir por composición que la coincidencia se indexe por esa clave y llegue al banner. No quedan hallazgos P1/P2 abiertos; `O-36-01` y `O-36-02` siguen como deuda menor P3. Las correcciones se acompañan de pruebas de composición reales, no solo de dobles del gateway.
+**Conclusión:** la Spec 36 puede declararse cerrada con esta corrida. `H-36-06` ya no bloquea el flujo principal de resolución L1: la hidratación y la composición HTTP/PostgreSQL están cubiertas. `H-36-07` queda resuelto con el selector de motivo en Sede y la validación/persistencia en el despacho manual L1. `H-36-08` queda resuelto con el filtrado por categoría/motivo, la preselección coherente y el rechazo 422 de causas de otra categoría. `H-36-09` queda resuelto al derivar la urgencia de máquina/categoría y heredar el perfil SLA de la sede en la rama de ticket SAT nuevo. `H-36-10` queda resuelto al publicar `location_id` en el DTO de máquina y exigir por composición que la coincidencia se indexe por esa clave y llegue al banner. No quedan hallazgos P1/P2 abiertos; `O-36-01` queda resuelto al recargar la ruta tras iniciar turno y solo `O-36-02` sigue como deuda menor P3. Las correcciones se acompañan de pruebas de composición reales, no solo de dobles del gateway.

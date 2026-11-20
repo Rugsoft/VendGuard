@@ -791,6 +791,9 @@ export const TechnicianRouteView = {
         const res = await api.post('/technician/shift/start');
         this.applyShiftResponse(res, 'ON_SHIFT');
         await this.persistOfflineShiftStatus();
+        // O-36-01: site coincidence depends on the open shift, so refresh the
+        // route in the same cycle instead of waiting for a manual reload.
+        await this.loadRoute();
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo iniciar el turno.';
       } finally {

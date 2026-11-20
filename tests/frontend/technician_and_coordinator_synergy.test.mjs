@@ -243,6 +243,41 @@ assert(
   !technicianSource.includes('{{ incident.dispatch_level }}')
 );
 
+// O-36-01: al abrir turno la ruta debe recargarse para que la coincidencia,
+// calculada con el turno ya abierto, llegue al banner sin refrescar la página.
+const shiftStartVm = buildVm(TechnicianRouteView, {
+  guardOnlineOnly: () => true,
+  persistOfflineShiftStatus: async () => {},
+  refreshOfflineSnapshotFromServer: async () => {},
+  loadTroubleshootingGuidesForRoute: async () => {}
+});
+const originalPost = api.post;
+const originalTechnicianGetMyRoute = api.technician.getMyRoute;
+let startedPath = null;
+let routeLoads = 0;
+api.post = async (path) => {
+  startedPath = path;
+  return { status: 'ON_SHIFT', active_shift_id: 77, today_effective_seconds: 3600 };
+};
+api.technician.getMyRoute = async () => {
+  routeLoads++;
+  return [{ id: 501, machine_id: 7, site_coincidence: coincidence }];
+};
+try {
+  await shiftStartVm.startShift();
+} finally {
+  api.post = originalPost;
+  api.technician.getMyRoute = originalTechnicianGetMyRoute;
+}
+assert(
+  'O-36-01: iniciar turno recarga la ruta y publica la coincidencia sin refrescar',
+  startedPath === '/technician/shift/start'
+    && routeLoads === 1
+    && shiftStartVm.shiftStatus === 'ON_SHIFT'
+    && shiftStartVm.siteCoincidenceFor(shiftStartVm.incidents[0]).length === 2
+    && shiftStartVm.siteCoincidenceSummary(shiftStartVm.incidents[0]).includes('Lucía Gómez (REP-09)')
+);
+
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Fallidas: ${failures}`);
 console.log(failures === 0
