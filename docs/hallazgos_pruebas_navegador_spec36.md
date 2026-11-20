@@ -3,12 +3,12 @@
 - **Fecha:** 2026-11-20
 - **Rama:** `feat/restocker-sat-synergy`
 - **HEAD de la corrida original:** `9d72fea` · `fix(restocker): update the route empty state copy`
-- **Árbol:** la corrida original no modificó código, esquema ni tests. Las correcciones posteriores de `H-36-06` a `H-36-10` y de `O-36-01` sí cambian gateway, repositorio, servicios, UI y suites; se registran en sus commits de corrección, sin push.
+- **Árbol:** la corrida original no modificó código, esquema ni tests. Las correcciones posteriores de `H-36-06` a `H-36-10` y de `O-36-01`/`O-36-02` sí cambian gateway, repositorio, servicios, UI y suites; se registran en sus commits de corrección, sin push.
 - **Alcance:** recorrido manual en navegador de los flujos de la Spec 36 (`RF-01`–`RF-05`, `D1`–`D4`, `C1`–`C2`) con los cuatro perfiles: Responsable de Sede, Coordinación, Reponedor y Técnico SAT.
 - **Entorno:** app local `http://127.0.0.1:8000` contra `vendguard_battery` (PostgreSQL local `127.0.0.1:54331`). Estado inicial: 0 tickets activos y 0 turnos.
-- **Naturaleza:** acta de verificación funcional. La corrida original no aplicó correcciones y dejó los hallazgos abiertos; `H-36-06` a `H-36-10` y `O-36-01` se corrigieron después.
-- **Actualización (2026-11-20):** `H-36-06` corregido y cubierto por una prueba de composición HTTP/PostgreSQL; `H-36-07` corregido en alta de Sede y despacho manual L1, con validación y persistencia del motivo; `H-36-08` corregido con filtrado de causas por categoría/motivo, preselección coherente y rechazo 422 de causas de otra categoría; `H-36-09` corregido con la derivación de urgencia desde tipo de máquina y categoría y la herencia del perfil SLA de la sede en la rama de ticket SAT nuevo; `H-36-10` corregido al publicar `location_id` en el DTO de máquina, con composición HTTP/PostgreSQL y bootstrap de la vista; `O-36-01` corregido al recargar la ruta técnica tras iniciar turno, con prueba de regresión del banner. La evidencia original se conserva; los estados actualizados están en la tabla resumen y en las secciones de cada hallazgo.
-- **Relación con documentos previos:** complementa [`informe_verificacion_rama_restocker_sat_synergy.md`](informe_verificacion_rama_restocker_sat_synergy.md) y [`auditoria_spec_36_brechas.md`](auditoria_spec_36_brechas.md). Los cierres `V-01`–`V-03` y `FIX-36-01`–`FIX-36-08` siguen siendo válidos. La corrida de navegador abrió `H-36-06`–`H-36-10`; `H-36-06` a `H-36-10` quedan resueltos.
+- **Naturaleza:** acta de verificación funcional. La corrida original no aplicó correcciones y dejó los hallazgos abiertos; `H-36-06` a `H-36-10` y `O-36-01`/`O-36-02` se corrigieron después.
+- **Actualización (2026-11-20):** `H-36-06` corregido y cubierto por una prueba de composición HTTP/PostgreSQL; `H-36-07` corregido en alta de Sede y despacho manual L1, con validación y persistencia del motivo; `H-36-08` corregido con filtrado de causas por categoría/motivo, preselección coherente y rechazo 422 de causas de otra categoría; `H-36-09` corregido con la derivación de urgencia desde tipo de máquina y categoría y la herencia del perfil SLA de la sede en la rama de ticket SAT nuevo; `H-36-10` corregido al publicar `location_id` en el DTO de máquina, con composición HTTP/PostgreSQL y bootstrap de la vista; `O-36-01` corregido al recargar la ruta técnica tras iniciar turno, con prueba de regresión del banner; `O-36-02` corregido al traducir los errores de validación L1 a mensajes de campo con su código seguro, sin filtrar SQL. La evidencia original se conserva; los estados actualizados están en la tabla resumen y en las secciones de cada hallazgo.
+- **Relación con documentos previos:** complementa [`informe_verificacion_rama_restocker_sat_synergy.md`](informe_verificacion_rama_restocker_sat_synergy.md) y [`auditoria_spec_36_brechas.md`](auditoria_spec_36_brechas.md). Los cierres `V-01`–`V-03` y `FIX-36-01`–`FIX-36-08` siguen siendo válidos. La corrida de navegador abrió `H-36-06`–`H-36-10`; los cinco hallazgos y las observaciones `O-36-01`/`O-36-02` quedan resueltos.
 
 > Los identificadores `H-36-06` a `H-36-10` son nuevos para no reutilizar los `H-36-01`–`H-36-05` ya cerrados en la auditoría. Las observaciones menores se numeran aparte como `O-36-01` y `O-36-02`.
 
@@ -34,7 +34,7 @@ El flujo **queda cerrado tras las correcciones**: la corrida detectó un bloquea
 | `H-36-09` | P2 · Alto | El escalado a SAT desde máquina sin aviso previo pierde el SLA de la sede | `RF-03.2`, `D3` | **Resuelto (2026-11-20)** |
 | `H-36-10` | P2 · Medio | «Coincidencia en Sede» no se renderiza en la vista del Reponedor | `RF-04.1`, `D4` | **Resuelto (2026-11-20)** |
 | `O-36-01` | P3 · Menor | El banner de coincidencia del Técnico no aparece hasta refrescar | `D4` | **Resuelto (2026-11-20)** |
-| `O-36-02` | P3 · Menor | Error genérico de resolución L1, sin detalle de validación | `RF-02` | Observación |
+| `O-36-02` | P3 · Menor | Error genérico de resolución L1, sin detalle de validación | `RF-02` | **Resuelto (2026-11-20)** |
 
 **Lectura de prioridades:** P1 impide completar un flujo principal o certificar el módulo; P2 deja un requisito funcional sin cumplir o produce un dato operativo incorrecto; P3 es deuda de usabilidad o de actualización de datos, sin bloqueo.
 
@@ -461,6 +461,20 @@ La UI muestra «⚠️ No se pudo completar la operación de Nivel 1.» sin indi
 
 **Recomendación:** mapear los errores de validación a mensajes de campo y conservar el detalle seguro del código de error; no exponer el mensaje SQL.
 
+#### Corrección aplicada
+
+- **Vista:** [`RestockerRouteView.js`](../public/assets/js/components/RestockerRouteView.js) traduce el fallo con `l1ResolutionErrorMessage()`: usa `details.field` para señalar «Diagnóstico» o «Acción ejecutada» en `RESOLUTION_TEXT_TOO_SHORT`, mapea las guardas sanitarias, de repuestos y de taxonomía a mensajes accionables y conserva el código seguro del API. No se leen `raw` ni la traza; los códigos desconocidos conservan el mensaje del API.
+- **Códigos cubiertos:** `RESOLUTION_TEXT_TOO_SHORT`, `SANITARY_L1_RESOLUTION_BLOCKED`, `L1_PENDING_PARTS_FORBIDDEN`, `MISSING_ROOT_CAUSE_TAXONOMY`, `ROOT_CAUSE_NOT_FOUND`, `INCOMPATIBLE_STANDARD_SOLUTION`, `INACTIVE_ROOT_CAUSE_TAXONOMY`, `INVALID_RESOLUTION`, `INCIDENT_NOT_ASSIGNED_TO_RESTOCKER`, `MACHINE_OUTSIDE_RESTOCKER_ZONES` e `INTERNAL_SERVER_ERROR`. Este último muestra un mensaje seguro con su código, sin el texto interno del servidor.
+- **Prueba de regresión:** [`restocker_route_view.test.mjs`](../tests/frontend/restocker_route_view.test.mjs) simula un `ApiError` 422 con `details.field = resolution_diagnosis` y exige el campo «Diagnóstico», el mínimo de 20 caracteres y el código, sin el nombre interno del campo; un segundo caso simula un 500 con un payload que contiene `SQLSTATE` y exige que no se filtre.
+
+#### Evidencia de la corrección (2026-11-20)
+
+| Suite | Resultado |
+| :--- | :--- |
+| `tests/frontend/restocker_route_view.test.mjs` | **242/242** aserciones · 0 fallos (dos regresiones O-36-02) |
+| Canal `new_engine` | **71/71 suites · 2.356 aserciones · 0 fallos · `exit=0`** (sin cambios en PHP; corrida vigente del 2026-11-20) |
+| Evidencia focalizada del Módulo 36 | **582** aserciones |
+
 ---
 
 ## 5. Flujos verificados correctamente
@@ -541,6 +555,6 @@ SELECT ticket_code, status, dispatch_level, level1_issue_type,
 | `H-36-09` | **No · resuelto el 2026-11-20** | Urgencia derivada de máquina/categoría y perfil SLA de la sede heredado en la rama B |
 | `H-36-10` | **No · resuelto el 2026-11-20** | DTO publica `location_id`; composición HTTP/PostgreSQL y bootstrap de la vista cubiertos |
 | `O-36-01` | **No · resuelto el 2026-11-20** | `startShift()` recarga la ruta; regresión frontend **19/19** |
-| `O-36-02` | No | Mensajes de error de validación útiles |
+| `O-36-02` | **No · resuelto el 2026-11-20** | 422/500 mapeados a campo y código seguro; regresión frontend **242/242** |
 
-**Conclusión:** la Spec 36 puede declararse cerrada con esta corrida. `H-36-06` ya no bloquea el flujo principal de resolución L1: la hidratación y la composición HTTP/PostgreSQL están cubiertas. `H-36-07` queda resuelto con el selector de motivo en Sede y la validación/persistencia en el despacho manual L1. `H-36-08` queda resuelto con el filtrado por categoría/motivo, la preselección coherente y el rechazo 422 de causas de otra categoría. `H-36-09` queda resuelto al derivar la urgencia de máquina/categoría y heredar el perfil SLA de la sede en la rama de ticket SAT nuevo. `H-36-10` queda resuelto al publicar `location_id` en el DTO de máquina y exigir por composición que la coincidencia se indexe por esa clave y llegue al banner. No quedan hallazgos P1/P2 abiertos; `O-36-01` queda resuelto al recargar la ruta tras iniciar turno y solo `O-36-02` sigue como deuda menor P3. Las correcciones se acompañan de pruebas de composición reales, no solo de dobles del gateway.
+**Conclusión:** la Spec 36 puede declararse cerrada con esta corrida. `H-36-06` ya no bloquea el flujo principal de resolución L1: la hidratación y la composición HTTP/PostgreSQL están cubiertas. `H-36-07` queda resuelto con el selector de motivo en Sede y la validación/persistencia en el despacho manual L1. `H-36-08` queda resuelto con el filtrado por categoría/motivo, la preselección coherente y el rechazo 422 de causas de otra categoría. `H-36-09` queda resuelto al derivar la urgencia de máquina/categoría y heredar el perfil SLA de la sede en la rama de ticket SAT nuevo. `H-36-10` queda resuelto al publicar `location_id` en el DTO de máquina y exigir por composición que la coincidencia se indexe por esa clave y llegue al banner. No quedan hallazgos abiertos: `O-36-01` queda resuelto al recargar la ruta tras iniciar turno y `O-36-02` al traducir los errores de validación L1 a mensajes de campo con su código seguro. Las correcciones se acompañan de pruebas de composición reales, no solo de dobles del gateway.

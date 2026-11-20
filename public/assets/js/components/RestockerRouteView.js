@@ -1474,6 +1474,45 @@ export const RestockerRouteView = {
       this.l1ResolveForm.standard_solution_id = first?.id ?? '';
     },
 
+    /**
+     * Traduce un fallo de resolución L1 a un mensaje accionable y seguro.
+     *
+     * Solo consume `code`, `message` y `details.field` del error del API; no
+     * lee el payload crudo ni la traza. Los 500 usan un texto fijo para no
+     * filtrar SQL al operario (O-36-02).
+     */
+    l1ResolutionErrorMessage(error) {
+      const code = String(error?.code ?? '').trim();
+      const field = String(error?.details?.field ?? '').trim();
+      const safeMessages = {
+        SANITARY_L1_RESOLUTION_BLOCKED: 'La máquina está en cuarentena sanitaria: restituye la cadena de frío y emite el acta antes de resolver el aviso.',
+        L1_PENDING_PARTS_FORBIDDEN: 'Un aviso de Nivel 1 no puede quedar pendiente de repuestos: escala la avería al SAT.',
+        MISSING_ROOT_CAUSE_TAXONOMY: 'Selecciona la causa raíz y la solución estandarizada antes de resolver.',
+        ROOT_CAUSE_NOT_FOUND: 'La causa raíz o la solución ya no existe en el catálogo: recarga la ruta y elige una entrada vigente.',
+        INCOMPATIBLE_STANDARD_SOLUTION: 'La solución elegida no pertenece a la causa raíz: selecciona la pareja correcta del catálogo.',
+        INACTIVE_ROOT_CAUSE_TAXONOMY: 'La causa raíz o la solución está desactivada: elige una entrada vigente del catálogo.',
+        INVALID_RESOLUTION: 'La taxonomía de resolución no es válida: revisa la causa, la solución y los textos.',
+        INCIDENT_NOT_ASSIGNED_TO_RESTOCKER: 'Este aviso no está asignado a tu ruta: actualiza la ruta e inténtalo de nuevo.',
+        MACHINE_OUTSIDE_RESTOCKER_ZONES: 'La máquina está fuera de tus zonas asignadas: no puedes resolver este aviso.',
+        INTERNAL_SERVER_ERROR: 'No se pudo completar la operación por un fallo del servidor. Conserva lo escrito y reintenta; si persiste, avisa a coordinación.'
+      };
+
+      let message = '';
+      if (code === 'RESOLUTION_TEXT_TOO_SHORT') {
+        const labels = {
+          resolution_diagnosis: 'Diagnóstico',
+          resolution_action: 'Acción ejecutada'
+        };
+        message = `Revisa «${labels[field] || 'Diagnóstico y acción'}»: debe contener al menos 20 caracteres reales (Art. V.1).`;
+      } else if (safeMessages[code]) {
+        message = safeMessages[code];
+      } else {
+        message = String(error?.message ?? '').trim() || 'No se pudo resolver el aviso de Nivel 1.';
+      }
+
+      return code === '' ? message : `${message} (código: ${code})`;
+    },
+
     async submitL1Resolution() {
       const incident = this.l1ResolveIncident;
       const restockerId = this.visitRestockerId;
@@ -1517,7 +1556,7 @@ export const RestockerRouteView = {
         this.showL1ResolveModal = false;
         await this.loadMyRoute();
       } catch (error) {
-        this.l1ResolveError = error?.message || 'No se pudo resolver el aviso de Nivel 1.';
+        this.l1ResolveError = this.l1ResolutionErrorMessage(error);
       } finally {
         this.isResolvingL1 = false;
       }

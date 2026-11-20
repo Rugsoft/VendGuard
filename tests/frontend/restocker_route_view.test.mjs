@@ -27,7 +27,7 @@ globalThis.localStorage = {
 globalThis.sessionStorage = { ...globalThis.localStorage };
 
 import { readFileSync } from 'node:fs';
-import { api } from '../../public/assets/js/api.js';
+import { api, ApiError } from '../../public/assets/js/api.js';
 import { store } from '../../public/assets/js/store.js';
 import { RestockerRouteView } from '../../public/assets/js/components/RestockerRouteView.js';
 import { RestockVisitOfflineQueue } from '../../public/assets/js/utils/RestockVisitOfflineQueue.js';
@@ -1953,6 +1953,67 @@ await shortResolveVm.submitL1Resolution();
 assert(
   'La resolución L1 bloquea textos de menos de 20 caracteres reales (Art. V.1)',
   shortResolveVm.l1ResolveError.includes('20 caracteres')
+);
+
+const buildRejectedResolveVm = (incidentId) => {
+  const vm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+  vm.assignedL1Incidents = [{
+    id: incidentId,
+    machine_id: 7,
+    status: 'IN_PROGRESS',
+    category: 'PRODUCT_JAM',
+    level1_issue_type: 'STOCKOUT_EMPTY_SLOT'
+  }];
+  vm.loadMyRoute = async () => {};
+  vm.l1TaxonomyCatalog = l1TaxonomyFixture;
+  vm.openL1Resolve(vm.assignedL1Incidents[0]);
+  vm.l1ResolveForm.diagnosis = 'Carril sin producto y muelle correcto';
+  vm.l1ResolveForm.action = 'Repongo producto y verifico la entrega completa';
+  return vm;
+};
+
+api.restocker.resolveL1Incident = async () => {
+  throw new ApiError(
+    422,
+    'RESOLUTION_TEXT_TOO_SHORT',
+    'El campo «resolution_diagnosis» debe contener al menos 20 caracteres reales; se recibieron 3 (Art. V.1).',
+    { field: 'resolution_diagnosis' }
+  );
+};
+const validationResolveVm = buildRejectedResolveVm(503);
+try {
+  await validationResolveVm.submitL1Resolution();
+} finally {
+  api.restocker.resolveL1Incident = originalResolveL1;
+}
+assert(
+  'O-36-02: el 422 de textos se traduce a un campo útil y conserva el código',
+  validationResolveVm.l1ResolveError.includes('Diagnóstico')
+    && validationResolveVm.l1ResolveError.includes('20 caracteres')
+    && validationResolveVm.l1ResolveError.includes('RESOLUTION_TEXT_TOO_SHORT')
+    && !validationResolveVm.l1ResolveError.includes('resolution_diagnosis')
+);
+
+api.restocker.resolveL1Incident = async () => {
+  throw new ApiError(
+    500,
+    'INTERNAL_SERVER_ERROR',
+    'No se pudo completar la operación de Nivel 1.',
+    null,
+    { sql: 'SQLSTATE[23514] check violation' }
+  );
+};
+const serverErrorVm = buildRejectedResolveVm(504);
+try {
+  await serverErrorVm.submitL1Resolution();
+} finally {
+  api.restocker.resolveL1Incident = originalResolveL1;
+}
+assert(
+  'O-36-02: un 500 conserva un mensaje seguro y el código, sin filtrar SQL',
+  serverErrorVm.l1ResolveError.includes('fallo del servidor')
+    && serverErrorVm.l1ResolveError.includes('INTERNAL_SERVER_ERROR')
+    && !serverErrorVm.l1ResolveError.includes('SQLSTATE')
 );
 
 const escalateVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
