@@ -96,6 +96,7 @@ try {
     $shiftRestockerId = $createUser('shift', 'RESTOCKER', 'Reponedora de Cierre T-RSS-08');
     $deactivateRestockerId = $createUser('deact', 'RESTOCKER', 'Reponedora de Baja T-RSS-08');
     $staffRestockerId = $createUser('staff', 'RESTOCKER', 'Reponedora de Staff T-RSS-08');
+    $guardRestockerId = $createUser('guard', 'RESTOCKER', 'Reponedor de Guardia T-RSS-08');
     $technicianId = $createUser('sat', 'TECHNICIAN', 'Técnico SAT T-RSS-08');
 
     $zoneId = (int)$pdo->query(
@@ -151,6 +152,14 @@ try {
 
     $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-SNACK-04']);
     $refundMachineId = (int)$machineStmt->fetchColumn();
+
+    // PR22-04: dedicated machines keep the lifecycle guard isolated from the
+    // fixtures used by the later QR and coordinator flows.
+    $stateMachineIds = [];
+    foreach (['RSS8-STATE-21', 'RSS8-STATE-22', 'RSS8-STATE-23', 'RSS8-STATE-24'] as $stateMachineCode) {
+        $machineStmt->execute([':location_id' => $locationId, ':code' => $stateMachineCode]);
+        $stateMachineIds[$stateMachineCode] = (int)$machineStmt->fetchColumn();
+    }
 
     $fixtureMachines = [];
     foreach ([
@@ -308,6 +317,22 @@ try {
                 status = 'REGISTERED'
           WHERE id = :id"
     )->execute([':id' => $manualL1IncidentId]);
+
+    // PR22-04: each non-triage state must be rejected without mutation.
+    $protectedDispatchStates = [
+        'RESOLVED' => $seedIncident('INC-2026-8812', $stateMachineIds['RSS8-STATE-21'], $guardRestockerId, 'RESOLVED'),
+        'CLOSED' => $seedIncident('INC-2026-8813', $stateMachineIds['RSS8-STATE-22'], $guardRestockerId, 'CLOSED'),
+        'IN_PROGRESS' => $seedIncident('INC-2026-8814', $stateMachineIds['RSS8-STATE-23'], $guardRestockerId, 'IN_PROGRESS'),
+        'PENDING_INFO' => $seedIncident('INC-2026-8815', $stateMachineIds['RSS8-STATE-24'], $guardRestockerId, 'PENDING_INFO'),
+    ];
+    $pdo->prepare("UPDATE incidents SET resolved_at = CURRENT_TIMESTAMP - INTERVAL '1 hour' WHERE id = :id")
+        ->execute([':id' => $protectedDispatchStates['RESOLVED']]);
+    $pdo->prepare("UPDATE incidents SET resolved_at = CURRENT_TIMESTAMP - INTERVAL '2 hours', closed_at = CURRENT_TIMESTAMP - INTERVAL '1 hour' WHERE id = :id")
+        ->execute([':id' => $protectedDispatchStates['CLOSED']]);
+    $pdo->prepare("UPDATE incidents SET started_at = CURRENT_TIMESTAMP - INTERVAL '45 minutes' WHERE id = :id")
+        ->execute([':id' => $protectedDispatchStates['IN_PROGRESS']]);
+    $pdo->prepare("UPDATE incidents SET paused_at = CURRENT_TIMESTAMP - INTERVAL '30 minutes' WHERE id = :id")
+        ->execute([':id' => $protectedDispatchStates['PENDING_INFO']]);
 
     $seedCustody = static function (int $seedIncidentId, ?int $assigneeId = null) use ($pdo, $restockerId): void {
         $stmt = $pdo->prepare(
@@ -541,6 +566,56 @@ try {
             && ($dispatchAuditNew['urgency_override_reason'] ?? '') === 'La sede confirma que el cobro está bloqueado y exige prioridad inmediata.',
         'audit=' . json_encode($dispatchAuditNew)
     );
+
+    $protectedStateStmt = $pdo->prepare(
+        'SELECT status, dispatch_level, assigned_technician_id,
+                started_at, paused_at, resolved_at, closed_at
+           FROM incidents
+          WHERE id = :id'
+    );
+    $protectedCustodyStmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM incident_assignments WHERE incident_id = :id'
+    );
+    $protectedAuditStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM audit_log
+          WHERE entity_id = :id AND action = 'DISPATCH_LEVEL_CHANGE'"
+    );
+    foreach ($protectedDispatchStates as $protectedStatus => $protectedIncidentId) {
+        $protectedStateStmt->execute([':id' => $protectedIncidentId]);
+        $beforeBlocked = $protectedStateStmt->fetch();
+
+        $blocked = $call('POST', "/api/coordinator/incidents/{$protectedIncidentId}/dispatch-level", [
+            'dispatch_level' => 'L2_SAT',
+            'assignee_id' => $technicianId,
+        ], $coordinatorToken);
+        $assert(
+            "PR22-04: {$protectedStatus} dispatch-level returns 409",
+            $blocked->getStatusCode() === 409
+                && $errorCode($blocked) === 'INVALID_INCIDENT_STATE_TRANSITION',
+            'status=' . $blocked->getStatusCode()
+                . ' code=' . $errorCode($blocked)
+                . ' body=' . json_encode($json($blocked))
+        );
+
+        $protectedStateStmt->execute([':id' => $protectedIncidentId]);
+        $afterBlocked = $protectedStateStmt->fetch();
+        $protectedCustodyStmt->execute([':id' => $protectedIncidentId]);
+        $protectedCustodyCount = (int)$protectedCustodyStmt->fetchColumn();
+        $protectedAuditStmt->execute([':id' => $protectedIncidentId]);
+        $protectedAuditCount = (int)$protectedAuditStmt->fetchColumn();
+        $assert(
+            "PR22-04: {$protectedStatus} remains unchanged without custody or audit side effects",
+            is_array($afterBlocked)
+                && is_array($beforeBlocked)
+                && $afterBlocked === $beforeBlocked
+                && $protectedCustodyCount === 0
+                && $protectedAuditCount === 0,
+            'before=' . json_encode($beforeBlocked)
+                . ' after=' . json_encode($afterBlocked)
+                . ' custody=' . $protectedCustodyCount
+                . ' audit=' . $protectedAuditCount
+        );
+    }
 
     // H-36-07: el 422 por pareja incompatible no debe mutar el expediente.
     $incompatibleL1 = $call('POST', "/api/coordinator/incidents/{$manualL1IncidentId}/dispatch-level", [

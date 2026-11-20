@@ -12,6 +12,7 @@ use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\RestockerSatSynergyGatewayInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
+use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
@@ -57,6 +58,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
 {
     private const ACTIVE_L1_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'PENDING_INFO', 'REOPENED'];
     private const TERMINAL_STATUSES = ['RESOLVED', 'CLOSED', 'CANCELLED'];
+    private const DISPATCH_LEVEL_ALLOWED_STATUSES = ['REGISTERED', 'ASSIGNED', 'REOPENED'];
     private const OPEN_SHIFT_STATUSES = ['ON_SHIFT', 'MEAL_BREAK'];
 
     private PDO $pdo;
@@ -243,6 +245,25 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             $current = $this->lockIncident($incidentId);
             if ($current === null) {
                 return $this->fail('INCIDENT_NOT_FOUND', 404, 'El expediente no existe o está dado de baja.');
+            }
+
+            // PR22-04: el cambio de nivel no puede resucitar un ticket terminal ni
+            // resetear una intervención o una pausa en curso. Se comprueba con la
+            // fila bloqueada para que la decisión y la escritura sean atómicas.
+            $currentStatus = IncidentStatus::fromString((string)$current['status']);
+            if (!in_array($currentStatus->value, self::DISPATCH_LEVEL_ALLOWED_STATUSES, true)) {
+                return $this->fail(
+                    'INVALID_INCIDENT_STATE_TRANSITION',
+                    409,
+                    sprintf(
+                        'No se puede cambiar el nivel operativo desde «%s»: solo se permite en REGISTERED, ASSIGNED o REOPENED.',
+                        $currentStatus->value
+                    ),
+                    [
+                        'status' => $currentStatus->value,
+                        'allowed_statuses' => self::DISPATCH_LEVEL_ALLOWED_STATUSES,
+                    ]
+                );
             }
 
             $category = IncidentCategory::tryFrom((string)$current['category']);

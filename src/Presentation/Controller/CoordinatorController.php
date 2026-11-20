@@ -246,23 +246,49 @@ class CoordinatorController
             ?? $request->getBodyParam('urgency');
         $rawUrgencyReason = $request->getBodyParam('urgency_override_reason')
             ?? $request->getBodyParam('urgency_reason');
+        $targetLevel = (string)($request->getBodyParam('dispatch_level') ?? '');
+        $level1IssueType = is_string($rawLevel1IssueType) ? trim($rawLevel1IssueType) : '';
+        $assigneePayload = [
+            'id' => (int)$assignee->getId(),
+            'role' => $assignee->getRole()->value,
+            'is_active' => $assignee->isActive(),
+        ];
+        $urgencyOverride = is_string($rawUrgencyOverride) ? trim($rawUrgencyOverride) : null;
+        $urgencyReason = is_string($rawUrgencyReason) ? trim($rawUrgencyReason) : null;
 
-        return $this->executeSynergy(fn (): Response => Response::json(
-            $this->synergy()->dispatchLevel(
+        return $this->executeSynergy(function () use (
+            $incident,
+            $level1IssueType,
+            $targetLevel,
+            $assigneePayload,
+            $actor,
+            $urgencyOverride,
+            $urgencyReason
+        ): Response {
+            $result = $this->synergy()->dispatchLevel(
                 [
                     'id' => (int)$incident->getId(),
                     'category' => $incident->getCategory()->value,
-                    'level1_issue_type' => is_string($rawLevel1IssueType) ? trim($rawLevel1IssueType) : '',
+                    'level1_issue_type' => $level1IssueType,
                 ],
-                (string)($request->getBodyParam('dispatch_level') ?? ''),
-                ['id' => (int)$assignee->getId(), 'role' => $assignee->getRole()->value, 'is_active' => $assignee->isActive()],
+                $targetLevel,
+                $assigneePayload,
                 $actor,
-                is_string($rawUrgencyOverride) ? trim($rawUrgencyOverride) : null,
-                is_string($rawUrgencyReason) ? trim($rawUrgencyReason) : null
-            ),
-            200,
-            'Nivel operativo actualizado.'
-        ));
+                $urgencyOverride,
+                $urgencyReason
+            );
+
+            if (($result['ok'] ?? false) !== true) {
+                return Response::error(
+                    (string)($result['error_code'] ?? 'DISPATCH_LEVEL_FAILED'),
+                    (string)($result['message'] ?? 'No se pudo actualizar el nivel operativo.'),
+                    (int)($result['http_status'] ?? 409),
+                    is_array($result['details'] ?? null) ? $result['details'] : null
+                );
+            }
+
+            return Response::json($result, 200, 'Nivel operativo actualizado.');
+        });
     }
 
     private function synergy(): RestockerSatSynergyService

@@ -11,15 +11,15 @@
 | **Fecha de la revisión** | 2026-11-20 |
 | **Estado de la PR** | abierta, `MERGEABLE`; sin checks de CI reportados en la rama |
 | **Alcance** | Revisión estática del diff completo (47 commits, 88 archivos, +15.580/−190), contraste con la Spec 36 y sus contratos, lint/sintaxis y suites focalizadas. Sin cambios de código de producto. |
-| **Resultado** | **7 hallazgos**: 3 P1 solucionados con regresiones; 4 abiertos (2 P2, 2 P3) |
+| **Resultado** | **7 hallazgos**: 3 P1 y 1 P2 solucionados con regresiones; 3 abiertos (1 P2, 2 P3) |
 
-> **Actualización de corrección (2026-11-20):** `PR22-01`, `PR22-02` y `PR22-03` quedan **solucionados** y cubiertos por regresiones focalizadas. El detalle de los cambios y las pruebas se recoge en «Corrección aplicada».
+> **Actualización de corrección (2026-11-20):** `PR22-01`, `PR22-02`, `PR22-03` y `PR22-04` quedan **solucionados** y cubiertos por regresiones focalizadas. El detalle de los cambios y las pruebas se recoge en «Corrección aplicada».
 
 ---
 
 ## Veredicto
 
-El núcleo de la sinergia está bien encaminado: el modelo de dominio, la taxonomía L1, la custodia y las suites focalizadas están trabajados, y las 647 aserciones revisadas están en verde. Los tres hallazgos P1 han sido corregidos y verificados con regresiones focalizadas. La recomendación de **no fusionar todavía** se mantiene mientras sigan abiertos los dos P2 (`PR22-04`, `PR22-05`), que afectan a la máquina de estados y a la validación de la evidencia.
+El núcleo de la sinergia está bien encaminado: el modelo de dominio, la taxonomía L1, la custodia y las suites focalizadas están trabajados, y las 647 aserciones revisadas están en verde. Los tres hallazgos P1 y el P2 de la máquina de estados (`PR22-04`) han sido corregidos y verificados con regresiones focalizadas. La recomendación de **no fusionar todavía** se mantiene mientras siga abierto el P2 `PR22-05`, que afecta a la validación de la evidencia del escalado.
 
 Tras la corrección, las regresiones cubren el alta QR nueva en L1, el cambio L1→L2 desde la UI y el recálculo de urgencia/SLA de las ramas A y C. Siguen sin prueba específica el estado `REOPENED` en `start` y la validación real de la foto por `photo_path`.
 
@@ -32,7 +32,7 @@ Tras la corrección, las regresiones cubren el alta QR nueva en L1, el cambio L1
 | 1 | `PR22-01` | **P1 · Crítico** | El canal QR descarta `level1_issue_type` y nunca crea un aviso L1 | El alta QR incumple RF-01.2/D2 en todos los casos nuevos | ✅ Solucionado |
 | 2 | `PR22-02` | **P1 · Crítico** | El cambio L1→L2 de Coordinación no actualiza `dispatch_level` | La incidencia queda en L1 con un `TECHNICIAN`, o el cambio falla con 422 | ✅ Solucionado |
 | 3 | `PR22-03` | **P1 · Crítico** | El escalado manual desde L1 no recalcula urgencia/SLA y acepta valores del cliente | Una avería térmica/eléctrica puede quedar con prioridad y SLA antiguos o rebajados | ✅ Solucionado |
-| 4 | `PR22-04` | **P2 · Alto** | `POST /dispatch-level` no valida el estado actual | Puede resucitar tickets `RESOLVED`/`CLOSED` y resetear `IN_PROGRESS`/`PENDING_*` | Abierto |
+| 4 | `PR22-04` | **P2 · Alto** | `POST /dispatch-level` no valida el estado actual | Puede resucitar tickets `RESOLVED`/`CLOSED` y resetear `IN_PROGRESS`/`PENDING_*` | ✅ Solucionado |
 | 5 | `PR22-05` | **P2 · Alto** | La foto del escalado solo se valida por extensión cuando llega `photo_path` | Se puede adjuntar una ruta sin archivo, tamaño ni magic bytes reales | Abierto |
 | 6 | `PR22-06` | **P3 · Medio** | `start` rechaza `REOPENED` pese al contrato y a la UI | Un L1 reabierto asignado no puede iniciarse | Abierto |
 | 7 | `PR22-07` | **P3 · Bajo** | La ruta contractual `upload-photo` no existe | Contrato y router no coinciden; la evidencia usa `visits/photo` | Abierto |
@@ -139,6 +139,8 @@ Descartar `urgency` y `sla_target_minutes` del payload. Derivar urgencia, tier y
 
 **Prioridad:** P2 · **Requisito afectado:** máquina de estados, Art. III.3, ventana de reapertura de 48 horas.
 
+**Estado:** ✅ **Solucionado** · `assignDispatchLevel()` valida la fila bloqueada y solo permite el cambio desde `REGISTERED`, `ASSIGNED` o `REOPENED`; el resto responde `409 INVALID_INCIDENT_STATE_TRANSITION` sin mutar el expediente. La regresión cubre `RESOLVED`, `CLOSED`, `IN_PROGRESS` y `PENDING_INFO`.
+
 ### Evidencia
 
 - `src/Presentation/Controller/CoordinatorController.php:224-260`: `dispatchLevel()` solo comprueba que la incidencia exista y que el asignado exista.
@@ -219,9 +221,10 @@ Registrar la ruta contractual como alias o endpoint dedicado, reutilizando el up
 
 | ID | Cambio | Regresión |
 | :--- | :--- | :--- |
-| `PR22-01` | `QrScanController` incluye `level1_issue_type` en el payload del alta QR. | `RestockerSatSynergyApiTest`: alta nueva sobre `RSS8-SNACK-20`, `201`, `L1_RESTOCKER` y motivo persistido (**72/72**). |
-| `PR22-02` | `CoordinatorDashboardView` conmuta L1→L2 mediante `changeDispatchLevel()` y no reutiliza el id del reponedor como técnico SAT; la urgencia elegida viaja con su motivo, se recalcula el SLA y queda en `audit_log`. | Frontend de sinergia: L1→L2 llama a `dispatch-level` con urgencia y exige motivo (**22/22**); API: urgencia aplicada, SLA 480 y motivo auditado (**72/72**). |
+| `PR22-01` | `QrScanController` incluye `level1_issue_type` en el payload del alta QR. | `RestockerSatSynergyApiTest`: alta nueva sobre `RSS8-SNACK-20`, `201`, `L1_RESTOCKER` y motivo persistido (**80/80**). |
+| `PR22-02` | `CoordinatorDashboardView` conmuta L1→L2 mediante `changeDispatchLevel()` y no reutiliza el id del reponedor como técnico SAT; la urgencia elegida viaja con su motivo, se recalcula el SLA y queda en `audit_log`. | Frontend de sinergia: L1→L2 llama a `dispatch-level` con urgencia y exige motivo (**22/22**); API: urgencia aplicada, SLA 480 y motivo auditado (**80/80**). |
 | `PR22-03` | `PdoRestockerSatSynergyGateway` calcula urgencia, SLA y `sla_target_at` en servidor para las ramas A y C; descarta `urgency`/`sla_target_minutes` del cliente. | Gateway: L1 térmico con payload `LOW`/60 exige `CRITICAL`/240; rama C recalcula al alza (**26/26**). |
+| `PR22-04` | `PdoRestockerSatSynergyGateway::assignDispatchLevel()` limita el cambio a `REGISTERED`/`ASSIGNED`/`REOPENED` y el controlador traduce el fallo a `409`; los estados terminales y operativos no se resucitan ni se resetean. | API: `RESOLVED`, `CLOSED`, `IN_PROGRESS` y `PENDING_INFO` responden `409`; estado, nivel, asignado, `started_at`/`paused_at`, custodia y auditoría permanecen intactos (**80/80**). |
 
 ---
 
@@ -238,13 +241,13 @@ Registrar la ruta contractual como alias o endpoint dedicado, reutilizando el up
 | `php tests/run_all.php` | No ejecutado en esta revisión |
 | Código de producto modificado | Ninguno durante la revisión; las correcciones posteriores se detallan en «Corrección aplicada» |
 
-Las suites de esquema, gateway y convergencia requirieron `PG_TEST_DSN`; se ejecutaron con el contrato de PostgreSQL local correspondiente. La revisión original es estática sobre `f4b72a6`. Las correcciones de `PR22-01` a `PR22-03` se verificaron después con las suites focalizadas indicadas; no se ejecutó la batería completa ni se hizo push.
+Las suites de esquema, gateway y convergencia requirieron `PG_TEST_DSN`; se ejecutaron con el contrato de PostgreSQL local correspondiente. La revisión original es estática sobre `f4b72a6`. Las correcciones de `PR22-01` a `PR22-04` se verificaron después con las suites focalizadas indicadas; no se ejecutó la batería completa ni se hizo push.
 
 ---
 
 ## Recomendación
 
-1. ✅ **Hecho:** `PR22-01`, `PR22-02` y `PR22-03` están corregidos y cubiertos por regresiones focalizadas.
-2. Corregir `PR22-04` y `PR22-05` antes de fusionar: son los dos P2 que quedan abiertos.
+1. ✅ **Hecho:** `PR22-01`, `PR22-02`, `PR22-03` y `PR22-04` están corregidos y cubiertos por regresiones focalizadas.
+2. Corregir `PR22-05` antes de fusionar: es el P2 que queda abierto.
 3. Abordar `PR22-06` y `PR22-07` como seguimiento, junto con las pruebas del estado `REOPENED` y de la validación real de la foto.
 4. Mantener las regresiones del alta QR limpia, del cambio L1→L2 y del recálculo de urgencia/SLA; no sustituirlas por la cifra global de la suite.
