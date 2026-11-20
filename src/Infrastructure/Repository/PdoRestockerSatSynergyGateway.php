@@ -417,6 +417,52 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             $action = (string)($resolution['resolution_action'] ?? '');
             $occurredAt = $this->occurredAt($mutation);
 
+            // Snapshots are catalog data, never client input: hydrate them from
+            // the active taxonomy pair inside the same transaction.
+            $rootCauseId = (int)($resolution['root_cause_id'] ?? 0);
+            $solutionId = (int)($resolution['standard_solution_id'] ?? 0);
+            if ($rootCauseId <= 0 || $solutionId <= 0) {
+                return $this->fail(
+                    'RESOLUTION_TAXONOMY_REQUIRED',
+                    422,
+                    'La resolución debe indicar una causa raíz y una solución estandarizada.'
+                );
+            }
+
+            $taxonomyStmt = $this->pdo->prepare(
+                'SELECT rc.code AS root_cause_code,
+                        rc.category AS root_cause_category,
+                        rc.name AS root_cause_name,
+                        ss.code AS standard_solution_code,
+                        ss.name AS standard_solution_name
+                   FROM root_causes rc
+                   INNER JOIN standard_solutions ss ON ss.root_cause_id = rc.id
+                  WHERE rc.id = :root_cause_id
+                    AND ss.id = :standard_solution_id
+                    AND rc.is_active = TRUE
+                    AND ss.is_active = TRUE'
+            );
+            $taxonomyStmt->execute([
+                ':root_cause_id' => $rootCauseId,
+                ':standard_solution_id' => $solutionId,
+            ]);
+            $taxonomy = $taxonomyStmt->fetch();
+            if (!is_array($taxonomy)) {
+                return $this->fail(
+                    'INVALID_RESOLUTION_TAXONOMY',
+                    422,
+                    'La causa raíz y la solución deben existir, estar activas y pertenecer al mismo par.'
+                );
+            }
+
+            $resolution['root_cause_id'] = $rootCauseId;
+            $resolution['standard_solution_id'] = $solutionId;
+            $resolution['root_cause_code'] = (string)$taxonomy['root_cause_code'];
+            $resolution['root_cause_category'] = (string)$taxonomy['root_cause_category'];
+            $resolution['root_cause_name'] = (string)$taxonomy['root_cause_name'];
+            $resolution['standard_solution_code'] = (string)$taxonomy['standard_solution_code'];
+            $resolution['standard_solution_name'] = (string)$taxonomy['standard_solution_name'];
+
             $this->closeOpenCustody(
                 $incidentId,
                 $actor,

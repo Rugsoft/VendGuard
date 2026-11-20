@@ -217,11 +217,21 @@ try {
     );
 
     $pdo->exec("UPDATE machines SET sanitary_status = 'OK' WHERE id = {$machineA}");
+    $rootCauseId = (int)$pdo->query(
+        "INSERT INTO root_causes (code, category, name, is_active)
+         VALUES ('RC-RSS9-SPIRAL', 'PRODUCT_JAM', 'Causa constitucional T-RSS-09', TRUE) RETURNING id"
+    )->fetchColumn();
+    $solutionId = (int)$pdo->query(
+        "INSERT INTO standard_solutions (root_cause_id, code, name, is_default, is_active)
+         VALUES ({$rootCauseId}, 'SS-RSS9-CLEAR', 'Solución constitucional T-RSS-09', TRUE, TRUE) RETURNING id"
+    )->fetchColumn();
     $resolved = $call('POST', "/api/restocker/incidents/{$incidentA}/resolve", [
         'machine_id' => $machineA,
         'sanitary_status' => 'OK',
         'diagnosis' => 'Envase atascado en la espiral del carril central',
         'action' => 'Liberación manual del envase y reacomodo del carril',
+        'root_cause_id' => $rootCauseId,
+        'standard_solution_id' => $solutionId,
         'client_mutation_id' => 'rss09-resolve-0001',
         'client_occurred_at' => '2026-11-18 10:00:00+00',
     ], $restockerToken);

@@ -333,8 +333,8 @@ try {
         ($resolved['ok'] ?? false) === true
             && ($resolved['status'] ?? '') === 'RESOLVED'
             && $scalar($pdo, 'SELECT status FROM incidents WHERE id = :id', [':id' => (int)$incident2['id']]) === 'RESOLVED'
-            && $scalar($pdo, 'SELECT root_cause_code_snapshot FROM incidents WHERE id = :id', [':id' => (int)$incident2['id']]) === 'RC-L1-SPIRAL-RELEASE'
-            && $scalar($pdo, 'SELECT standard_solution_code_snapshot FROM incidents WHERE id = :id', [':id' => (int)$incident2['id']]) === 'SS-L1-CLEAR-SPIRAL'
+            && $scalar($pdo, 'SELECT root_cause_code_snapshot FROM incidents WHERE id = :id', [':id' => (int)$incident2['id']]) === 'RC-RSS05-SPIRAL'
+            && $scalar($pdo, 'SELECT standard_solution_code_snapshot FROM incidents WHERE id = :id', [':id' => (int)$incident2['id']]) === 'SS-RSS05-SPIRAL'
     );
     $assert(
         'La custodia abierta se cierra con RESOLVED y sin hoja de servicio',

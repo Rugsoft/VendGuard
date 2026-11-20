@@ -149,6 +149,7 @@ try {
         'RSS8-SNACK-14',
         'RSS8-SNACK-15',
         'RSS8-SNACK-16',
+        'RSS8-SNACK-17',
     ] as $fixtureMachineCode) {
         $machineStmt->execute([':location_id' => $locationId, ':code' => $fixtureMachineCode]);
         $fixtureMachines[$fixtureMachineCode] = (int)$machineStmt->fetchColumn();
@@ -157,6 +158,20 @@ try {
     // D2 / EARS 01.2: una máquina en cuarentena no puede nacer en L1.
     $pdo->prepare("UPDATE machines SET sanitary_status = 'QUARANTINE' WHERE id = :id")
         ->execute([':id' => $fixtureMachines['RSS8-SNACK-14']]);
+
+    $taxonomyCauseStmt = $pdo->prepare(
+        "INSERT INTO root_causes (code, category, name, is_active)
+         VALUES ('RC-RSS8-SPIRAL', 'PRODUCT_JAM', 'Causa sembrada T-RSS-08', TRUE) RETURNING id"
+    );
+    $taxonomyCauseStmt->execute();
+    $taxonomyCauseId = (int)$taxonomyCauseStmt->fetchColumn();
+
+    $taxonomySolutionStmt = $pdo->prepare(
+        "INSERT INTO standard_solutions (root_cause_id, code, name, is_default, is_active)
+         VALUES (:root_cause_id, 'SS-RSS8-CLEAR', 'Solución sembrada T-RSS-08', TRUE, TRUE) RETURNING id"
+    );
+    $taxonomySolutionStmt->execute([':root_cause_id' => $taxonomyCauseId]);
+    $taxonomySolutionId = (int)$taxonomySolutionStmt->fetchColumn();
 
     $zoneAssignmentStmt = $pdo->prepare(
         "INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
@@ -245,6 +260,7 @@ try {
         $fixtureMachines['RSS8-SNACK-09'],
         $staffRestockerId
     );
+    $taxonomyIncidentId = $seedIncident('INC-2026-8810', $fixtureMachines['RSS8-SNACK-17']);
 
     $seedCustody = static function (int $seedIncidentId, ?int $assigneeId = null) use ($pdo, $restockerId): void {
         $stmt = $pdo->prepare(
@@ -264,6 +280,7 @@ try {
     $seedCustody($absenceIncidentId, $restockerId);
     $seedCustody($deactivateIncidentId, $deactivateRestockerId);
     $seedCustody($staffDeactivateIncidentId, $staffRestockerId);
+    $seedCustody($taxonomyIncidentId);
 
     $userRepo = new PdoUserRepository($pdo);
     $authService = new AuthService(null, $userRepo);
@@ -311,10 +328,82 @@ try {
         'sanitary_status' => 'OK',
         'diagnosis' => 'Envase atascado en la espiral del carril central',
         'action' => 'Liberación manual del envase y reacomodo del carril',
+        'root_cause_id' => $taxonomyCauseId,
+        'standard_solution_id' => $taxonomySolutionId,
         'client_mutation_id' => 'rss08-resolve-0001',
         'client_occurred_at' => '2026-11-18 09:10:00+00',
     ], $restockerToken);
     $assert('La resolución L1 responde 200', $resolve->getStatusCode() === 200, 'status=' . $resolve->getStatusCode() . ' ' . $errorCode($resolve));
+
+    echo "\n--- 2.1 Resolución L1 con snapshots de taxonomía ---\n";
+    $taxonomyStart = $call('POST', "/api/restocker/incidents/{$taxonomyIncidentId}/start", [
+        'client_mutation_id' => 'rss08-start-taxonomy',
+        'client_occurred_at' => '2026-11-18 10:00:00+00',
+    ], $restockerToken);
+    $assert(
+        'El aviso L1 de taxonomía se inicia para resolverlo',
+        $taxonomyStart->getStatusCode() === 200,
+        'status=' . $taxonomyStart->getStatusCode() . ' ' . $errorCode($taxonomyStart)
+    );
+
+    $invalidTaxonomy = $call('POST', "/api/restocker/incidents/{$taxonomyIncidentId}/resolve", [
+        'machine_id' => $fixtureMachines['RSS8-SNACK-17'],
+        'sanitary_status' => 'OK',
+        'diagnosis' => 'Envase atascado en la espiral del carril central',
+        'action' => 'Liberación manual del envase y reacomodo del carril',
+        'root_cause_id' => $taxonomyCauseId,
+        'standard_solution_id' => $taxonomySolutionId + 100000,
+    ], $restockerToken);
+    $assert(
+        'Una pareja de taxonomía inexistente se rechaza con 422',
+        $invalidTaxonomy->getStatusCode() === 422 && $errorCode($invalidTaxonomy) === 'INVALID_RESOLUTION_TAXONOMY',
+        'status=' . $invalidTaxonomy->getStatusCode() . ' code=' . $errorCode($invalidTaxonomy)
+    );
+
+    $taxonomyResolve = $call('POST', "/api/restocker/incidents/{$taxonomyIncidentId}/resolve", [
+        'machine_id' => $fixtureMachines['RSS8-SNACK-17'],
+        'sanitary_status' => 'OK',
+        'diagnosis' => 'Envase atascado en la espiral del carril central',
+        'action' => 'Liberación manual del envase y reacomodo del carril',
+        'root_cause_id' => $taxonomyCauseId,
+        'standard_solution_id' => $taxonomySolutionId,
+        // Client-supplied snapshots must be ignored in favour of the catalog.
+        'root_cause_code' => 'CLIENT_FORGED',
+        'root_cause_category' => 'OTHER',
+        'root_cause_name' => 'Nombre falseado por el cliente',
+        'standard_solution_code' => 'CLIENT_FORGED',
+        'standard_solution_name' => 'Solución falseada por el cliente',
+        'client_mutation_id' => 'rss08-resolve-taxonomy',
+        'client_occurred_at' => '2026-11-18 10:10:00+00',
+    ], $restockerToken);
+    $assert(
+        'La resolución L1 con taxonomía real responde 200',
+        $taxonomyResolve->getStatusCode() === 200,
+        'status=' . $taxonomyResolve->getStatusCode() . ' ' . $errorCode($taxonomyResolve)
+    );
+
+    $taxonomyStmt = $pdo->prepare(
+        'SELECT status, root_cause_id, standard_solution_id,
+                root_cause_code_snapshot, root_cause_category_snapshot, root_cause_name_snapshot,
+                standard_solution_code_snapshot, standard_solution_name_snapshot
+           FROM incidents
+          WHERE id = :id'
+    );
+    $taxonomyStmt->execute([':id' => $taxonomyIncidentId]);
+    $taxonomyRow = $taxonomyStmt->fetch();
+    $assert(
+        'La resolución selló los cinco snapshots desde el catálogo, no desde el cliente',
+        is_array($taxonomyRow)
+            && $taxonomyRow['status'] === 'RESOLVED'
+            && (int)$taxonomyRow['root_cause_id'] === $taxonomyCauseId
+            && (int)$taxonomyRow['standard_solution_id'] === $taxonomySolutionId
+            && $taxonomyRow['root_cause_code_snapshot'] === 'RC-RSS8-SPIRAL'
+            && $taxonomyRow['root_cause_category_snapshot'] === 'PRODUCT_JAM'
+            && $taxonomyRow['root_cause_name_snapshot'] === 'Causa sembrada T-RSS-08'
+            && $taxonomyRow['standard_solution_code_snapshot'] === 'SS-RSS8-CLEAR'
+            && $taxonomyRow['standard_solution_name_snapshot'] === 'Solución sembrada T-RSS-08',
+        'row=' . json_encode($taxonomyRow)
+    );
 
     echo "\n--- 3. Volcado de conflicto ---\n";
     $dump = $call('POST', '/api/restocker/incidents/conflict-dump', [

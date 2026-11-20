@@ -768,8 +768,17 @@ final class RestockerRouteController
                 ]
                 : null;
 
+            $result = $this->synergy()->resolveLevel1($incident, $this->actor($request), $resolution, $mutation);
+            if (($result['ok'] ?? false) !== true) {
+                return Response::error(
+                    (string)($result['error_code'] ?? 'RESOLUTION_FAILED'),
+                    (string)($result['message'] ?? 'No se pudo resolver el aviso de Nivel 1.'),
+                    (int)($result['http_status'] ?? 409)
+                );
+            }
+
             return Response::json(
-                $this->synergy()->resolveLevel1($incident, $this->actor($request), $resolution, $mutation),
+                $result,
                 200,
                 'Nivel 1 resuelto y custodia cerrada.'
             );

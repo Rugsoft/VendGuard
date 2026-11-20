@@ -35,6 +35,9 @@ interface RestockerSatSynergyGatewayInterface
     /**
      * Resuelve un aviso de Nivel 1 sin repuestos ni albarán (EARS 03.1, D3).
      *
+     * The resolution must carry `root_cause_id` and `standard_solution_id`; the
+     * gateway hydrates the five taxonomy snapshots from the active catalog pair.
+     *
      * @param array<string, mixed> $actor
      * @param array<string, mixed> $resolution
      * @param array<string, mixed>|null $mutation

@@ -2,12 +2,13 @@
 
 - **Fecha:** 2026-11-20
 - **Rama:** `feat/restocker-sat-synergy`
-- **HEAD:** `9d72fea` · `fix(restocker): update the route empty state copy`
-- **Árbol:** código sin cambios antes y después de la corrida. Esta acta **no modifica código, esquema ni tests**; solo añade este documento de hallazgos.
+- **HEAD de la corrida original:** `9d72fea` · `fix(restocker): update the route empty state copy`
+- **Árbol:** la corrida original no modificó código, esquema ni tests. La corrección posterior de `H-36-06` sí cambia el gateway, la suite de composición y esta acta; se registra en el commit de corrección, sin push.
 - **Alcance:** recorrido manual en navegador de los flujos de la Spec 36 (`RF-01`–`RF-05`, `D1`–`D4`, `C1`–`C2`) con los cuatro perfiles: Responsable de Sede, Coordinación, Reponedor y Técnico SAT.
 - **Entorno:** app local `http://127.0.0.1:8000` contra `vendguard_battery` (PostgreSQL local `127.0.0.1:54331`). Estado inicial: 0 tickets activos y 0 turnos.
-- **Naturaleza:** acta de verificación funcional. Los hallazgos quedan **abiertos**; no se aplicaron correcciones.
-- **Relación con documentos previos:** complementa [`informe_verificacion_rama_restocker_sat_synergy.md`](informe_verificacion_rama_restocker_sat_synergy.md) y [`auditoria_spec_36_brechas.md`](auditoria_spec_36_brechas.md). Los cierres `V-01`–`V-03` y `FIX-36-01`–`FIX-36-08` siguen siendo válidos, pero la corrida de navegador abre los hallazgos `H-36-06`–`H-36-10`.
+- **Naturaleza:** acta de verificación funcional. La corrida original no aplicó correcciones y dejó los hallazgos abiertos; `H-36-06` se corrigió después y el resto sigue abierto.
+- **Actualización (2026-11-20):** `H-36-06` corregido y cubierto por una prueba de composición HTTP/PostgreSQL. La evidencia original se conserva; los estados actualizados están en la tabla resumen y en la sección del hallazgo.
+- **Relación con documentos previos:** complementa [`informe_verificacion_rama_restocker_sat_synergy.md`](informe_verificacion_rama_restocker_sat_synergy.md) y [`auditoria_spec_36_brechas.md`](auditoria_spec_36_brechas.md). Los cierres `V-01`–`V-03` y `FIX-36-01`–`FIX-36-08` siguen siendo válidos. La corrida de navegador abrió `H-36-06`–`H-36-10`; `H-36-06` ya está resuelto y `H-36-07`–`H-36-10` siguen abiertos.
 
 > Los identificadores `H-36-06` a `H-36-10` son nuevos para no reutilizar los `H-36-01`–`H-36-05` ya cerrados en la auditoría. Las observaciones menores se numeran aparte como `O-36-01` y `O-36-02`.
 
@@ -17,9 +18,9 @@
 
 La mayor parte del recorrido funciona: la Sede crea avisos, Coordinación sugiere y despacha reponedores, el reponedor inicia y escala avisos L1, el técnico ve la nota interna y la foto, la coincidencia en sede funciona en la vista del técnico y los filtros por nivel de Coordinación responden.
 
-El flujo **no puede considerarse cerrado** por un bloqueante:
+El flujo **todavía no puede considerarse cerrado**: la corrida detectó un bloqueante, ya corregido, y quedan cuatro hallazgos P2:
 
-1. **`H-36-06` (P1):** «Resolver en 1 toque» de Nivel 1 devuelve **500 siempre**. El ticket queda `IN_PROGRESS`, no se sella `RESOLVED` y no se puede cerrar el turno por la vía normal. Para continuar la corrida fue necesario escalar el L1 al SAT.
+1. **`H-36-06` (P1 · resuelto el 2026-11-20):** «Resolver en 1 toque» de Nivel 1 devolvía **500 siempre** porque los snapshots de taxonomía llegaban vacíos al `UPDATE`. El ticket quedaba `IN_PROGRESS`, no se sellaba `RESOLVED` y no se podía cerrar el turno por la vía normal. La corrección hidrata la pareja activa causa/solución dentro de la transacción y añade composición HTTP/PostgreSQL con aserciones sobre los cinco snapshots.
 2. **`H-36-07` (P2):** la Sede no preclasifica el motivo L1. Un atasco leve nace en `L2_SAT` y, tras el despacho manual a `L1_RESTOCKER`, conserva `level1_issue_type = NULL`; la tarjeta del reponedor muestra el texto genérico «Aviso de Nivel 1».
 3. **`H-36-08` (P2):** el modal de resolución preselecciona una causa incompatible con la categoría del ticket y no filtra el catálogo por categoría o motivo L1.
 4. **`H-36-09` (P2):** el escalado que crea un ticket SAT nuevo desde una máquina sin aviso previo pierde el SLA de la sede: un centro `CRITICAL_INFRASTRUCTURE_24_7` recibe `STANDARD` / 24 h.
@@ -27,7 +28,7 @@ El flujo **no puede considerarse cerrado** por un bloqueante:
 
 | ID | Prioridad | Hallazgo | Requisito afectado | Estado |
 | :--- | :--- | :--- | :--- | :--- |
-| `H-36-06` | **P1 · Bloqueante** | Resolución L1 devuelve 500 por snapshots de taxonomía incompletos | `RF-02`, `D3`, `C1` | Abierto |
+| `H-36-06` | **P1 · Bloqueante** | Resolución L1 devolvía 500 por snapshots de taxonomía incompletos | `RF-02`, `D3`, `C1` | **Resuelto (2026-11-20)** |
 | `H-36-07` | P2 · Alto | La Sede no preclasifica `level1_issue_type`; el despacho L1 lo deja nulo | `RF-01`, `D1`, `D2` | Abierto |
 | `H-36-08` | P2 · Alto | Causa raíz preseleccionada incompatible con la categoría | `RF-02`, `D3` | Abierto |
 | `H-36-09` | P2 · Alto | El escalado a SAT desde máquina sin aviso previo pierde el SLA de la sede | `RF-03.2`, `D3` | Abierto |
@@ -60,7 +61,7 @@ El flujo **no puede considerarse cerrado** por un bloqueante:
 
 ## 3. Hallazgos
 
-### H-36-06 · P1 · RESOLUCIÓN L1 SIEMPRE DEVUELVE 500
+### H-36-06 · P1 · RESUELTO · RESOLUCIÓN L1 DEVOLVÍA 500
 
 **Flujo:** el reponedor inicia un aviso L1 y pulsa «✓ Resolver en 1 toque».
 
@@ -108,13 +109,23 @@ La restricción exige que, si se rellena `root_cause_id` y `standard_solution_id
 - [`src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php`](../src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php), método `resolveLevel1()`: el `UPDATE` escribe los dos IDs y los cinco snapshots con `$resolution['root_cause_code'] ?? null`, `$resolution['root_cause_category'] ?? null`, etc. Al no venir en el array del servicio, todos quedan `NULL` y PostgreSQL rechaza la fila.
 - La suite `PdoRestockerSatSynergyGatewayTest` sí pasa porque invoca el gateway directamente con los snapshots completos; la composición HTTP real no está cubierta por ese test.
 
-#### Impacto
+#### Corrección aplicada
 
-- **Bloquea RF-02:** no se puede resolver un L1 ni cerrar la custodia por la vía normal.
-- **Bloquea el cierre de turno:** el reponedor queda atrapado con un L1 `IN_PROGRESS`; el cierre responde correctamente **409**, pero no hay forma de resolverlo desde la UI.
+- [`PdoRestockerSatSynergyGateway::resolveLevel1()`](../src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php) exige `root_cause_id` y `standard_solution_id`, resuelve la pareja activa en `root_causes`/`standard_solutions` dentro de la misma transacción y escribe los cinco snapshots desde el catálogo. Los snapshots que pudiera enviar el cliente se ignoran.
+- Una pareja ausente, inactiva o no vinculada devuelve **422** (`RESOLUTION_TAXONOMY_REQUIRED` o `INVALID_RESOLUTION_TAXONOMY`) antes de cerrar la custodia; ya no se delega el fallo a la restricción SQL.
+- Se amplió [`RestockerSatSynergyApiTest`](../tests/integration/RestockerSatSynergyApiTest.php) con un escenario de composición HTTP/PostgreSQL que inicia y resuelve un L1 con taxonomía real, envía snapshots falseados por el cliente y verifica en PostgreSQL `status = RESOLVED`, los dos IDs y los cinco snapshots con los valores del catálogo. El mismo escenario comprueba que una pareja inexistente responde **422** sin cerrar la custodia.
+- Se ajustó `PdoRestockerSatSynergyGatewayTest` para comprobar que el gateway sella el código real de la base y no el que recibe en el array.
+- `RestockerRouteController::resolveLevel1()` traduce los errores del gateway a su estado HTTP real; antes cualquier rechazo del gateway se envolvía en un **200**.
+
+**Evidencia:** `RestockerSatSynergyApiTest` **59/59**, `PdoRestockerSatSynergyGatewayTest` **24/24**, `RestockerSatSynergyConstitutionalTest` **17/17** y `RestockerSatSynergyServiceTest` **34/34**, todos con `exit=0`.
+
+#### Impacto en la corrida original
+
+- **Bloqueaba RF-02:** no se podía resolver un L1 ni cerrar la custodia por la vía normal.
+- **Bloqueaba el cierre de turno:** el reponedor quedaba atrapado con un L1 `IN_PROGRESS`; el cierre respondía correctamente **409**, pero no había forma de resolverlo desde la UI.
 - **Workaround usado en la corrida:** escalar el L1 al SAT desde la tarjeta. Eso desbloquea el cierre, pero no sustituye la resolución L1.
 
-#### Recomendación
+#### Recomendación original (atendida)
 
 Hidratar la taxonomía completa antes de llamar al gateway (o hacer que el gateway la resuelva por ID dentro de la misma transacción) y añadir un test de composición HTTP/PostgreSQL que ejecute `resolve` con una causa y solución reales. El test debe fallar si algún snapshot queda en `NULL`.
 
@@ -211,12 +222,12 @@ El modal muestra las cuatro causas L1 sin filtrar por categoría ni por `level1_
 #### Causa raíz
 
 - El modal construye el desplegable con el catálogo completo (`l1_taxonomy_catalog`) y no aplica ningún filtro por `category` o `level1_issue_type`.
-- El backend no valida la coherencia de la pareja causa/categoría antes de escribir; la deja a la restricción SQL, que responde con 500 en lugar de un 422 de validación.
+- El backend no valida la coherencia de la pareja causa/categoría antes de escribir. `H-36-06` ya hidrata los snapshots, pero no añade esa validación: una pareja incoherente puede persistirse en lugar de recibir un **422**.
 
 #### Impacto
 
 - Un operario puede enviar la combinación por defecto sin advertirlo.
-- Aunque se corrija `H-36-06`, el envío por defecto seguiría siendo inválido y debería rechazarse con un error de negocio claro.
+- La corrección de `H-36-06` evita el 500 de snapshots nulos, pero no corrige la preselección ni valida la categoría; el envío por defecto sigue siendo incoherente y debe rechazarse con un error de negocio claro.
 - La corrección de `H-36-07` (motivo L1 no nulo) permitiría preseleccionar la causa correcta.
 
 #### Recomendación
@@ -377,6 +388,7 @@ La UI muestra «⚠️ No se pudo completar la operación de Nivel 1.» sin indi
 - Bloqueo de despacho L1 sin reponedor en turno: aviso correcto y submit deshabilitado.
 - Sugerencia y despacho L1 al `#1 RECOMENDADO` (Lucía): **200**, ticket `ASSIGNED` en `L1_RESTOCKER`.
 - Inicio de intervención L1: **200**, ticket `IN_PROGRESS`.
+- Resolución L1 con taxonomía real: **200**, ticket `RESOLVED`, custodia cerrada y cinco snapshots sellados desde el catálogo. Verificado en la prueba de composición HTTP/PostgreSQL, no en una nueva corrida de navegador.
 - Cierre de turno con un L1 `IN_PROGRESS`: **409** con mensaje claro y ticket bloqueante.
 - Validación cliente de nota interna corta: rechazo con mensaje de mínimo 20 caracteres.
 - Validación cliente de foto obligatoria: rechazo si no se adjunta imagen.
@@ -389,7 +401,7 @@ La UI muestra «⚠️ No se pudo completar la operación de Nivel 1.» sin indi
 
 ## 6. Estado de la rama y datos de prueba
 
-- **Código:** sin cambios. `git status` limpio; no se hizo commit ni push.
+- **Código:** la corrida original no cambió código. La corrección posterior de `H-36-06` modifica el gateway, la suite de composición y esta acta; se registra en el commit de corrección, sin push.
 - **Servidor:** detenido al terminar la corrida; `.tmp_server.log` eliminado.
 - **Base:** `vendguard_battery` conserva los datos de prueba de la corrida:
   - `INC-2026-QW8V` (id 5780), VEND-0101, `ASSIGNED`, `L2_SAT`, Marta.
@@ -401,7 +413,7 @@ La UI muestra «⚠️ No se pudo completar la operación de Nivel 1.» sin indi
 
 ## 7. Limitaciones de la verificación
 
-- **No se pudo validar la resolución exitosa de L1:** `H-36-06` lo impide. No se comprobó el estado `RESOLVED`, el sellado de snapshots ni el cierre de la custodia por la vía de resolución; solo se verificó el bloqueo y el workaround de escalado.
+- **La corrida original no pudo validar la resolución exitosa de L1:** `H-36-06` lo impedía. La corrección posterior lo cubre con `RestockerSatSynergyApiTest` sobre router y PostgreSQL reales (estado `RESOLVED`, snapshots y custodia), pero no se repitió el recorrido manual de navegador.
 - **El diálogo nativo de archivos no se abrió** en la automatización. La imagen PNG de prueba se adjuntó directamente al input del navegador; sí se verificaron el handler `change`, la subida (`201`), el nombre del archivo, la nota interna y la persistencia.
 - No se probó el límite real de 5 MB con un archivo grande; solo la validación de foto obligatoria y la nota mínima.
 - No se hizo una auditoría de accesibilidad ni una revisión visual con capturas; la verificación fue funcional sobre DOM, red, log y base de datos.
@@ -425,7 +437,7 @@ Recorrido mínimo para reproducir `H-36-06`:
 3. Despachar el aviso a `L1_RESTOCKER` desde Coordinación.
 4. Iniciar la intervención L1.
 5. Abrir «✓ Resolver en 1 toque», elegir `RC-L1-SPIRAL-RELEASE` y `SS-L1-CLEAR-SPIRAL`, escribir diagnóstico/acción de 20+ caracteres y confirmar.
-6. Observar `POST /api/restocker/incidents/{id}/resolve` → **500** y el ticket en `IN_PROGRESS`.
+6. Antes de la corrección se observaba `POST /api/restocker/incidents/{id}/resolve` → **500** y el ticket en `IN_PROGRESS`. Con la corrección, la misma petición responde **200**, el ticket queda `RESOLVED` y los cinco snapshots se hidratan desde el catálogo.
 
 Comprobación de estado:
 
@@ -442,7 +454,7 @@ SELECT ticket_code, status, dispatch_level, level1_issue_type,
 
 | Hallazgo | ¿Bloquea el cierre de la Spec 36? | Acción mínima |
 | :--- | :--- | :--- |
-| `H-36-06` | **Sí** | Hidratar snapshots y cubrir la composición HTTP/PostgreSQL de resolución |
+| `H-36-06` | **No · resuelto el 2026-11-20** | Hidratación y composición HTTP/PostgreSQL cubiertas; queda la validación de categoría en `H-36-08` |
 | `H-36-07` | Sí, para RF-01 | Preclasificar el motivo L1 y persistirlo en alta/despacho |
 | `H-36-08` | No por separado, pero agrava `H-36-06` | Filtrar catálogo y validar coherencia con 422 |
 | `H-36-09` | Sí, para el contrato SLA | Heredar el perfil SLA de la sede en la rama de ticket nuevo |
@@ -450,4 +462,4 @@ SELECT ticket_code, status, dispatch_level, level1_issue_type,
 | `O-36-01` | No | Refrescar coincidencia al iniciar turno |
 | `O-36-02` | No | Mensajes de error de validación útiles |
 
-**Conclusión:** la Spec 36 no puede declararse cerrada con esta corrida. El bloqueante `H-36-06` impide completar el flujo principal de resolución L1; los otros cuatro hallazgos P2 dejan requisitos funcionales y de SLA sin cumplir. Las correcciones deben acompañarse de pruebas de composición reales, no solo de dobles del gateway.
+**Conclusión:** la Spec 36 no puede declararse cerrada con esta corrida. `H-36-06` ya no bloquea el flujo principal de resolución L1: la hidratación y la composición HTTP/PostgreSQL están cubiertas. Siguen abiertos `H-36-07`, `H-36-08`, `H-36-09` y `H-36-10`, que dejan requisitos funcionales, de coherencia de taxonomía y de SLA sin cumplir. Las correcciones deben acompañarse de pruebas de composición reales, no solo de dobles del gateway.
