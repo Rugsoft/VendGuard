@@ -5,8 +5,8 @@
 - **HEAD verificado:** `2777bfd` · `perf(synergy): close the H-36-05 pooler latency budget`
 - **Estado del árbol:** limpio antes y después de la corrida inicial de verificación, que **no modificó código ni esquema**. La corrección posterior de V-01 **sí modificó el test** [`tests/integration/IncidentCommentsPerformanceAndSecurityTest.php`](../tests/integration/IncidentCommentsPerformanceAndSecurityTest.php); no se tocó esquema ni código de producto.
 - **Alcance:** batería global (`php tests/run_all.php`), canal `new_engine` acotado a las suites de la rama, medición del pooler, arranque de la app local y humo real de UI con los cuatro perfiles (sede, coordinación, técnico SAT y reponedor).
-- **Naturaleza del documento:** acta de verificación. La corrida inicial registró el estado observado **sin modificar código**; la corrección de V-01 cambió únicamente el test de rendimiento y seguridad. V-02 y V-03 siguen abiertos.
-- **Última actualización:** 2026-11-20 · V-01 resuelto con validación por catálogo y batería global en verde.
+- **Naturaleza del documento:** acta de verificación. La corrida inicial registró el estado observado **sin modificar código**; la corrección de V-01 cambió únicamente el test de rendimiento y seguridad y la de V-02 el login del reponedor. V-03 sigue abierto.
+- **Última actualización:** 2026-11-20 · V-01 resuelto con validación por catálogo y V-02 con etiquetado accesible verificado en navegador; batería global en verde.
 
 ---
 
@@ -25,7 +25,7 @@
 
 Cifras de H-36-05 confirmadas en Supavisor 6543: «crear» 210,5 ms (p95 271,1), «ruta» 209,4 ms (p95 235,5) y «listar» 210,3 ms, dentro del presupuesto de 250 ms.
 
-**Conclusión tras la corrección de V-01 (2026-11-20):** la batería global queda en **441 suites · 16.993 aserciones · 0 fallos · exit 0**, con **197/197 PHP Unit, 106/106 JS Unit, 135/135 integración y 3/3 E2E**, y `DocMetricsGuard` declara las cifras coherentes con el README. Quedan abiertos V-02 y V-03, ninguno bloqueante.
+**Conclusión tras la corrección de V-01 (2026-11-20):** la batería global queda en **441 suites · 16.993 aserciones · 0 fallos · exit 0**, con **197/197 PHP Unit, 106/106 JS Unit, 135/135 integración y 3/3 E2E**, y `DocMetricsGuard` declara las cifras coherentes con el README. Queda abierto V-03, no bloqueante.
 
 ---
 
@@ -52,7 +52,9 @@ Cifras de H-36-05 confirmadas en Supavisor 6543: «crear» 210,5 ms (p95 271,1),
 
 ---
 
-### V-02 · P2 · Login del reponedor sin etiquetado accesible
+### V-02 · P2 · RESUELTO (2026-11-20) — Login del reponedor sin etiquetado accesible
+
+**Resolución.** Las etiquetas «Correo electrónico» y «Contraseña» se asocian con sus inputs mediante `for`/`id` (`restocker-login-email` y `restocker-login-password`), conservando los `data-testid` existentes. Evidencia en el árbol de accesibilidad real del navegador: los dos campos aparecen como `textbox "Correo electrónico"` y `textbox "Contraseña"`, ambos con nombre accesible. La suite frontend `restocker_route_view.test.mjs` sigue en **236/236, exit 0**. No se tocó esquema ni código de producto ajeno al login.
 
 - **Archivo:** [`public/assets/js/components/RestockerRouteView.js`](../public/assets/js/components/RestockerRouteView.js) · líneas 2665–2679
 - **Qué ocurre:** los `<label>` «Correo electrónico» y «Contraseña» no tienen `for` ni `id` asociado, y los `<input>` (`data-testid="restocker-login-email"` y `restocker-login-password`) no llevan `id`, `aria-label` ni `aria-labelledby`.
@@ -93,7 +95,7 @@ Cargar `.env.docker-tls` y `.env.local` juntos sobrescribe `DATABASE_URL` y hace
 | Hallazgo | Prioridad | ¿Bloquea la rama? | Acción |
 | :--- | :--- | :--- | :--- |
 | V-01 · aserción 1.8 | P2 | No · resuelto (2026-11-20) | Validación por catálogo con latencia y plan a escala conservados |
-| V-02 · etiquetado del login | P2 | No | Asociar etiquetas e inputs |
+| V-02 · etiquetado del login | P2 | No · resuelto (2026-11-20) | Etiquetas asociadas con `for`/`id`; `data-testid` conservados |
 | V-03 · copy obsoleto | P4 | No | Actualizar el texto del estado vacío |
 
 El README ya declara 135/135 integraciones y 441 suites · 16.993 aserciones, cifras que la corrida posterior confirma.

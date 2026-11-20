@@ -2662,16 +2662,18 @@ export const RestockerRouteView = {
           Acceso exclusivo para Cargadores / Reponedores de Ruta.
         </p>
 
-        <label style="display: block; font-size: 12px; margin-bottom: 4px;">Correo electrónico</label>
+        <label for="restocker-login-email" style="display: block; font-size: 12px; margin-bottom: 4px;">Correo electrónico</label>
         <input
+          id="restocker-login-email"
           v-model="loginEmail"
           type="email"
           autocomplete="username"
           data-testid="restocker-login-email"
           style="width: 100%; box-sizing: border-box; height: 36px; padding: 0 10px; margin-bottom: 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);"
         />
-        <label style="display: block; font-size: 12px; margin-bottom: 4px;">Contraseña</label>
+        <label for="restocker-login-password" style="display: block; font-size: 12px; margin-bottom: 4px;">Contraseña</label>
         <input
+          id="restocker-login-password"
           v-model="loginPassword"
           type="password"
           autocomplete="current-password"
