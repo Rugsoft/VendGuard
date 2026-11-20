@@ -66,6 +66,7 @@ $errorCode = static fn (Response $response): string => (string)($json($response)
 
 $schemaReady = false;
 $exitCode = 1;
+$uploadedFiles = [];
 
 try {
     PostgresFixtureBuilder::createIsolationSchema($pdo, RSS08_API_SCHEMA);
@@ -1083,11 +1084,86 @@ try {
 
     echo "\n--- 8. Escalado real sin assign_technician_id (FIX-36-03) ---\n";
 
+    $evidenceDir = $projectRoot . '/public/uploads/incidents';
+    if (!is_dir($evidenceDir) && !mkdir($evidenceDir, 0777, true) && !is_dir($evidenceDir)) {
+        throw new RuntimeException('No se pudo preparar el directorio de evidencias de la regresión.');
+    }
+    $validPngBytes = hex2bin('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082');
+    foreach ([
+        'rss08_escalation.png',
+        'rss08_critical_sla.png',
+        'rss08_escalation_unassigned.png',
+    ] as $validEvidenceName) {
+        $validEvidencePath = $evidenceDir . '/' . $validEvidenceName;
+        file_put_contents($validEvidencePath, $validPngBytes);
+        $uploadedFiles[] = $validEvidencePath;
+    }
+    $renamedEvidencePath = $evidenceDir . '/rss08_fake_image.jpg';
+    file_put_contents($renamedEvidencePath, 'esto no es una imagen');
+    $uploadedFiles[] = $renamedEvidencePath;
+    $oversizeEvidencePath = $evidenceDir . '/rss08_oversize.png';
+    $oversizeHandle = fopen($oversizeEvidencePath, 'w');
+    fseek($oversizeHandle, 5 * 1024 * 1024);
+    fwrite($oversizeHandle, 'x');
+    fclose($oversizeHandle);
+    $uploadedFiles[] = $oversizeEvidencePath;
+
     $cleanMachineId = $fixtureMachines['RSS8-SNACK-10'];
+    $incidentCountStmt = $pdo->prepare('SELECT COUNT(*) FROM incidents WHERE machine_id = :machine');
+    $incidentCountStmt->execute([':machine' => $cleanMachineId]);
+    $photoRejectionsBefore = (int)$incidentCountStmt->fetchColumn();
+
+    $missingPhoto = $call('POST', "/api/restocker/machines/{$cleanMachineId}/escalate-to-sat", [
+        'category' => 'PRODUCT_JAM',
+        'workshop_internal_note' => 'El carril queda bloqueado y la espiral no gira al pulsar el botón.',
+        'photo_path' => '/uploads/incidents/rss08_missing.png',
+        'client_mutation_id' => 'rss08-photo-missing',
+    ], $restockerToken);
+    $assert(
+        '8.0a Un photo_path inexistente responde 422 INVALID_EVIDENCE_IMAGE',
+        $missingPhoto->getStatusCode() === 422
+            && $errorCode($missingPhoto) === 'INVALID_EVIDENCE_IMAGE',
+        'status=' . $missingPhoto->getStatusCode() . ' code=' . $errorCode($missingPhoto)
+    );
+
+    $renamedPhoto = $call('POST', "/api/restocker/machines/{$cleanMachineId}/escalate-to-sat", [
+        'category' => 'PRODUCT_JAM',
+        'workshop_internal_note' => 'El carril queda bloqueado y la espiral no gira al pulsar el botón.',
+        'photo_path' => '/uploads/incidents/rss08_fake_image.jpg',
+        'client_mutation_id' => 'rss08-photo-renamed',
+    ], $restockerToken);
+    $assert(
+        '8.0b Un archivo renombrado a .jpg responde 422 INVALID_EVIDENCE_IMAGE',
+        $renamedPhoto->getStatusCode() === 422
+            && $errorCode($renamedPhoto) === 'INVALID_EVIDENCE_IMAGE',
+        'status=' . $renamedPhoto->getStatusCode() . ' code=' . $errorCode($renamedPhoto)
+    );
+
+    $oversizePhoto = $call('POST', "/api/restocker/machines/{$cleanMachineId}/escalate-to-sat", [
+        'category' => 'PRODUCT_JAM',
+        'workshop_internal_note' => 'El carril queda bloqueado y la espiral no gira al pulsar el botón.',
+        'photo_path' => '/uploads/incidents/rss08_oversize.png',
+        'client_mutation_id' => 'rss08-photo-oversize',
+    ], $restockerToken);
+    $assert(
+        '8.0c Una evidencia de más de 5 MB responde 422 INVALID_EVIDENCE_IMAGE',
+        $oversizePhoto->getStatusCode() === 422
+            && $errorCode($oversizePhoto) === 'INVALID_EVIDENCE_IMAGE',
+        'status=' . $oversizePhoto->getStatusCode() . ' code=' . $errorCode($oversizePhoto)
+    );
+
+    $incidentCountStmt->execute([':machine' => $cleanMachineId]);
+    $photoRejectionsAfter = (int)$incidentCountStmt->fetchColumn();
+    $assert(
+        '8.0d Los rechazos de evidencia no crean expedientes',
+        $photoRejectionsAfter === $photoRejectionsBefore,
+        'before=' . $photoRejectionsBefore . ' after=' . $photoRejectionsAfter
+    );
+
     $escalation = $call('POST', "/api/restocker/machines/{$cleanMachineId}/escalate-to-sat", [
         'category' => 'PRODUCT_JAM',
         'workshop_internal_note' => 'El carril queda bloqueado y la espiral no gira al pulsar el botón.',
-        'photo_path' => '/uploads/incidents/rss08_escalation.jpg',
+        'photo_path' => '/uploads/incidents/rss08_escalation.png',
         'urgency' => 'HIGH',
         'sla_target_minutes' => 480,
         'client_mutation_id' => 'rss08-escalate-0001',
@@ -1145,8 +1221,8 @@ try {
             && (int)($escalatedStop['escalated_from_restocker_id'] ?? 0) === $restockerId
             && ($escalatedStop['escalated_to_sat_at'] ?? null) !== null
             && ($escalatedStop['workshop_internal_note'] ?? '') === 'El carril queda bloqueado y la espiral no gira al pulsar el botón.'
-            && ($escalatedStop['workshop_internal_photo_path'] ?? '') === '/uploads/incidents/rss08_escalation.jpg'
-            && ($escalatedStop['photo_path'] ?? '') === '/uploads/incidents/rss08_escalation.jpg',
+            && ($escalatedStop['workshop_internal_photo_path'] ?? '') === '/uploads/incidents/rss08_escalation.png'
+            && ($escalatedStop['photo_path'] ?? '') === '/uploads/incidents/rss08_escalation.png',
         'status=' . $technicianRouteAfterEscalation->getStatusCode()
             . ' stop=' . json_encode($escalatedStop)
     );
@@ -1157,7 +1233,7 @@ try {
     $criticalEscalation = $call('POST', "/api/restocker/machines/{$criticalMachineId}/escalate-to-sat", [
         'category' => 'ELECTRICAL_OFF',
         'workshop_internal_note' => 'La máquina no enciende y el display queda completamente apagado.',
-        'photo_path' => '/uploads/incidents/rss08_critical_sla.jpg',
+        'photo_path' => '/uploads/incidents/rss08_critical_sla.png',
         'urgency' => 'LOW',
         'sla_target_minutes' => 1440,
         'client_mutation_id' => 'rss08-escalate-critical-sla',
@@ -1196,7 +1272,7 @@ try {
     $noCandidate = $call('POST', "/api/restocker/machines/{$noCandidateMachineId}/escalate-to-sat", [
         'category' => 'PRODUCT_JAM',
         'workshop_internal_note' => 'La espiral vuelve a atascarse y no hay técnico disponible en la zona.',
-        'photo_path' => '/uploads/incidents/rss08_escalation_unassigned.jpg',
+        'photo_path' => '/uploads/incidents/rss08_escalation_unassigned.png',
         'urgency' => 'MEDIUM',
         'client_mutation_id' => 'rss08-escalate-0002',
         'client_occurred_at' => '2026-11-18 11:05:00+00',
@@ -1368,6 +1444,11 @@ try {
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");
 } finally {
+    foreach ($uploadedFiles as $uploadedFile) {
+        if (is_string($uploadedFile) && is_file($uploadedFile)) {
+            @unlink($uploadedFile);
+        }
+    }
     if ($schemaReady) {
         try {
             $pdo->exec('DROP SCHEMA IF EXISTS ' . RSS08_API_SCHEMA . ' CASCADE');

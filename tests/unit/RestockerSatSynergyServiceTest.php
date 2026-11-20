@@ -17,8 +17,8 @@ declare(strict_types=1);
  *   4. Coincidencia en Sede, relevo y volcado de conflicto offline
  *      (RF-04.1, RF-04.2, RF-05.1, D4, C1, Art. III.3).
  *
- * CATEGORÍA: hermética (`tests/unit/`). No toca PostgreSQL, red ni sistema de
- * archivos; el doble implementa el mismo puerto que producción.
+ * CATEGORÍA: hermética (`tests/unit/`). No toca PostgreSQL ni red; sólo usa un
+ * directorio temporal para certificar la evidencia del escalado.
  *
  * Dogma Vanilla: PHP 8.2+ puro, cero dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -29,6 +29,7 @@ require_once __DIR__ . '/../../src/autoload.php';
 use VendGuard\Application\Service\RestockerSatSynergyService;
 use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
 use VendGuard\Core\Domain\Repository\RestockerSatSynergyGatewayInterface;
+use VendGuard\Infrastructure\Storage\LocalFileUploader;
 
 $GLOBALS['assertions'] = 0;
 
@@ -275,11 +276,21 @@ assertSynergy(
 );
 
 // ── 3. Escalado al SAT ─────────────────────────────────────────────────
+$photoDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vg_rss06_' . bin2hex(random_bytes(6));
+mkdir($photoDir, 0777, true);
+$validPngBytes = hex2bin('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082');
+file_put_contents($photoDir . '/rss06_door.png', $validPngBytes);
+file_put_contents($photoDir . '/rss06_fake.jpg', 'esto no es una imagen');
+$oversizePath = $photoDir . '/rss06_oversize.png';
+$oversizeHandle = fopen($oversizePath, 'w');
+fseek($oversizeHandle, 5 * 1024 * 1024);
+fwrite($oversizeHandle, 'x');
+fclose($oversizeHandle);
+$photoUploader = new LocalFileUploader($photoDir);
+
 $escalation = [
     'internal_note' => 'La puerta deja de cerrar y el producto queda expuesto al exterior.',
-    'photo_path' => '/uploads/incidents/rss06_door.jpg',
-    'photo_size_bytes' => 120000,
-    'photo_mime_type' => 'image/jpeg',
+    'photo_path' => '/uploads/rss06_door.png',
 ];
 $gateway = new SynergyGatewayDouble();
 $resolverCalls = 0;
@@ -292,12 +303,38 @@ $service = new RestockerSatSynergyService(
     },
     static function (string $event, array $payload) use (&$notified): void {
         $notified[] = [$event, $payload];
-    }
+    },
+    $photoUploader
 );
 
 assertSynergyRejects(
     static fn () => $service->escalateToSat(3, $actor, ['internal_note' => 'Avería']),
     'ESCALATION_INTERNAL_NOTE_REQUIRED',
+    422
+);
+
+assertSynergyRejects(
+    static fn () => $service->escalateToSat(3, $actor, [
+        'internal_note' => $escalation['internal_note'],
+        'photo_path' => '/uploads/rss06_missing.png',
+    ]),
+    'INVALID_EVIDENCE_IMAGE',
+    422
+);
+assertSynergyRejects(
+    static fn () => $service->escalateToSat(3, $actor, [
+        'internal_note' => $escalation['internal_note'],
+        'photo_path' => '/uploads/rss06_fake.jpg',
+    ]),
+    'INVALID_EVIDENCE_IMAGE',
+    422
+);
+assertSynergyRejects(
+    static fn () => $service->escalateToSat(3, $actor, [
+        'internal_note' => $escalation['internal_note'],
+        'photo_path' => '/uploads/rss06_oversize.png',
+    ]),
+    'INVALID_EVIDENCE_IMAGE',
     422
 );
 
@@ -331,7 +368,7 @@ assertSynergy(
 $gateway = new SynergyGatewayDouble();
 $service = new RestockerSatSynergyService($gateway, static function (): array {
     throw new RuntimeException('No debe sugerirse si el cliente fuerza técnico.');
-});
+}, null, $photoUploader);
 $forced = $service->escalateToSat(3, $actor, $escalation + ['assign_technician_id' => 88]);
 assertSynergy(($forced['ok'] ?? false) === true, 'el técnico forzado no bloquea el escalado');
 assertSynergy(
@@ -382,6 +419,11 @@ assertSynergy($gateway->lastCall()['method'] === 'recordConflictDump', 'el volca
 
 $suggestions = $service->suggestRestockers(10);
 assertSynergy(($suggestions['data'][0]['active_l1_incidents_count'] ?? 0) === 2, 'la sugerencia expone la carga L1');
+
+@unlink($photoDir . '/rss06_door.png');
+@unlink($photoDir . '/rss06_fake.jpg');
+@unlink($oversizePath);
+@rmdir($photoDir);
 
 echo "======================================================================\n";
 echo " Total Aserciones: {$GLOBALS['assertions']} | Fallidas: 0\n";

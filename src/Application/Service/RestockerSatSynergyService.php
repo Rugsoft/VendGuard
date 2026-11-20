@@ -6,6 +6,7 @@ namespace VendGuard\Application\Service;
 
 use DateTimeImmutable;
 use InvalidArgumentException;
+use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
 use VendGuard\Core\Domain\Repository\RestockerSatSynergyGatewayInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
@@ -13,6 +14,7 @@ use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
 use VendGuard\Core\Domain\ValueObject\Level1IssueType;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\RestockerSatSynergyValidator;
+use VendGuard\Infrastructure\Storage\LocalFileUploader;
 
 /**
  * RestockerSatSynergyService
@@ -48,13 +50,17 @@ final class RestockerSatSynergyService
     /** @var callable(string, array<string, mixed>): void|null */
     private $notifier;
 
+    private LocalFileUploader $uploader;
+
     public function __construct(
         private readonly RestockerSatSynergyGatewayInterface $gateway,
         ?callable $technicianResolver = null,
-        ?callable $notifier = null
+        ?callable $notifier = null,
+        ?LocalFileUploader $uploader = null
     ) {
         $this->technicianResolver = $technicianResolver;
         $this->notifier = $notifier;
+        $this->uploader = $uploader ?? new LocalFileUploader();
     }
 
     /**
@@ -222,6 +228,22 @@ final class RestockerSatSynergyService
         );
         $payload['workshop_internal_note'] = $validatedNote;
         $payload['internal_note'] = $validatedNote;
+
+        // PR22-05: un photo_path no es una prueba por sí mismo. Se resuelve en el
+        // almacenamiento local y se exige que exista, respete el tope de 5 MB y
+        // tenga una firma real coherente con su extensión (Art. V.5).
+        $cleanPhotoPath = isset($payload['photo_path']) ? trim((string)$payload['photo_path']) : '';
+        if ($cleanPhotoPath !== '') {
+            try {
+                $payload['photo_path'] = $this->uploader->validateStoredImage($cleanPhotoPath);
+            } catch (InvalidUploadException $exception) {
+                throw RestockerSatSynergyValidationException::invalidEvidenceImage(
+                    $exception->getMessage(),
+                    ['photo_path' => $cleanPhotoPath]
+                );
+            }
+        }
+
         RestockerSatSynergyValidator::assertEscalationPhoto(
             isset($payload['photo_path']) ? (string)$payload['photo_path'] : null,
             isset($payload['photo_size_bytes']) ? (int)$payload['photo_size_bytes'] : null,
