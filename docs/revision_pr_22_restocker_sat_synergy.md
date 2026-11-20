@@ -7,22 +7,23 @@
 | **Rama origen** | `feat/restocker-sat-synergy` |
 | **Rama destino** | `main` |
 | **HEAD revisado (original)** | `f4b72a6` |
-| **HEAD publicado por PR** | `403ef49` |
+| **HEAD revisado (original)** | `f4b72a6` |
+| **HEAD publicado por PR** | `edd4fef` |
 | **Head remoto antes de la publicación** | `ab7a85c` (datos históricos: 52 commits, 89 archivos, +16.659/−191) |
-| **HEAD local de código** | `90a15ce` (antes del ajuste de informe) |
+| **HEAD local de código** | `90a15ce` (before report fix `403ef49`) |
 | **Base** | `7187116` (`main`) |
 | **Fecha de la revisión** | 2026-11-20 |
-| **Estado de la PR** | abierta, `MERGEABLE`; sin checks de CI; head publicado `403ef49` (antes `ab7a85c`) |
-| **Alcance** | Revisión original estática sobre `f4b72a6` (47 commits, 88 archivos, +15.580/−190). Revisión actual sobre `403ef49`: 55 commits, 89 archivos, +16.731/−191 contra `7187116` (head publicado `403ef49` incluye los commits publicados). |
+| **Estado de la PR** | abierta, `MERGEABLE`; sin checks de CI; head publicado `edd4fef` (antes `ab7a85c`) |
+| **Alcance** | Revisión original estática sobre `f4b72a6` (47 commits, 88 archivos, +15.580/−190). Revisión actual sobre `edd4fef`: 56 commits, 89 archivos, +16.733/−191 contra `7187116` (head publicado `edd4fef` incluye los commits publicados). |
 | **Resultado** | **7 hallazgos**: 7 solucionados en local y publicados en PR |
 
-> **Actualización de corrección (2026-11-20):** `PR22-01`, `PR22-02`, `PR22-03`, `PR22-04`, `PR22-05`, `PR22-06` y `PR22-07` quedan **solucionados** y cubiertos por regresiones focalizadas. El detalle de los cambios y las pruebas se recoge en «Corrección aplicada». El head publicado de la PR es `403ef49`, que incluye `7470bf9`, `90a15ce` y este ajuste de informe.
+> **Actualización de corrección (2026-11-20):** `PR22-01`, `PR22-02`, `PR22-03`, `PR22-04`, `PR22-05`, `PR22-06` y `PR22-07` quedan **solucionados** y cubiertos por regresiones focalizadas. El detalle de los cambios y las pruebas se recoge en «Corrección aplicada». El head publicado de la PR es `edd4fef`, que incluye `7470bf9`, `90a15ce`, `403ef49` y este ajuste de informe.
 
 ---
 
 ## Veredicto
 
-El núcleo de la sinergia está bien encaminado: el modelo de dominio, la taxonomía L1, la custodia y las suites focalizadas están trabajados, y las 640 aserciones de la revisión fresca están en verde. Los tres hallazgos P1, los dos P2 (`PR22-04` y `PR22-05`) y los dos P3 (`PR22-06` y `PR22-07`) están corregidos. El head publicado `403ef49` incluye `7470bf9` y `90a15ce`: PR22-07 ya está en la PR; se convierte en publicado público la revisión de la PR remota, con los stats: 55 commits, 89 archivos, +16.731/−191.
+El núcleo de la sinergia está bien encaminado: el modelo de dominio, la taxonomía L1, la custodia y las suites focalizadas están trabajados, y las 640 aserciones de la revisión fresca están en verde. Los tres hallazgos P1, los dos P2 (`PR22-04` y `PR22-05`) y los dos P3 (`PR22-06` y `PR22-07`) están corregidos. El head publicado `edd4fef` incluye `7470bf9`, `90a15ce`, `403ef49` y este ajuste de informe: PR22-07 ya está en la PR; se publica la revisión de la PR remota, con los stats: 56 commits, 89 archivos, +16.733/−191.
 
 Tras la corrección, las regresiones cubren el alta QR nueva en L1, el cambio L1→L2 desde la UI, el recálculo de urgencia/SLA de las ramas A y C, la guarda de estados de `dispatch-level`, la evidencia real del escalado, el reinicio de un L1 `REOPENED` y la ruta contractual `upload-photo`.
 
@@ -251,17 +252,17 @@ Registrar la ruta contractual como alias o endpoint dedicado, reutilizando el up
 | `RestockerSatSynergyApiTest` | **69/69** en la revisión; **88/88** tras las correcciones |
 | `RestockerSatSynergyConstitutionalTest` | **17/17**, `exit 0`, con evidencia PNG real |
 | `RestockerSatLayoutBrowserTest` | **22/22**, `exit 0`, viewport de 360 px |
-| `gh pr view 22` remotos | head publicado `403ef49`; antes `ab7a85c`; PR22-07 publicado |
+| `gh pr view 22` remotos | head publicado `edd4fef`; antes `ab7a85c`; PR22-07 publicado |
 | `gh pr checks 22` | Sin checks reportados en la rama |
 | `php tests/run_all.php` | No ejecutado en esta revisión |
 | Código de producto modificado | Sin cambios durante la revisión original; las correcciones locales se detallan en «Corrección aplicada» |
 
-Las suites de esquema, gateway, constitucional y convergencia requirieron `PG_TEST_DSN`; se ejecutaron con el contrato de PostgreSQL local correspondiente. La revisión original es estática sobre `f4b72a6`. Las correcciones de `PR22-01` a `PR22-07` se verificaron después con las suites focalizadas indicadas. El total de 640 sale de: dominio 36, servicio 40, validador 46, integraciones 27, API 88, gateway 26, esquema 30, constitucional 17, convergencia 42, frontend de sinergia 22, frontend del reponedor 244 y layout 22. Los commits locales `7470bf9`, `90a15ce` y `403ef49` se publicaron ahora en la PR.
+Las suites de esquema, gateway, constitucional y convergencia requirieron `PG_TEST_DSN`; se ejecutaron con el contrato de PostgreSQL local correspondiente. La revisión original es estática sobre `f4b72a6`. Las correcciones de `PR22-01` a `PR22-07` se verificaron después con las suites focalizadas indicadas. El total de 640 sale de: dominio 36, servicio 40, validador 46, integraciones 27, API 88, gateway 26, esquema 30, constitucional 17, convergencia 42, frontend de sinergia 22, frontend del reponedor 244 y layout 22. Los commits locales `7470bf9`, `90a15ce`, `403ef49` y `edd4fef` se publicaron ahora en la PR.
 
 ---
 
 ## Recomendación
 
-1. ✅ **Hecho y publicado:** los siete hallazgos (`PR22-01` a `PR22-07`) están corregidos y cubiertos por regresiones focalizadas; publicados en la PR como `403ef49`.
-2. **No fusionar todavía:** no se fusiona; la PR sigue abierta y `MERGEABLE`, head publicado `403ef49` (antes `ab7a85c`).
+1. ✅ **Hecho y publicado:** los siete hallazgos (`PR22-01` a `PR22-07`) están corregidos y cubiertos por regresiones focalizadas; publicados en la PR como `edd4fef`.
+2. **No fusionar todavía:** no se fusiona; la PR sigue abierta y `MERGEABLE`, head publicado `edd4fef` (antes `ab7a85c`).
 3. Mantener las regresiones del alta QR limpia, del cambio L1→L2, del recálculo de urgencia/SLA, de la guarda de estados, de la evidencia real, del inicio de un L1 reabierto y de la ruta contractual `upload-photo`; no sustituirlas por la cifra global de la suite.
