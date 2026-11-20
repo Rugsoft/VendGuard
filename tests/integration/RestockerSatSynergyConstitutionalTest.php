@@ -67,6 +67,7 @@ $errorCode = static fn (Response $response): string => (string)($json($response)
 
 $schemaReady = false;
 $exitCode = 1;
+$uploadedEvidenceFiles = [];
 
 try {
     PostgresFixtureBuilder::createIsolationSchema($pdo, RSS09_CONST_SCHEMA);
@@ -239,10 +240,24 @@ try {
 
     echo "\n--- 3. Art. V.3 / QA-CONST-02: absorción sin robar custodia ---\n";
     $before = (int)$pdo->query("SELECT COUNT(*) FROM incidents WHERE machine_id = {$machineB}")->fetchColumn();
+    // PR22-05: the escalation now validates the stored file; seed a real PNG.
+    $evidenceDir = $projectRoot . '/public/uploads/incidents';
+    if (!is_dir($evidenceDir) && !mkdir($evidenceDir, 0777, true) && !is_dir($evidenceDir)) {
+        throw new RuntimeException('No se pudo preparar el directorio de evidencias de la regresión.');
+    }
+    $evidencePath = $evidenceDir . '/rss09_door.png';
+    $evidenceBytes = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        true
+    );
+    if ($evidenceBytes === false || file_put_contents($evidencePath, $evidenceBytes) === false) {
+        throw new RuntimeException('No se pudo crear la evidencia PNG de la regresión.');
+    }
+    $uploadedEvidenceFiles[] = $evidencePath;
     $escalate = $call('POST', "/api/restocker/machines/{$machineB}/escalate-to-sat", [
         'category' => 'ELECTRICAL_OFF',
         'internal_note' => 'La puerta deja de cerrar y el producto queda expuesto al exterior.',
-        'photo_path' => '/uploads/incidents/rss09_door.jpg',
+        'photo_path' => '/uploads/incidents/rss09_door.png',
         'client_mutation_id' => 'rss09-escalate-0001',
         'client_occurred_at' => '2026-11-18 10:10:00+00',
     ], $restockerToken);
@@ -336,6 +351,11 @@ try {
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");
 } finally {
+    foreach ($uploadedEvidenceFiles as $uploadedEvidenceFile) {
+        if (is_string($uploadedEvidenceFile) && is_file($uploadedEvidenceFile)) {
+            @unlink($uploadedEvidenceFile);
+        }
+    }
     if ($schemaReady) {
         try {
             $pdo->exec('DROP SCHEMA IF EXISTS ' . RSS09_CONST_SCHEMA . ' CASCADE');
