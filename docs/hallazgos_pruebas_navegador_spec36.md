@@ -200,6 +200,7 @@ No muestra el motivo concreto («Atasco leve en espiral») porque `level1_issue_
 - **Alta de Sede:** [`IncidentReportModal.js`](../public/assets/js/components/IncidentReportModal.js) muestra «Motivo de Nivel 1 (opcional)» solo cuando la categoría elegida tiene una pareja determinista, usando el catálogo único `LEVEL1_ISSUE_TYPES` de [`IncidentStatusPermissions.js`](../public/assets/js/utils/IncidentStatusPermissions.js). Envía `level1_issue_type` tanto en JSON como en `FormData`; al cambiar de categoría se limpia un motivo que haya quedado incompatible. El backend de Portal ya clasificaba y persistía el motivo, así que el alta lo recibe sin cambios de esquema.
 - **Despacho manual a L1:** el modal de Coordinación pide el motivo (preseleccionado si el ticket ya lo trae), lo limita a la categoría del expediente y no permite confirmar sin él. [`api.js`](../public/assets/js/api.js) envía `level1_issue_type`; [`CoordinatorController.php`](../src/Presentation/Controller/CoordinatorController.php) lo traslada al caso de uso, que valida que sea uno de los cuatro valores y que sea compatible con la categoría (`QA-AMB-01`). Un motivo ausente o incompatible devuelve `422 INVALID_LEVEL1_ISSUE_TYPE`.
 - **Persistencia:** [`PdoRestockerSatSynergyGateway.php`](../src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php) incorpora `level1_issue_type` al `UPDATE` del despacho mediante `COALESCE`, de modo que un L1 sella el motivo y una conmutación posterior a L2 conserva el rastro histórico sin borrarlo. El cambio queda también en la auditoría.
+- **Prueba de composición:** [`RestockerSatSynergyApiTest.php`](../tests/integration/RestockerSatSynergyApiTest.php) siembra un ticket `PRODUCT_JAM` en `L2_SAT` con motivo nulo, comprueba que un `EMPTY_CHANGE_TUBES` incompatible devuelve `422 INVALID_LEVEL1_ISSUE_TYPE` sin mutar la fila y que el despacho posterior a `L1_RESTOCKER` con `STOCKOUT_EMPTY_SLOT` responde 200 y deja ambos valores persistidos en `incidents`.
 - **Alcance:** no se toca `H-36-08`; la preselección y el filtrado de causas raíz siguen siendo un hallazgo independiente.
 
 #### Evidencia de la corrección (2026-11-20)
@@ -209,10 +210,10 @@ No muestra el motivo concreto («Atasco leve en espiral») porque `level1_issue_
 | `tests/unit/IncidentReportModalTest.mjs` | **37/37** aserciones · 0 fallos (incluye filtrado por categoría y motivo en el payload) |
 | `tests/frontend/technician_and_coordinator_synergy.test.mjs` | **18/18** aserciones · 0 fallos (incluye selector L1 y motivo en el despacho) |
 | `tests/unit/RestockerSatSynergyServiceTest.php` | **34/34** aserciones · 0 fallos (incluye el motivo íntegro en el gateway) |
-| `tests/integration/RestockerSatSynergyApiTest.php` | **59/59** aserciones · 0 fallos |
+| `tests/integration/RestockerSatSynergyApiTest.php` | **63/63** aserciones · 0 fallos (422 incompatible sin mutación y persistencia real de `level1_issue_type`) |
 | `tests/integration/CreateIncidentEndpointTest.php` | verde · 0 fallos (Caso 9 de preclasificación L1 del Portal) |
 
-La evidencia original de la reproducción se conserva arriba. La corrección no altera el esquema ni los recuentos del Módulo 36.
+La evidencia original de la reproducción se conserva arriba. La corrección no altera el esquema; la suite API suma cuatro aserciones de composición HTTP/PostgreSQL y el canal queda en **71/71 · 2.350 aserciones** (focalizado: **569**).
 
 ---
 

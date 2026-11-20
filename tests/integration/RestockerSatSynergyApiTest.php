@@ -150,6 +150,7 @@ try {
         'RSS8-SNACK-15',
         'RSS8-SNACK-16',
         'RSS8-SNACK-17',
+        'RSS8-SNACK-18',
     ] as $fixtureMachineCode) {
         $machineStmt->execute([':location_id' => $locationId, ':code' => $fixtureMachineCode]);
         $fixtureMachines[$fixtureMachineCode] = (int)$machineStmt->fetchColumn();
@@ -261,6 +262,19 @@ try {
         $staffRestockerId
     );
     $taxonomyIncidentId = $seedIncident('INC-2026-8810', $fixtureMachines['RSS8-SNACK-17']);
+
+    // H-36-07: ticket nacido en L2 sin motivo, para demostrar que el despacho
+    // manual a L1 sella la taxonomía en la misma fila de `incidents`.
+    $manualL1IncidentId = $seedIncident('INC-2026-8811', $fixtureMachines['RSS8-SNACK-18']);
+    $pdo->prepare(
+        "UPDATE incidents
+            SET dispatch_level = 'L2_SAT',
+                level1_issue_type = NULL,
+                assigned_technician_id = NULL,
+                assigned_at = NULL,
+                status = 'REGISTERED'
+          WHERE id = :id"
+    )->execute([':id' => $manualL1IncidentId]);
 
     $seedCustody = static function (int $seedIncidentId, ?int $assigneeId = null) use ($pdo, $restockerId): void {
         $stmt = $pdo->prepare(
@@ -426,6 +440,55 @@ try {
     ], $coordinatorToken);
     $assert('La conmutación a L2 responde 200', $dispatch->getStatusCode() === 200, 'status=' . $dispatch->getStatusCode() . ' ' . $errorCode($dispatch));
     $assert('El nivel conmutado es L2_SAT', ($data($dispatch)['dispatch_level'] ?? '') === 'L2_SAT');
+
+    // H-36-07: el 422 por pareja incompatible no debe mutar el expediente.
+    $incompatibleL1 = $call('POST', "/api/coordinator/incidents/{$manualL1IncidentId}/dispatch-level", [
+        'dispatch_level' => 'L1_RESTOCKER',
+        'assignee_id' => $restockerId,
+        'level1_issue_type' => 'EMPTY_CHANGE_TUBES',
+    ], $coordinatorToken);
+    $assert(
+        'Un motivo L1 incompatible responde 422',
+        $incompatibleL1->getStatusCode() === 422
+            && $errorCode($incompatibleL1) === 'INVALID_LEVEL1_ISSUE_TYPE',
+        'status=' . $incompatibleL1->getStatusCode() . ' code=' . $errorCode($incompatibleL1)
+    );
+
+    $manualL1Stmt = $pdo->prepare(
+        'SELECT dispatch_level, level1_issue_type FROM incidents WHERE id = :id'
+    );
+    $manualL1Stmt->execute([':id' => $manualL1IncidentId]);
+    $manualL1RejectedRow = $manualL1Stmt->fetch();
+    $assert(
+        'El 422 L1 no muta el nivel ni la taxonomía',
+        is_array($manualL1RejectedRow)
+            && $manualL1RejectedRow['dispatch_level'] === 'L2_SAT'
+            && $manualL1RejectedRow['level1_issue_type'] === null,
+        'row=' . json_encode($manualL1RejectedRow)
+    );
+
+    // H-36-07: el despacho válido sella el motivo y deja la fila en L1.
+    $manualL1 = $call('POST', "/api/coordinator/incidents/{$manualL1IncidentId}/dispatch-level", [
+        'dispatch_level' => 'L1_RESTOCKER',
+        'assignee_id' => $restockerId,
+        'level1_issue_type' => 'STOCKOUT_EMPTY_SLOT',
+    ], $coordinatorToken);
+    $assert(
+        'El despacho manual a L1 con motivo responde 200',
+        $manualL1->getStatusCode() === 200
+            && ($data($manualL1)['dispatch_level'] ?? '') === 'L1_RESTOCKER',
+        'status=' . $manualL1->getStatusCode() . ' ' . $errorCode($manualL1)
+    );
+
+    $manualL1Stmt->execute([':id' => $manualL1IncidentId]);
+    $manualL1Row = $manualL1Stmt->fetch();
+    $assert(
+        'El motivo L1 queda persistido en incidents',
+        is_array($manualL1Row)
+            && $manualL1Row['dispatch_level'] === 'L1_RESTOCKER'
+            && $manualL1Row['level1_issue_type'] === 'STOCKOUT_EMPTY_SLOT',
+        'row=' . json_encode($manualL1Row)
+    );
 
     $filtered = $call('GET', '/api/coordinator/incidents', [], $coordinatorToken, ['dispatch_level' => 'L1_RESTOCKER']);
     $filteredRows = $data($filtered);

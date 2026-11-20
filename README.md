@@ -828,7 +828,7 @@ En esa misma corrida histórica, `PostgresTieredSlaMetricsPerformanceTest` decla
 
 En la corrida histórica del 18 de noviembre, el pooler remoto quedó en verde y estable: `PoolerLatencyMeasurementTest` completa sus 20 rondas y pasa 30/30 aserciones en tres corridas. La optimización de `asignar` integró el cierre y la apertura de custodia en el CTE atómico y trasladó la revalidación de estado, titular y urgencia al propio `UPDATE` condicionado, eliminando en PostgreSQL la lectura bloqueada previa. Las medianas de «asignar» fueron **166,8 ms**, **165,6 ms** y **174,3 ms** (p95 194,2 / 224,6 / 241,1 ms) frente al presupuesto de 250 ms; el enlace base se mantuvo en 43,8–44,1 ms.
 
-> **Corrida completa del 20 de noviembre de 2026 (71 suites):** **71 suites evaluadas · 71 en verde · 2.346 aserciones · 0 fallos · `exit=0`**. Incluye `RestockerSatSynergyApiTest` **59/59** tras H-36-06 y `PoolerLatencyMeasurementTest` **30/30**; 0 no ejecutables.
+> **Corrida completa del 20 de noviembre de 2026 (71 suites):** **71 suites evaluadas · 71 en verde · 2.350 aserciones · 0 fallos · `exit=0`**. Incluye `RestockerSatSynergyApiTest` **63/63** tras H-36-07 y `PoolerLatencyMeasurementTest` **30/30**; 0 no ejecutables.
 
 El cerrojo entre pestañas también queda certificado: `OfflineSyncLockBrowserTest` completa sus **16/16 aserciones**. El runner prefiere Chrome/Chromium del sistema, después el Chromium que Playwright tenga en su caché local y, por último, Edge; así evita el arranque de Edge 157, que en este puesto termina con código 0 antes de publicar DevTools, sin instalar dependencias ni rebajar la exigencia de navegador real.
 
