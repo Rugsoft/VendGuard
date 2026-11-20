@@ -1435,13 +1435,19 @@ export class ApiClient {
      * @param {number|string} incidentId
      * @param {'L1_RESTOCKER'|'L2_SAT'} dispatchLevel
      * @param {number|string} assigneeId
+     * @param {string} [level1IssueType] Motivo L1 del despacho manual (H-36-07)
      * @returns {Promise<Object>}
      */
-    changeDispatchLevel: (incidentId, dispatchLevel, assigneeId) => {
-      return this.post(`/coordinator/incidents/${encodeURIComponent(incidentId)}/dispatch-level`, {
+    changeDispatchLevel: (incidentId, dispatchLevel, assigneeId, level1IssueType = '') => {
+      const payload = {
         dispatch_level: dispatchLevel,
         assignee_id: Number(assigneeId)
-      });
+      };
+      if (level1IssueType) {
+        payload.level1_issue_type = level1IssueType;
+      }
+
+      return this.post(`/coordinator/incidents/${encodeURIComponent(incidentId)}/dispatch-level`, payload);
     },
 
     /**

@@ -6,9 +6,11 @@ namespace VendGuard\Application\Service;
 
 use DateTimeImmutable;
 use InvalidArgumentException;
+use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
 use VendGuard\Core\Domain\Repository\RestockerSatSynergyGatewayInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
+use VendGuard\Core\Domain\ValueObject\Level1IssueType;
 use VendGuard\Core\Service\RestockerSatSynergyValidator;
 
 /**
@@ -84,6 +86,26 @@ final class RestockerSatSynergyService
             (bool)($assignee['is_active'] ?? true)
         );
         RestockerSatSynergyValidator::assertNotPendingParts($level);
+
+        if ($level->isLevel1()) {
+            // H-36-07: un despacho manual a L1 no puede dejar el expediente sin
+            // motivo. La taxonomía se valida antes de tocar la custodia y debe
+            // ser la pareja determinista de la categoría (QA-AMB-01).
+            $rawIssueType = strtoupper(trim((string)($incident['level1_issue_type'] ?? '')));
+            $level1IssueType = $rawIssueType !== '' ? Level1IssueType::tryFrom($rawIssueType) : null;
+            if ($level1IssueType === null || !$level1IssueType->isCompatibleWith($category)) {
+                throw RestockerSatSynergyValidationException::invalidLevel1IssueType(
+                    $rawIssueType !== '' ? $rawIssueType : null,
+                    $category
+                );
+            }
+
+            $incident['level1_issue_type'] = $level1IssueType->value;
+        } else {
+            // En L2 el motivo es rastro histórico, no una decisión del despacho:
+            // se conserva el que ya tuviera el expediente y se ignora el cuerpo.
+            unset($incident['level1_issue_type']);
+        }
 
         return $this->gateway->assignDispatchLevel($incident, $level->value, $assignee, $actor);
     }

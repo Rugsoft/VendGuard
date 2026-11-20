@@ -263,11 +263,13 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             }
 
             $status = $assigneeId > 0 ? 'ASSIGNED' : 'REGISTERED';
+            $level1IssueType = trim((string)($incident['level1_issue_type'] ?? ''));
             $this->closeOpenCustody($incidentId, $actor, 'REASSIGNED_BY_COORDINATOR', 'Cambio de nivel operativo', null);
 
             $stmt = $this->pdo->prepare(
                 'UPDATE incidents
                     SET dispatch_level = :dispatch_level::incident_dispatch_level,
+                        level1_issue_type = COALESCE(:level1_issue_type::level1_issue_type, level1_issue_type),
                         assigned_technician_id = :assignee_id,
                         status = :status,
                         assigned_at = CASE WHEN :assignee_flag::bigint IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
@@ -277,6 +279,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             );
             $stmt->execute([
                 ':dispatch_level' => $level->value,
+                ':level1_issue_type' => $level1IssueType !== '' ? $level1IssueType : null,
                 ':assignee_id' => $assigneeId > 0 ? $assigneeId : null,
                 ':assignee_flag' => $assigneeId > 0 ? $assigneeId : null,
                 ':status' => $status,
@@ -298,8 +301,8 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                 $incidentId,
                 'DISPATCH_LEVEL_CHANGE',
                 $actor,
-                ['dispatch_level' => (string)$current['dispatch_level']],
-                ['dispatch_level' => $level->value, 'assigned_technician_id' => $assigneeId > 0 ? $assigneeId : null]
+                ['dispatch_level' => (string)$current['dispatch_level'], 'level1_issue_type' => $current['level1_issue_type'] ?? null],
+                ['dispatch_level' => $level->value, 'level1_issue_type' => $level1IssueType !== '' ? $level1IssueType : ($current['level1_issue_type'] ?? null), 'assigned_technician_id' => $assigneeId > 0 ? $assigneeId : null]
             );
             $this->commit();
 
@@ -307,6 +310,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                 'ok' => true,
                 'incident_id' => $incidentId,
                 'dispatch_level' => $level->value,
+                'level1_issue_type' => $level1IssueType !== '' ? $level1IssueType : ($current['level1_issue_type'] ?? null),
                 'status' => $status,
                 'assigned_technician_id' => $assigneeId > 0 ? $assigneeId : null,
             ];

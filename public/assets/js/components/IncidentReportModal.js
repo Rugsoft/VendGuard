@@ -18,7 +18,7 @@ import { ModalDialog } from './ModalDialog.js';
 import { IncidentBadge } from './IncidentBadge.js';
 import { ImagePreview } from './ImagePreview.js';
 import { QrRefundRequestBlock } from './QrRefundRequestBlock.js';
-import { INCIDENT_CATEGORIES, INCIDENT_STATUSES, URGENCY_LEVELS } from '../utils/IncidentStatusPermissions.js';
+import { INCIDENT_CATEGORIES, INCIDENT_STATUSES, LEVEL1_ISSUE_TYPES, URGENCY_LEVELS } from '../utils/IncidentStatusPermissions.js';
 
 export const IncidentReportModal = {
   name: 'IncidentReportModal',
@@ -52,6 +52,9 @@ export const IncidentReportModal = {
     return {
       // New Incident Form
       category: 'TEMPERATURE_COLD',
+      // Motivo rápido opcional de Nivel 1 (RF-01.2, D2). Solo se envía si la
+      // categoría elegida admite una pareja determinista; el backend decide.
+      level1IssueType: '',
       description: '',
       retainedMoney: '',
       reporterName: '',
@@ -112,6 +115,15 @@ export const IncidentReportModal = {
     categories() {
       return INCIDENT_CATEGORIES;
     },
+    /**
+     * Motivos L1 compatibles con la categoría seleccionada (QA-AMB-01).
+     *
+     * El selector solo aparece cuando existe una pareja determinista; térmica y
+     * eléctrica quedan fuera porque nunca pueden resolverse en Nivel 1 (Art. II).
+     */
+    level1IssueTypeOptions() {
+      return LEVEL1_ISSUE_TYPES.filter((issueType) => issueType.category === this.category);
+    },
     refundRequested() {
       return this.refundClaim?.refund_requested === true;
     },
@@ -143,6 +155,13 @@ export const IncidentReportModal = {
     }
   },
   watch: {
+    category() {
+      // Un cambio de categoría invalida el motivo anterior: la pareja debe ser
+      // siempre coherente antes de llegar al servidor (QA-AMB-01).
+      if (!this.level1IssueTypeOptions.some((issueType) => issueType.value === this.level1IssueType)) {
+        this.level1IssueType = '';
+      }
+    },
     modelValue(isOpen) {
       if (isOpen) {
         this.resetForm();
@@ -162,6 +181,7 @@ export const IncidentReportModal = {
   methods: {
     resetForm() {
       this.category = 'TEMPERATURE_COLD';
+      this.level1IssueType = '';
       this.description = '';
       this.retainedMoney = '';
       this.reporterEmail = '';
@@ -237,6 +257,9 @@ export const IncidentReportModal = {
           payload = new FormData();
           payload.append('machine_id', String(this.machine.id));
           payload.append('category', this.category);
+          if (this.level1IssueType) {
+            payload.append('level1_issue_type', this.level1IssueType);
+          }
           payload.append('description', this.description.trim());
           payload.append('reporter_name', this.reporterName.trim());
           payload.append('reporter_phone', this.reporterPhone.trim());
@@ -260,6 +283,7 @@ export const IncidentReportModal = {
           payload = {
             machine_id: this.machine.id,
             category: this.category,
+            ...(this.level1IssueType ? { level1_issue_type: this.level1IssueType } : {}),
             description: this.description.trim(),
             reporter_name: this.reporterName.trim(),
             reporter_phone: this.reporterPhone.trim(),
@@ -593,6 +617,32 @@ export const IncidentReportModal = {
                 </div>
               </div>
             </label>
+          </div>
+        </div>
+
+        <!-- Motivo rápido de Nivel 1 (RF-01.2, D2, QA-AMB-01) -->
+        <div
+          v-if="level1IssueTypeOptions.length > 0"
+          style="margin-bottom: 16px;"
+          data-testid="level1-issue-type-block"
+        >
+          <label for="incident-level1-issue-type" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 4px;">
+            Motivo de Nivel 1 <span style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);">(opcional)</span>
+          </label>
+          <select
+            id="incident-level1-issue-type"
+            v-model="level1IssueType"
+            class="vg-select"
+            :disabled="isSubmitting"
+            data-testid="level1-issue-type-select"
+          >
+            <option value="">No preclasificar · requiere valoración del SAT</option>
+            <option v-for="issueType in level1IssueTypeOptions" :key="issueType.value" :value="issueType.value">
+              {{ issueType.label }}
+            </option>
+          </select>
+          <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
+            Si el aviso es leve y puede resolverlo el reponedor en su ruta, selecciona el motivo para preclasificarlo (RF-01.2).
           </div>
         </div>
 

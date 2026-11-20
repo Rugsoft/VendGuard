@@ -104,6 +104,7 @@ assert(
 assert(
   'El modal de Triaje incluye el selector de nivel',
   coordinatorSource.includes('data-testid="assign-dispatch-level-select"')
+    && coordinatorSource.includes('data-testid="assign-level1-issue-type-select"')
     && coordinatorSource.includes('assignDispatchLevel')
 );
 assert(
@@ -152,12 +153,13 @@ assert(
   Number(coordinator.assignRestockerId) === 9
 );
 
-api.coordinator.changeDispatchLevel = async (id, level, assigneeId) => {
-  dispatched = { id, level, assigneeId };
+api.coordinator.changeDispatchLevel = async (id, level, assigneeId, level1IssueType) => {
+  dispatched = { id, level, assigneeId, level1IssueType };
   return { id, dispatch_level: level, assigned_technician_id: assigneeId };
 };
-coordinator.selectedIncident = { id: 4, ticket_code: 'INC-4' };
+coordinator.selectedIncident = { id: 4, ticket_code: 'INC-4', category: 'PRODUCT_JAM' };
 coordinator.assignRestockerId = 10;
+coordinator.assignLevel1IssueType = 'MINOR_SPIRAL_JAM';
 coordinator.loadIncidents = async () => {};
 let emitted = null;
 coordinator.$emit = (event, payload) => { emitted = { event, payload }; };
@@ -165,7 +167,8 @@ coordinator.$emit = (event, payload) => { emitted = { event, payload }; };
 await coordinator.performLevel1Dispatch();
 assert(
   'El despacho L1 llama a dispatch-level con el reponedor elegido',
-  dispatched?.id === 4 && dispatched?.level === 'L1_RESTOCKER' && dispatched?.assigneeId === 10,
+  dispatched?.id === 4 && dispatched?.level === 'L1_RESTOCKER' && dispatched?.assigneeId === 10
+    && dispatched?.level1IssueType === 'MINOR_SPIRAL_JAM',
   JSON.stringify(dispatched)
 );
 assert('El despacho L1 emite assigned para refrescar la vista', emitted?.event === 'assigned');

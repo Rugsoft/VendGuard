@@ -181,7 +181,7 @@ assertSynergyRejects(
 );
 
 $dispatch = $service->dispatchLevel(
-    ['id' => 10, 'category' => 'PRODUCT_JAM'],
+    ['id' => 10, 'category' => 'PRODUCT_JAM', 'level1_issue_type' => 'MINOR_SPIRAL_JAM'],
     'L1_RESTOCKER',
     $restocker,
     $actor
@@ -189,7 +189,11 @@ $dispatch = $service->dispatchLevel(
 assertSynergy(($dispatch['ok'] ?? false) === true, 'el despacho válido devuelve ok');
 assertSynergy($dispatch['dispatch_level'] === 'L1_RESTOCKER', 'el despacho conserva el nivel L1');
 assertSynergy($gateway->lastCall()['method'] === 'assignDispatchLevel', 'el despacho delega en el gateway');
-assertSynergy($gateway->lastCall()['args']['assignee']['id'] === 4, 'el custodio llega íntegro al gateway');
+assertSynergy(
+    $gateway->lastCall()['args']['assignee']['id'] === 4
+        && $gateway->lastCall()['args']['incident']['level1_issue_type'] === 'MINOR_SPIRAL_JAM',
+    'el custodio y el motivo L1 llegan íntegros al gateway'
+);
 
 // ── 2. Inicio y resolución in situ ─────────────────────────────────────
 $started = $service->startLevel1(10, $actor, ['client_mutation_id' => 'mut-1']);

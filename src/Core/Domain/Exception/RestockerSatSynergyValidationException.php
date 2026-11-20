@@ -39,6 +39,7 @@ final class RestockerSatSynergyValidationException extends DomainException
     // ── 422 · elegibilidad, rol y evidencia ────────────────────────────────
     public const L1_DISPATCH_FORBIDDEN_FOR_CATEGORY = 'L1_DISPATCH_FORBIDDEN_FOR_CATEGORY';
     public const INVALID_ASSIGNEE_ROLE_FOR_DISPATCH_LEVEL = 'INVALID_ASSIGNEE_ROLE_FOR_DISPATCH_LEVEL';
+    public const INVALID_LEVEL1_ISSUE_TYPE = 'INVALID_LEVEL1_ISSUE_TYPE';
     public const RESOLUTION_TEXT_TOO_SHORT = 'RESOLUTION_TEXT_TOO_SHORT';
     public const ESCALATION_INTERNAL_NOTE_REQUIRED = 'ESCALATION_INTERNAL_NOTE_REQUIRED';
     public const ESCALATION_PHOTO_REQUIRED = 'ESCALATION_PHOTO_REQUIRED';
@@ -156,6 +157,25 @@ final class RestockerSatSynergyValidationException extends DomainException
             422,
             'assigned_technician_id',
             ['dispatch_level' => $level->value, 'role' => $role, 'is_active' => $isActive]
+        );
+    }
+
+    /**
+     * El despacho manual a L1 exige un motivo compatible con la categoría del
+     * expediente (H-36-07, QA-AMB-01).
+     */
+    public static function invalidLevel1IssueType(?string $issueType, IncidentCategory $category): self
+    {
+        $detail = $issueType === null || trim($issueType) === ''
+            ? 'falta el motivo de Nivel 1'
+            : sprintf('el motivo «%s» no es compatible con la categoría «%s»', $issueType, $category->value);
+
+        return new self(
+            self::INVALID_LEVEL1_ISSUE_TYPE,
+            'No se puede despachar el expediente a Nivel 1: ' . $detail . ' (QA-AMB-01).',
+            422,
+            'level1_issue_type',
+            ['level1_issue_type' => $issueType, 'category' => $category->value]
         );
     }
 

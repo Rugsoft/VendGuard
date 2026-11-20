@@ -241,9 +241,15 @@ class CoordinatorController
             'role' => 'COORDINATOR',
         ];
 
+        $rawLevel1IssueType = $request->getBodyParam('level1_issue_type');
+
         return $this->executeSynergy(fn (): Response => Response::json(
             $this->synergy()->dispatchLevel(
-                ['id' => (int)$incident->getId(), 'category' => $incident->getCategory()->value],
+                [
+                    'id' => (int)$incident->getId(),
+                    'category' => $incident->getCategory()->value,
+                    'level1_issue_type' => is_string($rawLevel1IssueType) ? trim($rawLevel1IssueType) : '',
+                ],
                 (string)($request->getBodyParam('dispatch_level') ?? ''),
                 ['id' => (int)$assignee->getId(), 'role' => $assignee->getRole()->value, 'is_active' => $assignee->isActive()],
                 $actor

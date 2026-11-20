@@ -31,6 +31,7 @@ import {
   isPendingAssignment,
   isPendingInfoStatus,
   isTerminalStatus,
+  LEVEL1_ISSUE_TYPES,
   normalizeIncidentStatus,
   normalizeUrgency
 } from '../utils/IncidentStatusPermissions.js';
@@ -152,6 +153,9 @@ export const CoordinatorDashboardView = {
       // Selector de nivel operativo del Triaje (RF-05.3): el despacho L1 usa la
       // sugerencia de reponedores de la zona; L2 conserva la asignación SAT.
       assignDispatchLevel: 'L2_SAT',
+      // Motivo L1 del despacho manual: si el ticket nació sin taxonomía, el
+      // coordinador debe elegir una pareja coherente antes de conmutar (H-36-07).
+      assignLevel1IssueType: '',
       assignRestockerId: null,
       restockerSuggestions: [],
       isLoadingRestockers: false,
@@ -254,6 +258,11 @@ export const CoordinatorDashboardView = {
     };
   },
   computed: {
+    /** Motivos L1 compatibles con la categoría del expediente abierto (QA-AMB-01). */
+    assignLevel1IssueTypeOptions() {
+      const category = this.selectedIncident?.category;
+      return LEVEL1_ISSUE_TYPES.filter((issueType) => issueType.category === category);
+    },
     isAuthenticated() {
       return store.isCoordinator && store.state.user !== null;
     },
@@ -1184,6 +1193,7 @@ export const CoordinatorDashboardView = {
       this.selectedIncident = incident;
       this.assignTechnicianId = incident.assigned_technician_id || (this.technicians[0]?.id || null);
       this.assignDispatchLevel = incident.dispatch_level === 'L1_RESTOCKER' ? 'L1_RESTOCKER' : 'L2_SAT';
+      this.assignLevel1IssueType = incident.level1_issue_type || '';
       this.assignRestockerId = null;
       this.restockerSuggestions = [];
       this.restockersError = '';
@@ -1213,6 +1223,7 @@ export const CoordinatorDashboardView = {
       this.assignOverrideJustification = '';
       this.assignTechnicianChosenByUser = false;
       this.assignDispatchLevel = 'L2_SAT';
+      this.assignLevel1IssueType = '';
       this.assignRestockerId = null;
       this.restockerSuggestions = [];
       this.isLoadingRestockers = false;
@@ -1701,6 +1712,10 @@ export const CoordinatorDashboardView = {
         this.assignError = 'Selecciona un reponedor de zona antes de confirmar el despacho de Nivel 1.';
         return;
       }
+      if (!this.assignLevel1IssueType) {
+        this.assignError = 'Selecciona el motivo de Nivel 1 del expediente antes de confirmar el despacho.';
+        return;
+      }
 
       this.assignError = '';
       this.isAssigning = true;
@@ -1709,7 +1724,8 @@ export const CoordinatorDashboardView = {
         const result = await api.coordinator.changeDispatchLevel(
           this.selectedIncident.id,
           'L1_RESTOCKER',
-          this.assignRestockerId
+          this.assignRestockerId,
+          this.assignLevel1IssueType
         );
         store.addAlert(
           `Incidencia #${this.selectedIncident.ticket_code} despachada al reponedor de zona.`,
@@ -3007,6 +3023,32 @@ export const CoordinatorDashboardView = {
             </select>
           </div>
 
+          <!-- Motivo L1 del despacho manual (H-36-07, QA-AMB-01) -->
+          <div
+            v-if="assignDispatchLevel === 'L1_RESTOCKER' && assignLevel1IssueTypeOptions.length > 0"
+            style="margin-bottom: 16px;"
+            data-testid="assign-level1-issue-type-block"
+          >
+            <label for="assign-level1-issue-type" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Motivo de Nivel 1 <span style="color: #dc2626;">*</span>
+            </label>
+            <select
+              id="assign-level1-issue-type"
+              v-model="assignLevel1IssueType"
+              class="vg-select"
+              :disabled="isAssigning"
+              data-testid="assign-level1-issue-type-select"
+            >
+              <option value="">Selecciona un motivo coherente con la categoría</option>
+              <option v-for="issueType in assignLevel1IssueTypeOptions" :key="issueType.value" :value="issueType.value">
+                {{ issueType.label }}
+              </option>
+            </select>
+            <p style="margin: 6px 0 0; font-size: 12px; color: var(--color-ink-muted);">
+              El motivo queda sellado en el expediente y permite el 1-Tap del reponedor.
+            </p>
+          </div>
+
           <!-- Reponedor #1 RECOMENDADO ⭐ (Módulo 36, RF-02.1.1) -->
           <section
             v-if="assignDispatchLevel === 'L1_RESTOCKER'"
@@ -3171,7 +3213,7 @@ export const CoordinatorDashboardView = {
             <button
               type="submit"
               class="vg-btn vg-btn-primary"
-              :disabled="isAssigning || (assignDispatchLevel === 'L1_RESTOCKER' ? !assignRestockerId : !assignTechnicianId) || !assignOverrideJustificationValid"
+              :disabled="isAssigning || (assignDispatchLevel === 'L1_RESTOCKER' ? (!assignRestockerId || !assignLevel1IssueType) : !assignTechnicianId) || !assignOverrideJustificationValid"
               data-testid="assign-submit"
             >
               <span v-if="!isAssigning">{{ assignDispatchLevel === 'L1_RESTOCKER' ? 'Despachar al Reponedor' : 'Confirmar Asignación' }}</span>

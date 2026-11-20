@@ -367,8 +367,39 @@ export function isPerishableMachineType(value) {
 }
 
 // =====================================================================
-// Incident categories (mirrors IncidentCategory.php)
+// Incident categories and Level 1 quick reasons
 // =====================================================================
+
+/**
+ * Motivos rápidos de Nivel 1 (mirrors Level1IssueType.php).
+ *
+ * Cada motivo declara la categoría canónica que impone en el alta (QA-AMB-01):
+ * producto agotado y atasco leve son PRODUCT_JAM, tubos vacíos es PAYMENT_SYSTEM
+ * y falta de consumibles es OTHER. La Sede puede seleccionarlos al reportar; el
+ * backend sigue siendo quien decide el nivel y sella la taxonomía (RF-01.2).
+ */
+export const LEVEL1_ISSUE_TYPES = Object.freeze([
+  Object.freeze({
+    value: 'STOCKOUT_EMPTY_SLOT',
+    label: 'Producto agotado / Carril vacío',
+    category: 'PRODUCT_JAM'
+  }),
+  Object.freeze({
+    value: 'MINOR_SPIRAL_JAM',
+    label: 'Atasco leve de producto en espiral',
+    category: 'PRODUCT_JAM'
+  }),
+  Object.freeze({
+    value: 'EMPTY_CHANGE_TUBES',
+    label: 'Tubos de cambio vacíos',
+    category: 'PAYMENT_SYSTEM'
+  }),
+  Object.freeze({
+    value: 'MISSING_CONSUMABLES',
+    label: 'Falta de consumibles (vasos, azúcar o paletinas)',
+    category: 'OTHER'
+  })
+]);
 
 /** Canonical incident categories, mirroring IncidentCategory.php (English canonical keys). */
 export const INCIDENT_CATEGORIES = Object.freeze([
