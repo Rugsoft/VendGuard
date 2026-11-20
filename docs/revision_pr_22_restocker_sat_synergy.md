@@ -6,20 +6,22 @@
 | **PR** | [#22 · feat(restocker): sinergia operativa reponedor ↔ SAT (Módulo 36)](https://github.com/Rugsoft/VendGuard/pull/22) |
 | **Rama origen** | `feat/restocker-sat-synergy` |
 | **Rama destino** | `main` |
-| **HEAD revisado** | `f4b72a6` |
+| **HEAD revisado (original)** | `f4b72a6` |
+| **HEAD local de código** | `90a15ce` |
+| **Head remoto de la PR** | `ab7a85c`; no incluye `7470bf9` ni `90a15ce` |
 | **Base** | `7187116` (`main`) |
 | **Fecha de la revisión** | 2026-11-20 |
-| **Estado de la PR** | abierta, `MERGEABLE`; sin checks de CI reportados en la rama |
-| **Alcance** | Revisión estática del diff completo (47 commits, 88 archivos, +15.580/−190), contraste con la Spec 36 y sus contratos, lint/sintaxis y suites focalizadas. Sin cambios de código de producto. |
-| **Resultado** | **7 hallazgos**: 7 solucionados con regresiones; 0 abiertos |
+| **Estado de la PR** | abierta, `MERGEABLE`; sin checks de CI; head remoto `ab7a85c` |
+| **Alcance** | Revisión original estática sobre `f4b72a6` (47 commits, 88 archivos, +15.580/−190). Revisión fresca de código sobre `90a15ce`: 54 commits, 89 archivos, +16.727/−191 contra `7187116`; el head remoto `ab7a85c` (52 commits, 89 archivos, +16.659/−191) aún no incluye PR22-07. |
+| **Resultado** | **7 hallazgos**: 7 solucionados en local; el head remoto `ab7a85c` mantiene `PR22-07` abierto |
 
-> **Actualización de corrección (2026-11-20):** `PR22-01`, `PR22-02`, `PR22-03`, `PR22-04`, `PR22-05`, `PR22-06` y `PR22-07` quedan **solucionados** y cubiertos por regresiones focalizadas. El detalle de los cambios y las pruebas se recoge en «Corrección aplicada».
+> **Actualización de corrección (2026-11-20):** `PR22-01`, `PR22-02`, `PR22-03`, `PR22-04`, `PR22-05`, `PR22-06` y `PR22-07` quedan **solucionados** y cubiertos por regresiones focalizadas. El detalle de los cambios y las pruebas se recoge en «Corrección aplicada». El commit local `7470bf9` no está publicado en la PR: el head remoto `ab7a85c` sigue mostrando `PR22-07` abierto.
 
 ---
 
 ## Veredicto
 
-El núcleo de la sinergia está bien encaminado: el modelo de dominio, la taxonomía L1, la custodia y las suites focalizadas están trabajados, y las 647 aserciones revisadas están en verde. Los tres hallazgos P1, los dos P2 (`PR22-04` y `PR22-05`) y los dos P3 (`PR22-06` y `PR22-07`) han sido corregidos y verificados con regresiones focalizadas. No quedan hallazgos abiertos.
+El núcleo de la sinergia está bien encaminado: el modelo de dominio, la taxonomía L1, la custodia y las suites focalizadas están trabajados, y las 640 aserciones de la revisión fresca están en verde. Los tres hallazgos P1, los dos P2 (`PR22-04` y `PR22-05`) y los dos P3 (`PR22-06` y `PR22-07`) están corregidos en local. Sin embargo, el head remoto `ab7a85c` no incluye `7470bf9` ni `90a15ce`: `PR22-07` sigue abierto en la PR y no puede certificarse la revisión completa hasta publicar esos commits.
 
 Tras la corrección, las regresiones cubren el alta QR nueva en L1, el cambio L1→L2 desde la UI, el recálculo de urgencia/SLA de las ramas A y C, la guarda de estados de `dispatch-level`, la evidencia real del escalado, el reinicio de un L1 `REOPENED` y la ruta contractual `upload-photo`.
 
@@ -35,7 +37,7 @@ Tras la corrección, las regresiones cubren el alta QR nueva en L1, el cambio L1
 | 4 | `PR22-04` | **P2 · Alto** | `POST /dispatch-level` no valida el estado actual | Puede resucitar tickets `RESOLVED`/`CLOSED` y resetear `IN_PROGRESS`/`PENDING_*` | ✅ Solucionado |
 | 5 | `PR22-05` | **P2 · Alto** | La foto del escalado solo se valida por extensión cuando llega `photo_path` | Se puede adjuntar una ruta sin archivo, tamaño ni magic bytes reales | ✅ Solucionado |
 | 6 | `PR22-06` | **P3 · Medio** | `start` rechaza `REOPENED` pese al contrato y a la UI | Un L1 reabierto asignado no puede iniciarse | ✅ Solucionado |
-| 7 | `PR22-07` | **P3 · Bajo** | La ruta contractual `upload-photo` no existe | Contrato y router no coinciden; la evidencia usa `visits/photo` | ✅ Solucionado |
+| 7 | `PR22-07` | **P3 · Bajo** | La ruta contractual `upload-photo` no existe | Contrato y router no coinciden; la evidencia usa `visits/photo` | ✅ Solucionado en local · pendiente de push |
 
 ---
 
@@ -205,7 +207,7 @@ Permitir `REOPENED` en el guard, usar el estado de origen real en `incident_hist
 
 **Prioridad:** P3 · **Requisito afectado:** contrato de subida de evidencia del reponedor.
 
-**Estado:** ✅ **Solucionado** · `AppRouter` registra `POST /api/restocker/incidents/upload-photo` como alias autenticado de `uploadVisitPhoto`, reutilizando la validación de 5 MB y magic bytes. `uploadIncidentPhoto()` consume la ruta contractual y `visits/photo` se conserva para las visitas in situ.
+**Estado:** ✅ **Solucionado en local** · `AppRouter` registra `POST /api/restocker/incidents/upload-photo` como alias autenticado de `uploadVisitPhoto`, reutilizando la validación de 5 MB y magic bytes. `uploadIncidentPhoto()` consume la ruta contractual y `visits/photo` se conserva para las visitas in situ. El commit local `7470bf9` no está en el head remoto `ab7a85c`.
 
 ### Evidencia
 
@@ -233,7 +235,7 @@ Registrar la ruta contractual como alias o endpoint dedicado, reutilizando el up
 | `PR22-04` | `PdoRestockerSatSynergyGateway::assignDispatchLevel()` limita el cambio a `REGISTERED`/`ASSIGNED`/`REOPENED` y el controlador traduce el fallo a `409`; los estados terminales y operativos no se resucitan ni se resetean. | API: `RESOLVED`, `CLOSED`, `IN_PROGRESS` y `PENDING_INFO` responden `409`; estado, nivel, asignado, `started_at`/`paused_at`, custodia y auditoría permanecen intactos (**88/88**). |
 | `PR22-05` | `RestockerSatSynergyService::escalateToSat()` valida el `photo_path` contra el almacenamiento local con `LocalFileUploader::validateStoredImage()` antes de delegar en el gateway. | Servicio: path inexistente, archivo renombrado y archivo > 5 MB devuelven `422 INVALID_EVIDENCE_IMAGE` (**40/40**); API: los tres rechazos no crean expedientes y el PNG real se persiste (**88/88**). |
 | `PR22-06` | `PdoRestockerSatSynergyGateway::startLevel1()` admite `ASSIGNED` y `REOPENED`; usa el estado de origen real en historial/auditoría y refresca `started_at` al iniciar una reapertura. | API: un L1 `REOPENED` asignado responde `200 IN_PROGRESS`, el historial y la auditoría conservan `REOPENED` y `started_at` se actualiza (**88/88**). |
-| `PR22-07` | `AppRouter` registra `/api/restocker/incidents/upload-photo` como alias autenticado de `uploadVisitPhoto`; `api.js` usa esa ruta para el escalado y mantiene `visits/photo` para las visitas in situ. | API: la subida base64 válida responde `201` con `/uploads/` y los magic bytes inválidos `422 INVALID_FILE_TYPE` (**88/88**); frontend: el cliente usa la ruta contractual (**244/244**). |
+| `PR22-07` | `AppRouter` registra `/api/restocker/incidents/upload-photo` como alias autenticado de `uploadVisitPhoto`; `api.js` usa esa ruta para el escalado y mantiene `visits/photo` para las visitas in situ. | API: la subida base64 válida responde `201` con `/uploads/` y los magic bytes inválidos `422 INVALID_FILE_TYPE` (**88/88**); frontend: el cliente usa la ruta contractual (**244/244**). Commit local `7470bf9`, pendiente de push. |
 
 ---
 
@@ -244,18 +246,20 @@ Registrar la ruta contractual como alias o endpoint dedicado, reutilizando el up
 | `git diff --check` | Sin errores |
 | `php -l` sobre los PHP modificados | Sin errores |
 | `node --check` sobre los JS/MJS modificados | Sin errores |
-| Suites focalizadas | **647 aserciones verdes** en las suites de dominio, servicio, validador, API, gateway, esquema, layout, frontend y convergencia |
+| Suites focalizadas | **640 aserciones verdes** en las 12 suites de dominio, servicio, validador, integraciones, API, gateway, esquema, constitucional, convergencia, frontend y layout |
 | `RestockerSatSynergyApiTest` | **69/69** en la revisión; **88/88** tras las correcciones |
+| `RestockerSatSynergyConstitutionalTest` | **17/17**, `exit 0`, con evidencia PNG real |
+| `RestockerSatLayoutBrowserTest` | **22/22**, `exit 0`, viewport de 360 px |
 | `gh pr checks 22` | Sin checks reportados en la rama |
 | `php tests/run_all.php` | No ejecutado en esta revisión |
-| Código de producto modificado | Ninguno durante la revisión; las correcciones posteriores se detallan en «Corrección aplicada» |
+| Código de producto modificado | Sin cambios durante la revisión original; las correcciones locales se detallan en «Corrección aplicada» |
 
-Las suites de esquema, gateway y convergencia requirieron `PG_TEST_DSN`; se ejecutaron con el contrato de PostgreSQL local correspondiente. La revisión original es estática sobre `f4b72a6`. Las correcciones de `PR22-01` a `PR22-07` se verificaron después con las suites focalizadas indicadas; no se ejecutó la batería completa ni se hizo push.
+Las suites de esquema, gateway, constitucional y convergencia requirieron `PG_TEST_DSN`; se ejecutaron con el contrato de PostgreSQL local correspondiente. La revisión original es estática sobre `f4b72a6`. Las correcciones de `PR22-01` a `PR22-07` se verificaron después con las suites focalizadas indicadas. El total de 640 sale de: dominio 36, servicio 40, validador 46, integraciones 27, API 88, gateway 26, esquema 30, constitucional 17, convergencia 42, frontend de sinergia 22, frontend del reponedor 244 y layout 22. No se ejecutó la batería completa ni se hizo push; los commits `7470bf9` y `90a15ce` siguen siendo locales.
 
 ---
 
 ## Recomendación
 
-1. ✅ **Hecho:** los siete hallazgos (`PR22-01` a `PR22-07`) están corregidos y cubiertos por regresiones focalizadas.
-2. No quedan hallazgos abiertos: la PR queda lista para la decisión de fusión.
+1. ✅ **Hecho en local:** los siete hallazgos (`PR22-01` a `PR22-07`) están corregidos y cubiertos por regresiones focalizadas.
+2. **No fusionar todavía:** publicar `7470bf9` y `90a15ce` para que el head remoto deje de mostrar `PR22-07` abierto y actualizar las cifras de la PR.
 3. Mantener las regresiones del alta QR limpia, del cambio L1→L2, del recálculo de urgencia/SLA, de la guarda de estados, de la evidencia real, del inicio de un L1 reabierto y de la ruta contractual `upload-photo`; no sustituirlas por la cifra global de la suite.
