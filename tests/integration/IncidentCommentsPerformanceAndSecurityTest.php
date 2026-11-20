@@ -280,20 +280,39 @@ $enginePlan = static function (string $sql, array $params) use ($pdo): string {
 };
 $planSummary = static fn (string $plan): string => str_replace("\n", ' · ', $plan);
 
-$commentsTablePlan = $enginePlan(
-    "SELECT c.*, i.ticket_code
-     FROM incident_comments c
-     JOIN incidents i ON c.incident_id = i.id
-     WHERE c.incident_id = :incident_id AND c.is_internal = FALSE
-     ORDER BY c.created_at DESC, c.id DESC
-     LIMIT 51",
-    [':incident_id' => $incidentId]
-);
-echo "  [MEDICIÓN] Plan del motor con 1.000 mensajes: {$planSummary($commentsTablePlan)}\n";
+// La garantía del bloque no es que el planificador elija el índice con 1.000 filas —con ese
+// volumen PostgreSQL prefiere un recorrido secuencial—, sino que el índice exista, esté
+// habilitado y cubra el filtro (`incident_id`) y el orden (`created_at`) del hilo. La latencia
+// de RNF-02 se sigue midiendo en 1.3–1.7 y el plan a escala se vigila en 2.4.
+$indexCatalog = $pdo->query("
+    SELECT idx.indexname, idx.indexdef, i.indisvalid::int AS indisvalid, i.indisready::int AS indisready
+    FROM pg_indexes idx
+    JOIN pg_class c ON c.relname = idx.indexname
+    JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = idx.schemaname
+    JOIN pg_index i ON i.indexrelid = c.oid
+    WHERE idx.schemaname = current_schema()
+      AND idx.tablename = 'incident_comments'
+      AND idx.indexname = 'idx_comments_incident'
+")->fetch(PDO::FETCH_ASSOC);
 
-$assert('1.8 El índice idx_comments_incident está disponible y es aplicable al filtro del hilo',
-    str_contains($commentsTablePlan, 'idx_comments_incident'),
-    'plan real: ' . $planSummary($commentsTablePlan));
+$indexDefinition = is_array($indexCatalog) ? (string)($indexCatalog['indexdef'] ?? '') : '';
+$indexColumns = [];
+if (preg_match('/\(([^)]*)\)/', $indexDefinition, $indexMatch) === 1) {
+    $indexColumns = array_values(array_map(
+        static fn(string $column): string => trim((string)preg_replace('/\s+(ASC|DESC)$/i', '', $column)),
+        explode(',', $indexMatch[1])
+    ));
+}
+$indexIsUsable = is_array($indexCatalog)
+    && (int)($indexCatalog['indisvalid'] ?? 0) === 1
+    && (int)($indexCatalog['indisready'] ?? 0) === 1;
+
+echo "  [CATÁLOGO] Índice del hilo: {$indexDefinition} | columnas: " . implode(', ', $indexColumns)
+    . ' | válido: ' . ($indexIsUsable ? 'sí' : 'no') . "\n";
+
+$assert('1.8 El índice idx_comments_incident existe, es válido y cubre filtro y orden del hilo',
+    $indexIsUsable && array_slice($indexColumns, 0, 2) === ['incident_id', 'created_at'],
+    'definición real: ' . ($indexDefinition !== '' ? $indexDefinition : 'índice ausente del catálogo'));
 
 // =========================================================================
 // BLOQUE 2 (H-1): RNF-02 — escalado a 10.000 mensajes y plan indexado
