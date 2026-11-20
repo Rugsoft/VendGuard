@@ -480,6 +480,42 @@ try {
     ], $restockerToken);
     $assert('La resolución L1 responde 200', $resolve->getStatusCode() === 200, 'status=' . $resolve->getStatusCode() . ' ' . $errorCode($resolve));
 
+    echo "\n--- 2.2 Ruta contractual de evidencia (PR22-07) ---\n";
+
+    $contractPhotoBytes = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        true
+    );
+    $contractUpload = $call('POST', '/api/restocker/incidents/upload-photo', [
+        'photo_base64' => 'data:image/png;base64,' . base64_encode((string)$contractPhotoBytes),
+    ], $restockerToken);
+    $contractUploadData = $data($contractUpload);
+    $contractPhotoUrl = (string)($contractUploadData['photo_evidence_url'] ?? '');
+    $contractPhotoPath = $projectRoot . '/public' . $contractPhotoUrl;
+    if ($contractPhotoUrl !== '') {
+        $uploadedFiles[] = $contractPhotoPath;
+    }
+    $assert(
+        'PR22-07: la ruta contractual upload-photo almacena evidencia validada',
+        $contractUpload->getStatusCode() === 201
+            && str_starts_with($contractPhotoUrl, '/uploads/')
+            && is_file($contractPhotoPath),
+        'status=' . $contractUpload->getStatusCode()
+            . ' code=' . $errorCode($contractUpload)
+            . ' url=' . $contractPhotoUrl
+    );
+
+    $invalidContractUpload = $call('POST', '/api/restocker/incidents/upload-photo', [
+        'photo_base64' => 'data:image/png;base64,' . base64_encode('esto no es una imagen'),
+    ], $restockerToken);
+    $assert(
+        'PR22-07: la ruta contractual rechaza magic bytes inválidos con 422',
+        $invalidContractUpload->getStatusCode() === 422
+            && $errorCode($invalidContractUpload) === 'INVALID_FILE_TYPE',
+        'status=' . $invalidContractUpload->getStatusCode()
+            . ' code=' . $errorCode($invalidContractUpload)
+    );
+
     echo "\n--- 2.1 Resolución L1 con snapshots de taxonomía ---\n";
     $taxonomyStart = $call('POST', "/api/restocker/incidents/{$taxonomyIncidentId}/start", [
         'client_mutation_id' => 'rss08-start-taxonomy',

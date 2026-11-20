@@ -11,17 +11,17 @@
 | **Fecha de la revisión** | 2026-11-20 |
 | **Estado de la PR** | abierta, `MERGEABLE`; sin checks de CI reportados en la rama |
 | **Alcance** | Revisión estática del diff completo (47 commits, 88 archivos, +15.580/−190), contraste con la Spec 36 y sus contratos, lint/sintaxis y suites focalizadas. Sin cambios de código de producto. |
-| **Resultado** | **7 hallazgos**: 3 P1, 2 P2 y 1 P3 solucionados con regresiones; 1 P3 abierto (`PR22-07`) |
+| **Resultado** | **7 hallazgos**: 7 solucionados con regresiones; 0 abiertos |
 
-> **Actualización de corrección (2026-11-20):** `PR22-01`, `PR22-02`, `PR22-03`, `PR22-04`, `PR22-05` y `PR22-06` quedan **solucionados** y cubiertos por regresiones focalizadas. El detalle de los cambios y las pruebas se recoge en «Corrección aplicada».
+> **Actualización de corrección (2026-11-20):** `PR22-01`, `PR22-02`, `PR22-03`, `PR22-04`, `PR22-05`, `PR22-06` y `PR22-07` quedan **solucionados** y cubiertos por regresiones focalizadas. El detalle de los cambios y las pruebas se recoge en «Corrección aplicada».
 
 ---
 
 ## Veredicto
 
-El núcleo de la sinergia está bien encaminado: el modelo de dominio, la taxonomía L1, la custodia y las suites focalizadas están trabajados, y las 647 aserciones revisadas están en verde. Los tres hallazgos P1, los dos P2 (`PR22-04` y `PR22-05`) y el P3 `PR22-06` han sido corregidos y verificados con regresiones focalizadas. No quedan P1 ni P2 abiertos: solo permanece como seguimiento el P3 `PR22-07`.
+El núcleo de la sinergia está bien encaminado: el modelo de dominio, la taxonomía L1, la custodia y las suites focalizadas están trabajados, y las 647 aserciones revisadas están en verde. Los tres hallazgos P1, los dos P2 (`PR22-04` y `PR22-05`) y los dos P3 (`PR22-06` y `PR22-07`) han sido corregidos y verificados con regresiones focalizadas. No quedan hallazgos abiertos.
 
-Tras la corrección, las regresiones cubren el alta QR nueva en L1, el cambio L1→L2 desde la UI, el recálculo de urgencia/SLA de las ramas A y C, la guarda de estados de `dispatch-level`, la evidencia real del escalado y el reinicio de un L1 `REOPENED`. Queda como seguimiento la ruta contractual `upload-photo`.
+Tras la corrección, las regresiones cubren el alta QR nueva en L1, el cambio L1→L2 desde la UI, el recálculo de urgencia/SLA de las ramas A y C, la guarda de estados de `dispatch-level`, la evidencia real del escalado, el reinicio de un L1 `REOPENED` y la ruta contractual `upload-photo`.
 
 ---
 
@@ -35,7 +35,7 @@ Tras la corrección, las regresiones cubren el alta QR nueva en L1, el cambio L1
 | 4 | `PR22-04` | **P2 · Alto** | `POST /dispatch-level` no valida el estado actual | Puede resucitar tickets `RESOLVED`/`CLOSED` y resetear `IN_PROGRESS`/`PENDING_*` | ✅ Solucionado |
 | 5 | `PR22-05` | **P2 · Alto** | La foto del escalado solo se valida por extensión cuando llega `photo_path` | Se puede adjuntar una ruta sin archivo, tamaño ni magic bytes reales | ✅ Solucionado |
 | 6 | `PR22-06` | **P3 · Medio** | `start` rechaza `REOPENED` pese al contrato y a la UI | Un L1 reabierto asignado no puede iniciarse | ✅ Solucionado |
-| 7 | `PR22-07` | **P3 · Bajo** | La ruta contractual `upload-photo` no existe | Contrato y router no coinciden; la evidencia usa `visits/photo` | Abierto |
+| 7 | `PR22-07` | **P3 · Bajo** | La ruta contractual `upload-photo` no existe | Contrato y router no coinciden; la evidencia usa `visits/photo` | ✅ Solucionado |
 
 ---
 
@@ -205,6 +205,8 @@ Permitir `REOPENED` en el guard, usar el estado de origen real en `incident_hist
 
 **Prioridad:** P3 · **Requisito afectado:** contrato de subida de evidencia del reponedor.
 
+**Estado:** ✅ **Solucionado** · `AppRouter` registra `POST /api/restocker/incidents/upload-photo` como alias autenticado de `uploadVisitPhoto`, reutilizando la validación de 5 MB y magic bytes. `uploadIncidentPhoto()` consume la ruta contractual y `visits/photo` se conserva para las visitas in situ.
+
 ### Evidencia
 
 - `specs/technical/restocker_sat_synergy_contracts.md:23`: declara `POST /api/restocker/incidents/upload-photo` para validar y subir la fotografía de evidencia.
@@ -225,12 +227,13 @@ Registrar la ruta contractual como alias o endpoint dedicado, reutilizando el up
 
 | ID | Cambio | Regresión |
 | :--- | :--- | :--- |
-| `PR22-01` | `QrScanController` incluye `level1_issue_type` en el payload del alta QR. | `RestockerSatSynergyApiTest`: alta nueva sobre `RSS8-SNACK-20`, `201`, `L1_RESTOCKER` y motivo persistido (**86/86**). |
-| `PR22-02` | `CoordinatorDashboardView` conmuta L1→L2 mediante `changeDispatchLevel()` y no reutiliza el id del reponedor como técnico SAT; la urgencia elegida viaja con su motivo, se recalcula el SLA y queda en `audit_log`. | Frontend de sinergia: L1→L2 llama a `dispatch-level` con urgencia y exige motivo (**22/22**); API: urgencia aplicada, SLA 480 y motivo auditado (**86/86**). |
+| `PR22-01` | `QrScanController` incluye `level1_issue_type` en el payload del alta QR. | `RestockerSatSynergyApiTest`: alta nueva sobre `RSS8-SNACK-20`, `201`, `L1_RESTOCKER` y motivo persistido (**88/88**). |
+| `PR22-02` | `CoordinatorDashboardView` conmuta L1→L2 mediante `changeDispatchLevel()` y no reutiliza el id del reponedor como técnico SAT; la urgencia elegida viaja con su motivo, se recalcula el SLA y queda en `audit_log`. | Frontend de sinergia: L1→L2 llama a `dispatch-level` con urgencia y exige motivo (**22/22**); API: urgencia aplicada, SLA 480 y motivo auditado (**88/88**). |
 | `PR22-03` | `PdoRestockerSatSynergyGateway` calcula urgencia, SLA y `sla_target_at` en servidor para las ramas A y C; descarta `urgency`/`sla_target_minutes` del cliente. | Gateway: L1 térmico con payload `LOW`/60 exige `CRITICAL`/240; rama C recalcula al alza (**26/26**). |
-| `PR22-04` | `PdoRestockerSatSynergyGateway::assignDispatchLevel()` limita el cambio a `REGISTERED`/`ASSIGNED`/`REOPENED` y el controlador traduce el fallo a `409`; los estados terminales y operativos no se resucitan ni se resetean. | API: `RESOLVED`, `CLOSED`, `IN_PROGRESS` y `PENDING_INFO` responden `409`; estado, nivel, asignado, `started_at`/`paused_at`, custodia y auditoría permanecen intactos (**86/86**). |
-| `PR22-05` | `RestockerSatSynergyService::escalateToSat()` valida el `photo_path` contra el almacenamiento local con `LocalFileUploader::validateStoredImage()` antes de delegar en el gateway. | Servicio: path inexistente, archivo renombrado y archivo > 5 MB devuelven `422 INVALID_EVIDENCE_IMAGE` (**40/40**); API: los tres rechazos no crean expedientes y el PNG real se persiste (**86/86**). |
-| `PR22-06` | `PdoRestockerSatSynergyGateway::startLevel1()` admite `ASSIGNED` y `REOPENED`; usa el estado de origen real en historial/auditoría y refresca `started_at` al iniciar una reapertura. | API: un L1 `REOPENED` asignado responde `200 IN_PROGRESS`, el historial y la auditoría conservan `REOPENED` y `started_at` se actualiza (**86/86**). |
+| `PR22-04` | `PdoRestockerSatSynergyGateway::assignDispatchLevel()` limita el cambio a `REGISTERED`/`ASSIGNED`/`REOPENED` y el controlador traduce el fallo a `409`; los estados terminales y operativos no se resucitan ni se resetean. | API: `RESOLVED`, `CLOSED`, `IN_PROGRESS` y `PENDING_INFO` responden `409`; estado, nivel, asignado, `started_at`/`paused_at`, custodia y auditoría permanecen intactos (**88/88**). |
+| `PR22-05` | `RestockerSatSynergyService::escalateToSat()` valida el `photo_path` contra el almacenamiento local con `LocalFileUploader::validateStoredImage()` antes de delegar en el gateway. | Servicio: path inexistente, archivo renombrado y archivo > 5 MB devuelven `422 INVALID_EVIDENCE_IMAGE` (**40/40**); API: los tres rechazos no crean expedientes y el PNG real se persiste (**88/88**). |
+| `PR22-06` | `PdoRestockerSatSynergyGateway::startLevel1()` admite `ASSIGNED` y `REOPENED`; usa el estado de origen real en historial/auditoría y refresca `started_at` al iniciar una reapertura. | API: un L1 `REOPENED` asignado responde `200 IN_PROGRESS`, el historial y la auditoría conservan `REOPENED` y `started_at` se actualiza (**88/88**). |
+| `PR22-07` | `AppRouter` registra `/api/restocker/incidents/upload-photo` como alias autenticado de `uploadVisitPhoto`; `api.js` usa esa ruta para el escalado y mantiene `visits/photo` para las visitas in situ. | API: la subida base64 válida responde `201` con `/uploads/` y los magic bytes inválidos `422 INVALID_FILE_TYPE` (**88/88**); frontend: el cliente usa la ruta contractual (**244/244**). |
 
 ---
 
@@ -242,17 +245,17 @@ Registrar la ruta contractual como alias o endpoint dedicado, reutilizando el up
 | `php -l` sobre los PHP modificados | Sin errores |
 | `node --check` sobre los JS/MJS modificados | Sin errores |
 | Suites focalizadas | **647 aserciones verdes** en las suites de dominio, servicio, validador, API, gateway, esquema, layout, frontend y convergencia |
-| `RestockerSatSynergyApiTest` | **69/69** en la revisión; **86/86** tras las correcciones |
+| `RestockerSatSynergyApiTest` | **69/69** en la revisión; **88/88** tras las correcciones |
 | `gh pr checks 22` | Sin checks reportados en la rama |
 | `php tests/run_all.php` | No ejecutado en esta revisión |
 | Código de producto modificado | Ninguno durante la revisión; las correcciones posteriores se detallan en «Corrección aplicada» |
 
-Las suites de esquema, gateway y convergencia requirieron `PG_TEST_DSN`; se ejecutaron con el contrato de PostgreSQL local correspondiente. La revisión original es estática sobre `f4b72a6`. Las correcciones de `PR22-01` a `PR22-06` se verificaron después con las suites focalizadas indicadas; no se ejecutó la batería completa ni se hizo push.
+Las suites de esquema, gateway y convergencia requirieron `PG_TEST_DSN`; se ejecutaron con el contrato de PostgreSQL local correspondiente. La revisión original es estática sobre `f4b72a6`. Las correcciones de `PR22-01` a `PR22-07` se verificaron después con las suites focalizadas indicadas; no se ejecutó la batería completa ni se hizo push.
 
 ---
 
 ## Recomendación
 
-1. ✅ **Hecho:** `PR22-01`, `PR22-02`, `PR22-03`, `PR22-04`, `PR22-05` y `PR22-06` están corregidos y cubiertos por regresiones focalizadas.
-2. Abordar `PR22-07` como seguimiento: registrar la ruta contractual `upload-photo` o alinear el contrato con `visits/photo`.
-3. Mantener las regresiones del alta QR limpia, del cambio L1→L2, del recálculo de urgencia/SLA, de la guarda de estados, de la evidencia real y del inicio de un L1 reabierto; no sustituirlas por la cifra global de la suite.
+1. ✅ **Hecho:** los siete hallazgos (`PR22-01` a `PR22-07`) están corregidos y cubiertos por regresiones focalizadas.
+2. No quedan hallazgos abiertos: la PR queda lista para la decisión de fusión.
+3. Mantener las regresiones del alta QR limpia, del cambio L1→L2, del recálculo de urgencia/SLA, de la guarda de estados, de la evidencia real, del inicio de un L1 reabierto y de la ruta contractual `upload-photo`; no sustituirlas por la cifra global de la suite.

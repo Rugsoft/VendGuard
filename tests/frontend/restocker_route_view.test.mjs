@@ -1840,6 +1840,11 @@ assert(
 );
 
 assert(
+  'El cliente de escalado usa la ruta contractual upload-photo',
+  apiSource.includes("upload('/restocker/incidents/upload-photo'")
+);
+
+assert(
   'El Service Worker precachea la cola L1 y sube la versión',
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/RestockerIncidentOfflineQueue.js')

@@ -633,6 +633,7 @@ final class RestockerRouteController
 
     /**
      * POST /api/restocker/visits/photo
+     * POST /api/restocker/incidents/upload-photo (alias contractual del escalado)
      *
      * Evidencia fotográfica por `multipart/form-data` o base64 seguro. El
      * uploader valida el tope de 5 MB y los magic bytes reales (`Art. V.5`).

@@ -2285,7 +2285,7 @@ export class ApiClient {
     uploadIncidentPhoto: (photo, photoName = null) => {
       const formData = new FormData();
       formData.append('photo', photo, photoName || photo?.name || 'incident-evidence');
-      return this.upload('/restocker/visits/photo', formData);
+      return this.upload('/restocker/incidents/upload-photo', formData);
     },
 
     /**
