@@ -109,6 +109,9 @@ try {
             [':location' => $locationId, ':code' => sprintf('VEND-RSS-%03d', 500 + $i)]
         );
     }
+    // La rama A se certifica sobre una máquina de perecederos: el escalado a
+    // temperatura debe imponer CRITICAL/240 aunque el cliente intente rebajarlo.
+    $pdo->exec("UPDATE machines SET machine_type = 'PERISHABLE_FOOD' WHERE id = {$machineIds[1]}");
 
     $createUser = static function (string $name, string $email, string $role, string $code) use ($pdo): int {
         return (int)$pdo->query(
@@ -345,11 +348,11 @@ try {
     echo "\n--- Escalado al SAT en tres ramas (EARS 03.2, QA-CONST-02) ---\n";
 
     $escalateA = $gateway->escalateToSat($machineIds[1], $rep, [
-        'category' => 'PRODUCT_JAM',
+        'category' => 'TEMPERATURE_COLD',
         'workshop_internal_note' => 'Al abrir la máquina se comprueba que el motorreductor de la espiral 14 está quemado.',
         'photo_path' => '/uploads/incidents/rss05_motor14.jpg',
-        'urgency' => 'HIGH',
-        'sla_target_minutes' => 480,
+        'urgency' => 'LOW',
+        'sla_target_minutes' => 60,
     ], [
         'client_mutation_id' => 'mut-rss05-escalate-0001',
         'client_occurred_at' => '2026-11-18 10:30:00+00',
@@ -360,6 +363,21 @@ try {
             && ($escalateA['escalation_outcome'] ?? '') === 'ESCALATED_FROM_L1'
             && $scalar($pdo, 'SELECT dispatch_level FROM incidents WHERE id = :id', [':id' => (int)$incident1['id']]) === 'L2_SAT'
             && $scalar($pdo, 'SELECT escalated_from_restocker_id FROM incidents WHERE id = :id', [':id' => (int)$incident1['id']]) == $restockerId
+    );
+    $branchARow = $pdo->prepare(
+        'SELECT category, urgency, sla_target_minutes, sla_target_at
+           FROM incidents WHERE id = :id'
+    );
+    $branchARow->execute([':id' => (int)$incident1['id']]);
+    $branchARow = $branchARow->fetch();
+    $assert(
+        'La Rama A recalcula urgencia/SLA desde máquina y categoría e ignora el payload',
+        is_array($branchARow)
+            && $branchARow['category'] === 'TEMPERATURE_COLD'
+            && $branchARow['urgency'] === 'CRITICAL'
+            && (int)$branchARow['sla_target_minutes'] === 240
+            && $branchARow['sla_target_at'] !== null,
+        'row=' . json_encode($branchARow)
     );
     $assert(
         'La Rama A cierra la custodia y deja la nota interna del reponedor',
@@ -387,6 +405,21 @@ try {
     $assert(
         'La Rama C respeta intacta la custodia del técnico',
         (int)$scalar($pdo, 'SELECT COUNT(*) FROM incident_assignments WHERE incident_id = :id AND unassigned_at IS NULL AND technician_id = :tid', [':id' => (int)$incident3['id'], ':tid' => $technicianId]) === 1
+    );
+    $branchCRow = $pdo->prepare(
+        'SELECT category, urgency, sla_target_minutes, sla_target_at
+           FROM incidents WHERE id = :id'
+    );
+    $branchCRow->execute([':id' => (int)$incident3['id']]);
+    $branchCRow = $branchCRow->fetch();
+    $assert(
+        'La Rama C recalcula urgencia/SLA cuando la categoría entrante es más grave',
+        is_array($branchCRow)
+            && $branchCRow['category'] === 'TEMPERATURE_COLD'
+            && $branchCRow['urgency'] === 'MEDIUM'
+            && (int)$branchCRow['sla_target_minutes'] === 1440
+            && $branchCRow['sla_target_at'] !== null,
+        'row=' . json_encode($branchCRow)
     );
 
     $escalateB = $gateway->escalateToSat($machineIds[4], $rep, [

@@ -168,6 +168,7 @@ try {
         'RSS8-SNACK-16',
         'RSS8-SNACK-17',
         'RSS8-SNACK-18',
+        'RSS8-SNACK-20',
     ] as $fixtureMachineCode) {
         $machineStmt->execute([':location_id' => $locationId, ':code' => $fixtureMachineCode]);
         $fixtureMachines[$fixtureMachineCode] = (int)$machineStmt->fetchColumn();
@@ -571,14 +572,16 @@ try {
     );
 
     echo "\n--- 5. Alta QR y opacidad ---\n";
+    // Regresión PR22-01: la máquina debe estar limpia para que el alta cree un
+    // expediente nuevo y no se fusione con un L1 sembrado.
     $qr = $call('POST', '/api/qr/report', [
-        'machine_code' => 'RSS8-SNACK-01',
+        'machine_code' => 'RSS8-SNACK-20',
         'category' => 'PRODUCT_JAM',
         'description' => 'No puedo retirar el producto del carril',
         'level1_issue_type' => 'MINOR_SPIRAL_JAM',
     ]);
     $qrBody = $data($qr);
-    $assert('El alta QR responde 200', $qr->getStatusCode() === 200, 'status=' . $qr->getStatusCode() . ' ' . $errorCode($qr));
+    $assert('El alta QR responde 201', $qr->getStatusCode() === 201, 'status=' . $qr->getStatusCode() . ' ' . $errorCode($qr));
     $assert('La respuesta QR no expone dispatch_level', !array_key_exists('dispatch_level', $qrBody) && !array_key_exists('level1_issue_type', $qrBody));
 
     $restockerRoute = $call('GET', '/api/restocker/my-route', [], $restockerToken);
@@ -631,7 +634,13 @@ try {
     $storedStmt = $pdo->prepare('SELECT dispatch_level, level1_issue_type FROM incidents WHERE id = :id');
     $storedStmt->execute([':id' => $qrIncidentId]);
     $stored = $storedStmt->fetch();
-    $assert('El alta QR se persiste como L1_RESTOCKER', is_array($stored) && $stored['dispatch_level'] === 'L1_RESTOCKER');
+    $assert(
+        'El alta QR se persiste como L1_RESTOCKER con su motivo',
+        is_array($stored)
+            && $stored['dispatch_level'] === 'L1_RESTOCKER'
+            && $stored['level1_issue_type'] === 'MINOR_SPIRAL_JAM',
+        'row=' . json_encode($stored)
+    );
 
     echo "\n--- 6. Auto-escalado QR real (FIX-36-01) ---\n";
 

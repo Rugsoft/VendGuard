@@ -173,6 +173,56 @@ assert(
 );
 assert('El despacho L1 emite assigned para refrescar la vista', emitted?.event === 'assigned');
 
+// PR22-02: un expediente que nació en L1 y se conmuta a L2 debe viajar por
+// dispatch-level, no por assignTechnician (que dejaba el nivel intacto).
+let level2Dispatched = null;
+let assignTechnicianCalls = 0;
+const originalAssignTechnician = api.coordinator.assignTechnician;
+api.coordinator.changeDispatchLevel = async (id, level, assigneeId) => {
+  level2Dispatched = { id, level, assigneeId };
+  return { id, dispatch_level: level, assigned_technician_id: assigneeId };
+};
+api.coordinator.assignTechnician = async () => {
+  assignTechnicianCalls++;
+  return {};
+};
+coordinator.selectedIncident = {
+  id: 5,
+  ticket_code: 'INC-5',
+  dispatch_level: 'L1_RESTOCKER',
+  assigned_technician_id: 9
+};
+coordinator.assignDispatchLevel = 'L2_SAT';
+coordinator.assignTechnicianId = 10;
+coordinator.refreshTerritorialMap = () => {};
+await coordinator.submitAssignment();
+assert(
+  'El cambio L1→L2 llama a dispatch-level con el técnico SAT elegido',
+  level2Dispatched?.id === 5
+    && level2Dispatched?.level === 'L2_SAT'
+    && level2Dispatched?.assigneeId === 10
+    && assignTechnicianCalls === 0,
+  JSON.stringify({ level2Dispatched, assignTechnicianCalls })
+);
+api.coordinator.assignTechnician = originalAssignTechnician;
+
+const modalVm = buildVm(CoordinatorDashboardView, {
+  technicians: [{ id: 7, name: 'Técnico SAT' }],
+  ensureTechniciansLoaded: () => {},
+  loadAssignmentSuggestions: async () => {},
+  loadAssignRestockerSuggestions: async () => {}
+});
+modalVm.openAssignModal({
+  id: 6,
+  ticket_code: 'INC-6',
+  dispatch_level: 'L1_RESTOCKER',
+  assigned_technician_id: 9
+});
+assert(
+  'El modal L1 no preselecciona al reponedor como técnico SAT',
+  Number(modalVm.assignTechnicianId) === 7
+);
+
 api.coordinator.getIncidents = originalGetIncidents;
 api.coordinator.getSuggestedRestockers = originalGetSuggestedRestockers;
 api.coordinator.changeDispatchLevel = originalChangeDispatchLevel;

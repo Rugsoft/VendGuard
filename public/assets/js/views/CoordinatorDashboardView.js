@@ -1191,7 +1191,14 @@ export const CoordinatorDashboardView = {
 
     openAssignModal(incident) {
       this.selectedIncident = incident;
-      this.assignTechnicianId = incident.assigned_technician_id || (this.technicians[0]?.id || null);
+      // Un expediente L1 puede estar custodiado por un reponedor. Ese id no es
+      // un técnico SAT válido para el selector: se ignora y se ofrece la lista
+      // de técnicos activos (D1, QA-CON-01).
+      const assignedId = Number(incident.assigned_technician_id || 0);
+      const assignedTechnician = this.technicians.find((tech) => Number(tech.id) === assignedId);
+      this.assignTechnicianId = incident.dispatch_level === 'L1_RESTOCKER'
+        ? (assignedTechnician?.id ?? this.technicians[0]?.id ?? null)
+        : (incident.assigned_technician_id || (this.technicians[0]?.id || null));
       this.assignDispatchLevel = incident.dispatch_level === 'L1_RESTOCKER' ? 'L1_RESTOCKER' : 'L2_SAT';
       this.assignLevel1IssueType = incident.level1_issue_type || '';
       this.assignRestockerId = null;
@@ -1700,6 +1707,13 @@ export const CoordinatorDashboardView = {
         await this.performLevel1Dispatch();
         return;
       }
+      // El expediente nació en L1: la conmutación a L2 debe viajar por el
+      // endpoint de nivel, que valida rol/categoría y reabre la custodia SAT.
+      // Usar `assignTechnician()` dejaba el ticket en L1 (PR22-02).
+      if (this.selectedIncident.dispatch_level === 'L1_RESTOCKER') {
+        await this.performLevel2Dispatch();
+        return;
+      }
       await this.performAssignment(this.assignTechnicianId);
     },
 
@@ -1737,6 +1751,46 @@ export const CoordinatorDashboardView = {
         await this.loadIncidents();
       } catch (err) {
         this.assignError = err.message || 'Error al despachar el aviso de Nivel 1.';
+      } finally {
+        this.isAssigning = false;
+        store.setLoading(false);
+      }
+    },
+
+    /**
+     * Conmutación L1→L2 desde el modal de Triaje. Usa el endpoint dedicado de
+     * nivel para que el expediente cambie de nivel, estado y custodio en una
+     * sola transacción (D1, D2.3, QA-CON-01).
+     */
+    async performLevel2Dispatch() {
+      if (!this.selectedIncident || !this.assignTechnicianId) {
+        this.assignError = 'Selecciona un técnico SAT antes de conmutar el expediente a Nivel 2.';
+        return;
+      }
+
+      this.assignError = '';
+      this.isAssigning = true;
+      store.setLoading(true);
+      try {
+        const result = await api.coordinator.changeDispatchLevel(
+          this.selectedIncident.id,
+          'L2_SAT',
+          this.assignTechnicianId
+        );
+        store.addAlert(
+          `Incidencia #${this.selectedIncident.ticket_code} conmutada a Nivel 2 SAT.`,
+          'success',
+          5000
+        );
+        this.$emit('assigned', result);
+        this.closeAssignModal();
+        await this.loadIncidents();
+        this.refreshTerritorialMap();
+      } catch (err) {
+        this.assignError = err.message || 'Error al conmutar la incidencia a Nivel 2 SAT.';
+        if (this.selectedIncident?.id !== undefined && this.selectedIncident?.id !== null) {
+          await this.refreshIncidentRow(this.selectedIncident.id);
+        }
       } finally {
         this.isAssigning = false;
         store.setLoading(false);

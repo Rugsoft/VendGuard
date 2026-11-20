@@ -356,6 +356,7 @@ class QrScanController
             'machine_code' => $machineCode,
             'category' => $category,
             'description' => $description,
+            'level1_issue_type' => $request->getBodyParam('level1_issue_type'),
             'reporter_name' => $reporterName,
             'reporter_phone' => $reporterPhone,
             'reporter_email' => $reporterEmail,
