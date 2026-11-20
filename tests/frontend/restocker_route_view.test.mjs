@@ -2016,6 +2016,25 @@ assert(
     && !serverErrorVm.l1ResolveError.includes('SQLSTATE')
 );
 
+const whitespaceResolveVm = buildRejectedResolveVm(505);
+whitespaceResolveVm.l1ResolveForm.diagnosis = 'Espiral' + ' '.repeat(50) + 'OK';
+let whitespaceResolveApiCalls = 0;
+api.restocker.resolveL1Incident = async () => {
+  whitespaceResolveApiCalls++;
+  return {};
+};
+try {
+  await whitespaceResolveVm.submitL1Resolution();
+} finally {
+  api.restocker.resolveL1Incident = originalResolveL1;
+}
+assert(
+  'O-36-02: el contador L1 colapsa espacios internos y bloquea el envío',
+  whitespaceResolveVm.charCount(whitespaceResolveVm.l1ResolveForm.diagnosis) === 10
+    && whitespaceResolveVm.l1ResolveError.includes('20 caracteres')
+    && whitespaceResolveApiCalls === 0
+);
+
 const escalateVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
 escalateVm.loadMyRoute = async () => {};
 const escalationMachine = { id: 7, code: 'VEND-0701', location_id: 4 };

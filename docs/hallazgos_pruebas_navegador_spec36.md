@@ -465,15 +465,16 @@ La UI muestra «⚠️ No se pudo completar la operación de Nivel 1.» sin indi
 
 - **Vista:** [`RestockerRouteView.js`](../public/assets/js/components/RestockerRouteView.js) traduce el fallo con `l1ResolutionErrorMessage()`: usa `details.field` para señalar «Diagnóstico» o «Acción ejecutada» en `RESOLUTION_TEXT_TOO_SHORT`, mapea las guardas sanitarias, de repuestos y de taxonomía a mensajes accionables y conserva el código seguro del API. No se leen `raw` ni la traza; los códigos desconocidos conservan el mensaje del API.
 - **Códigos cubiertos:** `RESOLUTION_TEXT_TOO_SHORT`, `SANITARY_L1_RESOLUTION_BLOCKED`, `L1_PENDING_PARTS_FORBIDDEN`, `MISSING_ROOT_CAUSE_TAXONOMY`, `ROOT_CAUSE_NOT_FOUND`, `INCOMPATIBLE_STANDARD_SOLUTION`, `INACTIVE_ROOT_CAUSE_TAXONOMY`, `INVALID_RESOLUTION`, `INCIDENT_NOT_ASSIGNED_TO_RESTOCKER`, `MACHINE_OUTSIDE_RESTOCKER_ZONES` e `INTERNAL_SERVER_ERROR`. Este último muestra un mensaje seguro con su código, sin el texto interno del servidor.
-- **Prueba de regresión:** [`restocker_route_view.test.mjs`](../tests/frontend/restocker_route_view.test.mjs) simula un `ApiError` 422 con `details.field = resolution_diagnosis` y exige el campo «Diagnóstico», el mínimo de 20 caracteres y el código, sin el nombre interno del campo; un segundo caso simula un 500 con un payload que contiene `SQLSTATE` y exige que no se filtre.
+- **Contador alineado:** `charCount()` ahora aplica `trim()` y colapsa espacios internos igual que `RestockerSatSynergyValidator::normalizeText()`. Un diagnóstico como `Espiral` + 50 espacios + `OK` cuenta 10 caracteres reales y se bloquea en cliente antes de enviar, en vez de mostrar 69/20.
+- **Prueba de regresión:** [`restocker_route_view.test.mjs`](../tests/frontend/restocker_route_view.test.mjs) simula un `ApiError` 422 con `details.field = resolution_diagnosis` y exige el campo «Diagnóstico», el mínimo de 20 caracteres y el código, sin el nombre interno del campo; un segundo caso simula un 500 con un payload que contiene `SQLSTATE` y exige que no se filtre; un tercer caso usa espacios internos y exige el contador normalizado de 10 y que no se llame al API.
 
 #### Evidencia de la corrección (2026-11-20)
 
 | Suite | Resultado |
 | :--- | :--- |
-| `tests/frontend/restocker_route_view.test.mjs` | **242/242** aserciones · 0 fallos (dos regresiones O-36-02) |
+| `tests/frontend/restocker_route_view.test.mjs` | **243/243** aserciones · 0 fallos (tres regresiones O-36-02) |
 | Canal `new_engine` | **71/71 suites · 2.356 aserciones · 0 fallos · `exit=0`** (sin cambios en PHP; corrida vigente del 2026-11-20) |
-| Evidencia focalizada del Módulo 36 | **582** aserciones |
+| Evidencia focalizada del Módulo 36 | **583** aserciones |
 
 ---
 
@@ -555,6 +556,6 @@ SELECT ticket_code, status, dispatch_level, level1_issue_type,
 | `H-36-09` | **No · resuelto el 2026-11-20** | Urgencia derivada de máquina/categoría y perfil SLA de la sede heredado en la rama B |
 | `H-36-10` | **No · resuelto el 2026-11-20** | DTO publica `location_id`; composición HTTP/PostgreSQL y bootstrap de la vista cubiertos |
 | `O-36-01` | **No · resuelto el 2026-11-20** | `startShift()` recarga la ruta; regresión frontend **19/19** |
-| `O-36-02` | **No · resuelto el 2026-11-20** | 422/500 mapeados a campo y código seguro; regresión frontend **242/242** |
+| `O-36-02` | **No · resuelto el 2026-11-20** | 422/500 mapeados a campo y código seguro; contador L1 normalizado; regresión frontend **243/243** |
 
 **Conclusión:** la Spec 36 puede declararse cerrada con esta corrida. `H-36-06` ya no bloquea el flujo principal de resolución L1: la hidratación y la composición HTTP/PostgreSQL están cubiertas. `H-36-07` queda resuelto con el selector de motivo en Sede y la validación/persistencia en el despacho manual L1. `H-36-08` queda resuelto con el filtrado por categoría/motivo, la preselección coherente y el rechazo 422 de causas de otra categoría. `H-36-09` queda resuelto al derivar la urgencia de máquina/categoría y heredar el perfil SLA de la sede en la rama de ticket SAT nuevo. `H-36-10` queda resuelto al publicar `location_id` en el DTO de máquina y exigir por composición que la coincidencia se indexe por esa clave y llegue al banner. No quedan hallazgos abiertos: `O-36-01` queda resuelto al recargar la ruta tras iniciar turno y `O-36-02` al traducir los errores de validación L1 a mensajes de campo con su código seguro. Las correcciones se acompañan de pruebas de composición reales, no solo de dobles del gateway.

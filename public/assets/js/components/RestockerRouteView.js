@@ -1429,7 +1429,10 @@ export const RestockerRouteView = {
     },
 
     charCount(value) {
-      return Array.from(String(value ?? '').trim()).length;
+      // Espeja `RestockerSatSynergyValidator::normalizeText()`: recorta extremos
+      // y colapsa espacios internos antes de contar caracteres reales.
+      const normalized = String(value ?? '').trim().replace(/\s+/gu, ' ');
+      return Array.from(normalized).length;
     },
 
     async startL1(incident) {
