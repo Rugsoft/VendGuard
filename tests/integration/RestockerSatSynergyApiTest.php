@@ -238,7 +238,7 @@ try {
 
     $shiftStmt = $pdo->prepare(
         "INSERT INTO technician_shifts (technician_id, shift_date, status, started_at)
-         VALUES (:id, CURRENT_DATE, 'ON_SHIFT', CURRENT_TIMESTAMP - INTERVAL '2 hours') RETURNING id"
+         VALUES (:id, (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date, 'ON_SHIFT', CURRENT_TIMESTAMP - INTERVAL '2 hours') RETURNING id"
     );
     $shiftStmt->execute([':id' => $restockerId]);
     $shiftStmt->execute([':id' => $backupId]);

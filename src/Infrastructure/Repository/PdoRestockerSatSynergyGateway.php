@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Infrastructure\Repository;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use PDO;
 use RuntimeException;
 use Throwable;
@@ -16,6 +17,7 @@ use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Core\Service\RestockerZoneCoverageRanker;
 use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -110,14 +112,13 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             return $this->error('RESTOCKER_ROLE_REQUIRED', 403, 'Solo un reponedor puede iniciar un aviso de Nivel 1.');
         }
 
-        $replay = $this->findReplay($actor, $mutation);
-        if ($replay !== null) {
-            return $replay;
-        }
-
         $this->begin();
         try {
             $incident = $this->lockIncident($incidentId);
+            $replay = $this->findReplay($actor, $mutation, 'INCIDENT', $incidentId, 'START_L1_INCIDENT');
+            if ($replay !== null) {
+                return $replay;
+            }
             if ($incident === null) {
                 return $this->fail('INCIDENT_NOT_FOUND', 404, 'El expediente no existe o está dado de baja.');
             }
@@ -530,14 +531,13 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             return $this->error('RESTOCKER_ROLE_REQUIRED', 403, 'Solo un reponedor puede resolver un aviso de Nivel 1.');
         }
 
-        $replay = $this->findReplay($actor, $mutation);
-        if ($replay !== null) {
-            return $replay;
-        }
-
         $this->begin();
         try {
             $incident = $this->lockIncident($incidentId);
+            $replay = $this->findReplay($actor, $mutation, 'INCIDENT', $incidentId, 'RESOLVE_L1_INCIDENT');
+            if ($replay !== null) {
+                return $replay;
+            }
             if ($incident === null) {
                 return $this->fail('INCIDENT_NOT_FOUND', 404, 'El expediente no existe o está dado de baja.');
             }
@@ -709,11 +709,6 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             return $this->error('RESTOCKER_ROLE_REQUIRED', 403, 'Solo un reponedor puede escalar una avería al SAT.');
         }
 
-        $replay = $this->findReplay($actor, $mutation);
-        if ($replay !== null) {
-            return $replay;
-        }
-
         $note = (string)($payload['workshop_internal_note'] ?? '');
         $category = IncidentCategory::tryFrom(strtoupper(trim((string)($payload['category'] ?? ''))));
         if ($category === null) {
@@ -723,6 +718,10 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         $this->begin();
         try {
             $machine = $this->lockMachine($machineId);
+            $replay = $this->findReplay($actor, $mutation, 'MACHINE', $machineId, 'ESCALATE_INCIDENT_TO_SAT');
+            if ($replay !== null) {
+                return $replay;
+            }
             if ($machine === null) {
                 return $this->fail('MACHINE_NOT_FOUND', 404, 'La máquina no existe o está dada de baja.');
             }
@@ -789,42 +788,100 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         }
 
         $stmt = $this->pdo->prepare(
-            'SELECT u.id, u.name, u.operator_code, u.phone, rza.role_in_zone, rza.is_primary,
+            'SELECT u.id, u.name, u.operator_code, u.phone, u.is_active,
+                    rza.role_in_zone, rza.is_primary,
+                    COALESCE(rza.assigned_at, CURRENT_TIMESTAMP) AS assigned_at,
+                    COALESCE(s.status::text, \'OFF_SHIFT\') AS shift_status,
+                    (ta.id IS NOT NULL) AS has_active_absence,
+                    ta.reason::text AS absence_reason,
                     (
                         SELECT COUNT(*)
                           FROM incidents i
                          WHERE i.dispatch_level = \'L1_RESTOCKER\'
                            AND i.assigned_technician_id = u.id
+                           AND i.deleted_at IS NULL
                            AND i.status IN (\'ASSIGNED\', \'IN_PROGRESS\', \'PENDING_INFO\', \'REOPENED\')
                     ) AS active_l1_count
                FROM users u
-               INNER JOIN technician_shifts s
-                       ON s.technician_id = u.id
-                      AND s.closed_at IS NULL
-                      AND s.shift_date = CURRENT_DATE
-                      AND s.status IN (\'ON_SHIFT\', \'MEAL_BREAK\')
                INNER JOIN restocker_zone_assignments rza
                        ON rza.restocker_id = u.id
                       AND rza.zone_id = :zone_id
                       AND rza.removed_at IS NULL
                INNER JOIN operational_zones oz ON oz.id = rza.zone_id AND oz.is_active = TRUE
+               LEFT JOIN technician_shifts s
+                      ON s.technician_id = u.id
+                     AND s.closed_at IS NULL
+                     AND s.shift_date = :today
+                     AND s.status IN (\'ON_SHIFT\', \'MEAL_BREAK\')
+               LEFT JOIN LATERAL (
+                   SELECT ta.id, ta.reason
+                     FROM technician_absences ta
+                    WHERE ta.technician_id = u.id
+                      AND ta.cancelled_at IS NULL
+                      AND ta.starts_at <= CURRENT_TIMESTAMP
+                      AND ta.ends_at > CURRENT_TIMESTAMP
+                    ORDER BY ta.starts_at ASC, ta.id ASC
+                    LIMIT 1
+               ) ta ON TRUE
               WHERE u.role = \'RESTOCKER\'
                 AND u.is_active = TRUE
-                AND u.deleted_at IS NULL
-              ORDER BY rza.is_primary DESC, active_l1_count ASC, u.name ASC'
+                AND u.deleted_at IS NULL'
         );
-        $stmt->execute([':zone_id' => (int)$row['zone_id']]);
+        $stmt->execute([
+            ':zone_id' => (int)$row['zone_id'],
+            ':today' => $this->madridToday(),
+        ]);
 
-        $restockers = [];
+        $candidates = [];
+        $extrasById = [];
         foreach ($stmt->fetchAll() as $candidate) {
-            $restockers[] = [
-                'user_id' => (int)$candidate['id'],
+            $restockerId = (int)$candidate['id'];
+            $roleInZone = strtoupper(trim((string)$candidate['role_in_zone']));
+            $candidates[] = [
+                'restocker_id' => $restockerId,
                 'name' => (string)$candidate['name'],
                 'operator_code' => (string)($candidate['operator_code'] ?? ''),
+                'role_in_zone' => $roleInZone,
+                'is_primary' => $roleInZone === 'PRIMARY',
+                'is_active' => $this->toBool($candidate['is_active']),
+                'shift_status' => (string)$candidate['shift_status'],
+                'has_active_absence' => $this->toBool($candidate['has_active_absence']),
+                'absence_reason' => $candidate['absence_reason'] !== null ? (string)$candidate['absence_reason'] : null,
+                'assigned_at' => (string)$candidate['assigned_at'],
+            ];
+            $extrasById[$restockerId] = [
                 'phone' => $candidate['phone'] !== null ? (string)$candidate['phone'] : null,
-                'role_in_zone' => (string)$candidate['role_in_zone'],
-                'is_primary' => $this->toBool($candidate['is_primary']),
                 'active_l1_incidents_count' => (int)$candidate['active_l1_count'],
+            ];
+        }
+
+        if ($candidates === []) {
+            return [];
+        }
+
+        $ranking = RestockerZoneCoverageRanker::rank($candidates);
+        $restockers = [];
+        foreach ($ranking['candidates'] as $item) {
+            if (($item['is_available'] ?? false) !== true) {
+                continue;
+            }
+            $restockerId = (int)$item['restocker_id'];
+            $extras = $extrasById[$restockerId] ?? ['phone' => null, 'active_l1_incidents_count' => 0];
+            $restockers[] = [
+                'user_id' => $restockerId,
+                'name' => (string)$item['name'],
+                'operator_code' => (string)($item['operator_code'] ?? ''),
+                'phone' => $extras['phone'],
+                'role_in_zone' => (string)$item['role_in_zone'],
+                'is_primary' => (bool)$item['is_primary'],
+                'active_l1_incidents_count' => $extras['active_l1_incidents_count'],
+                'shift_status' => (string)$item['shift_status'],
+                'coverage_tier' => (string)$item['coverage_tier'],
+                'coverage_tier_label' => (string)$item['coverage_tier_label'],
+                'tier_rank' => (int)$item['tier_rank'],
+                'is_recommended' => (bool)$item['is_recommended'],
+                'is_promoted_backup' => (bool)$item['is_promoted_backup'],
+                'has_overridden_absence' => (bool)$item['has_overridden_absence'],
             ];
         }
 
@@ -927,73 +984,66 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             return [];
         }
 
-        $result = [];
-        foreach ($locationIds as $locationId) {
-            $locationId = (int)$locationId;
-            if ($locationId <= 0) {
-                continue;
-            }
+        $cleanIds = array_values(array_unique(array_filter(array_map('intval', $locationIds), static fn (int $id): bool => $id > 0)));
+        if ($cleanIds === []) {
+            return [];
+        }
 
-            $stmt = $this->pdo->prepare(
-                'SELECT u.id, u.name, u.operator_code, u.phone, s.status,
-                        (
-                            SELECT COUNT(*)
-                              FROM incidents i
-                             WHERE i.location_id = :loc_count
-                               AND i.dispatch_level = \'L1_RESTOCKER\'
-                               AND i.assigned_technician_id = u.id
-                               AND i.status IN (\'ASSIGNED\', \'IN_PROGRESS\', \'REOPENED\')
-                        ) AS activity_count
-                   FROM users u
-                   INNER JOIN technician_shifts s
-                           ON s.technician_id = u.id
-                          AND s.closed_at IS NULL
-                          AND s.shift_date = CURRENT_DATE
-                          AND s.status IN (\'ON_SHIFT\', \'MEAL_BREAK\')
-                  WHERE u.role = \'RESTOCKER\'
-                    AND u.is_active = TRUE
-                    AND u.deleted_at IS NULL
-                    AND (
-                        EXISTS (
-                            SELECT 1 FROM incidents i
-                             WHERE i.location_id = :loc_incident
-                               AND i.dispatch_level = \'L1_RESTOCKER\'
-                               AND i.assigned_technician_id = u.id
-                               AND i.status IN (\'ASSIGNED\', \'IN_PROGRESS\', \'REOPENED\')
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                              FROM restocker_zone_assignments rza
-                              INNER JOIN locations l ON l.zone_id = rza.zone_id
-                             WHERE rza.restocker_id = u.id
-                               AND rza.removed_at IS NULL
-                               AND l.id = :loc_zone
-                        )
-                    )
-                  ORDER BY u.name ASC'
-            );
-            $stmt->execute([
-                ':loc_count' => $locationId,
-                ':loc_incident' => $locationId,
-                ':loc_zone' => $locationId,
-            ]);
+        $result = array_fill_keys($cleanIds, []);
+        $placeholders = [];
+        foreach ($cleanIds as $index => $locationId) {
+            $placeholders[] = ':loc_' . $index;
+        }
 
-            $rows = [];
-            foreach ($stmt->fetchAll() as $candidate) {
-                $count = (int)$candidate['activity_count'];
-                $rows[] = [
-                    'user_id' => (int)$candidate['id'],
-                    'name' => (string)$candidate['name'],
-                    'operator_code' => (string)($candidate['operator_code'] ?? ''),
-                    'role' => 'RESTOCKER',
-                    'shift_status' => (string)$candidate['status'],
-                    'phone' => $candidate['phone'] !== null ? (string)$candidate['phone'] : null,
-                    'activity_summary' => $count > 0
-                        ? sprintf('%d aviso(s) L1 activo(s) en esta sede', $count)
-                        : 'Cobertura de zona activa en esta sede',
-                ];
-            }
-            $result[$locationId] = $rows;
+        $stmt = $this->pdo->prepare(
+            'SELECT l.id AS location_id,
+                    u.id, u.name, u.operator_code, u.phone, s.status,
+                    COUNT(DISTINCT i.id) AS activity_count
+               FROM locations l
+               CROSS JOIN users u
+               INNER JOIN technician_shifts s
+                       ON s.technician_id = u.id
+                      AND s.closed_at IS NULL
+                      AND s.shift_date = :today
+                      AND s.status IN (\'ON_SHIFT\', \'MEAL_BREAK\')
+               LEFT JOIN incidents i
+                      ON i.location_id = l.id
+                     AND i.dispatch_level = \'L1_RESTOCKER\'
+                     AND i.assigned_technician_id = u.id
+                     AND i.deleted_at IS NULL
+                     AND i.status IN (\'ASSIGNED\', \'IN_PROGRESS\', \'REOPENED\')
+               LEFT JOIN restocker_zone_assignments rza
+                      ON rza.restocker_id = u.id
+                     AND rza.zone_id = l.zone_id
+                     AND rza.removed_at IS NULL
+              WHERE l.id IN (' . implode(', ', $placeholders) . ')
+                AND u.role = \'RESTOCKER\'
+                AND u.is_active = TRUE
+                AND u.deleted_at IS NULL
+                AND (i.id IS NOT NULL OR rza.id IS NOT NULL)
+              GROUP BY l.id, u.id, u.name, u.operator_code, u.phone, s.status
+              ORDER BY l.id ASC, u.name ASC'
+        );
+        $stmt->bindValue(':today', $this->madridToday(), PDO::PARAM_STR);
+        foreach ($cleanIds as $index => $locationId) {
+            $stmt->bindValue(':loc_' . $index, $locationId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        foreach ($stmt->fetchAll() as $candidate) {
+            $locId = (int)$candidate['location_id'];
+            $count = (int)$candidate['activity_count'];
+            $result[$locId][] = [
+                'user_id' => (int)$candidate['id'],
+                'name' => (string)$candidate['name'],
+                'operator_code' => (string)($candidate['operator_code'] ?? ''),
+                'role' => 'RESTOCKER',
+                'shift_status' => (string)$candidate['status'],
+                'phone' => $candidate['phone'] !== null ? (string)$candidate['phone'] : null,
+                'activity_summary' => $count > 0
+                    ? sprintf('%d aviso(s) L1 activo(s) en esta sede', $count)
+                    : 'Cobertura de zona activa en esta sede',
+            ];
         }
 
         return $result;
@@ -1005,84 +1055,72 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             return [];
         }
 
-        $result = [];
-        foreach ($locationIds as $locationId) {
-            $locationId = (int)$locationId;
-            if ($locationId <= 0) {
-                continue;
-            }
+        $cleanIds = array_values(array_unique(array_filter(array_map('intval', $locationIds), static fn (int $id): bool => $id > 0)));
+        if ($cleanIds === []) {
+            return [];
+        }
 
-            $stmt = $this->pdo->prepare(
-                'SELECT u.id, u.name, u.operator_code, u.phone, s.status,
-                        (
-                            SELECT COUNT(*)
-                              FROM incidents i
-                             WHERE i.location_id = :loc_count
-                               AND i.dispatch_level = \'L2_SAT\'
-                               AND i.assigned_technician_id = u.id
-                               AND i.status IN (\'ASSIGNED\', \'IN_PROGRESS\', \'REOPENED\')
-                        ) AS activity_count,
-                        EXISTS (
-                            SELECT 1 FROM preventive_orders p
-                             WHERE p.location_id = :loc_prev
-                               AND p.assigned_technician_id = u.id
-                               AND p.status IN (\'SCHEDULED\', \'IN_INSPECTION\')
-                               AND p.deleted_at IS NULL
-                        ) AS has_preventive
-                   FROM users u
-                   INNER JOIN technician_shifts s
-                           ON s.technician_id = u.id
-                          AND s.closed_at IS NULL
-                          AND s.shift_date = CURRENT_DATE
-                          AND s.status IN (\'ON_SHIFT\', \'MEAL_BREAK\')
-                  WHERE u.role = \'TECHNICIAN\'
-                    AND u.is_active = TRUE
-                    AND u.deleted_at IS NULL
-                    AND (
-                        EXISTS (
-                            SELECT 1 FROM incidents i
-                             WHERE i.location_id = :loc_incident
-                               AND i.dispatch_level = \'L2_SAT\'
-                               AND i.assigned_technician_id = u.id
-                               AND i.status IN (\'ASSIGNED\', \'IN_PROGRESS\', \'REOPENED\')
-                        )
-                        OR EXISTS (
-                            SELECT 1 FROM preventive_orders p
-                             WHERE p.location_id = :loc_prev2
-                               AND p.assigned_technician_id = u.id
-                               AND p.status IN (\'SCHEDULED\', \'IN_INSPECTION\')
-                               AND p.deleted_at IS NULL
-                        )
-                    )
-                  ORDER BY u.name ASC'
-            );
-            $stmt->execute([
-                ':loc_count' => $locationId,
-                ':loc_prev' => $locationId,
-                ':loc_incident' => $locationId,
-                ':loc_prev2' => $locationId,
-            ]);
+        $result = array_fill_keys($cleanIds, []);
+        $placeholders = [];
+        foreach ($cleanIds as $index => $locationId) {
+            $placeholders[] = ':loc_' . $index;
+        }
 
-            $rows = [];
-            foreach ($stmt->fetchAll() as $candidate) {
-                $count = (int)$candidate['activity_count'];
-                $hasPreventive = $this->toBool($candidate['has_preventive']);
-                $summary = match (true) {
-                    $count > 0 => sprintf('%d avería(s) SAT activa(s) en esta sede', $count),
-                    $hasPreventive => 'Orden preventiva activa en esta sede',
-                    default => 'Actividad SAT en esta sede',
-                };
-                $rows[] = [
-                    'user_id' => (int)$candidate['id'],
-                    'name' => (string)$candidate['name'],
-                    'operator_code' => (string)($candidate['operator_code'] ?? ''),
-                    'role' => 'TECHNICIAN',
-                    'shift_status' => (string)$candidate['status'],
-                    'phone' => $candidate['phone'] !== null ? (string)$candidate['phone'] : null,
-                    'activity_summary' => $summary,
-                ];
-            }
-            $result[$locationId] = $rows;
+        $stmt = $this->pdo->prepare(
+            'SELECT l.id AS location_id,
+                    u.id, u.name, u.operator_code, u.phone, s.status,
+                    COUNT(DISTINCT i.id) AS activity_count,
+                    BOOL_OR(p.id IS NOT NULL) AS has_preventive
+               FROM locations l
+               CROSS JOIN users u
+               INNER JOIN technician_shifts s
+                       ON s.technician_id = u.id
+                      AND s.closed_at IS NULL
+                      AND s.shift_date = :today
+                      AND s.status IN (\'ON_SHIFT\', \'MEAL_BREAK\')
+               LEFT JOIN incidents i
+                      ON i.location_id = l.id
+                     AND i.dispatch_level = \'L2_SAT\'
+                     AND i.assigned_technician_id = u.id
+                     AND i.deleted_at IS NULL
+                     AND i.status IN (\'ASSIGNED\', \'IN_PROGRESS\', \'REOPENED\')
+               LEFT JOIN preventive_orders p
+                      ON p.location_id = l.id
+                     AND p.assigned_technician_id = u.id
+                     AND p.status IN (\'SCHEDULED\', \'IN_INSPECTION\')
+                     AND p.deleted_at IS NULL
+              WHERE l.id IN (' . implode(', ', $placeholders) . ')
+                AND u.role = \'TECHNICIAN\'
+                AND u.is_active = TRUE
+                AND u.deleted_at IS NULL
+                AND (i.id IS NOT NULL OR p.id IS NOT NULL)
+              GROUP BY l.id, u.id, u.name, u.operator_code, u.phone, s.status
+              ORDER BY l.id ASC, u.name ASC'
+        );
+        $stmt->bindValue(':today', $this->madridToday(), PDO::PARAM_STR);
+        foreach ($cleanIds as $index => $locationId) {
+            $stmt->bindValue(':loc_' . $index, $locationId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        foreach ($stmt->fetchAll() as $candidate) {
+            $locId = (int)$candidate['location_id'];
+            $count = (int)$candidate['activity_count'];
+            $hasPreventive = $this->toBool($candidate['has_preventive']);
+            $summary = match (true) {
+                $count > 0 => sprintf('%d avería(s) SAT activa(s) en esta sede', $count),
+                $hasPreventive => 'Orden preventiva activa en esta sede',
+                default => 'Actividad SAT en esta sede',
+            };
+            $result[$locId][] = [
+                'user_id' => (int)$candidate['id'],
+                'name' => (string)$candidate['name'],
+                'operator_code' => (string)($candidate['operator_code'] ?? ''),
+                'role' => 'TECHNICIAN',
+                'shift_status' => (string)$candidate['status'],
+                'phone' => $candidate['phone'] !== null ? (string)$candidate['phone'] : null,
+                'activity_summary' => $summary,
+            ];
         }
 
         return $result;
@@ -1124,11 +1162,11 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             }
 
             $tickets = $this->pdo->prepare(
-                'SELECT id, ticket_code, machine_id, location_id
+                'SELECT id, ticket_code, machine_id, location_id, status, paused_at, total_pending_info_seconds
                    FROM incidents
                   WHERE dispatch_level = \'L1_RESTOCKER\'
                     AND assigned_technician_id = :restocker_id
-                    AND status IN (\'ASSIGNED\', \'PENDING_INFO\')
+                    AND status IN (\'ASSIGNED\', \'PENDING_INFO\', \'REOPENED\')
                     AND deleted_at IS NULL
                   ORDER BY id ASC
                   FOR UPDATE'
@@ -1142,6 +1180,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
 
             foreach ($rows as $ticket) {
                 $incidentId = (int)$ticket['id'];
+                $previousStatus = (string)$ticket['status'];
                 $this->closeOpenCustody($incidentId, $actor, $reasonType, $reason, null);
 
                 $next = $this->findNextRestocker((int)$ticket['location_id'], $restockerId);
@@ -1149,34 +1188,56 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                     $stmt = $this->pdo->prepare(
                         'UPDATE incidents
                             SET assigned_technician_id = :next_id,
-                                assigned_at = CURRENT_TIMESTAMP,
+                                assigned_at = COALESCE(assigned_at, CURRENT_TIMESTAMP),
                                 updated_at = CURRENT_TIMESTAMP
                           WHERE id = :id'
                     );
                     $stmt->execute([':next_id' => (int)$next['id'], ':id' => $incidentId]);
                     $this->openCustody($incidentId, (int)$next['id'], $source, $restockerId, null);
                     $reassigned[] = (string)$ticket['ticket_code'];
-                    $this->insertHistory($incidentId, $restockerId, 'ASSIGNED', 'ASSIGNED', 'L1_HANDOVER_TO_RESTOCKER:' . (int)$next['id']);
+                    $this->insertHistory($incidentId, $restockerId, $previousStatus, $previousStatus, 'L1_HANDOVER_TO_RESTOCKER:' . (int)$next['id']);
+                    $nextState = ['assigned_technician_id' => (int)$next['id'], 'status' => $previousStatus];
                 } else {
+                    $closedPauseSeconds = 0;
+                    if ($previousStatus === 'PENDING_INFO' && !empty($ticket['paused_at'])) {
+                        $closedPauseSeconds = max(
+                            0,
+                            (new DateTimeImmutable('now'))->getTimestamp()
+                            - (new DateTimeImmutable((string)$ticket['paused_at']))->getTimestamp()
+                        );
+                    }
+
                     $stmt = $this->pdo->prepare(
                         'UPDATE incidents
                             SET assigned_technician_id = NULL,
                                 status = \'REGISTERED\',
                                 assigned_at = NULL,
+                                paused_at = NULL,
+                                total_pending_info_seconds = total_pending_info_seconds + CAST(:closed_pause_seconds AS integer),
+                                sla_target_at = CASE
+                                    WHEN sla_target_at IS NOT NULL
+                                    THEN sla_target_at + make_interval(secs => CAST(:closed_pause_seconds_sla AS integer))
+                                    ELSE NULL
+                                END,
                                 updated_at = CURRENT_TIMESTAMP
                           WHERE id = :id'
                     );
-                    $stmt->execute([':id' => $incidentId]);
+                    $stmt->execute([
+                        ':closed_pause_seconds' => $closedPauseSeconds,
+                        ':closed_pause_seconds_sla' => $closedPauseSeconds,
+                        ':id' => $incidentId,
+                    ]);
                     $released[] = (string)$ticket['ticket_code'];
-                    $this->insertHistory($incidentId, $restockerId, 'ASSIGNED', 'REGISTERED', 'L1_HANDOVER_RELEASED_TO_QUEUE');
+                    $this->insertHistory($incidentId, $restockerId, $previousStatus, 'REGISTERED', 'L1_HANDOVER_RELEASED_TO_QUEUE');
+                    $nextState = ['assigned_technician_id' => null, 'status' => 'REGISTERED'];
                 }
 
                 $this->audit(
                     $incidentId,
                     $cause === 'SHIFT_CLOSE' ? self::ACTION_L1_HANDOVER_SHIFT : self::ACTION_L1_HANDOVER_ABSENCE,
                     $actor,
-                    ['assigned_technician_id' => $restockerId],
-                    ['assigned_technician_id' => $next['id'] ?? null]
+                    ['assigned_technician_id' => $restockerId, 'status' => $previousStatus],
+                    $nextState
                 );
             }
 
@@ -1852,10 +1913,13 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                FROM technician_shifts
               WHERE technician_id = :user_id
                 AND closed_at IS NULL
-                AND shift_date = CURRENT_DATE
+                AND shift_date = :today
                 AND status IN (\'ON_SHIFT\', \'MEAL_BREAK\')'
         );
-        $stmt->execute([':user_id' => $userId]);
+        $stmt->execute([
+            ':user_id' => $userId,
+            ':today' => $this->madridToday(),
+        ]);
 
         return $stmt->fetchColumn() !== false;
     }
@@ -1871,7 +1935,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                INNER JOIN technician_shifts s
                        ON s.technician_id = u.id
                       AND s.closed_at IS NULL
-                      AND s.shift_date = CURRENT_DATE
+                      AND s.shift_date = :today
                       AND s.status IN (\'ON_SHIFT\', \'MEAL_BREAK\')
                INNER JOIN restocker_zone_assignments rza
                        ON rza.restocker_id = u.id
@@ -1881,17 +1945,23 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                 AND u.is_active = TRUE
                 AND u.deleted_at IS NULL
                 AND u.id <> :excluded_id
-              ORDER BY rza.is_primary DESC,
+              ORDER BY CASE s.status WHEN \'ON_SHIFT\' THEN 1 ELSE 2 END ASC,
+                       rza.is_primary DESC,
                        (
                            SELECT COUNT(*) FROM incidents i
                             WHERE i.dispatch_level = \'L1_RESTOCKER\'
                               AND i.assigned_technician_id = u.id
+                              AND i.deleted_at IS NULL
                               AND i.status IN (\'ASSIGNED\', \'IN_PROGRESS\', \'PENDING_INFO\', \'REOPENED\')
                        ) ASC,
                        u.name ASC
               LIMIT 1'
         );
-        $stmt->execute([':location_id' => $locationId, ':excluded_id' => $excludeRestockerId]);
+        $stmt->execute([
+            ':today' => $this->madridToday(),
+            ':location_id' => $locationId,
+            ':excluded_id' => $excludeRestockerId,
+        ]);
         $row = $stmt->fetch();
 
         return is_array($row) ? $row : null;
@@ -2038,32 +2108,78 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
      * @param array<string, mixed>|null $mutation
      * @return array<string, mixed>|null
      */
-    private function findReplay(array $actor, ?array $mutation): ?array
-    {
+    private function findReplay(
+        array $actor,
+        ?array $mutation,
+        string $expectedStopType,
+        int $expectedStopId,
+        string $expectedOperationType
+    ): ?array {
         $mutationId = trim((string)($mutation['client_mutation_id'] ?? ''));
         if ($mutationId === '') {
             return null;
         }
 
         $stmt = $this->pdo->prepare(
-            'SELECT response_payload
+            'SELECT stop_type, stop_id, operation_type, outcome_status, response_payload
                FROM offline_sync_mutations
-              WHERE technician_id = :technician_id AND client_mutation_id = :client_mutation_id'
+              WHERE technician_id = :technician_id AND client_mutation_id = :client_mutation_id
+              FOR UPDATE'
         );
         $stmt->execute([
             ':technician_id' => $this->actorId($actor),
             ':client_mutation_id' => $mutationId,
         ]);
-        $payload = $stmt->fetchColumn();
-        if (!is_string($payload) || $payload === '') {
+        $row = $stmt->fetch();
+        if (!is_array($row)) {
             return null;
         }
 
-        $decoded = json_decode($payload, true);
-        if (!is_array($decoded)) {
-            return null;
+        $outcomeStatus = strtoupper(trim((string)($row['outcome_status'] ?? '')));
+        if ($outcomeStatus !== 'APPLIED') {
+            return $this->fail(
+                'MUTATION_ID_CONFLICT',
+                409,
+                'El identificador de mutación offline ya fue registrado con un resultado no reaplicable.',
+                ['outcome_status' => $outcomeStatus]
+            );
         }
 
+        $recordedOperation = strtoupper(trim((string)($row['operation_type'] ?? '')));
+        if ($recordedOperation !== $expectedOperationType) {
+            return $this->fail(
+                'MUTATION_ID_CONFLICT',
+                409,
+                'El identificador de mutación offline pertenece a otra operación.',
+                ['recorded_operation_type' => $recordedOperation]
+            );
+        }
+
+        $payload = (string)($row['response_payload'] ?? '');
+        $decoded = $payload !== '' ? json_decode($payload, true) : null;
+        $recordedStopType = strtoupper(trim((string)($row['stop_type'] ?? '')));
+        $recordedStopId = (int)($row['stop_id'] ?? 0);
+
+        $matchesStop = $expectedOperationType === 'ESCALATE_INCIDENT_TO_SAT' && $expectedStopType === 'MACHINE'
+            ? (
+                ($recordedStopType === 'MACHINE' && $recordedStopId === $expectedStopId)
+                || ($recordedStopType === 'INCIDENT' && is_array($decoded) && (int)($decoded['machine_id'] ?? 0) === $expectedStopId)
+            )
+            : ($recordedStopType === $expectedStopType && $recordedStopId === $expectedStopId);
+
+        if (!$matchesStop || !is_array($decoded)) {
+            return $this->fail(
+                'MUTATION_ID_CONFLICT',
+                409,
+                'El identificador de mutación offline pertenece a otra parada o expediente.',
+                [
+                    'recorded_stop_type' => $recordedStopType,
+                    'recorded_stop_id' => $recordedStopId,
+                ]
+            );
+        }
+
+        $this->rollback();
         $decoded['idempotent_replay'] = true;
 
         return $decoded;
@@ -2206,6 +2322,11 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         }
 
         return $declared;
+    }
+
+    private function madridToday(): string
+    {
+        return (new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))->format('Y-m-d');
     }
 
     private function categorySeverity(?IncidentCategory $category): int

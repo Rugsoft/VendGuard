@@ -7,25 +7,22 @@
 | **Rama origen** | `feat/restocker-sat-synergy` |
 | **Rama destino** | `main` |
 | **HEAD revisado (original)** | `f4b72a6` |
-| **HEAD revisado (original)** | `f4b72a6` |
-| **HEAD publicado por PR** | `edd4fef` |
+| **HEAD publicado por PR** | `edd4fef` (en `origin/feat/restocker-sat-synergy`) |
 | **Head remoto antes de la publicación** | `ab7a85c` (datos históricos: 52 commits, 89 archivos, +16.659/−191) |
-| **HEAD local de código** | `90a15ce` (before report fix `403ef49`) |
+| **HEAD local consolidado (P0+P1)** | `19ff79d` (más cambios P2+P3 locales pendientes de commit) |
 | **Base** | `7187116` (`main`) |
 | **Fecha de la revisión** | 2026-11-20 |
-| **Estado de la PR** | abierta, `MERGEABLE`; sin checks de CI; head publicado `edd4fef` (antes `ab7a85c`) |
-| **Alcance** | Revisión original estática sobre `f4b72a6` (47 commits, 88 archivos, +15.580/−190). Revisión actual sobre `edd4fef`: 56 commits, 89 archivos, +16.733/−191 contra `7187116` (head publicado `edd4fef` incluye los commits publicados). |
-| **Resultado** | **7 hallazgos**: 7 solucionados en local y publicados en PR |
+| **Estado de la PR** | abierta, `MERGEABLE`; sin checks de CI; head remoto `edd4fef` (local por delante tras P0+P1+P2) |
+| **Alcance** | Revisión original estática sobre `f4b72a6`. Actualizada tras la segunda auditoría integral (`P0`–`P3`) y las correcciones aplicadas en local. |
+| **Resultado** | **7 hallazgos iniciales (`PR22-01`–`PR22-07`) + 12 hallazgos de auditoría (`P0`–`P2` + higiene `P3`)**: código y regresiones **solucionados en local** |
 
-> **Actualización de corrección (2026-11-20):** `PR22-01`, `PR22-02`, `PR22-03`, `PR22-04`, `PR22-05`, `PR22-06` y `PR22-07` quedan **solucionados** y cubiertos por regresiones focalizadas. El detalle de los cambios y las pruebas se recoge en «Corrección aplicada». El head publicado de la PR es `edd4fef`, que incluye `7470bf9`, `90a15ce`, `403ef49` y este ajuste de informe.
+> **Actualización de corrección (2026-11-20):** además de `PR22-01`–`PR22-07` (head publicado `edd4fef`), quedan **solucionados en local** todos los hallazgos de la auditoría de mergeabilidad (`P0.1`–`P0.5`, `P1.6`–`P1.8` en `19ff79d`, y `P2.9`–`P2.12` + higiene `P3` en el árbol de trabajo actual).
 
 ---
 
 ## Veredicto
 
-El núcleo de la sinergia está bien encaminado: el modelo de dominio, la taxonomía L1, la custodia y las suites focalizadas están trabajados, y las 640 aserciones de la revisión fresca están en verde. Los tres hallazgos P1, los dos P2 (`PR22-04` y `PR22-05`) y los dos P3 (`PR22-06` y `PR22-07`) están corregidos. El head publicado `edd4fef` incluye `7470bf9`, `90a15ce`, `403ef49` y este ajuste de informe: PR22-07 ya está en la PR; se publica la revisión de la PR remota, con los stats: 56 commits, 89 archivos, +16.733/−191.
-
-Tras la corrección, las regresiones cubren el alta QR nueva en L1, el cambio L1→L2 desde la UI, el recálculo de urgencia/SLA de las ramas A y C, la guarda de estados de `dispatch-level`, la evidencia real del escalado, el reinicio de un L1 `REOPENED` y la ruta contractual `upload-photo`.
+La rama `feat/restocker-sat-synergy` queda **saneada en local** tras resolver tanto los 7 hallazgos iniciales (`PR22-01`–`PR22-07`) como los 12 puntos de auditoría profunda (`P0`–`P2` + higiene `P3`). Los 5 bloqueantes `P0`, los 3 `P1` y los 4 `P2` cuentan con regresiones automatizadas en verde sobre PostgreSQL local y sobre la batería global (`441/441` suites · `17.018` aserciones · `0` fallos · `DocMetricsGuard COHERENTES`). Quedan únicamente las acciones remotas en GitHub (subir los commits locales, actualizar el cuerpo de la PR #22 y decidir entre *Squash & Merge* o reescritura de historial para limpiar los `Co-Authored-By:` previos).
 
 ---
 
@@ -241,28 +238,46 @@ Registrar la ruta contractual como alias o endpoint dedicado, reutilizando el up
 
 ---
 
+## Segunda auditoría integral de mergeabilidad (`P0`–`P3`) · Corrección aplicada
+
+| Prioridad | ID | Cambio aplicado | Regresión / Evidencia |
+| :---: | :---: | :--- | :--- |
+| **P0** | `P0.1` | `RestockerRouteController` usa `gatewayErrorResponse()` al iniciar, resolver, escalar o volcar conflictos para respetar el estado HTTP real del gateway (`403`/`404`/`409`/`422`). | `RestockerSatSynergyApiTest` (**98/98**) |
+| **P0** | `P0.2` | `lockActiveIncident()` alinea el filtro con `uq_machine_active_ticket` (`NOT IN ('CLOSED','CANCELLED')`), reabre en garantía `<= 48 h` sin colisionar y autocierra expirados `> 48 h`. | `RestockerSatSynergyApiTest` (**98/98**) |
+| **P0** | `P0.3` | `QrReportService` evalúa la cuarentena sanitaria real de la máquina al crear QR y las ramas de escalado recalculan ranking SAT post-escalado y encolan alerta de frío (`Outbox`). | `RestockerSatSynergyApiTest` (**98/98**) |
+| **P0** | `P0.4` | Rama B (`escalateBranchB`) deja de volcar `workshop_internal_note` en `incidents.description` (Art. V.4) y persiste `sla_target_at`, `machine_type_snapshot` y `cycle_started_at`. | `RestockerSatSynergyApiTest` (**98/98**) |
+| **P0** | `P0.5` | Catálogo `AuditActionLabels` / `ACTION_*` completo (`AuditActionCatalogTest` **27/27**), 0 literales hex nuevos en JS (`DesignTokenDebtRatchetTest`) y métricas `DocMetricsGuard` sincronizadas. | `php tests/run_all.php` (**441/441**) |
+| **P1** | `P1.6` | `assignTechnician()` exige `L2_SAT` (`422`), `dispatchLevel()` encola aviso de asignación, `assignSuggestedTechnician()` enruta L1 vía `performLevel2Dispatch()`, y los flujos oportunistas promueven `L1_RESTOCKER` → `L2_SAT`. | `RestockerSatSynergyApiTest` (**98/98**) · `RestockerSatSynergyConstitutionalTest` (**20/20**) |
+| **P1** | `P1.7` | Escalado SAT monotónico en Ramas A/C sin degradación de urgencia/SLA y autoasignación de ticket SAT `REGISTERED` en Rama C. | `PdoRestockerSatSynergyGatewayTest` (**31/31**) · `RestockerSatSynergyApiTest` (**98/98**) |
+| **P1** | `P1.8` | Ruta contractual `POST /api/restocker/incidents/{id}/escalate-to-sat` registrada, compatibilidad con `resolution_diagnosis`/`resolution_action` y `conflict-dump` con `stop_id`/`operation_type` reales. | `RestockerSatSynergyApiTest` (**98/98**) · `restocker_route_view.test.mjs` (**245/245**) |
+| **P2** | `P2.9` | `suggestRestockers()` y `findNextRestocker()` usan la fecha operativa `Europe/Madrid`; `suggestRestockers()` reutiliza el ranking de 6 escalones de `RestockerZoneCoverageRanker` (Módulo 31, con `OFF_SHIFT` disponibles y filtro de ausentes) y `findNextRestocker()` prioriza `ON_SHIFT` > `MEAL_BREAK`. | `PdoRestockerSatSynergyGatewayTest` (**31/31**) |
+| **P2** | `P2.10` | `TechnicianAbsenceService` exige ausencia viva (`starts <= now <= ends`) solo para `RESTOCKER` antes de ejecutar `handoverLevel1()`; el relevo L1 incluye `REOPENED`, preserva estado y pausa en reasignación, y cierra `paused_at` + acumula `total_pending_info_seconds` al liberar a `REGISTERED`. | `TechnicianAbsenceServiceTest` (**19/19**) · `PdoRestockerSatSynergyGatewayTest` (**31/31**) |
+| **P2** | `P2.11` | `findReplay()` se ejecuta dentro de transacción con bloqueo `FOR UPDATE` y verifica `outcome_status = 'APPLIED'`, `operation_type` y ámbito de parada (`409 MUTATION_ID_CONFLICT`). | `PdoRestockerSatSynergyGatewayTest` (**31/31**) |
+| **P2** | `P2.12` | `technicianCoincidences()` y `restockerCoincidences()` reemplazan bucles N+1 por una consulta SQL por lotes con `IN (...)` y mapa completo de sedes. | `PdoRestockerSatSynergyGatewayTest` (**31/31**) |
+| **P3** | `P3` | Informe de revisión depurado (fila duplicada eliminada y tablas actualizadas). Acciones remotas pendientes de confirmación: subir commits locales, actualizar descripción remota de PR #22 y decidir *Squash & Merge* vs limpieza de `Co-Authored-By` en commits ya publicados. | Documentación + `DocMetricsGuard` (**COHERENTES**) |
+
+---
+
 ## Verificación ejecutada
 
 | Comprobación | Resultado |
 | :--- | :--- |
-| `git diff --check` | Sin errores |
-| `php -l` sobre los PHP modificados | Sin errores |
-| `node --check` sobre los JS/MJS modificados | Sin errores |
-| Suites focalizadas | **640 aserciones verdes** en las 12 suites de dominio, servicio, validador, integraciones, API, gateway, esquema, constitucional, convergencia, frontend y layout |
-| `RestockerSatSynergyApiTest` | **69/69** en la revisión; **88/88** tras las correcciones |
-| `RestockerSatSynergyConstitutionalTest` | **17/17**, `exit 0`, con evidencia PNG real |
-| `RestockerSatLayoutBrowserTest` | **22/22**, `exit 0`, viewport de 360 px |
-| `gh pr view 22` remotos | head publicado `edd4fef`; antes `ab7a85c`; PR22-07 publicado |
+| `php -l` sobre PHP modificados (`P0`–`P2`) | Sin errores |
+| `node --check` sobre JS/MJS modificados (`P0`–`P1`) | Sin errores |
+| `php tests/run_all.php` (batería hermética global) | **441/441 suites · 17.018 aserciones · 0 fallos · `Cifras documentadas: COHERENTES` · `exit 0`** |
+| `PostgresRestockerSatSynergySchemaTest` (`new_engine`) | **30/30**, `exit 0` |
+| `PdoRestockerSatSynergyGatewayTest` (`new_engine`) | **31/31**, `exit 0` (con regresiones `P2.9`–`P2.12`) |
+| `RestockerSatSynergyApiTest` (`new_engine`) | **98/98**, `exit 0` |
+| `RestockerSatSynergyConstitutionalTest` (`new_engine`) | **20/20**, `exit 0` |
+| `TechnicianAbsenceServiceTest` (Unit) | **19/19**, `exit 0` (con regresión `P2.10` retroactiva vs viva) |
+| `gh pr view 22` remotos | head remoto publicado `edd4fef` (antes `ab7a85c`); commits locales `19ff79d` + cambios `P2`/`P3` pendientes de push |
 | `gh pr checks 22` | Sin checks reportados en la rama |
-| `php tests/run_all.php` | No ejecutado en esta revisión |
-| Código de producto modificado | Sin cambios durante la revisión original; las correcciones locales se detallan en «Corrección aplicada» |
 
-Las suites de esquema, gateway, constitucional y convergencia requirieron `PG_TEST_DSN`; se ejecutaron con el contrato de PostgreSQL local correspondiente. La revisión original es estática sobre `f4b72a6`. Las correcciones de `PR22-01` a `PR22-07` se verificaron después con las suites focalizadas indicadas. El total de 640 sale de: dominio 36, servicio 40, validador 46, integraciones 27, API 88, gateway 26, esquema 30, constitucional 17, convergencia 42, frontend de sinergia 22, frontend del reponedor 244 y layout 22. Los commits locales `7470bf9`, `90a15ce`, `403ef49` y `edd4fef` se publicaron ahora en la PR.
+Las suites de esquema, gateway, API y constitucional requieren `PG_TEST_DSN` apuntando al PostgreSQL local del arnés.
 
 ---
 
 ## Recomendación
 
-1. ✅ **Hecho y publicado:** los siete hallazgos (`PR22-01` a `PR22-07`) están corregidos y cubiertos por regresiones focalizadas; publicados en la PR como `edd4fef`.
-2. **No fusionar todavía:** no se fusiona; la PR sigue abierta y `MERGEABLE`, head publicado `edd4fef` (antes `ab7a85c`).
-3. Mantener las regresiones del alta QR limpia, del cambio L1→L2, del recálculo de urgencia/SLA, de la guarda de estados, de la evidencia real, del inicio de un L1 reabierto y de la ruta contractual `upload-photo`; no sustituirlas por la cifra global de la suite.
+1. ✅ **Corregido en local:** `PR22-01`–`PR22-07` y los hallazgos `P0.1`–`P2.12` + higiene documental `P3` están aplicados y certificados con la batería global (`441/441`, `17.018` aserciones) y las suites de integración PostgreSQL del Módulo 36.
+2. **Publicación y fusión (`P3` remoto):** confirmar commit local del lote `P2`/`P3`, hacer `git push` a `feat/restocker-sat-synergy`, actualizar el cuerpo de la PR #22 en GitHub y fusionar preferiblemente con **Squash & Merge** sobre `main` (para dejar un historial limpio en `main` sin `Co-Authored-By:` heredados, salvo que se prefiera reescribir el historial de la rama con `force-push`).

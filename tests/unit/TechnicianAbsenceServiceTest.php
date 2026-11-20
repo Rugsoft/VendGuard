@@ -430,6 +430,112 @@ try {
 }
 $assert('createAbsence rechaza fechas imposibles sin normalizarlas', $impossibleDateRejected);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. P2.10: una ausencia retroactiva (ya finalizada) no dispara handoverLevel1 L1
+// ─────────────────────────────────────────────────────────────────────────────
+$restockerUserRepo = new class implements UserRepositoryInterface {
+    public function findById(int $id, bool $onlyActive = true, bool $allowDeleted = false): ?VendGuard\Core\Domain\Model\User {
+        if ($id === 14) {
+            return new VendGuard\Core\Domain\Model\User(
+                id: 14,
+                name: 'Reponedora Retro',
+                email: 'retro.rep@vending.test',
+                passwordHash: 'hash',
+                role: VendGuard\Core\Domain\Model\UserRole::RESTOCKER,
+                isActive: true
+            );
+        }
+        if ($id === 1) {
+            return new VendGuard\Core\Domain\Model\User(
+                id: 1,
+                name: 'Laura Coordinadora',
+                email: 'laura@vending.test',
+                passwordHash: 'hash',
+                role: VendGuard\Core\Domain\Model\UserRole::COORDINATOR,
+                isActive: true
+            );
+        }
+        return null;
+    }
+    public function findByEmail(string $email, bool $onlyActive = true, bool $allowDeleted = false): ?VendGuard\Core\Domain\Model\User { return null; }
+    public function findAllTechnicians(bool $onlyActive = true): array { return []; }
+    public function create(array $data): VendGuard\Core\Domain\Model\User { throw new LogicException(); }
+    public function update(int $id, array $data): bool { return false; }
+    public function updatePassword(int $id, string $newPassword): bool { return false; }
+    public function resetPassword(int $id, string $newPassword): bool { return false; }
+    public function softDelete(int $id): bool { return false; }
+    public function restore(int $id): bool { return false; }
+    public function findAll(array $filters = []): array { return []; }
+    public function countActiveByRole(VendGuard\Core\Domain\Model\UserRole|string $role): int { return 1; }
+    public function countActiveAssignedIncidents(int $userId): int { return 0; }
+    public function countPendingIncidents(int $technicianId): int { return 0; }
+};
+
+$handoverCalls = 0;
+$spyGateway = new class($handoverCalls) implements VendGuard\Core\Domain\Repository\RestockerSatSynergyGatewayInterface {
+    public function __construct(public int &$handoverCalls) {}
+    public function startLevel1(int $incidentId, array $actor, ?array $mutation = null): array { return []; }
+    public function resolveLevel1(int $incidentId, array $actor, array $resolution, ?array $mutation = null): array { return []; }
+    public function escalateToSat(int $machineId, array $actor, array $payload, ?array $mutation = null): array { return []; }
+    public function promoteToSatOnQrMerge(int $incidentId, string $category, ?int $assignTechnicianId, array $actor): array { return []; }
+    public function assignDispatchLevel(array $incident, string $dispatchLevel, array $assignee, array $actor, ?string $urgencyOverride = null, ?string $urgencyReason = null): array { return []; }
+    public function recordConflictDump(array $actor, array $mutation, array $conflict): array { return []; }
+    public function suggestRestockers(int $incidentId): array { return []; }
+    public function technicianCoincidences(int $technicianId, array $locationIds): array { return []; }
+    public function restockerCoincidences(int $restockerId, array $locationIds): array { return []; }
+    public function handoverLevel1(int $restockerId, string $cause, string $reason): array {
+        $this->handoverCalls++;
+        return [
+            'ok' => false,
+            'error_code' => 'SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1',
+            'http_status' => 409,
+            'blocked_ticket_codes' => ['INC-2026-9901'],
+        ];
+    }
+};
+
+$serviceWithSynergy = new TechnicianAbsenceService(
+    absenceRepo: $absenceRepo,
+    userRepo: $restockerUserRepo,
+    incidentRepo: $incidentRepo,
+    auditRepo: $auditRepo,
+    transactions: $transactions,
+    lockRepo: $lockRepo,
+    synergyService: new VendGuard\Application\Service\RestockerSatSynergyService($spyGateway)
+);
+
+$retroResult = $serviceWithSynergy->createAbsence(
+    technicianId: 14,
+    reason: 'SICK_LEAVE',
+    startsAt: '2020-01-10 08:00:00+01:00',
+    endsAt: '2020-01-12 18:00:00+01:00',
+    notes: 'Regularización administrativa retroactiva',
+    createdBy: 1
+);
+$assert(
+    'P2.10: ausencia retroactiva en RESTOCKER no dispara handoverLevel1 L1 y se registra sin 409',
+    $handoverCalls === 0 && $retroResult['absence'] instanceof TechnicianAbsenceDto
+);
+
+$liveNow = new DateTimeImmutable('now');
+$liveBlockedCode = null;
+try {
+    $serviceWithSynergy->createAbsence(
+        technicianId: 14,
+        reason: 'SICK_LEAVE',
+        startsAt: $liveNow->modify('-1 hour')->format(DateTimeImmutable::ATOM),
+        endsAt: $liveNow->modify('+4 hours')->format(DateTimeImmutable::ATOM),
+        notes: 'Ausencia activa en curso',
+        createdBy: 1
+    );
+} catch (InvalidAbsenceException $e) {
+    $liveBlockedCode = $e->getErrorCode();
+}
+$assert(
+    'P2.10: ausencia vigente en RESTOCKER sí invoca handoverLevel1 y propaga 409 SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1',
+    $handoverCalls === 1 && $liveBlockedCode === 'SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1'
+);
+
 echo "\n======================================================================\n";
 echo sprintf(" Total Aserciones: %d | Fallidas: %d\n", $assertions, $failures);
 echo "======================================================================\n";

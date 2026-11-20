@@ -78,9 +78,10 @@ final class TechnicianAbsenceService
             throw InvalidAbsenceException::invalidDateRange();
         }
 
-        // C1: una ausencia que empieza ahora ejecuta el relevo dentro de la
-        // misma transacción que el alta; un L1 en IN_PROGRESS la bloquea.
-        $isCurrentAbsence = $starts <= new \DateTimeImmutable('now');
+        // C1: una ausencia que cubre el instante actual ejecuta el relevo dentro de la
+        // misma transacción que el alta; una ausencia retroactiva (ya cerrada) no dispara relevo en vivo.
+        $now = new \DateTimeImmutable('now');
+        $isCurrentAbsence = $starts <= $now && $ends >= $now;
 
         // RF-01.1: las notas son opcionales pero nunca superan 500 caracteres.
         // El repositorio inserta directamente, así que la validación debe ocurrir
@@ -127,7 +128,7 @@ final class TechnicianAbsenceService
                 throw InvalidAbsenceException::overlap();
             }
 
-            if ($this->synergyService !== null && $isCurrentAbsence) {
+            if ($this->synergyService !== null && $isCurrentAbsence && $tech->getRole()->isRestocker()) {
                 $handover = $this->synergyService->handoverLevel1(
                     $technicianId,
                     'ABSENCE',

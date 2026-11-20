@@ -134,9 +134,9 @@ try {
 
     $pdo->exec(
         "INSERT INTO technician_shifts (technician_id, shift_date, status)
-         VALUES ({$restockerId}, CURRENT_DATE, 'ON_SHIFT'),
-                ({$backupId}, CURRENT_DATE, 'ON_SHIFT'),
-                ({$technicianId}, CURRENT_DATE, 'ON_SHIFT')"
+         VALUES ({$restockerId}, (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date, 'ON_SHIFT'),
+                ({$backupId}, (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date, 'ON_SHIFT'),
+                ({$technicianId}, (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date, 'ON_SHIFT')"
     );
 
     $ticketSeed = 900;
@@ -520,6 +520,160 @@ try {
             && $scalar($pdo, 'SELECT status FROM incidents WHERE id = :id', [':id' => (int)$incident7['id']]) === 'REGISTERED'
             && $scalar($pdo, 'SELECT assigned_technician_id FROM incidents WHERE id = :id', [':id' => (int)$incident7['id']]) === null
             && $scalar($pdo, 'SELECT dispatch_level FROM incidents WHERE id = :id', [':id' => (int)$incident7['id']]) === 'L1_RESTOCKER'
+    );
+
+    echo "\n--- Regresiones P2 · Ranking 6 escalones, Coincidencias batched, Relevo REOPENED/PENDING_INFO e Idempotencia ---\n";
+
+    // P2.9: Escalafón 6 niveles de Módulo 31 (incluye OFF_SHIFT disponible, excluye OFF_SHIFT ausente)
+    $offShiftAvailableId = $createUser('Reponedor Fuera Turno', 'offavail.rss05@test.local', 'RESTOCKER', 'REP-07');
+    $offShiftAbsentId = $createUser('Reponedor Ausente', 'offabsent.rss05@test.local', 'RESTOCKER', 'REP-08');
+    $pdo->exec(
+        "INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
+         VALUES ({$offShiftAvailableId}, {$zoneId}, 'BACKUP', FALSE),
+                ({$offShiftAbsentId}, {$zoneId}, 'BACKUP', FALSE)"
+    );
+    $pdo->exec(
+        "INSERT INTO technician_absences (technician_id, reason, starts_at, ends_at, created_by)
+         VALUES ({$offShiftAbsentId}, 'VACATION', CURRENT_TIMESTAMP - INTERVAL '1 hour', CURRENT_TIMESTAMP + INTERVAL '6 hours', {$technicianId})"
+    );
+    // Titular en pausa de comida (rank 3) y suplente en turno (rank 2)
+    $pdo->exec("UPDATE technician_shifts SET status = 'MEAL_BREAK', closed_at = NULL WHERE technician_id = {$restockerId}");
+    $pdo->exec("UPDATE technician_shifts SET status = 'ON_SHIFT', closed_at = NULL WHERE technician_id = {$backupId}");
+
+    $rankedP2 = $gateway->suggestRestockers((int)$incident6['id']);
+    $assert(
+        'P2.9: suggestRestockers usa el ranking de 6 escalones e incluye OFF_SHIFT disponible filtrando al ausente',
+        count($rankedP2) === 3
+            && ($rankedP2[0]['user_id'] ?? 0) === $backupId
+            && ($rankedP2[0]['coverage_tier'] ?? '') === 'BACKUP_PROMOTED_ON_SHIFT'
+            && ($rankedP2[0]['is_recommended'] ?? false) === true
+            && ($rankedP2[1]['user_id'] ?? 0) === $restockerId
+            && ($rankedP2[1]['coverage_tier'] ?? '') === 'PRIMARY_MEAL_BREAK'
+            && ($rankedP2[2]['user_id'] ?? 0) === $offShiftAvailableId
+            && ($rankedP2[2]['shift_status'] ?? '') === 'OFF_SHIFT'
+            && ($rankedP2[2]['coverage_tier'] ?? '') === 'BACKUP_PROMOTED_OFF_SHIFT',
+        'ranked=' . json_encode(array_map(static fn (array $r): array => [
+            'user_id' => $r['user_id'],
+            'tier' => $r['coverage_tier'] ?? null,
+            'shift' => $r['shift_status'] ?? null,
+        ], $rankedP2))
+    );
+
+    // P2.12: Coincidencia en Sede por lote multi-sede
+    $emptyLocationId = (int)$scalar(
+        $pdo,
+        "INSERT INTO locations (site_code, site_code_key, name, address, zone_id)
+         VALUES ('RSS-05-EMPTY', 'RSS-05-EMPTY', 'Sede Vacía Sinergia', 'Calle Vacía 1', NULL)
+         RETURNING id"
+    );
+    $pdo->exec("UPDATE technician_shifts SET status = 'ON_SHIFT', closed_at = NULL WHERE technician_id IN ({$restockerId}, {$technicianId})");
+    $batchTech = $gateway->technicianCoincidences($technicianId, [$locationId, $emptyLocationId, $locationId]);
+    $batchRep = $gateway->restockerCoincidences($restockerId, [$locationId, $emptyLocationId]);
+    $assert(
+        'P2.12: technicianCoincidences y restockerCoincidences devuelven mapa completo en una consulta por lotes',
+        array_keys($batchTech) === [$locationId, $emptyLocationId]
+            && count($batchTech[$locationId]) === 2
+            && $batchTech[$emptyLocationId] === []
+            && array_keys($batchRep) === [$locationId, $emptyLocationId]
+            && count($batchRep[$locationId]) === 1
+            && $batchRep[$emptyLocationId] === []
+    );
+
+    // P2.10: Relevo L1 en estados REOPENED y PENDING_INFO (con y sin suplente en turno)
+    $m8 = (int)$scalar($pdo, "INSERT INTO machines (location_id, code, model, machine_type, floor_wing) VALUES (:l, 'VEND-RSS-508', 'M8', 'SNACKS', 'Planta 1') RETURNING id", [':l' => $locationId]);
+    $m9 = (int)$scalar($pdo, "INSERT INTO machines (location_id, code, model, machine_type, floor_wing) VALUES (:l, 'VEND-RSS-509', 'M9', 'SNACKS', 'Planta 1') RETURNING id", [':l' => $locationId]);
+    $reopenTicket = PostgresFixtureBuilder::insertIncident($pdo, 'INC-2026-0108', $locationId, $m8, [
+        'category' => 'PRODUCT_JAM',
+        'status' => 'REOPENED',
+        'urgency' => 'MEDIUM',
+        'description' => 'Ticket L1 reabierto pendiente de visita.',
+        'dispatch_level' => 'L1_RESTOCKER',
+        'level1_issue_type' => 'MINOR_SPIRAL_JAM',
+        'assigned_technician_id' => $restockerId,
+    ]);
+    $pendingTicket = PostgresFixtureBuilder::insertIncident($pdo, 'INC-2026-0109', $locationId, $m9, [
+        'category' => 'PAYMENT_SYSTEM',
+        'status' => 'PENDING_INFO',
+        'urgency' => 'LOW',
+        'description' => 'Ticket L1 pausado por falta de acceso.',
+        'dispatch_level' => 'L1_RESTOCKER',
+        'level1_issue_type' => 'EMPTY_CHANGE_TUBES',
+        'assigned_technician_id' => $restockerId,
+        'paused_at' => gmdate('Y-m-d H:i:s+00', time() - 180),
+        'total_pending_info_seconds' => 60,
+        'sla_target_at' => '2026-11-21 12:00:00+00',
+    ]);
+    PostgresFixtureBuilder::openCustodySegment($pdo, (int)$reopenTicket['id'], $restockerId, 'COORDINATOR_ASSIGN');
+    PostgresFixtureBuilder::openCustodySegment($pdo, (int)$pendingTicket['id'], $restockerId, 'COORDINATOR_ASSIGN');
+    // Dejar IN_PROGRESS limpiado de otros tickets del titular si hubiera
+    $pdo->exec("UPDATE incidents SET status = 'CLOSED' WHERE dispatch_level = 'L1_RESTOCKER' AND assigned_technician_id = {$restockerId} AND id NOT IN ({$reopenTicket['id']}, {$pendingTicket['id']})");
+
+    $handoverSpecial = $gateway->handoverLevel1($restockerId, 'SHIFT_CLOSE', 'Relevo con REOPENED y PENDING_INFO');
+    $reopenHist = $pdo->query("SELECT from_status, to_status FROM incident_history WHERE incident_id = {$reopenTicket['id']} ORDER BY id DESC LIMIT 1")->fetch();
+    $pendingRowAfterReassign = $pdo->query("SELECT status, assigned_technician_id, paused_at FROM incidents WHERE id = {$pendingTicket['id']}")->fetch();
+    $assert(
+        'P2.10a: handoverLevel1 reasigna REOPENED y PENDING_INFO conservando estado, pausa e historial real',
+        ($handoverSpecial['ok'] ?? false) === true
+            && ($handoverSpecial['reassigned_count'] ?? 0) === 2
+            && is_array($reopenHist) && $reopenHist['from_status'] === 'REOPENED' && $reopenHist['to_status'] === 'REOPENED'
+            && is_array($pendingRowAfterReassign)
+            && $pendingRowAfterReassign['status'] === 'PENDING_INFO'
+            && (int)$pendingRowAfterReassign['assigned_technician_id'] === $backupId
+            && $pendingRowAfterReassign['paused_at'] !== null
+    );
+
+    // Ahora sin suplente en turno: libera ambos a REGISTERED, cierra paused_at e incrementa total_pending_info_seconds
+    $pdo->exec("UPDATE technician_shifts SET status = 'OFF_SHIFT', closed_at = CURRENT_TIMESTAMP WHERE technician_id IN ({$restockerId}, {$backupId})");
+    $pdo->exec("UPDATE incidents SET status = 'CLOSED' WHERE dispatch_level = 'L1_RESTOCKER' AND assigned_technician_id = {$backupId} AND id NOT IN ({$reopenTicket['id']}, {$pendingTicket['id']})");
+    $releasedSpecial = $gateway->handoverLevel1($backupId, 'ABSENCE', 'Ausencia sin relevo con PENDING_INFO');
+    $pendingAfterRelease = $pdo->query("SELECT status, assigned_technician_id, paused_at, total_pending_info_seconds FROM incidents WHERE id = {$pendingTicket['id']}")->fetch();
+    $pendingHistRelease = $pdo->query("SELECT from_status, to_status FROM incident_history WHERE incident_id = {$pendingTicket['id']} ORDER BY id DESC LIMIT 1")->fetch();
+    $assert(
+        'P2.10b: liberar PENDING_INFO a REGISTERED sin suplente cierra paused_at y acumula segundos de pausa',
+        ($releasedSpecial['ok'] ?? false) === true
+            && ($releasedSpecial['released_count'] ?? 0) === 2
+            && is_array($pendingAfterRelease)
+            && $pendingAfterRelease['status'] === 'REGISTERED'
+            && $pendingAfterRelease['assigned_technician_id'] === null
+            && $pendingAfterRelease['paused_at'] === null
+            && (int)$pendingAfterRelease['total_pending_info_seconds'] >= 200
+            && is_array($pendingHistRelease) && $pendingHistRelease['from_status'] === 'PENDING_INFO' && $pendingHistRelease['to_status'] === 'REGISTERED',
+        'pending=' . json_encode($pendingAfterRelease) . ' hist=' . json_encode($pendingHistRelease)
+    );
+
+    // P2.11: findReplay rechaza reutilización de client_mutation_id tras CONFLICT_DUMPED o sobre otra parada/operación
+    $m10 = (int)$scalar($pdo, "INSERT INTO machines (location_id, code, model, machine_type, floor_wing) VALUES (:l, 'VEND-RSS-510', 'M10', 'SNACKS', 'Planta 1') RETURNING id", [':l' => $locationId]);
+    $conflictIncident = PostgresFixtureBuilder::insertIncident($pdo, 'INC-2026-0110', $locationId, $m10, [
+        'category' => 'PRODUCT_JAM',
+        'status' => 'ASSIGNED',
+        'urgency' => 'LOW',
+        'description' => 'Aviso para probar colisión de client_mutation_id.',
+        'dispatch_level' => 'L1_RESTOCKER',
+        'level1_issue_type' => 'MINOR_SPIRAL_JAM',
+        'assigned_technician_id' => $restockerId,
+    ]);
+    $dumpRes = $gateway->recordConflictDump($rep, [
+        'client_mutation_id' => 'mut-rss05-dumped-0001',
+        'stop_type' => 'INCIDENT',
+        'stop_id' => (int)$conflictIncident['id'],
+        'operation_type' => 'START_L1_INCIDENT',
+        'client_occurred_at' => '2026-11-18 11:00:00+00',
+    ], ['http_status' => 409, 'error_code' => 'SANITARY_L1_RESOLUTION_BLOCKED']);
+    $replayAfterDump = $gateway->startLevel1((int)$conflictIncident['id'], $rep, [
+        'client_mutation_id' => 'mut-rss05-dumped-0001',
+        'client_occurred_at' => '2026-11-18 11:05:00+00',
+    ]);
+    $replayCrossStop = $gateway->startLevel1((int)$conflictIncident['id'], $rep, $startMutation);
+    $assert(
+        'P2.11: reutilizar client_mutation_id archivado como CONFLICT_DUMPED u otra parada devuelve 409 MUTATION_ID_CONFLICT',
+        ($dumpRes['ok'] ?? false) === true
+            && ($replayAfterDump['ok'] ?? true) === false
+            && ($replayAfterDump['error_code'] ?? '') === 'MUTATION_ID_CONFLICT'
+            && ($replayAfterDump['http_status'] ?? 0) === 409
+            && ($replayCrossStop['ok'] ?? true) === false
+            && ($replayCrossStop['error_code'] ?? '') === 'MUTATION_ID_CONFLICT'
+            && ($replayCrossStop['http_status'] ?? 0) === 409
+            && $scalar($pdo, 'SELECT status FROM incidents WHERE id = :id', [':id' => (int)$conflictIncident['id']]) === 'ASSIGNED'
     );
 } catch (Throwable $exception) {
     $crash = $exception;
