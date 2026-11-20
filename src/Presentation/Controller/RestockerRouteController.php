@@ -773,7 +773,8 @@ final class RestockerRouteController
                 return Response::error(
                     (string)($result['error_code'] ?? 'RESOLUTION_FAILED'),
                     (string)($result['message'] ?? 'No se pudo resolver el aviso de Nivel 1.'),
-                    (int)($result['http_status'] ?? 409)
+                    (int)($result['http_status'] ?? 409),
+                    is_array($result['details'] ?? null) ? $result['details'] : null
                 );
             }
 

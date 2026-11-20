@@ -3,12 +3,12 @@
 - **Fecha:** 2026-11-20
 - **Rama:** `feat/restocker-sat-synergy`
 - **HEAD de la corrida original:** `9d72fea` · `fix(restocker): update the route empty state copy`
-- **Árbol:** la corrida original no modificó código, esquema ni tests. Las correcciones posteriores de `H-36-06` y `H-36-07` sí cambian gateway, servicios, UI y suites; se registran en sus commits de corrección, sin push.
+- **Árbol:** la corrida original no modificó código, esquema ni tests. Las correcciones posteriores de `H-36-06`, `H-36-07` y `H-36-08` sí cambian gateway, servicios, UI y suites; se registran en sus commits de corrección, sin push.
 - **Alcance:** recorrido manual en navegador de los flujos de la Spec 36 (`RF-01`–`RF-05`, `D1`–`D4`, `C1`–`C2`) con los cuatro perfiles: Responsable de Sede, Coordinación, Reponedor y Técnico SAT.
 - **Entorno:** app local `http://127.0.0.1:8000` contra `vendguard_battery` (PostgreSQL local `127.0.0.1:54331`). Estado inicial: 0 tickets activos y 0 turnos.
-- **Naturaleza:** acta de verificación funcional. La corrida original no aplicó correcciones y dejó los hallazgos abiertos; `H-36-06` y `H-36-07` se corrigieron después; `H-36-08`–`H-36-10` siguen abiertos.
-- **Actualización (2026-11-20):** `H-36-06` corregido y cubierto por una prueba de composición HTTP/PostgreSQL; `H-36-07` corregido en alta de Sede y despacho manual L1, con validación y persistencia del motivo. La evidencia original se conserva; los estados actualizados están en la tabla resumen y en las secciones de cada hallazgo.
-- **Relación con documentos previos:** complementa [`informe_verificacion_rama_restocker_sat_synergy.md`](informe_verificacion_rama_restocker_sat_synergy.md) y [`auditoria_spec_36_brechas.md`](auditoria_spec_36_brechas.md). Los cierres `V-01`–`V-03` y `FIX-36-01`–`FIX-36-08` siguen siendo válidos. La corrida de navegador abrió `H-36-06`–`H-36-10`; `H-36-06` y `H-36-07` ya están resueltos y `H-36-08`–`H-36-10` siguen abiertos.
+- **Naturaleza:** acta de verificación funcional. La corrida original no aplicó correcciones y dejó los hallazgos abiertos; `H-36-06`, `H-36-07` y `H-36-08` se corrigieron después; `H-36-09` y `H-36-10` siguen abiertos.
+- **Actualización (2026-11-20):** `H-36-06` corregido y cubierto por una prueba de composición HTTP/PostgreSQL; `H-36-07` corregido en alta de Sede y despacho manual L1, con validación y persistencia del motivo; `H-36-08` corregido con filtrado de causas por categoría/motivo, preselección coherente y rechazo 422 de causas de otra categoría. La evidencia original se conserva; los estados actualizados están en la tabla resumen y en las secciones de cada hallazgo.
+- **Relación con documentos previos:** complementa [`informe_verificacion_rama_restocker_sat_synergy.md`](informe_verificacion_rama_restocker_sat_synergy.md) y [`auditoria_spec_36_brechas.md`](auditoria_spec_36_brechas.md). Los cierres `V-01`–`V-03` y `FIX-36-01`–`FIX-36-08` siguen siendo válidos. La corrida de navegador abrió `H-36-06`–`H-36-10`; `H-36-06`, `H-36-07` y `H-36-08` ya están resueltos y `H-36-09`–`H-36-10` siguen abiertos.
 
 > Los identificadores `H-36-06` a `H-36-10` son nuevos para no reutilizar los `H-36-01`–`H-36-05` ya cerrados en la auditoría. Las observaciones menores se numeran aparte como `O-36-01` y `O-36-02`.
 
@@ -18,11 +18,11 @@
 
 La mayor parte del recorrido funciona: la Sede crea avisos, Coordinación sugiere y despacha reponedores, el reponedor inicia y escala avisos L1, el técnico ve la nota interna y la foto, la coincidencia en sede funciona en la vista del técnico y los filtros por nivel de Coordinación responden.
 
-El flujo **todavía no puede considerarse cerrado**: la corrida detectó un bloqueante, ya corregido, y quedan tres hallazgos P2:
+El flujo **todavía no puede considerarse cerrado**: la corrida detectó un bloqueante, ya corregido, y quedan dos hallazgos P2:
 
 1. **`H-36-06` (P1 · resuelto el 2026-11-20):** «Resolver en 1 toque» de Nivel 1 devolvía **500 siempre** porque los snapshots de taxonomía llegaban vacíos al `UPDATE`. El ticket quedaba `IN_PROGRESS`, no se sellaba `RESOLVED` y no se podía cerrar el turno por la vía normal. La corrección hidrata la pareja activa causa/solución dentro de la transacción y añade composición HTTP/PostgreSQL con aserciones sobre los cinco snapshots.
 2. **`H-36-07` (P2 · resuelto el 2026-11-20):** la Sede ya ofrece el selector de motivo L1 y lo envía en el alta; el despacho manual a `L1_RESTOCKER` exige una pareja motivo/categoría compatible y la persiste antes de cambiar el nivel. El reponedor deja de recibir el texto genérico «Aviso de Nivel 1».
-3. **`H-36-08` (P2):** el modal de resolución preselecciona una causa incompatible con la categoría del ticket y no filtra el catálogo por categoría o motivo L1.
+3. **`H-36-08` (P2 · resuelto el 2026-11-20):** el modal de resolución filtra las causas por la categoría del ticket y por el motivo L1, preselecciona la pareja semilla coherente y el gateway rechaza con 422 una causa de otra categoría. El catálogo completo deja de llegar al desplegable.
 4. **`H-36-09` (P2):** el escalado que crea un ticket SAT nuevo desde una máquina sin aviso previo pierde el SLA de la sede: un centro `CRITICAL_INFRASTRUCTURE_24_7` recibe `STANDARD` / 24 h.
 5. **`H-36-10` (P2):** la vista del Reponedor no pinta «🤝 Coincidencia en Sede» porque el payload de máquinas no incluye `location_id`, aunque la API sí devuelve las coincidencias por sede.
 
@@ -30,7 +30,7 @@ El flujo **todavía no puede considerarse cerrado**: la corrida detectó un bloq
 | :--- | :--- | :--- | :--- | :--- |
 | `H-36-06` | **P1 · Bloqueante** | Resolución L1 devolvía 500 por snapshots de taxonomía incompletos | `RF-02`, `D3`, `C1` | **Resuelto (2026-11-20)** |
 | `H-36-07` | P2 · Alto | La Sede no preclasifica `level1_issue_type`; el despacho L1 lo deja nulo | `RF-01`, `D1`, `D2` | **Resuelto (2026-11-20)** |
-| `H-36-08` | P2 · Alto | Causa raíz preseleccionada incompatible con la categoría | `RF-02`, `D3` | Abierto |
+| `H-36-08` | P2 · Alto | Causa raíz preseleccionada incompatible con la categoría | `RF-02`, `D3` | **Resuelto (2026-11-20)** |
 | `H-36-09` | P2 · Alto | El escalado a SAT desde máquina sin aviso previo pierde el SLA de la sede | `RF-03.2`, `D3` | Abierto |
 | `H-36-10` | P2 · Medio | «Coincidencia en Sede» no se renderiza en la vista del Reponedor | `RF-04.1`, `D4` | Abierto |
 | `O-36-01` | P3 · Menor | El banner de coincidencia del Técnico no aparece hasta refrescar | `D4` | Observación |
@@ -186,7 +186,7 @@ No muestra el motivo concreto («Atasco leve en espiral») porque `level1_issue_
 
 - Se pierde la preclasificación determinista de avisos leves elegibles (`RF-01.1`/`RF-01.2`, `D1`/`D2`).
 - Todo aviso creado desde Sede nace en `L2_SAT`; el despacho a L1 queda como una maniobra manual y el expediente llega al reponedor sin motivo.
-- La resolución no puede preseleccionar la taxonomía correcta (ver `H-36-08`).
+- En el momento de esta corrección, la resolución aún no podía preseleccionar la taxonomía correcta; quedó resuelto en `H-36-08` (2026-11-20).
 - La UI del reponedor pierde información útil para el 1-Tap.
 
 #### Recomendación original
@@ -201,7 +201,7 @@ No muestra el motivo concreto («Atasco leve en espiral») porque `level1_issue_
 - **Despacho manual a L1:** el modal de Coordinación pide el motivo (preseleccionado si el ticket ya lo trae), lo limita a la categoría del expediente y no permite confirmar sin él. [`api.js`](../public/assets/js/api.js) envía `level1_issue_type`; [`CoordinatorController.php`](../src/Presentation/Controller/CoordinatorController.php) lo traslada al caso de uso, que valida que sea uno de los cuatro valores y que sea compatible con la categoría (`QA-AMB-01`). Un motivo ausente o incompatible devuelve `422 INVALID_LEVEL1_ISSUE_TYPE`.
 - **Persistencia:** [`PdoRestockerSatSynergyGateway.php`](../src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php) incorpora `level1_issue_type` al `UPDATE` del despacho mediante `COALESCE`, de modo que un L1 sella el motivo y una conmutación posterior a L2 conserva el rastro histórico sin borrarlo. El cambio queda también en la auditoría.
 - **Prueba de composición:** [`RestockerSatSynergyApiTest.php`](../tests/integration/RestockerSatSynergyApiTest.php) siembra un ticket `PRODUCT_JAM` en `L2_SAT` con motivo nulo, comprueba que un `EMPTY_CHANGE_TUBES` incompatible devuelve `422 INVALID_LEVEL1_ISSUE_TYPE` sin mutar la fila y que el despacho posterior a `L1_RESTOCKER` con `STOCKOUT_EMPTY_SLOT` responde 200 y deja ambos valores persistidos en `incidents`.
-- **Alcance:** no se toca `H-36-08`; la preselección y el filtrado de causas raíz siguen siendo un hallazgo independiente.
+- **Alcance:** en esa corrección no se tocó `H-36-08`; la preselección y el filtrado de causas raíz se resolvieron después, el 2026-11-20.
 
 #### Evidencia de la corrección (2026-11-20)
 
@@ -217,11 +217,11 @@ La evidencia original de la reproducción se conserva arriba. La corrección no 
 
 ---
 
-### H-36-08 · P2 · CAUSA RAÍZ PRESELECCIONADA INCOMPATIBLE
+### H-36-08 · P2 · RESUELTO (2026-11-20) · CAUSA RAÍZ PRESELECCIONADA INCOMPATIBLE
 
 **Flujo:** modal «✓ Resolver Nivel 1» para un ticket `PRODUCT_JAM`.
 
-#### Resultado observado
+#### Resultado observado (original)
 
 El desplegable «Causa raíz» se abre con la primera causa del catálogo:
 
@@ -239,22 +239,38 @@ RC-L1-SPIRAL-RELEASE    → Envase mal posicionado o trabado leve
 
 El modal muestra las cuatro causas L1 sin filtrar por categoría ni por `level1_issue_type`. La solución estandarizada sí cambia al elegir una causa, pero la causa inicial no es válida para el ticket.
 
-#### Causa raíz
+#### Causa raíz original
 
 - El modal construye el desplegable con el catálogo completo (`l1_taxonomy_catalog`) y no aplica ningún filtro por `category` o `level1_issue_type`.
 - El backend no valida la coherencia de la pareja causa/categoría antes de escribir. `H-36-06` ya hidrata los snapshots, pero no añade esa validación: una pareja incoherente puede persistirse en lugar de recibir un **422**.
 
-#### Impacto
+#### Impacto original
 
 - Un operario puede enviar la combinación por defecto sin advertirlo.
 - La corrección de `H-36-06` evita el 500 de snapshots nulos, pero no corrige la preselección ni valida la categoría; el envío por defecto sigue siendo incoherente y debe rechazarse con un error de negocio claro.
-- La corrección de `H-36-07` (motivo L1 no nulo) ya permite preseleccionar la causa correcta; el filtrado por categoría sigue pendiente en este hallazgo.
+- La corrección de `H-36-07` (motivo L1 no nulo) ya permite preseleccionar la causa correcta; el filtrado por categoría queda resuelto en este hallazgo.
 
-#### Recomendación
+#### Recomendación original
 
 - Filtrar el catálogo por categoría/`level1_issue_type` y preseleccionar la causa por defecto coherente.
 - Validar en aplicación la coherencia `root_cause` ↔ `category` y la pertenencia de la solución a la causa; devolver **422** con campo y mensaje, no un 500.
 - Añadir un test que abra el modal con un ticket `PRODUCT_JAM` y compruebe que la causa inicial es `RC-L1-SPIRAL-RELEASE` o `RC-L1-STOCKOUT`, nunca `RC-L1-CONSUMABLES`.
+
+#### Corrección aplicada
+
+- **Filtrado en el modal:** [`RestockerRouteView.js`](../public/assets/js/components/RestockerRouteView.js) calcula `l1ResolveCauseOptions` con las causas activas de la categoría del expediente. Si el ticket trae `level1_issue_type` y existe su pareja semilla (`RC-L1-*`), reduce el desplegable a esa causa; si es un ticket histórico sin motivo, conserva las alternativas de la categoría y preselecciona la primera. El desplegable, la solución estandarizada y la validación de envío usan exclusivamente esa lista filtrada; sin causas compatibles se muestra un aviso y se bloquea la confirmación.
+- **Catálogo de motivos:** [`IncidentStatusPermissions.js`](../public/assets/js/utils/IncidentStatusPermissions.js) añade el `rootCauseCode` de cada motivo L1, alineado con `Level1IssueType::rootCauseCode()`.
+- **Validación de servidor:** [`PdoRestockerSatSynergyGateway.php`](../src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php) comprueba, después de resolver la pareja activa, que `root_cause_category` coincide con la categoría real bloqueada del expediente. Una causa de otra categoría devuelve **422 `INVALID_RESOLUTION_TAXONOMY`** con `details.field = root_cause_id` antes de cerrar la custodia o escribir snapshots.
+- **Pruebas:** [`restocker_route_view.test.mjs`](../tests/frontend/restocker_route_view.test.mjs) cubre la selección por `MINOR_SPIRAL_JAM` (`RC-L1-SPIRAL-RELEASE`, nunca consumibles) y la alternativa de categoría sin motivo. [`RestockerSatSynergyApiTest.php`](../tests/integration/RestockerSatSynergyApiTest.php) siembra una pareja `OTHER`, comprueba el 422 y verifica que el aviso sigue `IN_PROGRESS` con `root_cause_id = NULL`.
+
+#### Evidencia de la corrección (2026-11-20)
+
+| Suite | Resultado |
+| :--- | :--- |
+| `tests/frontend/restocker_route_view.test.mjs` | **239/239** aserciones · 0 fallos (filtro por categoría/motivo y preselección) |
+| `tests/integration/RestockerSatSynergyApiTest.php` | **65/65** aserciones · 0 fallos (422 de categoría con campo, sin mutación) |
+| Canal `new_engine` | **71/71 suites · 2.352 aserciones · 0 fallos · `exit=0`** |
+| Evidencia focalizada del Módulo 36 | **574** aserciones |
 
 ---
 
@@ -474,12 +490,12 @@ SELECT ticket_code, status, dispatch_level, level1_issue_type,
 
 | Hallazgo | ¿Bloquea el cierre de la Spec 36? | Acción mínima |
 | :--- | :--- | :--- |
-| `H-36-06` | **No · resuelto el 2026-11-20** | Hidratación y composición HTTP/PostgreSQL cubiertas; queda la validación de categoría en `H-36-08` |
+| `H-36-06` | **No · resuelto el 2026-11-20** | Hidratación y composición HTTP/PostgreSQL cubiertas; la validación de categoría quedó cubierta en `H-36-08` |
 | `H-36-07` | **No · resuelto el 2026-11-20** | Selector de motivo en Sede y persistencia validada en el despacho L1 |
-| `H-36-08` | No por separado, pero agrava `H-36-06` | Filtrar catálogo y validar coherencia con 422 |
+| `H-36-08` | **No · resuelto el 2026-11-20** | Filtro por categoría/motivo, preselección coherente y 422 de categoría cubiertos |
 | `H-36-09` | Sí, para el contrato SLA | Heredar el perfil SLA de la sede en la rama de ticket nuevo |
 | `H-36-10` | Sí, para D4 | Publicar `location_id` o indexar por máquina |
 | `O-36-01` | No | Refrescar coincidencia al iniciar turno |
 | `O-36-02` | No | Mensajes de error de validación útiles |
 
-**Conclusión:** la Spec 36 no puede declararse cerrada con esta corrida. `H-36-06` ya no bloquea el flujo principal de resolución L1: la hidratación y la composición HTTP/PostgreSQL están cubiertas. `H-36-07` queda resuelto con el selector de motivo en Sede y la validación/persistencia en el despacho manual L1. Siguen abiertos `H-36-08`, `H-36-09` y `H-36-10`, que dejan requisitos de coherencia de taxonomía y de SLA sin cumplir. Las correcciones deben acompañarse de pruebas de composición reales, no solo de dobles del gateway.
+**Conclusión:** la Spec 36 no puede declararse cerrada con esta corrida. `H-36-06` ya no bloquea el flujo principal de resolución L1: la hidratación y la composición HTTP/PostgreSQL están cubiertas. `H-36-07` queda resuelto con el selector de motivo en Sede y la validación/persistencia en el despacho manual L1. `H-36-08` queda resuelto con el filtrado por categoría/motivo, la preselección coherente y el rechazo 422 de causas de otra categoría. Siguen abiertos `H-36-09` y `H-36-10`, que dejan requisitos de SLA sin cumplir. Las correcciones deben acompañarse de pruebas de composición reales, no solo de dobles del gateway.

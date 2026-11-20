@@ -1745,6 +1745,73 @@ assert(
     && viewSource.includes('data-testid="l1-diagnosis"')
     && viewSource.includes('data-testid="l1-action"')
 );
+
+const l1TaxonomyFixture = [
+  {
+    id: 31,
+    code: 'RC-L1-STOCKOUT',
+    category: 'PRODUCT_JAM',
+    name: 'Agotamiento de producto en carril de selección',
+    is_active: true,
+    solutions: [{ id: 41, name: 'Reposición de producto en carril', is_active: true }]
+  },
+  {
+    id: 32,
+    code: 'RC-L1-CONSUMABLES',
+    category: 'OTHER',
+    name: 'Falta de vasos, azúcar o paletinas en dispensador',
+    is_active: true,
+    solutions: [{ id: 42, name: 'Reposición de consumibles', is_active: true }]
+  },
+  {
+    id: 33,
+    code: 'RC-L1-SPIRAL-RELEASE',
+    category: 'PRODUCT_JAM',
+    name: 'Envase mal posicionado o trabado leve en boca de espiral',
+    is_active: true,
+    solutions: [{ id: 43, name: 'Liberación manual de envase en espiral', is_active: true }]
+  },
+  {
+    id: 34,
+    code: 'RC-L1-EMPTY-TUBES',
+    category: 'PAYMENT_SYSTEM',
+    name: 'Tubos de cambio del monedero sin moneda fraccionaria',
+    is_active: true,
+    solutions: [{ id: 44, name: 'Recarga de tubos de cambio', is_active: true }]
+  }
+];
+
+const taxonomyVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+taxonomyVm.l1TaxonomyCatalog = l1TaxonomyFixture;
+taxonomyVm.openL1Resolve({
+  id: 503,
+  machine_id: 7,
+  category: 'PRODUCT_JAM',
+  level1_issue_type: 'MINOR_SPIRAL_JAM',
+  status: 'IN_PROGRESS'
+});
+assert(
+  'La resolución filtra la causa por categoría y motivo L1 sin preseleccionar otra categoría',
+  taxonomyVm.l1ResolveCauseOptions.length === 1
+    && Number(taxonomyVm.l1ResolveForm.root_cause_id) === 33
+    && Number(taxonomyVm.l1ResolveForm.standard_solution_id) === 43
+    && !taxonomyVm.l1ResolveCauseOptions.some((cause) => Number(cause.id) === 32)
+);
+
+const legacyTaxonomyVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+legacyTaxonomyVm.l1TaxonomyCatalog = l1TaxonomyFixture;
+legacyTaxonomyVm.openL1Resolve({ id: 504, machine_id: 8, category: 'PRODUCT_JAM', status: 'IN_PROGRESS' });
+assert(
+  'Sin motivo L1 la resolución conserva solo las causas de la categoría',
+  legacyTaxonomyVm.l1ResolveCauseOptions.length === 2
+    && legacyTaxonomyVm.l1ResolveCauseOptions.every((cause) => cause.category === 'PRODUCT_JAM')
+    && Number(legacyTaxonomyVm.l1ResolveForm.root_cause_id) === 31
+);
+assert(
+  'El desplegable de causa usa la lista filtrada, no el catálogo completo',
+  viewSource.includes('v-for="cause in l1ResolveCauseOptions"')
+    && !viewSource.includes('v-for="cause in l1TaxonomyCatalog"')
+);
 assert(
   'El modal de escalado exige nota interna y foto de hasta 5 MB',
   viewSource.includes('data-testid="restocker-escalate-modal"')
@@ -1836,13 +1903,16 @@ assert(
 await offlineVm.ensureIncidentQueue().clear(12);
 
 const resolveVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
-resolveVm.assignedL1Incidents = [{ id: 501, machine_id: 7, machine_code: 'VEND-0701', status: 'IN_PROGRESS' }];
-resolveVm.loadMyRoute = async () => {};
-resolveVm.l1TaxonomyCatalog = [{
-  id: 31,
-  name: 'Carril vacío',
-  solutions: [{ id: 41, name: 'Reposición de producto' }]
+resolveVm.assignedL1Incidents = [{
+  id: 501,
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  status: 'IN_PROGRESS',
+  category: 'PRODUCT_JAM',
+  level1_issue_type: 'STOCKOUT_EMPTY_SLOT'
 }];
+resolveVm.loadMyRoute = async () => {};
+resolveVm.l1TaxonomyCatalog = l1TaxonomyFixture;
 resolveVm.openL1Resolve(resolveVm.assignedL1Incidents[0]);
 resolveVm.l1ResolveForm.diagnosis = 'Carril sin producto y muelle correcto';
 resolveVm.l1ResolveForm.action = 'Repongo producto y verifico la entrega completa';

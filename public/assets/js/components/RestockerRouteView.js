@@ -45,6 +45,7 @@ import {
   RESTOCKER_INCIDENT_PENDING,
   RESTOCKER_INCIDENT_OPERATIONS
 } from '../utils/RestockerIncidentOfflineQueue.js';
+import { LEVEL1_ISSUE_TYPES } from '../utils/IncidentStatusPermissions.js';
 
 const HYGIENE_ITEMS = [
   { key: 'coffee_grounds_emptied', label: 'Cajón de posos vaciado', scope: 'hot' },
@@ -456,8 +457,33 @@ export const RestockerRouteView = {
     conflictIncidentCount() {
       return this.pendingIncidentMutations.filter((item) => item.status === RESTOCKER_INCIDENT_CONFLICT).length;
     },
+    /**
+     * Causas compatibles con la categoría y el motivo L1 del aviso (H-36-08).
+     *
+     * El catálogo completo nunca llega al desplegable: se descartan las causas
+     * de otra categoría y, cuando el ticket trae un motivo L1, se reduce a la
+     * pareja semilla de ese motivo. Un ticket histórico sin motivo conserva las
+     * alternativas de su categoría, pero la primera ya es coherente.
+     */
+    l1ResolveCauseOptions() {
+      const category = String(this.l1ResolveIncident?.category || '').trim().toUpperCase();
+      if (!category) return [];
+
+      const causes = (Array.isArray(this.l1TaxonomyCatalog) ? this.l1TaxonomyCatalog : [])
+        .filter((cause) => cause
+          && cause.is_active !== false
+          && String(cause.category || '').trim().toUpperCase() === category);
+      if (causes.length === 0) return [];
+
+      const issueType = String(this.l1ResolveIncident?.level1_issue_type || '').trim().toUpperCase();
+      const definition = LEVEL1_ISSUE_TYPES.find((row) => row.value === issueType);
+      if (!definition) return causes;
+
+      const seeded = causes.filter((cause) => String(cause.code || '').toUpperCase() === definition.rootCauseCode);
+      return seeded.length > 0 ? seeded : causes;
+    },
     l1ResolveSolutions() {
-      const cause = this.l1TaxonomyCatalog.find(
+      const cause = this.l1ResolveCauseOptions.find(
         (row) => Number(row.id) === Number(this.l1ResolveForm.root_cause_id)
       );
       return Array.isArray(cause?.solutions) ? cause.solutions : [];
@@ -1428,9 +1454,9 @@ export const RestockerRouteView = {
     },
 
     openL1Resolve(incident) {
-      const firstCause = this.l1TaxonomyCatalog[0] || null;
-      const firstSolution = Array.isArray(firstCause?.solutions) ? firstCause.solutions[0] : null;
       this.l1ResolveIncident = incident;
+      const firstCause = this.l1ResolveCauseOptions[0] || null;
+      const firstSolution = Array.isArray(firstCause?.solutions) ? firstCause.solutions[0] : null;
       this.l1ResolveForm = {
         root_cause_id: firstCause?.id ?? '',
         standard_solution_id: firstSolution?.id ?? '',
@@ -1454,6 +1480,10 @@ export const RestockerRouteView = {
       if (!incident || !restockerId || this.isResolvingL1) return;
       if (this.charCount(this.l1ResolveForm.diagnosis) < 20 || this.charCount(this.l1ResolveForm.action) < 20) {
         this.l1ResolveError = 'El diagnóstico y la acción deben contener al menos 20 caracteres reales (Art. V.1).';
+        return;
+      }
+      if (this.l1ResolveCauseOptions.length === 0) {
+        this.l1ResolveError = 'No hay una causa raíz activa compatible con la categoría y el motivo del aviso.';
         return;
       }
       if (!this.l1ResolveForm.root_cause_id || !this.l1ResolveForm.standard_solution_id) {
@@ -4492,8 +4522,11 @@ export const RestockerRouteView = {
           <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0 0 12px 0;">#{{ l1ResolveIncident?.ticket_code }} · Diagnóstico y acción de al menos 20 caracteres.</p>
           <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Causa raíz</label>
           <select v-model="l1ResolveForm.root_cause_id" class="vg-select" data-testid="l1-root-cause" @change="onL1RootCauseChange">
-            <option v-for="cause in l1TaxonomyCatalog" :key="cause.id" :value="cause.id">{{ cause.name }}</option>
+            <option v-for="cause in l1ResolveCauseOptions" :key="cause.id" :value="cause.id">{{ cause.name }}</option>
           </select>
+          <p v-if="l1ResolveCauseOptions.length === 0" role="alert" style="font-size: 12px; color: var(--color-error-text); margin: 6px 0 0 0;">
+            No hay causas raíz activas compatibles con esta categoría.
+          </p>
           <label style="display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px 0;">Solución estandarizada</label>
           <select v-model="l1ResolveForm.standard_solution_id" class="vg-select" data-testid="l1-standard-solution">
             <option v-for="solution in l1ResolveSolutions" :key="solution.id" :value="solution.id">{{ solution.name }}</option>
@@ -4505,7 +4538,7 @@ export const RestockerRouteView = {
           <p v-if="l1ResolveError" role="alert" style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); padding: 8px; border-radius: var(--radius-interactive);">⚠️ {{ l1ResolveError }}</p>
           <div style="display: flex; gap: 8px; margin-top: 14px;">
             <button type="button" class="vg-btn vg-btn-secondary" :disabled="isResolvingL1" @click="showL1ResolveModal = false">Cancelar</button>
-            <button type="button" class="vg-btn vg-btn-primary" data-testid="btn-submit-l1-resolution" :disabled="isResolvingL1" @click="submitL1Resolution">Confirmar resolución</button>
+            <button type="button" class="vg-btn vg-btn-primary" data-testid="btn-submit-l1-resolution" :disabled="isResolvingL1 || l1ResolveCauseOptions.length === 0" @click="submitL1Resolution">Confirmar resolución</button>
           </div>
         </div>
       </div>

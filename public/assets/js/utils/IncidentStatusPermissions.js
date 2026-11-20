@@ -382,22 +382,26 @@ export const LEVEL1_ISSUE_TYPES = Object.freeze([
   Object.freeze({
     value: 'STOCKOUT_EMPTY_SLOT',
     label: 'Producto agotado / Carril vacío',
-    category: 'PRODUCT_JAM'
+    category: 'PRODUCT_JAM',
+    rootCauseCode: 'RC-L1-STOCKOUT'
   }),
   Object.freeze({
     value: 'MINOR_SPIRAL_JAM',
     label: 'Atasco leve de producto en espiral',
-    category: 'PRODUCT_JAM'
+    category: 'PRODUCT_JAM',
+    rootCauseCode: 'RC-L1-SPIRAL-RELEASE'
   }),
   Object.freeze({
     value: 'EMPTY_CHANGE_TUBES',
     label: 'Tubos de cambio vacíos',
-    category: 'PAYMENT_SYSTEM'
+    category: 'PAYMENT_SYSTEM',
+    rootCauseCode: 'RC-L1-EMPTY-TUBES'
   }),
   Object.freeze({
     value: 'MISSING_CONSUMABLES',
     label: 'Falta de consumibles (vasos, azúcar o paletinas)',
-    category: 'OTHER'
+    category: 'OTHER',
+    rootCauseCode: 'RC-L1-CONSUMABLES'
   })
 ]);
 

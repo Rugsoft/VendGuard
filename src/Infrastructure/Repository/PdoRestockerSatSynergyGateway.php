@@ -459,6 +459,22 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                 );
             }
 
+            // H-36-08: una pareja válida del catálogo no basta si la causa
+            // pertenece a otra categoría. Se rechaza antes de cerrar la
+            // custodia o escribir los snapshots (RF-03.1, D3, Art. V.4).
+            if ((string)$taxonomy['root_cause_category'] !== (string)$incident['category']) {
+                return $this->fail(
+                    'INVALID_RESOLUTION_TAXONOMY',
+                    422,
+                    sprintf(
+                        'La causa raíz pertenece a la categoría «%s» y el expediente es «%s».',
+                        (string)$taxonomy['root_cause_category'],
+                        (string)$incident['category']
+                    ),
+                    ['field' => 'root_cause_id']
+                );
+            }
+
             $resolution['root_cause_id'] = $rootCauseId;
             $resolution['standard_solution_id'] = $solutionId;
             $resolution['root_cause_code'] = (string)$taxonomy['root_cause_code'];
@@ -1740,18 +1756,23 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
     /**
      * @return array<string, mixed>
      */
-    private function error(string $code, int $status, string $message): array
+    private function error(string $code, int $status, string $message, array $details = []): array
     {
-        return ['ok' => false, 'error_code' => $code, 'http_status' => $status, 'message' => $message];
+        $payload = ['ok' => false, 'error_code' => $code, 'http_status' => $status, 'message' => $message];
+        if ($details !== []) {
+            $payload['details'] = $details;
+        }
+
+        return $payload;
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function fail(string $code, int $status, string $message): array
+    private function fail(string $code, int $status, string $message, array $details = []): array
     {
         $this->rollback();
 
-        return $this->error($code, $status, $message);
+        return $this->error($code, $status, $message, $details);
     }
 }

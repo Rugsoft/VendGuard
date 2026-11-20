@@ -174,6 +174,21 @@ try {
     $taxonomySolutionStmt->execute([':root_cause_id' => $taxonomyCauseId]);
     $taxonomySolutionId = (int)$taxonomySolutionStmt->fetchColumn();
 
+    // H-36-08: pareja activa de otra categoría para probar el rechazo 422.
+    $incompatibleCauseStmt = $pdo->prepare(
+        "INSERT INTO root_causes (code, category, name, is_active)
+         VALUES ('RC-RSS8-CONSUMABLES', 'OTHER', 'Consumibles sembrados T-RSS-08', TRUE) RETURNING id"
+    );
+    $incompatibleCauseStmt->execute();
+    $incompatibleCauseId = (int)$incompatibleCauseStmt->fetchColumn();
+
+    $incompatibleSolutionStmt = $pdo->prepare(
+        "INSERT INTO standard_solutions (root_cause_id, code, name, is_default, is_active)
+         VALUES (:root_cause_id, 'SS-RSS8-CONSUMABLES', 'Reposición de consumibles sembrada T-RSS-08', TRUE, TRUE) RETURNING id"
+    );
+    $incompatibleSolutionStmt->execute([':root_cause_id' => $incompatibleCauseId]);
+    $incompatibleSolutionId = (int)$incompatibleSolutionStmt->fetchColumn();
+
     $zoneAssignmentStmt = $pdo->prepare(
         "INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
          VALUES (:id, :zone, 'PRIMARY', TRUE)"
@@ -372,6 +387,33 @@ try {
         'Una pareja de taxonomía inexistente se rechaza con 422',
         $invalidTaxonomy->getStatusCode() === 422 && $errorCode($invalidTaxonomy) === 'INVALID_RESOLUTION_TAXONOMY',
         'status=' . $invalidTaxonomy->getStatusCode() . ' code=' . $errorCode($invalidTaxonomy)
+    );
+
+    $wrongCategory = $call('POST', "/api/restocker/incidents/{$taxonomyIncidentId}/resolve", [
+        'machine_id' => $fixtureMachines['RSS8-SNACK-17'],
+        'sanitary_status' => 'OK',
+        'diagnosis' => 'Envase atascado en la espiral del carril central',
+        'action' => 'Liberación manual del envase y reacomodo del carril',
+        'root_cause_id' => $incompatibleCauseId,
+        'standard_solution_id' => $incompatibleSolutionId,
+    ], $restockerToken);
+    $assert(
+        'Una causa raíz de otra categoría se rechaza con 422 y campo',
+        $wrongCategory->getStatusCode() === 422
+            && $errorCode($wrongCategory) === 'INVALID_RESOLUTION_TAXONOMY'
+            && ($json($wrongCategory)['error']['details']['field'] ?? null) === 'root_cause_id',
+        'status=' . $wrongCategory->getStatusCode() . ' code=' . $errorCode($wrongCategory)
+    );
+
+    $wrongCategoryStmt = $pdo->prepare('SELECT status, root_cause_id FROM incidents WHERE id = :id');
+    $wrongCategoryStmt->execute([':id' => $taxonomyIncidentId]);
+    $wrongCategoryRow = $wrongCategoryStmt->fetch();
+    $assert(
+        'El 422 de categoría no resuelve ni clasifica el aviso',
+        is_array($wrongCategoryRow)
+            && $wrongCategoryRow['status'] === 'IN_PROGRESS'
+            && $wrongCategoryRow['root_cause_id'] === null,
+        'row=' . json_encode($wrongCategoryRow)
     );
 
     $taxonomyResolve = $call('POST', "/api/restocker/incidents/{$taxonomyIncidentId}/resolve", [
