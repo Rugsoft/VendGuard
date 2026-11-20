@@ -7,10 +7,14 @@ namespace VendGuard\Infrastructure\Repository;
 use PDO;
 use RuntimeException;
 use Throwable;
+use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\RestockerSatSynergyGatewayInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
+use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
@@ -1209,6 +1213,18 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
     ): array {
         $status = $technicianId !== null ? 'ASSIGNED' : 'REGISTERED';
         $urgency = (string)($payload['urgency'] ?? $this->defaultUrgency($category));
+        $urgencyLevel = UrgencyLevel::tryFrom(strtoupper(trim($urgency)))
+            ?? UrgencyLevel::fromString($this->defaultUrgency($category));
+        $urgency = $urgencyLevel->value;
+        $slaTier = SlaTier::tryFrom(strtoupper(trim((string)($machine['sla_tier'] ?? ''))))
+            ?? SlaTier::STANDARD;
+        $machineType = MachineType::fromString((string)$machine['machine_type']);
+        $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+            $slaTier,
+            $machineType,
+            $category,
+            $urgencyLevel
+        );
         $ticketCode = ($this->ticketCodeGenerator)();
 
         $stmt = $this->pdo->prepare(
@@ -1216,13 +1232,13 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                 ticket_code, machine_id, location_id, category, description, photo_path,
                 urgency, status, assigned_technician_id, assigned_at,
                 dispatch_level, escalated_from_restocker_id, escalated_to_sat_at,
-                sla_target_minutes, reporter_name
+                sla_tier_snapshot, sla_target_minutes, reporter_name
              ) VALUES (
                 :ticket_code, :machine_id, :location_id, :category, :description, :photo_path,
                 :urgency, :status, :technician_id,
                 CASE WHEN :technician_flag::bigint IS NULL THEN NULL ELSE :occurred_at_assigned::timestamptz END,
                 \'L2_SAT\', :restocker_id, :occurred_at::timestamptz,
-                COALESCE(:sla_minutes::integer, 1440), :reporter_name
+                :sla_tier, :sla_minutes, :reporter_name
              ) RETURNING id, ticket_code, status'
         );
         $stmt->execute([
@@ -1239,7 +1255,8 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             ':occurred_at' => $occurredAt,
             ':occurred_at_assigned' => $occurredAt,
             ':restocker_id' => $this->actorId($actor),
-            ':sla_minutes' => $payload['sla_target_minutes'] ?? null,
+            ':sla_tier' => $slaTier->value,
+            ':sla_minutes' => $slaTargetMinutes,
             ':reporter_name' => $this->actorName($actor),
         ]);
         $created = $stmt->fetch();
@@ -1270,6 +1287,9 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             'machine_code' => (string)$machine['code'],
             'dispatch_level' => 'L2_SAT',
             'status' => $status,
+            'urgency' => $urgency,
+            'sla_tier_snapshot' => $slaTier->value,
+            'sla_target_minutes' => $slaTargetMinutes,
             'escalation_outcome' => 'CREATED_NEW_SAT_TICKET',
             'merged_into_existing_sat_ticket' => false,
             'escalated_from_restocker_id' => $this->actorId($actor),
@@ -1311,7 +1331,8 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
     private function lockMachine(int $machineId): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT m.id, m.code, m.location_id, m.machine_type, m.sanitary_status, l.zone_id
+            'SELECT m.id, m.code, m.location_id, m.machine_type, m.sanitary_status,
+                    l.zone_id, l.sla_tier
                FROM machines m
                INNER JOIN locations l ON l.id = m.location_id
               WHERE m.id = :id AND m.is_active = TRUE AND m.deleted_at IS NULL

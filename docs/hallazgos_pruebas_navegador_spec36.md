@@ -3,12 +3,12 @@
 - **Fecha:** 2026-11-20
 - **Rama:** `feat/restocker-sat-synergy`
 - **HEAD de la corrida original:** `9d72fea` · `fix(restocker): update the route empty state copy`
-- **Árbol:** la corrida original no modificó código, esquema ni tests. Las correcciones posteriores de `H-36-06`, `H-36-07` y `H-36-08` sí cambian gateway, servicios, UI y suites; se registran en sus commits de corrección, sin push.
+- **Árbol:** la corrida original no modificó código, esquema ni tests. Las correcciones posteriores de `H-36-06`, `H-36-07`, `H-36-08` y `H-36-09` sí cambian gateway, servicios, UI y suites; se registran en sus commits de corrección, sin push.
 - **Alcance:** recorrido manual en navegador de los flujos de la Spec 36 (`RF-01`–`RF-05`, `D1`–`D4`, `C1`–`C2`) con los cuatro perfiles: Responsable de Sede, Coordinación, Reponedor y Técnico SAT.
 - **Entorno:** app local `http://127.0.0.1:8000` contra `vendguard_battery` (PostgreSQL local `127.0.0.1:54331`). Estado inicial: 0 tickets activos y 0 turnos.
-- **Naturaleza:** acta de verificación funcional. La corrida original no aplicó correcciones y dejó los hallazgos abiertos; `H-36-06`, `H-36-07` y `H-36-08` se corrigieron después; `H-36-09` y `H-36-10` siguen abiertos.
-- **Actualización (2026-11-20):** `H-36-06` corregido y cubierto por una prueba de composición HTTP/PostgreSQL; `H-36-07` corregido en alta de Sede y despacho manual L1, con validación y persistencia del motivo; `H-36-08` corregido con filtrado de causas por categoría/motivo, preselección coherente y rechazo 422 de causas de otra categoría. La evidencia original se conserva; los estados actualizados están en la tabla resumen y en las secciones de cada hallazgo.
-- **Relación con documentos previos:** complementa [`informe_verificacion_rama_restocker_sat_synergy.md`](informe_verificacion_rama_restocker_sat_synergy.md) y [`auditoria_spec_36_brechas.md`](auditoria_spec_36_brechas.md). Los cierres `V-01`–`V-03` y `FIX-36-01`–`FIX-36-08` siguen siendo válidos. La corrida de navegador abrió `H-36-06`–`H-36-10`; `H-36-06`, `H-36-07` y `H-36-08` ya están resueltos y `H-36-09`–`H-36-10` siguen abiertos.
+- **Naturaleza:** acta de verificación funcional. La corrida original no aplicó correcciones y dejó los hallazgos abiertos; `H-36-06`, `H-36-07`, `H-36-08` y `H-36-09` se corrigieron después; `H-36-10` sigue abierto.
+- **Actualización (2026-11-20):** `H-36-06` corregido y cubierto por una prueba de composición HTTP/PostgreSQL; `H-36-07` corregido en alta de Sede y despacho manual L1, con validación y persistencia del motivo; `H-36-08` corregido con filtrado de causas por categoría/motivo, preselección coherente y rechazo 422 de causas de otra categoría; `H-36-09` corregido con la herencia del perfil SLA de la sede en la rama de ticket SAT nuevo. La evidencia original se conserva; los estados actualizados están en la tabla resumen y en las secciones de cada hallazgo.
+- **Relación con documentos previos:** complementa [`informe_verificacion_rama_restocker_sat_synergy.md`](informe_verificacion_rama_restocker_sat_synergy.md) y [`auditoria_spec_36_brechas.md`](auditoria_spec_36_brechas.md). Los cierres `V-01`–`V-03` y `FIX-36-01`–`FIX-36-08` siguen siendo válidos. La corrida de navegador abrió `H-36-06`–`H-36-10`; `H-36-06`, `H-36-07`, `H-36-08` y `H-36-09` ya están resueltos y `H-36-10` sigue abierto.
 
 > Los identificadores `H-36-06` a `H-36-10` son nuevos para no reutilizar los `H-36-01`–`H-36-05` ya cerrados en la auditoría. Las observaciones menores se numeran aparte como `O-36-01` y `O-36-02`.
 
@@ -18,12 +18,12 @@
 
 La mayor parte del recorrido funciona: la Sede crea avisos, Coordinación sugiere y despacha reponedores, el reponedor inicia y escala avisos L1, el técnico ve la nota interna y la foto, la coincidencia en sede funciona en la vista del técnico y los filtros por nivel de Coordinación responden.
 
-El flujo **todavía no puede considerarse cerrado**: la corrida detectó un bloqueante, ya corregido, y quedan dos hallazgos P2:
+El flujo **todavía no puede considerarse cerrado**: la corrida detectó un bloqueante, ya corregido, y queda un hallazgo P2:
 
 1. **`H-36-06` (P1 · resuelto el 2026-11-20):** «Resolver en 1 toque» de Nivel 1 devolvía **500 siempre** porque los snapshots de taxonomía llegaban vacíos al `UPDATE`. El ticket quedaba `IN_PROGRESS`, no se sellaba `RESOLVED` y no se podía cerrar el turno por la vía normal. La corrección hidrata la pareja activa causa/solución dentro de la transacción y añade composición HTTP/PostgreSQL con aserciones sobre los cinco snapshots.
 2. **`H-36-07` (P2 · resuelto el 2026-11-20):** la Sede ya ofrece el selector de motivo L1 y lo envía en el alta; el despacho manual a `L1_RESTOCKER` exige una pareja motivo/categoría compatible y la persiste antes de cambiar el nivel. El reponedor deja de recibir el texto genérico «Aviso de Nivel 1».
 3. **`H-36-08` (P2 · resuelto el 2026-11-20):** el modal de resolución filtra las causas por la categoría del ticket y por el motivo L1, preselecciona la pareja semilla coherente y el gateway rechaza con 422 una causa de otra categoría. El catálogo completo deja de llegar al desplegable.
-4. **`H-36-09` (P2):** el escalado que crea un ticket SAT nuevo desde una máquina sin aviso previo pierde el SLA de la sede: un centro `CRITICAL_INFRASTRUCTURE_24_7` recibe `STANDARD` / 24 h.
+4. **`H-36-09` (P2 · resuelto el 2026-11-20):** el escalado que crea un ticket SAT nuevo desde una máquina sin aviso previo hereda el perfil SLA de la sede y calcula 240 min para `CRITICAL_INFRASTRUCTURE_24_7` con urgencia crítica, sin aceptar los minutos enviados por el cliente.
 5. **`H-36-10` (P2):** la vista del Reponedor no pinta «🤝 Coincidencia en Sede» porque el payload de máquinas no incluye `location_id`, aunque la API sí devuelve las coincidencias por sede.
 
 | ID | Prioridad | Hallazgo | Requisito afectado | Estado |
@@ -31,7 +31,7 @@ El flujo **todavía no puede considerarse cerrado**: la corrida detectó un bloq
 | `H-36-06` | **P1 · Bloqueante** | Resolución L1 devolvía 500 por snapshots de taxonomía incompletos | `RF-02`, `D3`, `C1` | **Resuelto (2026-11-20)** |
 | `H-36-07` | P2 · Alto | La Sede no preclasifica `level1_issue_type`; el despacho L1 lo deja nulo | `RF-01`, `D1`, `D2` | **Resuelto (2026-11-20)** |
 | `H-36-08` | P2 · Alto | Causa raíz preseleccionada incompatible con la categoría | `RF-02`, `D3` | **Resuelto (2026-11-20)** |
-| `H-36-09` | P2 · Alto | El escalado a SAT desde máquina sin aviso previo pierde el SLA de la sede | `RF-03.2`, `D3` | Abierto |
+| `H-36-09` | P2 · Alto | El escalado a SAT desde máquina sin aviso previo pierde el SLA de la sede | `RF-03.2`, `D3` | **Resuelto (2026-11-20)** |
 | `H-36-10` | P2 · Medio | «Coincidencia en Sede» no se renderiza en la vista del Reponedor | `RF-04.1`, `D4` | Abierto |
 | `O-36-01` | P3 · Menor | El banner de coincidencia del Técnico no aparece hasta refrescar | `D4` | Observación |
 | `O-36-02` | P3 · Menor | Error genérico de resolución L1, sin detalle de validación | `RF-02` | Observación |
@@ -274,7 +274,7 @@ El modal muestra las cuatro causas L1 sin filtrar por categoría ni por `level1_
 
 ---
 
-### H-36-09 · P2 · EL ESCALADO A SAT DESDE MÁQUINA SIN AVISO PREVIO PIERDE EL SLA DE LA SEDE
+### H-36-09 · P2 · RESUELTO (2026-11-20) · EL ESCALADO A SAT DESDE MÁQUINA SIN AVISO PREVIO PIERDE EL SLA DE LA SEDE
 
 **Flujo:** «⚡ Escalar Avería al SAT» desde la tarjeta de una máquina sin incidencia activa (rama que crea un ticket SAT nuevo).
 
@@ -286,7 +286,7 @@ El modal muestra las cuatro causas L1 sin filtrar por categoría ni por `level1_
 4. Nota interna de más de 20 caracteres y foto PNG de prueba.
 5. Confirmar. `POST /api/restocker/machines/2/escalate-to-sat` → **201**.
 
-#### Resultado observado
+#### Resultado observado (original)
 
 Se creó `INC-2026-DRJC` (id 5781) con:
 
@@ -312,22 +312,37 @@ El ticket hermano de la misma sede, `INC-2026-QW8V` (VEND-0101), conserva:
 
 La sede Hospital del Mar está sembrada con `sla_tier = CRITICAL_INFRASTRUCTURE_24_7`. El técnico ve el ticket como «Estándar · Objetivo 24 h» pese a que la urgencia es `CRITICAL` y la sede es crítica 24x7.
 
-#### Causa raíz
+#### Causa raíz original
 
 - En [`PdoRestockerSatSynergyGateway::escalateBranchB()`](../src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php), el `INSERT` del ticket nuevo fija `sla_target_minutes` con `COALESCE(:sla_minutes, 1440)` y no copia `sla_tier_snapshot` de la sede.
 - El resultado usa el valor por defecto del esquema para el perfil SLA (`STANDARD`) en lugar del perfil de la ubicación.
 - La rama que escala un L1 existente conserva el SLA del ticket original; la inconsistencia aparece solo al crear un ticket SAT nuevo desde una máquina sin aviso.
 
-#### Impacto
+#### Impacto original
 
 - El ticket se monitoriza con 24 h cuando la sede exige 4 h para urgencia crítica; puede incumplir el contrato SLA sin que el panel lo marque.
 - Dos tickets de la misma sede muestran perfiles distintos: el nuevo, con urgencia `CRITICAL`, queda en `STANDARD` / 24 h, mientras el hermano conserva `CRITICAL_INFRASTRUCTURE_24_7` / 240 min; eso rompe la trazabilidad del contrato.
 - Afecta a `RF-03.2` y al cálculo de SLA del Módulo 30.
 
-#### Recomendación
+#### Recomendación original
 
 - Heredar `sla_tier_snapshot` de la ubicación y calcular `sla_target_minutes` con la matriz de urgencia del perfil, igual que el alta ordinaria.
 - Añadir una prueba de composición que escale desde una máquina de sede `CRITICAL_INFRASTRUCTURE_24_7` con urgencia `CRITICAL` y exija 240 minutos.
+
+#### Corrección aplicada
+
+- **Herencia del perfil:** [`PdoRestockerSatSynergyGateway.php`](../src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php) lee `locations.sla_tier` en el bloqueo de la máquina y usa `SlaTargetCalculator` con `MachineType × IncidentCategory × UrgencyLevel` para calcular el objetivo, igual que el alta ordinaria. La rama B inserta `sla_tier_snapshot` y `sla_target_minutes` derivados del servidor; el `sla_target_minutes` del payload deja de decidir el contrato.
+- **Respuesta:** el escalado devuelve `urgency`, `sla_tier_snapshot` y `sla_target_minutes` para que la UI pueda reflejar el perfil aplicado sin una lectura adicional.
+- **Prueba de composición:** [`RestockerSatSynergyApiTest.php`](../tests/integration/RestockerSatSynergyApiTest.php) siembra una sede `CRITICAL_INFRASTRUCTURE_24_7` y una máquina limpia, escala con `ELECTRICAL_OFF`/`CRITICAL` y un `sla_target_minutes = 1440` malicioso, y exige **240 min** tanto en la respuesta como en PostgreSQL.
+
+#### Evidencia de la corrección (2026-11-20)
+
+| Suite | Resultado |
+| :--- | :--- |
+| `tests/integration/RestockerSatSynergyApiTest.php` | **67/67** aserciones · 0 fallos (herencia SLA y rechazo de minutos del cliente) |
+| `tests/frontend/restocker_route_view.test.mjs` | **239/239** aserciones · 0 fallos (sin cambios en la UI) |
+| Canal `new_engine` | **71/71 suites · 2.354 aserciones · 0 fallos · `exit=0`** |
+| Evidencia focalizada del Módulo 36 | **576** aserciones |
 
 ---
 
@@ -493,9 +508,9 @@ SELECT ticket_code, status, dispatch_level, level1_issue_type,
 | `H-36-06` | **No · resuelto el 2026-11-20** | Hidratación y composición HTTP/PostgreSQL cubiertas; la validación de categoría quedó cubierta en `H-36-08` |
 | `H-36-07` | **No · resuelto el 2026-11-20** | Selector de motivo en Sede y persistencia validada en el despacho L1 |
 | `H-36-08` | **No · resuelto el 2026-11-20** | Filtro por categoría/motivo, preselección coherente y 422 de categoría cubiertos |
-| `H-36-09` | Sí, para el contrato SLA | Heredar el perfil SLA de la sede en la rama de ticket nuevo |
+| `H-36-09` | **No · resuelto el 2026-11-20** | Perfil SLA de la sede heredado y calculado con la matriz de urgencia en la rama B |
 | `H-36-10` | Sí, para D4 | Publicar `location_id` o indexar por máquina |
 | `O-36-01` | No | Refrescar coincidencia al iniciar turno |
 | `O-36-02` | No | Mensajes de error de validación útiles |
 
-**Conclusión:** la Spec 36 no puede declararse cerrada con esta corrida. `H-36-06` ya no bloquea el flujo principal de resolución L1: la hidratación y la composición HTTP/PostgreSQL están cubiertas. `H-36-07` queda resuelto con el selector de motivo en Sede y la validación/persistencia en el despacho manual L1. `H-36-08` queda resuelto con el filtrado por categoría/motivo, la preselección coherente y el rechazo 422 de causas de otra categoría. Siguen abiertos `H-36-09` y `H-36-10`, que dejan requisitos de SLA sin cumplir. Las correcciones deben acompañarse de pruebas de composición reales, no solo de dobles del gateway.
+**Conclusión:** la Spec 36 no puede declararse cerrada con esta corrida. `H-36-06` ya no bloquea el flujo principal de resolución L1: la hidratación y la composición HTTP/PostgreSQL están cubiertas. `H-36-07` queda resuelto con el selector de motivo en Sede y la validación/persistencia en el despacho manual L1. `H-36-08` queda resuelto con el filtrado por categoría/motivo, la preselección coherente y el rechazo 422 de causas de otra categoría. `H-36-09` queda resuelto al heredar el perfil SLA de la sede en la rama de ticket SAT nuevo. Sigue abierto `H-36-10`, que deja la Coincidencia en Sede sin renderizar en la vista del reponedor. Las correcciones deben acompañarse de pruebas de composición reales, no solo de dobles del gateway.

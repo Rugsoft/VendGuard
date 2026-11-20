@@ -116,6 +116,23 @@ try {
     ]);
     $locationId = (int)$locationStmt->fetchColumn();
 
+    // H-36-09: sede crítica 24x7 para certificar la herencia del SLA en la rama B.
+    $criticalLocationStmt = $pdo->prepare(
+        "INSERT INTO locations (site_code, site_code_key, name, address, zone_id, sla_tier)
+         VALUES ('SEDE-RSS8-CRIT', 'sede-rss8-crit', 'Sede Crítica T-RSS-08',
+                 'Carrer de la Sinergia 8, Barcelona', :zone_id, 'CRITICAL_INFRASTRUCTURE_24_7')
+         RETURNING id"
+    );
+    $criticalLocationStmt->execute([':zone_id' => $zoneId]);
+    $criticalLocationId = (int)$criticalLocationStmt->fetchColumn();
+
+    $criticalMachineStmt = $pdo->prepare(
+        "INSERT INTO machines (location_id, code, model, machine_type, floor_wing)
+         VALUES (:location_id, 'RSS8-SNACK-19', 'Modelo RSS8', 'SNACKS', 'Planta baja') RETURNING id"
+    );
+    $criticalMachineStmt->execute([':location_id' => $criticalLocationId]);
+    $criticalMachineId = (int)$criticalMachineStmt->fetchColumn();
+
     $machineStmt = $pdo->prepare(
         "INSERT INTO machines (location_id, code, model, machine_type, floor_wing)
          VALUES (:location_id, :code, 'Modelo RSS8', 'SNACKS', 'Planta baja') RETURNING id"
@@ -978,6 +995,41 @@ try {
             && ($escalatedStop['photo_path'] ?? '') === '/uploads/incidents/rss08_escalation.jpg',
         'status=' . $technicianRouteAfterEscalation->getStatusCode()
             . ' stop=' . json_encode($escalatedStop)
+    );
+
+    // H-36-09: una máquina limpia de sede CRITICAL_INFRASTRUCTURE_24_7 debe
+    // heredar el perfil de la sede y calcular 240 min, ignorando el SLA del cliente.
+    $criticalEscalation = $call('POST', "/api/restocker/machines/{$criticalMachineId}/escalate-to-sat", [
+        'category' => 'ELECTRICAL_OFF',
+        'workshop_internal_note' => 'La máquina no enciende y el display queda completamente apagado.',
+        'photo_path' => '/uploads/incidents/rss08_critical_sla.jpg',
+        'urgency' => 'CRITICAL',
+        'sla_target_minutes' => 1440,
+        'client_mutation_id' => 'rss08-escalate-critical-sla',
+        'client_occurred_at' => '2026-11-18 11:10:00+00',
+    ], $restockerToken);
+    $criticalEscalationData = $data($criticalEscalation);
+    $assert(
+        '8.3.1 El escalado desde sede crítica hereda el perfil SLA de la ubicación',
+        $criticalEscalation->getStatusCode() === 201
+            && ($criticalEscalationData['sla_tier_snapshot'] ?? null) === 'CRITICAL_INFRASTRUCTURE_24_7'
+            && (int)($criticalEscalationData['sla_target_minutes'] ?? 0) === 240,
+        'status=' . $criticalEscalation->getStatusCode() . ' body=' . json_encode($criticalEscalationData)
+    );
+
+    $criticalIncidentStmt = $pdo->prepare(
+        'SELECT category, urgency, sla_tier_snapshot, sla_target_minutes
+           FROM incidents WHERE id = :id'
+    );
+    $criticalIncidentStmt->execute([':id' => (int)($criticalEscalationData['incident_id'] ?? 0)]);
+    $criticalIncidentRow = $criticalIncidentStmt->fetch();
+    $assert(
+        '8.3.2 El SLA crítico se persiste y no acepta minutos del cliente',
+        is_array($criticalIncidentRow)
+            && $criticalIncidentRow['category'] === 'ELECTRICAL_OFF'
+            && $criticalIncidentRow['sla_tier_snapshot'] === 'CRITICAL_INFRASTRUCTURE_24_7'
+            && (int)$criticalIncidentRow['sla_target_minutes'] === 240,
+        'row=' . json_encode($criticalIncidentRow)
     );
 
     $pdo->prepare('UPDATE users SET is_active = FALSE WHERE id = :id')
