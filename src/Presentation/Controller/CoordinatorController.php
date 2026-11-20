@@ -287,6 +287,11 @@ class CoordinatorController
                 );
             }
 
+            $after = $this->incidentRepo->findById((int)$incident->getId());
+            if ($after !== null && ($enqueuer = $this->notifications()) !== null) {
+                $enqueuer->enqueueAssignment($incident, $after);
+            }
+
             return Response::json($result, 200, 'Nivel operativo actualizado.');
         });
     }
@@ -1172,6 +1177,16 @@ class CoordinatorController
         $technician = $this->userRepo->findById($technicianId, onlyActive: true);
         if ($technician === null || $technician->getRole()->value !== 'TECHNICIAN') {
             return Response::error('TECHNICIAN_NOT_FOUND', "No se encontró ningún técnico de ruta activo con ID {$technicianId}.", 422);
+        }
+
+        // QA-CON-01 / D1: un expediente en Nivel 1 no puede asignarse a un Técnico SAT
+        // sin conmutar primero su nivel operativo mediante /dispatch-level.
+        if ($incident->getDispatchLevel()->isLevel1()) {
+            return Response::error(
+                'INVALID_ASSIGNEE_ROLE_FOR_DISPATCH_LEVEL',
+                'Un expediente en Nivel 1 (L1_RESTOCKER) no puede asignarse a un Técnico SAT sin conmutar primero su nivel operativo a L2_SAT.',
+                422
+            );
         }
 
         // 6. Validar estado actual: asignación inicial desde REGISTERED/REOPENED y

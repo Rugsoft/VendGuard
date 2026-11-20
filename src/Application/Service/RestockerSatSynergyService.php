@@ -190,9 +190,11 @@ final class RestockerSatSynergyService
         );
         RestockerSatSynergyValidator::assertNotPendingParts(IncidentDispatchLevel::L1_RESTOCKER);
 
+        $diagnosisInput = $resolution['resolution_diagnosis'] ?? $resolution['diagnosis'] ?? null;
+        $actionInput = $resolution['resolution_action'] ?? $resolution['action'] ?? null;
         $texts = RestockerSatSynergyValidator::assertResolutionTexts(
-            isset($resolution['diagnosis']) ? (string)$resolution['diagnosis'] : null,
-            isset($resolution['action']) ? (string)$resolution['action'] : null
+            $diagnosisInput !== null ? (string)$diagnosisInput : null,
+            $actionInput !== null ? (string)$actionInput : null
         );
         $resolution['diagnosis'] = $texts['diagnosis'];
         $resolution['action'] = $texts['action'];

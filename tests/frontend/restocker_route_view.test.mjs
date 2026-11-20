@@ -2082,6 +2082,39 @@ assert(
     && (await incidentSyncVm.ensureIncidentQueue().list(12)).length === 0
 );
 
+// P1.8: archivar un conflicto L1 envía stop_type, stop_id y operation_type reales en el raíz.
+const originalDumpIncidentConflict = api.restocker.dumpIncidentConflict;
+let dumpedIncidentPayload = null;
+api.restocker.dumpIncidentConflict = async (payload) => {
+  dumpedIncidentPayload = payload;
+  return { ok: true, outcome_status: 'CONFLICT_DUMPED' };
+};
+const conflictVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+await conflictVm.ensureIncidentQueue().enqueue({
+  client_mutation_id: 't-rss11-conflict-payload',
+  restocker_id: 12,
+  operation_type: RESTOCKER_INCIDENT_OPERATIONS.START_L1,
+  incident_id: 509,
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  payload: { client_occurred_at: '2026-11-20T10:00:00Z' }
+});
+await conflictVm.ensureIncidentQueue().markConflict('t-rss11-conflict-payload', 'Ya estaba iniciado');
+const [queuedConflictItem] = await conflictVm.ensureIncidentQueue().list(12, ['CONFLICT']);
+try {
+  await conflictVm.archiveIncidentConflict(queuedConflictItem);
+} finally {
+  api.restocker.dumpIncidentConflict = originalDumpIncidentConflict;
+}
+assert(
+  'P1.8: archiveIncidentConflict envía stop_type, stop_id y operation_type en nivel raíz',
+  dumpedIncidentPayload?.stop_type === 'INCIDENT'
+    && dumpedIncidentPayload?.stop_id === 509
+    && dumpedIncidentPayload?.operation_type === RESTOCKER_INCIDENT_OPERATIONS.START_L1
+    && (await conflictVm.ensureIncidentQueue().list(12)).length === 0,
+  JSON.stringify(dumpedIncidentPayload)
+);
+
 api.restocker.startL1Incident = originalStartL1;
 api.restocker.resolveL1Incident = originalResolveL1;
 api.restocker.escalateMachineToSat = originalEscalateMachine;

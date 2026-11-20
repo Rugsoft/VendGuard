@@ -612,6 +612,7 @@ class AppRouter
         $router->post('/api/restocker/machines/{machineId}/cash-collections', [RestockerRouteController::class, 'registerCashCollection'], [$restockerAuth]);
         $router->post('/api/restocker/incidents/{id}/start', [RestockerRouteController::class, 'startLevel1'], [$restockerAuth]);
         $router->post('/api/restocker/incidents/{id}/resolve', [RestockerRouteController::class, 'resolveLevel1'], [$restockerAuth]);
+        $router->post('/api/restocker/incidents/{id}/escalate-to-sat', [RestockerRouteController::class, 'escalateIncidentToSat'], [$restockerAuth]);
         $router->post('/api/restocker/machines/{machineId}/escalate-to-sat', [RestockerRouteController::class, 'escalateToSat'], [$restockerAuth]);
         // Alias contractual de la evidencia del escalado (PR22-07). Reutiliza
         // el uploader de visitas para no duplicar la validación de 5 MB y magic bytes.

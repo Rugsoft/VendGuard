@@ -61,6 +61,27 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
     private const DISPATCH_LEVEL_ALLOWED_STATUSES = ['REGISTERED', 'ASSIGNED', 'REOPENED'];
     private const OPEN_SHIFT_STATUSES = ['ON_SHIFT', 'MEAL_BREAK'];
 
+    private const ACTION_START_L1 = 'START_L1_INCIDENT';
+    private const ACTION_RESOLVE_L1 = 'RESOLVE_L1_INCIDENT';
+    private const ACTION_DISPATCH_LEVEL_CHANGE = 'DISPATCH_LEVEL_CHANGE';
+    private const ACTION_ESCALATE_TO_SAT = 'ESCALATE_INCIDENT_TO_SAT';
+    private const ACTION_QR_AUTO_ESCALATED_TO_SAT = 'QR_AUTO_ESCALATED_TO_SAT';
+    private const ACTION_OFFLINE_CONFLICT_DUMP = 'OFFLINE_RESTOCKER_INCIDENT_CONFLICT_DUMP';
+    private const ACTION_L1_HANDOVER_SHIFT = 'L1_HANDOVER_RESTOCKER_SHIFT_HANDOVER';
+    private const ACTION_L1_HANDOVER_ABSENCE = 'L1_HANDOVER_ABSENCE_COVERAGE_REASSIGN';
+
+    private const SUPPORTED_CONFLICT_OPERATIONS = [
+        'START_L1_INCIDENT',
+        'RESOLVE_L1_INCIDENT',
+        'ESCALATE_INCIDENT_TO_SAT',
+    ];
+
+    private const SUPPORTED_STOP_TYPES = [
+        'INCIDENT',
+        'MACHINE',
+        'PREVENTIVE_ORDER',
+    ];
+
     private PDO $pdo;
 
     /** Profundidad de las unidades de trabajo abiertas por esta instancia. */
@@ -135,7 +156,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             $stmt->execute([':occurred_at' => $occurredAt, ':id' => $incidentId]);
 
             $this->insertHistory($incidentId, $this->actorId($actor), $previousStatus, 'IN_PROGRESS', 'START_L1_INCIDENT');
-            $this->audit($incidentId, 'START_L1_INCIDENT', $actor, ['status' => $previousStatus], ['status' => 'IN_PROGRESS']);
+            $this->audit($incidentId, self::ACTION_START_L1, $actor, ['status' => $previousStatus], ['status' => 'IN_PROGRESS']);
 
             $payload = [
                 'ok' => true,
@@ -214,7 +235,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             );
             $this->audit(
                 $incidentId,
-                'QR_AUTO_ESCALATED_TO_SAT',
+                self::ACTION_QR_AUTO_ESCALATED_TO_SAT,
                 $actor,
                 ['dispatch_level' => (string)$current['dispatch_level'], 'category' => (string)$current['category']],
                 ['dispatch_level' => 'L2_SAT', 'category' => ($categoryEnum ?? IncidentCategory::fromString((string)$current['category']))->value]
@@ -383,7 +404,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             );
             $this->audit(
                 $incidentId,
-                'DISPATCH_LEVEL_CHANGE',
+                self::ACTION_DISPATCH_LEVEL_CHANGE,
                 $actor,
                 [
                     'dispatch_level' => (string)$current['dispatch_level'],
@@ -426,6 +447,23 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             return $this->error('MISSING_CLIENT_MUTATION_ID', 422, 'El volcado exige client_mutation_id.');
         }
 
+        $operationType = strtoupper(trim((string)(
+            $mutation['operation_type'] ?? $conflict['operation_type'] ?? 'RESOLVE_L1_INCIDENT'
+        )));
+        if (!in_array($operationType, self::SUPPORTED_CONFLICT_OPERATIONS, true)) {
+            return $this->error('INVALID_OPERATION_TYPE', 422, 'La operación offline indicada para el volcado no es válida.');
+        }
+
+        $defaultStopType = ($operationType === 'ESCALATE_INCIDENT_TO_SAT' && empty($mutation['incident_id']))
+            ? 'MACHINE'
+            : 'INCIDENT';
+        $stopType = strtoupper(trim((string)($mutation['stop_type'] ?? $conflict['stop_type'] ?? $defaultStopType)));
+        if (!in_array($stopType, self::SUPPORTED_STOP_TYPES, true)) {
+            return $this->error('INVALID_STOP_TYPE', 422, 'El tipo de parada del volcado no es válido.');
+        }
+
+        $stopId = (int)($mutation['stop_id'] ?? $mutation['incident_id'] ?? $mutation['machine_id'] ?? 0);
+
         $this->begin();
         try {
             $occurredAt = $this->occurredAt($mutation);
@@ -444,9 +482,9 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             $stmt->execute([
                 ':technician_id' => $this->actorId($actor),
                 ':client_mutation_id' => $mutationId,
-                ':stop_type' => strtoupper(trim((string)($mutation['stop_type'] ?? 'INCIDENT'))),
-                ':stop_id' => (int)($mutation['stop_id'] ?? 0),
-                ':operation_type' => strtoupper(trim((string)($mutation['operation_type'] ?? 'RESOLVE_L1_INCIDENT'))),
+                ':stop_type' => $stopType,
+                ':stop_id' => $stopId,
+                ':operation_type' => $operationType,
                 ':client_occurred_at' => (string)($mutation['client_occurred_at'] ?? $occurredAt),
                 ':effective_occurred_at' => $occurredAt,
                 ':response_status' => (int)($conflict['http_status'] ?? 409),
@@ -454,15 +492,28 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             ]);
 
             $this->audit(
-                (int)($mutation['stop_id'] ?? 0),
-                'OFFLINE_RESTOCKER_INCIDENT_CONFLICT_DUMP',
+                $stopId,
+                self::ACTION_OFFLINE_CONFLICT_DUMP,
                 $actor,
                 [],
-                ['client_mutation_id' => $mutationId, 'conflict' => $conflict]
+                [
+                    'client_mutation_id' => $mutationId,
+                    'stop_type' => $stopType,
+                    'stop_id' => $stopId,
+                    'operation_type' => $operationType,
+                    'conflict' => $conflict,
+                ]
             );
             $this->commit();
 
-            return ['ok' => true, 'client_mutation_id' => $mutationId, 'outcome_status' => 'CONFLICT_DUMPED'];
+            return [
+                'ok' => true,
+                'client_mutation_id' => $mutationId,
+                'outcome_status' => 'CONFLICT_DUMPED',
+                'stop_type' => $stopType,
+                'stop_id' => $stopId,
+                'operation_type' => $operationType,
+            ];
         } catch (Throwable $exception) {
             $this->rollback();
             throw $exception;
@@ -623,7 +674,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             $this->insertHistory($incidentId, $this->actorId($actor), 'IN_PROGRESS', 'RESOLVED', 'RESOLVE_L1_INCIDENT');
             $this->audit(
                 $incidentId,
-                'RESOLVE_L1_INCIDENT',
+                self::ACTION_RESOLVE_L1,
                 $actor,
                 ['status' => 'IN_PROGRESS'],
                 ['status' => 'RESOLVED', 'dispatch_level' => 'L1_RESTOCKER']
@@ -689,12 +740,31 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             $technicianId = isset($payload['assign_technician_id']) ? (int)$payload['assign_technician_id'] : 0;
             $technicianId = $technicianId > 0 ? $technicianId : null;
 
+            if ($incident !== null && (string)$incident['status'] === 'RESOLVED') {
+                if ($this->isResolvedWithinWarranty($incident, $occurredAt)) {
+                    return $this->escalateResolvedInWarranty(
+                        $incident,
+                        $machine,
+                        $actor,
+                        $category,
+                        $note,
+                        $payload,
+                        $technicianId,
+                        $occurredAt,
+                        $mutation
+                    );
+                }
+
+                $this->closeExpiredResolvedForNewEscalation($incident, $actor, $occurredAt);
+                $incident = null;
+            }
+
             if ($incident !== null && (string)$incident['dispatch_level'] === 'L1_RESTOCKER') {
                 return $this->escalateBranchA($incident, $machine, $actor, $category, $note, $payload, $technicianId, $occurredAt, $mutation);
             }
 
             if ($incident !== null) {
-                return $this->escalateBranchC($incident, $machine, $actor, $category, $note, $payload, $occurredAt, $mutation);
+                return $this->escalateBranchC($incident, $machine, $actor, $category, $note, $payload, $technicianId, $occurredAt, $mutation);
             }
 
             return $this->escalateBranchB($machine, $actor, $category, $note, $payload, $technicianId, $occurredAt, $mutation);
@@ -1103,7 +1173,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
 
                 $this->audit(
                     $incidentId,
-                    'L1_HANDOVER_' . $reasonType,
+                    $cause === 'SHIFT_CLOSE' ? self::ACTION_L1_HANDOVER_SHIFT : self::ACTION_L1_HANDOVER_ABSENCE,
                     $actor,
                     ['assigned_technician_id' => $restockerId],
                     ['assigned_technician_id' => $next['id'] ?? null]
@@ -1150,28 +1220,10 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         ?array $mutation
     ): array {
         $incidentId = (int)$incident['id'];
-
-        // La urgencia y el SLA son una consecuencia del parte, no una entrada del
-        // cliente: se derivan de la máquina, la categoría y el perfil contractual
-        // congelado en el expediente. Así un llamador no puede rebajar la
-        // prioridad sanitaria del Art. II al escalar desde L1.
-        $machineType = MachineType::fromString((string)$machine['machine_type']);
-        $slaTier = SlaTier::tryFrom(strtoupper(trim((string)($incident['sla_tier_snapshot'] ?? ''))))
-            ?? SlaTier::tryFrom(strtoupper(trim((string)($machine['sla_tier'] ?? ''))))
-            ?? SlaTier::STANDARD;
-        $urgencyLevel = UrgencyCalculator::calculate($machineType, $category);
-        $urgency = $urgencyLevel->value;
-        $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
-            $slaTier,
-            $machineType,
-            $category,
-            $urgencyLevel
-        );
-        $slaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt(
-            new DateTimeImmutable((string)$incident['created_at']),
-            $slaTargetMinutes,
-            (int)($incident['total_pending_info_seconds'] ?? 0)
-        )->format('Y-m-d\TH:i:sP');
+        $sla = $this->resolveMonotonicUrgencyAndSla($incident, $machine, $category);
+        $urgency = $sla['urgency']->value;
+        $slaTargetMinutes = $sla['sla_target_minutes'];
+        $slaTargetAt = $sla['sla_target_at'];
 
         $this->closeOpenCustody($incidentId, $actor, 'ESCALATED_TO_SAT_BY_RESTOCKER', $note, $occurredAt);
 
@@ -1213,7 +1265,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         $this->insertHistory($incidentId, $this->actorId($actor), (string)$incident['status'], $status, 'ESCALATE_INCIDENT_TO_SAT:ESCALATED_FROM_L1');
         $this->audit(
             $incidentId,
-            'ESCALATE_INCIDENT_TO_SAT',
+            self::ACTION_ESCALATE_TO_SAT,
             $actor,
             ['dispatch_level' => 'L1_RESTOCKER', 'status' => (string)$incident['status']],
             [
@@ -1262,68 +1314,85 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         IncidentCategory $category,
         string $note,
         array $payload,
+        ?int $technicianId,
         string $occurredAt,
         ?array $mutation
     ): array {
         $incidentId = (int)$incident['id'];
         $currentCategory = IncidentCategory::tryFrom((string)$incident['category']);
         $incomingWins = $this->categorySeverity($category) > $this->categorySeverity($currentCategory);
+        $effectiveCategory = $incomingWins ? $category : ($currentCategory ?? $category);
 
-        $machineType = MachineType::fromString((string)$machine['machine_type']);
-        $slaTier = SlaTier::tryFrom(strtoupper(trim((string)($incident['sla_tier_snapshot'] ?? ''))))
-            ?? SlaTier::tryFrom(strtoupper(trim((string)($machine['sla_tier'] ?? ''))))
-            ?? SlaTier::STANDARD;
-        $urgencyLevel = UrgencyCalculator::calculate($machineType, $category);
-        $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
-            $slaTier,
-            $machineType,
-            $category,
-            $urgencyLevel
-        );
-        $slaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt(
-            new DateTimeImmutable((string)$incident['created_at']),
-            $slaTargetMinutes,
-            (int)($incident['total_pending_info_seconds'] ?? 0)
-        )->format('Y-m-d\TH:i:sP');
+        $sla = $this->resolveMonotonicUrgencyAndSla($incident, $machine, $effectiveCategory);
+        $urgency = $sla['urgency']->value;
+        $slaTargetMinutes = $sla['sla_target_minutes'];
+        $slaTargetAt = $sla['sla_target_at'];
+
+        $assignUnassigned = (string)$incident['status'] === 'REGISTERED'
+            && empty($incident['assigned_technician_id'])
+            && $technicianId !== null;
+        $finalStatus = $assignUnassigned ? 'ASSIGNED' : (string)$incident['status'];
+        $finalAssigneeId = $assignUnassigned
+            ? $technicianId
+            : ($incident['assigned_technician_id'] !== null ? (int)$incident['assigned_technician_id'] : null);
+
+        $slaShortened = (int)($incident['sla_target_minutes'] ?? 0) !== $slaTargetMinutes
+            || empty($incident['sla_target_at']);
 
         $stmt = $this->pdo->prepare(
             'UPDATE incidents
                 SET escalated_from_restocker_id = COALESCE(escalated_from_restocker_id, :restocker_id),
                     escalated_to_sat_at = COALESCE(escalated_to_sat_at, :occurred_at::timestamptz),
-                    category = CASE WHEN :incoming_wins_a::boolean THEN :category::incident_category ELSE category END,
-                    urgency = CASE WHEN :incoming_wins_b::boolean THEN :urgency::urgency_level ELSE urgency END,
-                    sla_target_minutes = CASE WHEN :incoming_wins_c::boolean THEN :sla_minutes::integer ELSE sla_target_minutes END,
-                    sla_target_at = CASE WHEN :incoming_wins_d::boolean THEN :sla_target_at::timestamptz ELSE sla_target_at END,
+                    category = :category::incident_category,
+                    urgency = :urgency::urgency_level,
+                    sla_target_minutes = :sla_minutes::integer,
+                    sla_target_at = CASE WHEN :update_sla_target::boolean THEN :sla_target_at::timestamptz ELSE sla_target_at END,
+                    status = CASE WHEN :assign_unassigned_a::boolean THEN \'ASSIGNED\' ELSE status END,
+                    assigned_technician_id = CASE WHEN :assign_unassigned_b::boolean THEN :technician_id ELSE assigned_technician_id END,
+                    assigned_at = CASE WHEN :assign_unassigned_c::boolean THEN :occurred_at_assigned::timestamptz ELSE assigned_at END,
                     updated_at = CURRENT_TIMESTAMP
               WHERE id = :id'
         );
         $stmt->execute([
             ':restocker_id' => $this->actorId($actor),
             ':occurred_at' => $occurredAt,
-            ':incoming_wins_a' => $incomingWins ? 'true' : 'false',
-            ':incoming_wins_b' => $incomingWins ? 'true' : 'false',
-            ':incoming_wins_c' => $incomingWins ? 'true' : 'false',
-            ':incoming_wins_d' => $incomingWins ? 'true' : 'false',
-            ':category' => $category->value,
-            ':urgency' => $urgencyLevel->value,
+            ':category' => $effectiveCategory->value,
+            ':urgency' => $urgency,
             ':sla_minutes' => $slaTargetMinutes,
+            ':update_sla_target' => $slaShortened ? 'true' : 'false',
             ':sla_target_at' => $slaTargetAt,
+            ':assign_unassigned_a' => $assignUnassigned ? 'true' : 'false',
+            ':assign_unassigned_b' => $assignUnassigned ? 'true' : 'false',
+            ':assign_unassigned_c' => $assignUnassigned ? 'true' : 'false',
+            ':technician_id' => $technicianId,
+            ':occurred_at_assigned' => $occurredAt,
             ':id' => $incidentId,
         ]);
 
+        if ($assignUnassigned && $technicianId !== null) {
+            $this->openCustody($incidentId, $technicianId, 'RESTOCKER_ESCALATION_TO_SAT', $this->actorId($actor), $occurredAt);
+            $this->insertHistory($incidentId, $this->actorId($actor), 'REGISTERED', 'ASSIGNED', 'ESCALATE_INCIDENT_TO_SAT:ASSIGNED_ON_MERGE');
+        }
+
         $this->insertInternalComment($incidentId, $actor, $note, $payload['photo_path'] ?? null);
-        $this->insertHistory($incidentId, $this->actorId($actor), (string)$incident['status'], (string)$incident['status'], 'ESCALATE_INCIDENT_TO_SAT:MERGED_INTO_EXISTING_SAT_TICKET');
+        $this->insertHistory($incidentId, $this->actorId($actor), $finalStatus, $finalStatus, 'ESCALATE_INCIDENT_TO_SAT:MERGED_INTO_EXISTING_SAT_TICKET');
         $this->audit(
             $incidentId,
-            'ESCALATE_INCIDENT_TO_SAT',
+            self::ACTION_ESCALATE_TO_SAT,
             $actor,
-            ['assigned_technician_id' => $incident['assigned_technician_id'] ?? null],
+            [
+                'status' => (string)$incident['status'],
+                'assigned_technician_id' => $incident['assigned_technician_id'] ?? null,
+                'urgency' => (string)$incident['urgency'],
+            ],
             [
                 'dispatch_level' => 'L2_SAT',
                 'merged' => true,
-                'category' => $incomingWins ? $category->value : (string)$incident['category'],
-                'urgency' => $incomingWins ? $urgencyLevel->value : (string)$incident['urgency'],
-                'sla_target_minutes' => $incomingWins ? $slaTargetMinutes : (int)$incident['sla_target_minutes'],
+                'status' => $finalStatus,
+                'assigned_technician_id' => $finalAssigneeId,
+                'category' => $effectiveCategory->value,
+                'urgency' => $urgency,
+                'sla_target_minutes' => $slaTargetMinutes,
             ]
         );
 
@@ -1334,9 +1403,144 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             'machine_id' => (int)$machine['id'],
             'machine_code' => (string)$machine['code'],
             'dispatch_level' => 'L2_SAT',
-            'status' => (string)$incident['status'],
+            'status' => $finalStatus,
+            'urgency' => $urgency,
+            'sla_target_minutes' => $slaTargetMinutes,
+            'assigned_technician_id' => $finalAssigneeId,
+            'assigned_on_merge' => $assignUnassigned,
             'escalation_outcome' => 'MERGED_INTO_EXISTING_SAT_TICKET',
             'merged_into_existing_sat_ticket' => true,
+            'escalated_from_restocker_id' => (int)($incident['escalated_from_restocker_id'] ?? $this->actorId($actor)),
+            'escalated_to_sat_at' => (string)($incident['escalated_to_sat_at'] ?? $occurredAt),
+            'idempotent_replay' => false,
+        ];
+        $this->recordMutation($actor, $mutation, 'INCIDENT', $incidentId, 'ESCALATE_INCIDENT_TO_SAT', $response);
+        $this->commit();
+
+        return $response;
+    }
+
+    /**
+     * Reabre en garantía (<= 48 h) y promueve/absorbe hacia `L2_SAT` sin colisionar
+     * contra `uq_machine_active_ticket`. Nunca copia la nota interna a `reopen_reason`.
+     *
+     * @param array<string, mixed> $incident
+     * @param array<string, mixed> $machine
+     * @param array<string, mixed> $actor
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed>|null $mutation
+     * @return array<string, mixed>
+     */
+    private function escalateResolvedInWarranty(
+        array $incident,
+        array $machine,
+        array $actor,
+        IncidentCategory $category,
+        string $note,
+        array $payload,
+        ?int $technicianId,
+        string $occurredAt,
+        ?array $mutation
+    ): array {
+        $incidentId = (int)$incident['id'];
+        $wasL1 = (string)$incident['dispatch_level'] === 'L1_RESTOCKER';
+        $currentCategory = IncidentCategory::tryFrom((string)$incident['category']);
+        $effectiveCategory = $wasL1
+            ? $category
+            : ($this->categorySeverity($category) > $this->categorySeverity($currentCategory) ? $category : ($currentCategory ?? $category));
+
+        $sla = $this->resolveMonotonicUrgencyAndSla(
+            $incident,
+            $machine,
+            $effectiveCategory,
+            new DateTimeImmutable($occurredAt)
+        );
+        $urgency = $sla['urgency']->value;
+        $slaTargetMinutes = $sla['sla_target_minutes'];
+        $slaTargetAt = $sla['sla_target_at'];
+        $status = $technicianId !== null ? 'ASSIGNED' : 'REGISTERED';
+        $reopenPublicReason = 'Reapertura automática en garantía por escalado técnico in situ al SAT.';
+
+        $this->closeOpenCustody($incidentId, $actor, 'ESCALATED_TO_SAT_BY_RESTOCKER', $note, $occurredAt);
+
+        $stmt = $this->pdo->prepare(
+            'UPDATE incidents
+                SET dispatch_level = \'L2_SAT\',
+                    category = :category::incident_category,
+                    status = :status,
+                    assigned_technician_id = :technician_id,
+                    assigned_at = CASE WHEN :technician_flag::bigint IS NULL THEN NULL ELSE :occurred_at_assigned::timestamptz END,
+                    started_at = NULL,
+                    resolved_at = NULL,
+                    reopened_at = :occurred_at_reopened::timestamptz,
+                    reopen_reason = :reopen_reason,
+                    cycle_started_at = :occurred_at_cycle::timestamptz,
+                    cold_alert_sent_at = NULL,
+                    sla_2h_alert_sent_at = NULL,
+                    sla_3h_alert_sent_at = NULL,
+                    escalated_from_restocker_id = COALESCE(escalated_from_restocker_id, :restocker_id),
+                    escalated_to_sat_at = COALESCE(escalated_to_sat_at, :occurred_at_esc::timestamptz),
+                    urgency = :urgency::urgency_level,
+                    sla_target_minutes = :sla_minutes::integer,
+                    sla_target_at = :sla_target_at::timestamptz,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id = :id'
+        );
+        $stmt->execute([
+            ':category' => $effectiveCategory->value,
+            ':status' => $status,
+            ':technician_id' => $technicianId,
+            ':technician_flag' => $technicianId,
+            ':occurred_at_assigned' => $occurredAt,
+            ':occurred_at_reopened' => $occurredAt,
+            ':reopen_reason' => $reopenPublicReason,
+            ':occurred_at_cycle' => $occurredAt,
+            ':restocker_id' => $this->actorId($actor),
+            ':occurred_at_esc' => $occurredAt,
+            ':urgency' => $urgency,
+            ':sla_minutes' => $slaTargetMinutes,
+            ':sla_target_at' => $slaTargetAt,
+            ':id' => $incidentId,
+        ]);
+
+        if ($technicianId !== null) {
+            $this->openCustody($incidentId, $technicianId, 'WARRANTY_REOPEN_ESCALATION_TO_SAT', $this->actorId($actor), $occurredAt);
+        }
+
+        $this->insertInternalComment($incidentId, $actor, $note, $payload['photo_path'] ?? null);
+        $this->insertHistory($incidentId, $this->actorId($actor), 'RESOLVED', 'REOPENED', $reopenPublicReason);
+        $this->insertHistory($incidentId, $this->actorId($actor), 'REOPENED', $status, 'ESCALATE_INCIDENT_TO_SAT:WARRANTY_REOPEN_TO_SAT');
+        $this->audit(
+            $incidentId,
+            self::ACTION_ESCALATE_TO_SAT,
+            $actor,
+            ['dispatch_level' => (string)$incident['dispatch_level'], 'status' => 'RESOLVED'],
+            [
+                'dispatch_level' => 'L2_SAT',
+                'status' => $status,
+                'reopened_from_warranty' => true,
+                'category' => $effectiveCategory->value,
+                'urgency' => $urgency,
+                'sla_target_minutes' => $slaTargetMinutes,
+            ]
+        );
+
+        $outcome = $wasL1 ? 'ESCALATED_FROM_L1' : 'MERGED_INTO_EXISTING_SAT_TICKET';
+        $response = [
+            'ok' => true,
+            'incident_id' => $incidentId,
+            'ticket_code' => (string)$incident['ticket_code'],
+            'machine_id' => (int)$machine['id'],
+            'machine_code' => (string)$machine['code'],
+            'dispatch_level' => 'L2_SAT',
+            'status' => $status,
+            'urgency' => $urgency,
+            'sla_target_minutes' => $slaTargetMinutes,
+            'sla_target_at' => $slaTargetAt,
+            'assigned_technician_id' => $technicianId,
+            'reopened_from_warranty' => true,
+            'escalation_outcome' => $outcome,
+            'merged_into_existing_sat_ticket' => !$wasL1,
             'escalated_from_restocker_id' => (int)($incident['escalated_from_restocker_id'] ?? $this->actorId($actor)),
             'escalated_to_sat_at' => (string)($incident['escalated_to_sat_at'] ?? $occurredAt),
             'idempotent_replay' => false,
@@ -1379,28 +1583,38 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             $category,
             $urgencyLevel
         );
+        $slaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt(
+            new DateTimeImmutable($occurredAt),
+            $slaTargetMinutes,
+            0
+        )->format('Y-m-d\TH:i:sP');
         $ticketCode = ($this->ticketCodeGenerator)();
+        // Art. V.4: la nota interna de taller nunca se vuelca en el campo
+        // público `description`; queda protegida en `incident_comments` (`is_internal = TRUE`).
+        $publicDescription = 'Avería técnica detectada durante visita operativa en máquina y derivada al servicio técnico.';
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO incidents (
-                ticket_code, machine_id, location_id, category, description, photo_path,
-                urgency, status, assigned_technician_id, assigned_at,
+                ticket_code, machine_id, machine_type_snapshot, location_id, category, description, photo_path,
+                urgency, status, assigned_technician_id, assigned_at, cycle_started_at,
                 dispatch_level, escalated_from_restocker_id, escalated_to_sat_at,
-                sla_tier_snapshot, sla_target_minutes, reporter_name
+                sla_tier_snapshot, sla_target_minutes, sla_target_at, reporter_name
              ) VALUES (
-                :ticket_code, :machine_id, :location_id, :category, :description, :photo_path,
+                :ticket_code, :machine_id, :machine_type_snapshot::machine_type, :location_id, :category, :description, :photo_path,
                 :urgency, :status, :technician_id,
                 CASE WHEN :technician_flag::bigint IS NULL THEN NULL ELSE :occurred_at_assigned::timestamptz END,
+                :cycle_started_at::timestamptz,
                 \'L2_SAT\', :restocker_id, :occurred_at::timestamptz,
-                :sla_tier, :sla_minutes, :reporter_name
+                :sla_tier, :sla_minutes, :sla_target_at::timestamptz, :reporter_name
              ) RETURNING id, ticket_code, status'
         );
         $stmt->execute([
             ':ticket_code' => $ticketCode,
             ':machine_id' => (int)$machine['id'],
+            ':machine_type_snapshot' => $machineType->value,
             ':location_id' => (int)$machine['location_id'],
             ':category' => $category->value,
-            ':description' => $note,
+            ':description' => $publicDescription,
             ':photo_path' => $payload['photo_path'] ?? null,
             ':urgency' => $urgency,
             ':status' => $status,
@@ -1408,9 +1622,11 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             ':technician_flag' => $technicianId,
             ':occurred_at' => $occurredAt,
             ':occurred_at_assigned' => $occurredAt,
+            ':cycle_started_at' => $occurredAt,
             ':restocker_id' => $this->actorId($actor),
             ':sla_tier' => $slaTier->value,
             ':sla_minutes' => $slaTargetMinutes,
+            ':sla_target_at' => $slaTargetAt,
             ':reporter_name' => $this->actorName($actor),
         ]);
         $created = $stmt->fetch();
@@ -1427,7 +1643,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         $this->insertHistory($incidentId, $this->actorId($actor), null, $status, 'ESCALATE_INCIDENT_TO_SAT:CREATED_NEW_SAT_TICKET');
         $this->audit(
             $incidentId,
-            'ESCALATE_INCIDENT_TO_SAT',
+            self::ACTION_ESCALATE_TO_SAT,
             $actor,
             [],
             ['dispatch_level' => 'L2_SAT', 'status' => $status, 'machine_id' => (int)$machine['id']]
@@ -1444,6 +1660,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             'urgency' => $urgency,
             'sla_tier_snapshot' => $slaTier->value,
             'sla_target_minutes' => $slaTargetMinutes,
+            'sla_target_at' => $slaTargetAt,
             'escalation_outcome' => 'CREATED_NEW_SAT_TICKET',
             'merged_into_existing_sat_ticket' => false,
             'escalated_from_restocker_id' => $this->actorId($actor),
@@ -1454,6 +1671,99 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         $this->commit();
 
         return $response;
+    }
+
+    /**
+     * Calcula urgencia y SLA de forma monotónica para no degradar un expediente
+     * ya escalado al absorber o promover una categoría menos severa.
+     *
+     * @param array<string, mixed> $incident
+     * @param array<string, mixed> $machine
+     * @return array{urgency: UrgencyLevel, sla_tier: SlaTier, sla_target_minutes: int, sla_target_at: string}
+     */
+    private function resolveMonotonicUrgencyAndSla(
+        array $incident,
+        array $machine,
+        IncidentCategory $effectiveCategory,
+        ?DateTimeImmutable $anchor = null
+    ): array {
+        $machineType = MachineType::fromString((string)$machine['machine_type']);
+        $slaTier = SlaTier::tryFrom(strtoupper(trim((string)($incident['sla_tier_snapshot'] ?? ''))))
+            ?? SlaTier::tryFrom(strtoupper(trim((string)($machine['sla_tier'] ?? ''))))
+            ?? SlaTier::STANDARD;
+
+        $calculatedUrgency = UrgencyCalculator::calculate($machineType, $effectiveCategory);
+        $currentUrgency = UrgencyLevel::tryFrom(strtoupper(trim((string)($incident['urgency'] ?? ''))));
+        $finalUrgency = ($currentUrgency !== null && $currentUrgency->priorityRank() > $calculatedUrgency->priorityRank())
+            ? $currentUrgency
+            : $calculatedUrgency;
+
+        $calculatedSlaMinutes = SlaTargetCalculator::calculateTargetMinutes(
+            $slaTier,
+            $machineType,
+            $effectiveCategory,
+            $finalUrgency
+        );
+        $currentSlaMinutes = (int)($incident['sla_target_minutes'] ?? 0);
+        $finalSlaMinutes = $currentSlaMinutes > 0
+            ? min($currentSlaMinutes, $calculatedSlaMinutes)
+            : $calculatedSlaMinutes;
+
+        $baseTime = $anchor ?? new DateTimeImmutable((string)$incident['created_at']);
+        $pauseSeconds = $anchor !== null ? 0 : (int)($incident['total_pending_info_seconds'] ?? 0);
+        $slaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt(
+            $baseTime,
+            $finalSlaMinutes,
+            $pauseSeconds
+        )->format('Y-m-d\TH:i:sP');
+
+        return [
+            'urgency' => $finalUrgency,
+            'sla_tier' => $slaTier,
+            'sla_target_minutes' => $finalSlaMinutes,
+            'sla_target_at' => $slaTargetAt,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $incident
+     */
+    private function isResolvedWithinWarranty(array $incident, string $occurredAt): bool
+    {
+        $resolvedAtRaw = trim((string)($incident['resolved_at'] ?? ''));
+        if ($resolvedAtRaw === '') {
+            return false;
+        }
+
+        return new DateTimeImmutable($occurredAt) <= (new DateTimeImmutable($resolvedAtRaw))->modify('+48 hours');
+    }
+
+    /**
+     * @param array<string, mixed> $incident
+     * @param array<string, mixed> $actor
+     */
+    private function closeExpiredResolvedForNewEscalation(array $incident, array $actor, string $occurredAt): void
+    {
+        $incidentId = (int)$incident['id'];
+        $stmt = $this->pdo->prepare(
+            'UPDATE incidents
+                SET status = \'CLOSED\',
+                    closed_at = COALESCE(closed_at, :occurred_at::timestamptz),
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id = :id'
+        );
+        $stmt->execute([
+            ':occurred_at' => $occurredAt,
+            ':id' => $incidentId,
+        ]);
+
+        $this->insertHistory(
+            $incidentId,
+            $this->actorId($actor),
+            'RESOLVED',
+            'CLOSED',
+            'AUTO_CLOSED_EXPIRED_WARRANTY_ON_SAT_ESCALATION'
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1509,7 +1819,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                FROM incidents
               WHERE machine_id = :machine_id
                 AND deleted_at IS NULL
-                AND status NOT IN (\'RESOLVED\', \'CLOSED\', \'CANCELLED\')
+                AND status NOT IN (\'CLOSED\', \'CANCELLED\')
               ORDER BY id DESC
               LIMIT 1
               FOR UPDATE'

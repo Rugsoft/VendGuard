@@ -413,11 +413,11 @@ try {
     $branchCRow->execute([':id' => (int)$incident3['id']]);
     $branchCRow = $branchCRow->fetch();
     $assert(
-        'La Rama C recalcula urgencia/SLA cuando la categoría entrante es más grave',
+        'La Rama C preserva urgencia monotónica y endurece el SLA cuando la categoría entrante es más grave',
         is_array($branchCRow)
             && $branchCRow['category'] === 'TEMPERATURE_COLD'
-            && $branchCRow['urgency'] === 'MEDIUM'
-            && (int)$branchCRow['sla_target_minutes'] === 1440
+            && $branchCRow['urgency'] === 'HIGH'
+            && (int)$branchCRow['sla_target_minutes'] === 720
             && $branchCRow['sla_target_at'] !== null,
         'row=' . json_encode($branchCRow)
     );

@@ -626,8 +626,8 @@ export const IncidentReportModal = {
           style="margin-bottom: 16px;"
           data-testid="level1-issue-type-block"
         >
-          <label for="incident-level1-issue-type" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 4px;">
-            Motivo de Nivel 1 <span style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);">(opcional)</span>
+          <label for="incident-level1-issue-type" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 4px;">
+            Motivo de Nivel 1 <span style="font-size: 11px; color: var(--color-ink-muted);">(opcional)</span>
           </label>
           <select
             id="incident-level1-issue-type"
@@ -641,7 +641,7 @@ export const IncidentReportModal = {
               {{ issueType.label }}
             </option>
           </select>
-          <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
+          <div style="font-size: 12px; color: var(--color-ink-muted); margin-top: 4px;">
             Si el aviso es leve y puede resolverlo el reponedor en su ruta, selecciona el motivo para preclasificarlo (RF-01.2).
           </div>
         </div>

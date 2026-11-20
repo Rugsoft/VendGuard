@@ -224,6 +224,33 @@ assert(
     && assignTechnicianCalls === 0,
   JSON.stringify({ level2Dispatched, assignTechnicianCalls })
 );
+
+// P1.6: un clic en "Asignar al sugerido" sobre un ticket L1 también conmuta a L2_SAT
+// por dispatch-level en lugar de golpear assignTechnician().
+level2Calls = 0;
+level2Dispatched = null;
+coordinator.selectedIncident = {
+  id: 5,
+  ticket_code: 'INC-5',
+  dispatch_level: 'L1_RESTOCKER',
+  assigned_technician_id: 9
+};
+coordinator.assignmentSuggestions = {
+  recommendation: { top_technician_id: 10 },
+  ranked_technicians: [{ technician_id: 10, name: 'Carlos SAT' }]
+};
+coordinator.assignUrgencyOverride = '';
+coordinator.assignUrgencyReason = '';
+await coordinator.assignSuggestedTechnician();
+assert(
+  'P1.6: assignSuggestedTechnician en L1_RESTOCKER conmuta a L2_SAT vía dispatch-level',
+  level2Calls === 1
+    && level2Dispatched?.id === 5
+    && level2Dispatched?.level === 'L2_SAT'
+    && level2Dispatched?.assigneeId === 10
+    && assignTechnicianCalls === 0,
+  JSON.stringify({ level2Calls, level2Dispatched, assignTechnicianCalls })
+);
 api.coordinator.assignTechnician = originalAssignTechnician;
 
 const modalVm = buildVm(CoordinatorDashboardView, {

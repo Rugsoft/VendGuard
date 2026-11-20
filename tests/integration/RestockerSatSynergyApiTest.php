@@ -1549,6 +1549,326 @@ try {
             && $digitalRow['level1_issue_type'] === 'MISSING_CONSUMABLES',
         'status=' . $digitalCreation->getStatusCode() . ' row=' . json_encode($digitalRow)
     );
+
+    echo "\n--- 10. Cierre de bloqueantes P0 y P1 de la revisión PR22 ---\n";
+
+    // Reactivamos al técnico SAT titular de la zona (quedó inactivo en 8.4)
+    // y añadimos un técnico de guardia 24/7 para validar Art. II.
+    $pdo->prepare('UPDATE users SET is_active = TRUE, is_on_call = FALSE WHERE id = :id')
+        ->execute([':id' => $technicianId]);
+    $onCallTechId = $createUser('oncall', 'TECHNICIAN', 'Técnico Guardia P0 T-RSS-08');
+    $pdo->prepare('UPDATE users SET is_on_call = TRUE, is_active = TRUE WHERE id = :id')
+        ->execute([':id' => $onCallTechId]);
+    $shiftStmt->execute([':id' => $onCallTechId]);
+
+    // P0.1: errores de dominio del gateway no pueden devolver 200/201 (cola offline).
+    $foreignStart = $call('POST', "/api/restocker/incidents/{$incidentId}/start", [
+        'client_mutation_id' => 'rss08-p01-start-err',
+        'client_occurred_at' => '2026-11-20 10:00:00+00',
+    ], $restockerToken);
+    $outsideEscalate = $call('POST', '/api/restocker/machines/999999/escalate-to-sat', [
+        'category' => 'PRODUCT_JAM',
+        'workshop_internal_note' => 'Máquina inexistente en el parque para probar error HTTP real.',
+        'photo_path' => '/uploads/incidents/rss08_escalation.png',
+        'client_mutation_id' => 'rss08-p01-esc-404',
+        'client_occurred_at' => '2026-11-20 10:01:00+00',
+    ], $restockerToken);
+    $badDump = $call('POST', '/api/restocker/incidents/conflict-dump', [
+        'client_mutation_id' => 'rss08-p01-bad-op',
+        'stop_id' => $incidentId,
+        'operation_type' => 'UNKNOWN_OP',
+    ], $restockerToken);
+    $assert(
+        '10.1 P0.1: start, escalate-to-sat y conflict-dump propagan 4xx del gateway (no 200/201)',
+        $foreignStart->getStatusCode() === 409
+            && ($json($foreignStart)['success'] ?? true) === false
+            && $outsideEscalate->getStatusCode() === 404
+            && ($json($outsideEscalate)['success'] ?? true) === false
+            && $badDump->getStatusCode() === 422
+            && ($json($badDump)['success'] ?? true) === false,
+        sprintf(
+            'statuses=%d/%d/%d',
+            $foreignStart->getStatusCode(),
+            $outsideEscalate->getStatusCode(),
+            $badDump->getStatusCode()
+        )
+    );
+
+    // P0.2: escalado con ticket RESOLVED en garantía <= 48 h y expirado > 48 h (sin 23505).
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-P0-WARRANTY']);
+    $warrantyMachineId = (int)$machineStmt->fetchColumn();
+    $warrantyResolvedId = $seedIncident('INC-2026-8901', $warrantyMachineId, $restockerId, 'RESOLVED');
+    $pdo->prepare("UPDATE incidents SET resolved_at = CURRENT_TIMESTAMP - INTERVAL '2 hours' WHERE id = :id")
+        ->execute([':id' => $warrantyResolvedId]);
+
+    $warrantyNote = 'DIAGNOSTICO SECRETO GARANTIA P02: motorreductor dañado tras reapertura.';
+    $warrantyEsc = $call('POST', "/api/restocker/machines/{$warrantyMachineId}/escalate-to-sat", [
+        'category' => 'PRODUCT_JAM',
+        'workshop_internal_note' => $warrantyNote,
+        'photo_path' => '/uploads/incidents/rss08_escalation.png',
+        'client_mutation_id' => 'rss08-p02-warranty',
+        'client_occurred_at' => gmdate('Y-m-d H:i:s+00'),
+    ], $restockerToken);
+    $warrantyData = $data($warrantyEsc);
+    $warrantyRowStmt = $pdo->prepare(
+        'SELECT dispatch_level, status, reopen_reason, assigned_technician_id FROM incidents WHERE id = :id'
+    );
+    $warrantyRowStmt->execute([':id' => $warrantyResolvedId]);
+    $warrantyRow = $warrantyRowStmt->fetch();
+    $warrantyCustody = $pdo->prepare(
+        "SELECT COUNT(*) FROM incident_assignments
+          WHERE incident_id = :id AND assignment_source = 'WARRANTY_REOPEN_ESCALATION_TO_SAT' AND unassigned_at IS NULL"
+    );
+    $warrantyCustody->execute([':id' => $warrantyResolvedId]);
+    $assert(
+        '10.2 P0.2: escalar sobre RESOLVED en garantía (<48h) reabre en L2_SAT sin 500 ni fuga Art. V.4',
+        $warrantyEsc->getStatusCode() === 201
+            && ($warrantyData['reopened_from_warranty'] ?? false) === true
+            && is_array($warrantyRow)
+            && $warrantyRow['dispatch_level'] === 'L2_SAT'
+            && $warrantyRow['status'] === 'ASSIGNED'
+            && !str_contains((string)($warrantyRow['reopen_reason'] ?? ''), 'DIAGNOSTICO SECRETO')
+            && (int)$warrantyCustody->fetchColumn() === 1,
+        'status=' . $warrantyEsc->getStatusCode() . ' row=' . json_encode($warrantyRow)
+    );
+
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-P0-EXPIRED']);
+    $expiredMachineId = (int)$machineStmt->fetchColumn();
+    $expiredResolvedId = $seedIncident('INC-2026-8902', $expiredMachineId, $restockerId, 'RESOLVED');
+    $pdo->prepare("UPDATE incidents SET resolved_at = CURRENT_TIMESTAMP - INTERVAL '60 hours' WHERE id = :id")
+        ->execute([':id' => $expiredResolvedId]);
+    $expiredEsc = $call('POST', "/api/restocker/machines/{$expiredMachineId}/escalate-to-sat", [
+        'category' => 'PAYMENT_SYSTEM',
+        'workshop_internal_note' => 'NOTA INTERNA EXPIRADO: fallo completo de validador tras garantía.',
+        'photo_path' => '/uploads/incidents/rss08_escalation.png',
+        'client_mutation_id' => 'rss08-p02-expired',
+        'client_occurred_at' => gmdate('Y-m-d H:i:s+00'),
+    ], $restockerToken);
+    $expiredData = $data($expiredEsc);
+    $oldStatusStmt = $pdo->prepare('SELECT status FROM incidents WHERE id = :id');
+    $oldStatusStmt->execute([':id' => $expiredResolvedId]);
+    $assert(
+        '10.3 P0.2: escalar sobre RESOLVED expirado (>48h) cierra el previo y abre nuevo L2_SAT',
+        $expiredEsc->getStatusCode() === 201
+            && ($expiredData['escalation_outcome'] ?? '') === 'CREATED_NEW_SAT_TICKET'
+            && (int)($expiredData['incident_id'] ?? 0) !== $expiredResolvedId
+            && $oldStatusStmt->fetchColumn() === 'CLOSED',
+        'status=' . $expiredEsc->getStatusCode() . ' data=' . json_encode($expiredData)
+    );
+
+    // P0.3a: QrReportService recibe el sanitary_status real de la máquina (no null),
+    // de modo que una máquina en QUARANTINE jamás nazca en L1_RESTOCKER.
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-P0-QR-QUAR']);
+    $qrQuarMachineId = (int)$machineStmt->fetchColumn();
+    $pdo->prepare("UPDATE machines SET sanitary_status = 'QUARANTINE' WHERE id = :id")
+        ->execute([':id' => $qrQuarMachineId]);
+    $qrQuarResult = (new \VendGuard\Application\Service\QrReportService())->report([
+        'machine_code' => 'RSS8-P0-QR-QUAR',
+        'category' => 'PRODUCT_JAM',
+        'description' => 'Envase trabado en máquina en cuarentena sanitaria',
+        'level1_issue_type' => 'MINOR_SPIRAL_JAM',
+    ]);
+    $qrQuarStmt = $pdo->prepare('SELECT dispatch_level FROM incidents WHERE id = :id');
+    $qrQuarStmt->execute([':id' => (int)($qrQuarResult['incident_id'] ?? 0)]);
+    $assert(
+        '10.4 P0.3: QrReportService con level1_issue_type sobre máquina en QUARANTINE nace en L2_SAT (Art. II)',
+        (int)($qrQuarResult['incident_id'] ?? 0) > 0 && $qrQuarStmt->fetchColumn() === 'L2_SAT',
+        'result=' . json_encode($qrQuarResult)
+    );
+
+    // P0.3b + P0.4: escalado térmico en PERISHABLE_FOOD (Rama A y Rama B) prioriza guardia 24/7,
+    // encola COLD_CHAIN_IMMEDIATE_ALERT, no filtra nota interna a description y sella SLA/snapshot.
+    $perishableStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-P0-COLD-L1']);
+    $coldL1MachineId = (int)$perishableStmt->fetchColumn();
+    $coldL1Id = $seedIncident('INC-2026-8903', $coldL1MachineId, $restockerId, 'ASSIGNED');
+    $seedCustody($coldL1Id, $restockerId);
+
+    $coldEscA = $call('POST', "/api/restocker/machines/{$coldL1MachineId}/escalate-to-sat", [
+        'category' => 'TEMPERATURE_COLD',
+        'workshop_internal_note' => 'NOTA INTERNA FRIO RAMA A: compresor detenido a 14 grados.',
+        'photo_path' => '/uploads/incidents/rss08_escalation.png',
+        'client_mutation_id' => 'rss08-p03-cold-a',
+        'client_occurred_at' => gmdate('Y-m-d H:i:s+00'),
+    ], $restockerToken);
+    $coldRowA = $pdo->query(
+        "SELECT assigned_technician_id, urgency FROM incidents WHERE id = {$coldL1Id}"
+    )->fetch();
+    $coldAlertA = (int)$pdo->query(
+        "SELECT COUNT(*) FROM notification_outbox WHERE incident_id = {$coldL1Id} AND template = 'COLD_CHAIN_IMMEDIATE_ALERT'"
+    )->fetchColumn();
+    $assert(
+        '10.5 P0.3: Rama A TEMPERATURE_COLD prioriza al técnico de guardia 24/7 y encola alerta de frío',
+        $coldEscA->getStatusCode() === 201
+            && is_array($coldRowA)
+            && (int)$coldRowA['assigned_technician_id'] === $onCallTechId
+            && $coldRowA['urgency'] === 'CRITICAL'
+            && $coldAlertA >= 1,
+        'row=' . json_encode($coldRowA) . ' alerts=' . $coldAlertA
+    );
+
+    $perishableStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-P0-COLD-B']);
+    $coldBMachineId = (int)$perishableStmt->fetchColumn();
+    $secretNoteB = 'SECRETO INTERNO RAMA B P04: junta de puerta rota por dentro.';
+    $coldEscB = $call('POST', "/api/restocker/machines/{$coldBMachineId}/escalate-to-sat", [
+        'category' => 'TEMPERATURE_COLD',
+        'workshop_internal_note' => $secretNoteB,
+        'photo_path' => '/uploads/incidents/rss08_escalation.png',
+        'client_mutation_id' => 'rss08-p04-cold-b',
+        'client_occurred_at' => gmdate('Y-m-d H:i:s+00'),
+    ], $restockerToken);
+    $coldBId = (int)($data($coldEscB)['incident_id'] ?? 0);
+    $coldRowB = $pdo->query(
+        "SELECT description, sla_target_at, machine_type_snapshot, assigned_technician_id FROM incidents WHERE id = {$coldBId}"
+    )->fetch();
+    $coldAlertB = (int)$pdo->query(
+        "SELECT COUNT(*) FROM notification_outbox WHERE incident_id = {$coldBId} AND template = 'COLD_CHAIN_IMMEDIATE_ALERT'"
+    )->fetchColumn();
+    $internalCommentB = (int)$pdo->query(
+        "SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$coldBId} AND is_internal = TRUE AND comment_text LIKE '%SECRETO INTERNO RAMA B%'"
+    )->fetchColumn();
+    $assert(
+        '10.6 P0.3/P0.4: Rama B frío encola alerta, sella sla_target_at/snapshot y oculta nota interna (Art. V.4)',
+        $coldEscB->getStatusCode() === 201
+            && is_array($coldRowB)
+            && !str_contains((string)$coldRowB['description'], 'SECRETO INTERNO RAMA B')
+            && $coldRowB['sla_target_at'] !== null
+            && $coldRowB['machine_type_snapshot'] === 'PERISHABLE_FOOD'
+            && $coldAlertB >= 1
+            && $internalCommentB === 1,
+        'row=' . json_encode($coldRowB) . ' alert=' . $coldAlertB
+    );
+
+    // P1.6: PATCH assignTechnician rechaza L1_RESTOCKER y dispatchLevel L1->L2 encola notificación.
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-P1-COORD-L1']);
+    $coordL1MachineId = (int)$machineStmt->fetchColumn();
+    $coordL1Id = $seedIncident('INC-2026-8904', $coordL1MachineId, null, 'REGISTERED');
+    $pdo->prepare('UPDATE incidents SET assigned_technician_id = NULL, assigned_at = NULL WHERE id = :id')
+        ->execute([':id' => $coordL1Id]);
+
+    $forbiddenAssign = $call('PATCH', "/api/coordinator/incidents/{$coordL1Id}/assign", [
+        'technician_id' => $technicianId,
+    ], $coordinatorToken);
+    $switchDispatch = $call('POST', "/api/coordinator/incidents/{$coordL1Id}/dispatch-level", [
+        'dispatch_level' => 'L2_SAT',
+        'assignee_id' => $technicianId,
+    ], $coordinatorToken);
+    $switchNotifCount = (int)$pdo->query(
+        "SELECT COUNT(*) FROM notification_outbox WHERE incident_id = {$coordL1Id} AND template = 'TECHNICIAN_ASSIGNED'"
+    )->fetchColumn();
+    $assert(
+        '10.7 P1.6: assignTechnician rechaza L1_RESTOCKER con 422 y dispatch-level a L2 encola TECHNICIAN_ASSIGNED',
+        $forbiddenAssign->getStatusCode() === 422
+            && $errorCode($forbiddenAssign) === 'INVALID_ASSIGNEE_ROLE_FOR_DISPATCH_LEVEL'
+            && $switchDispatch->getStatusCode() === 200
+            && $switchNotifCount >= 1,
+        'assign=' . $forbiddenAssign->getStatusCode() . '/' . $errorCode($forbiddenAssign)
+            . ' switch=' . $switchDispatch->getStatusCode() . ' notif=' . $switchNotifCount
+    );
+
+    // P1.7: Rama C asigna un REGISTERED sin técnico y jamás rebaja urgencia CRITICAL existente.
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-P1-RAMA-C']);
+    $ramaCMachineId = (int)$machineStmt->fetchColumn();
+    $ramaCId = $seedIncident('INC-2026-8905', $ramaCMachineId, null, 'REGISTERED');
+    $pdo->prepare(
+        "UPDATE incidents
+            SET dispatch_level = 'L2_SAT',
+                level1_issue_type = NULL,
+                category = 'PRODUCT_JAM',
+                urgency = 'CRITICAL',
+                sla_target_minutes = 240,
+                assigned_technician_id = NULL,
+                assigned_at = NULL
+          WHERE id = :id"
+    )->execute([':id' => $ramaCId]);
+    $ramaCEsc = $call('POST', "/api/restocker/machines/{$ramaCMachineId}/escalate-to-sat", [
+        'category' => 'PAYMENT_SYSTEM',
+        'workshop_internal_note' => 'NOTA INTERNA RAMA C: también falló el monedero en sede.',
+        'photo_path' => '/uploads/incidents/rss08_escalation.png',
+        'client_mutation_id' => 'rss08-p17-rama-c',
+        'client_occurred_at' => gmdate('Y-m-d H:i:s+00'),
+    ], $restockerToken);
+    $ramaCRow = $pdo->query(
+        "SELECT status, assigned_technician_id, urgency, sla_target_minutes FROM incidents WHERE id = {$ramaCId}"
+    )->fetch();
+    $assert(
+        '10.8 P1.7: Rama C asigna ticket REGISTERED sin técnico y conserva CRITICAL/240 sin degradar',
+        $ramaCEsc->getStatusCode() === 201
+            && ($data($ramaCEsc)['escalation_outcome'] ?? '') === 'MERGED_INTO_EXISTING_SAT_TICKET'
+            && ($data($ramaCEsc)['assigned_on_merge'] ?? false) === true
+            && is_array($ramaCRow)
+            && $ramaCRow['status'] === 'ASSIGNED'
+            && (int)$ramaCRow['assigned_technician_id'] > 0
+            && $ramaCRow['urgency'] === 'CRITICAL'
+            && (int)$ramaCRow['sla_target_minutes'] === 240,
+        'data=' . json_encode($data($ramaCEsc)) . ' row=' . json_encode($ramaCRow)
+    );
+
+    // P1.8: ruta contractual /incidents/{id}/escalate-to-sat, claves resolution_* y conflict-dump real.
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-P1-INC-ESC']);
+    $incRouteMachineId = (int)$machineStmt->fetchColumn();
+    $incRouteTicketId = $seedIncident('INC-2026-8906', $incRouteMachineId, $restockerId, 'ASSIGNED');
+    $seedCustody($incRouteTicketId, $restockerId);
+    $incRouteEsc = $call('POST', "/api/restocker/incidents/{$incRouteTicketId}/escalate-to-sat", [
+        'category' => 'PAYMENT_SYSTEM',
+        'workshop_internal_note' => 'Escalado directo por endpoint de incidencia con lector averiado.',
+        'photo_path' => '/uploads/incidents/rss08_escalation.png',
+        'client_mutation_id' => 'rss08-p18-inc-route',
+        'client_occurred_at' => gmdate('Y-m-d H:i:s+00'),
+    ], $restockerToken);
+    $assert(
+        '10.9 P1.8: POST /api/restocker/incidents/{id}/escalate-to-sat existe y escala el expediente',
+        $incRouteEsc->getStatusCode() === 200
+            && ($data($incRouteEsc)['dispatch_level'] ?? '') === 'L2_SAT'
+            && (int)($data($incRouteEsc)['incident_id'] ?? 0) === $incRouteTicketId,
+        'status=' . $incRouteEsc->getStatusCode() . ' data=' . json_encode($data($incRouteEsc))
+    );
+
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS8-P1-RES-KEYS']);
+    $contractResMachineId = (int)$machineStmt->fetchColumn();
+    $contractResId = $seedIncident('INC-2026-8907', $contractResMachineId, $restockerId, 'IN_PROGRESS');
+    $seedCustody($contractResId, $restockerId);
+    $contractResolve = $call('POST', "/api/restocker/incidents/{$contractResId}/resolve", [
+        'machine_id' => $contractResMachineId,
+        'sanitary_status' => 'OK',
+        'resolution_diagnosis' => 'La bolsa del carril 12 quedó atrapada contra el frontal.',
+        'resolution_action' => 'Se libera el producto manualmente y se verifica el giro correcto.',
+        'root_cause_id' => $taxonomyCauseId,
+        'standard_solution_id' => $taxonomySolutionId,
+        'client_mutation_id' => 'rss08-p18-res-contract',
+        'client_occurred_at' => gmdate('Y-m-d H:i:s+00'),
+    ], $restockerToken);
+
+    $realDump = $call('POST', '/api/restocker/incidents/conflict-dump', [
+        'stop_type' => 'INCIDENT',
+        'stop_id' => $contractResId,
+        'operation_type' => 'START_L1_INCIDENT',
+        'machine_id' => $contractResMachineId,
+        'client_mutation_id' => 'rss08-p18-dump-real',
+        'client_occurred_at' => gmdate('Y-m-d H:i:s+00'),
+        'conflict' => ['http_status' => 409, 'operation_type' => 'START_L1_INCIDENT'],
+    ], $restockerToken);
+    $dumpRowStmt = $pdo->prepare(
+        "SELECT stop_type, stop_id, operation_type FROM offline_sync_mutations WHERE client_mutation_id = 'rss08-p18-dump-real'"
+    );
+    $dumpRowStmt->execute();
+    $dumpRow = $dumpRowStmt->fetch();
+    $dumpAuditEntityId = (int)$pdo->query(
+        "SELECT entity_id FROM audit_log WHERE action = 'OFFLINE_RESTOCKER_INCIDENT_CONFLICT_DUMP' ORDER BY id DESC LIMIT 1"
+    )->fetchColumn();
+    $assert(
+        '10.10 P1.8: resolve acepta resolution_diagnosis/action y conflict-dump sella stop_id y operation_type reales',
+        $contractResolve->getStatusCode() === 200
+            && ($data($contractResolve)['status'] ?? '') === 'RESOLVED'
+            && $realDump->getStatusCode() === 201
+            && is_array($dumpRow)
+            && $dumpRow['stop_type'] === 'INCIDENT'
+            && (int)$dumpRow['stop_id'] === $contractResId
+            && $dumpRow['operation_type'] === 'START_L1_INCIDENT'
+            && $dumpAuditEntityId === $contractResId,
+        'resolve=' . $contractResolve->getStatusCode()
+            . ' dump=' . json_encode($dumpRow)
+            . ' audit_entity_id=' . $dumpAuditEntityId
+    );
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");
 } finally {

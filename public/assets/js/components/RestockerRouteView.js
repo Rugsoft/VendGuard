@@ -1738,11 +1738,27 @@ export const RestockerRouteView = {
       if (!item?.client_mutation_id || this.isSyncingIncidents) return;
       this.isSyncingIncidents = true;
       try {
+        const stopType = item.operation_type === RESTOCKER_INCIDENT_OPERATIONS.ESCALATE_TO_SAT && !item.incident_id
+          ? 'MACHINE'
+          : 'INCIDENT';
+        const stopId = Number(item.incident_id || item.machine_id || 0);
+        const reason = item.conflict_reason || 'La operación L1 offline ya no puede aplicarse.';
         await api.restocker.dumpIncidentConflict({
+          stop_type: stopType,
+          stop_id: stopId,
+          operation_type: item.operation_type,
           machine_id: item.machine_id,
+          incident_id: item.incident_id || null,
           client_mutation_id: item.client_mutation_id,
-          reason: item.conflict_reason || 'La operación L1 offline ya no puede aplicarse.',
-          conflict: { operation_type: item.operation_type }
+          client_occurred_at: item.payload?.client_occurred_at || item.created_at || new Date().toISOString(),
+          reason,
+          conflict: {
+            operation_type: item.operation_type,
+            stop_type: stopType,
+            stop_id: stopId,
+            reason,
+            http_status: 409
+          }
         });
         await this.ensureIncidentQueue().remove(item.client_mutation_id);
         await this.loadPendingIncidentQueue();

@@ -1383,6 +1383,14 @@ export const CoordinatorDashboardView = {
         return;
       }
 
+      if (this.selectedIncident.dispatch_level === 'L1_RESTOCKER') {
+        this.assignDispatchLevel = 'L2_SAT';
+        this.assignTechnicianId = this.suggestedTechnicianId;
+        this.assignTechnicianChosenByUser = false;
+        await this.performLevel2Dispatch();
+        return;
+      }
+
       this.assignTechnicianId = this.suggestedTechnicianId;
       this.assignTechnicianChosenByUser = false;
       await this.performAssignment(this.suggestedTechnicianId);
@@ -2490,7 +2498,7 @@ export const CoordinatorDashboardView = {
           <div class="vg-triage-table-scroll">
             <table class="vg-triage-table" style="width: 100%; border-collapse: collapse; text-align: left; font-family: var(--font-body, Inter, sans-serif); font-size: 13px;">
               <thead>
-                <tr style="background-color: #fafbfc; border-bottom: 1px solid var(--color-hairline, #c8cfda); color: var(--color-ink-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;">
+                <tr style="background-color: var(--color-canvas); border-bottom: 1px solid var(--color-hairline); color: var(--color-ink-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;">
                   <th style="padding: 12px 16px;">Ticket / SLA</th>
                   <th style="padding: 12px 16px;">Sede / Ubicación</th>
                   <th style="padding: 12px 16px;">Máquina</th>
@@ -3091,7 +3099,7 @@ export const CoordinatorDashboardView = {
             data-testid="assign-level1-issue-type-block"
           >
             <label for="assign-level1-issue-type" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
-              Motivo de Nivel 1 <span style="color: #dc2626;">*</span>
+              Motivo de Nivel 1 <span style="color: var(--color-urgency-critical);">*</span>
             </label>
             <select
               id="assign-level1-issue-type"
@@ -3139,7 +3147,7 @@ export const CoordinatorDashboardView = {
                 Despachar al #1 recomendado
               </button>
             </div>
-            <p v-else-if="restockersError" style="font-size: 12px; color: #b91c1c;" role="alert">
+            <p v-else-if="restockersError" style="font-size: 12px; color: var(--color-error-text);" role="alert">
               {{ restockersError }}
             </p>
             <p v-else style="font-size: 12px; color: var(--color-ink-muted);">
@@ -3309,7 +3317,7 @@ export const CoordinatorDashboardView = {
                 <span
                   v-if="incidentOwnerLabel(inc)"
                   data-testid="bulk-assign-row-owner"
-                  style="margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--color-ink-muted); border: 1px solid var(--color-hairline, #c8cfda); border-radius: 4px; padding: 1px 6px;"
+                  style="margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--color-ink-muted); border: 1px solid var(--color-hairline); border-radius: 4px; padding: 1px 6px;"
                 >{{ incidentOwnerLabel(inc) }}</span>
               </li>
             </ul>

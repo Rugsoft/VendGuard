@@ -1864,7 +1864,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             $sql = "
                 UPDATE incidents
-                SET status = 'IN_PROGRESS',
+                SET dispatch_level = 'L2_SAT',
+                    status = 'IN_PROGRESS',
                     assigned_technician_id = :technician_id,
                     assigned_at = COALESCE(assigned_at, :instant),
                     started_at = COALESCE(started_at, :instant),
@@ -1982,7 +1983,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             $sql = "
                 UPDATE incidents
-                SET status = 'IN_PROGRESS',
+                SET dispatch_level = 'L2_SAT',
+                    status = 'IN_PROGRESS',
                     assigned_technician_id = :technician_id,
                     assigned_at = :instant,
                     started_at = COALESCE(started_at, :instant),
@@ -2124,7 +2126,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             $sql = "
                 UPDATE incidents
-                SET status = 'IN_PROGRESS',
+                SET dispatch_level = 'L2_SAT',
+                    status = 'IN_PROGRESS',
                     assigned_technician_id = :technician_id,
                     assigned_at = :instant,
                     started_at = :instant,

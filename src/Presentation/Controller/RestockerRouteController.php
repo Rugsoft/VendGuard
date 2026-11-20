@@ -29,15 +29,22 @@ use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
+use VendGuard\Core\Service\SlaTargetCalculator;
+use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoInSituRestockVisitGateway;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
+use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionGateway;
 use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionRepository;
 use VendGuard\Infrastructure\Repository\PdoMachinePlanogramRepository;
+use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRestockVisitRepository;
 use VendGuard\Infrastructure\Repository\PdoOperationalZoneRepository;
 use VendGuard\Infrastructure\Repository\PdoProductLoadingOrderRepository;
@@ -194,19 +201,87 @@ final class RestockerRouteController
             new PdoTechnicianSuggestionRepository($pdo)
         );
         $incidents = new PdoIncidentRepository($pdo);
+        $machines = new PdoMachineRepository($pdo);
+        $locations = new PdoLocationRepository($pdo);
         $notifications = NotificationOutboxEnqueuerFactory::create($pdo);
+        $beforeSnapshots = [];
 
-        $resolver = static function (int $machineId, array $payload) use ($suggestions, $incidents): ?array {
+        $resolver = static function (int $machineId, array $payload) use (
+            $suggestions,
+            $incidents,
+            $machines,
+            $locations,
+            &$beforeSnapshots
+        ): ?array {
             $incident = $incidents->findActiveByMachineId($machineId);
-            $suggestion = $incident !== null
-                ? $suggestions->getSuggestions($incident->getId())
-                : $suggestions->getSuggestionsForMachine(
-                    $machineId,
-                    (string)($payload['category'] ?? 'OTHER'),
-                    isset($payload['urgency']) ? (string)$payload['urgency'] : null,
-                    isset($payload['sla_tier_snapshot']) ? (string)$payload['sla_tier_snapshot'] : null,
-                    isset($payload['sla_target_minutes']) ? (int)$payload['sla_target_minutes'] : null
-                );
+            $beforeSnapshots[$machineId] = $incident;
+
+            $machine = $machines->findById($machineId);
+            if ($machine === null) {
+                return null;
+            }
+
+            // Si un ticket RESOLVED ya superó su garantía de 48 h, escalateToSat() lo
+            // cerrará y abrirá un expediente nuevo (Rama B) con el cálculo fresco.
+            if ($incident !== null && $incident->getStatus() === IncidentStatus::RESOLVED) {
+                $occurredAtRaw = trim((string)($payload['client_occurred_at'] ?? ''));
+                $occurredAt = $occurredAtRaw !== ''
+                    ? new \DateTimeImmutable($occurredAtRaw)
+                    : new \DateTimeImmutable('now');
+                $resolvedAtRaw = $incident->getResolvedAt();
+                $withinWarranty = $resolvedAtRaw !== null
+                    && $occurredAt <= (new \DateTimeImmutable($resolvedAtRaw))->modify('+48 hours');
+                if (!$withinWarranty) {
+                    $incident = null;
+                }
+            }
+
+            $incomingCategory = IncidentCategory::tryFrom(strtoupper(trim((string)($payload['category'] ?? 'OTHER'))))
+                ?? IncidentCategory::OTHER;
+
+            // La ponderación de candidatos (especialmente la guardia 24/7 de frío)
+            // debe evaluarse con la severidad resultante post-escalado, no con la
+            // categoría leve anterior de L1 o del parte previo (Art. II).
+            $targetCategory = $incomingCategory;
+            if ($incident !== null
+                && !$incident->getDispatchLevel()->isLevel1()
+                && $incident->getStatus() !== IncidentStatus::RESOLVED) {
+                $severityOrder = static fn (IncidentCategory $cat): int => match ($cat) {
+                    IncidentCategory::OTHER => 1,
+                    IncidentCategory::PRODUCT_JAM => 2,
+                    IncidentCategory::PAYMENT_SYSTEM => 3,
+                    IncidentCategory::ELECTRICAL_OFF => 4,
+                    IncidentCategory::TEMPERATURE_COLD => 5,
+                };
+                if ($severityOrder($incident->getCategory()) > $severityOrder($incomingCategory)) {
+                    $targetCategory = $incident->getCategory();
+                }
+            }
+
+            $calcUrgency = UrgencyCalculator::calculate($machine->getMachineType(), $targetCategory);
+            $effectiveUrgency = ($incident !== null && $incident->getUrgency()->priorityRank() > $calcUrgency->priorityRank())
+                ? $incident->getUrgency()
+                : $calcUrgency;
+
+            $slaTier = $incident?->getSlaTierSnapshot()
+                ?? ($locations->findById($machine->getLocationId())?->getSlaTier() ?? SlaTier::STANDARD);
+            $calcSlaMinutes = SlaTargetCalculator::calculateTargetMinutes(
+                $slaTier,
+                $machine->getMachineType(),
+                $targetCategory,
+                $effectiveUrgency
+            );
+            $effectiveSlaMinutes = $incident !== null
+                ? min($incident->getSlaTargetMinutes(), $calcSlaMinutes)
+                : $calcSlaMinutes;
+
+            $suggestion = $suggestions->getSuggestionsForMachine(
+                $machineId,
+                $targetCategory->value,
+                $effectiveUrgency->value,
+                $slaTier->value,
+                $effectiveSlaMinutes
+            );
 
             if ($suggestion === null) {
                 return null;
@@ -229,29 +304,50 @@ final class RestockerRouteController
             return ['id' => $topId];
         };
 
-        $notifier = static function (string $event, array $payload) use ($notifications, $incidents): void {
+        $notifier = static function (string $event, array $payload) use ($notifications, $incidents, &$beforeSnapshots): void {
             if ($event !== RestockerSatSynergyService::EVENT_ESCALATED_TO_SAT
                 || ($payload['ok'] ?? false) !== true
-                || ($payload['idempotent_replay'] ?? false) === true
-                || ($payload['escalation_outcome'] ?? '') === 'MERGED_INTO_EXISTING_SAT_TICKET') {
+                || ($payload['idempotent_replay'] ?? false) === true) {
                 return;
             }
 
             $incidentId = (int)($payload['incident_id'] ?? 0);
-            $incident = $incidentId > 0 ? $incidents->findById($incidentId) : null;
-            if ($incident === null) {
+            $after = $incidentId > 0 ? $incidents->findById($incidentId) : null;
+            if ($after === null) {
+                return;
+            }
+
+            $machineId = (int)($payload['machine_id'] ?? 0);
+            $before = $beforeSnapshots[$machineId] ?? null;
+            unset($beforeSnapshots[$machineId]);
+
+            $outcome = (string)($payload['escalation_outcome'] ?? '');
+            if ($outcome === 'MERGED_INTO_EXISTING_SAT_TICKET') {
+                if (($payload['assigned_on_merge'] ?? false) === true
+                    || ($payload['reopened_from_warranty'] ?? false) === true) {
+                    if (($payload['status'] ?? '') === 'ASSIGNED') {
+                        $notifications->enqueueAssignment($before ?? $after, $after);
+                    } else {
+                        $notifications->enqueueSla2hUnassignedAlert($after);
+                    }
+                }
+                // Si la absorción o reapertura elevó a riesgo térmico, emitir la Alerta Inmediata de Frío (Art. II).
+                $notifications->enqueueColdChainAlert($after);
+
                 return;
             }
 
             if (($payload['status'] ?? '') === 'ASSIGNED') {
-                $notifications->enqueueAssignment($incident, $incident);
-
-                return;
+                $notifications->enqueueAssignment($before ?? $after, $after);
+            } else {
+                // Sin candidato la avería queda REGISTERED: Coordinación recibe la
+                // alerta de cobertura para que el triaje no dependa de mirar el panel.
+                $notifications->enqueueSla2hUnassignedAlert($after);
             }
 
-            // Sin candidato la avería queda REGISTERED: Coordinación recibe la
-            // alerta de cobertura para que el triaje no dependa de mirar el panel.
-            $notifications->enqueueSla2hUnassignedAlert($incident);
+            // En Rama B o cuando `$before === $after`, `enqueueAssignment` no dispara la
+            // alerta diferencial de frío; la comprobación idempotente la garantiza siempre (Art. II).
+            $notifications->enqueueColdChainAlert($after);
         };
 
         return new RestockerSatSynergyService(
@@ -736,8 +832,13 @@ final class RestockerRouteController
                 ]
                 : null;
 
+            $result = $this->synergy()->startLevel1($this->incidentRouteId($request), $this->actor($request), $mutation);
+            if (($result['ok'] ?? false) !== true) {
+                return $this->gatewayErrorResponse($result, 'START_L1_FAILED', 'No se pudo iniciar la intervención de Nivel 1.');
+            }
+
             return Response::json(
-                $this->synergy()->startLevel1($this->incidentRouteId($request), $this->actor($request), $mutation),
+                $result,
                 200,
                 'Intervención de Nivel 1 iniciada.'
             );
@@ -757,8 +858,8 @@ final class RestockerRouteController
                 'sanitary_status' => $body['sanitary_status'] ?? null,
             ];
             $resolution = [
-                'diagnosis' => $body['diagnosis'] ?? null,
-                'action' => $body['action'] ?? null,
+                'diagnosis' => $body['resolution_diagnosis'] ?? $body['diagnosis'] ?? null,
+                'action' => $body['resolution_action'] ?? $body['action'] ?? null,
                 'root_cause_id' => $body['root_cause_id'] ?? null,
                 'standard_solution_id' => $body['standard_solution_id'] ?? null,
             ];
@@ -771,18 +872,53 @@ final class RestockerRouteController
 
             $result = $this->synergy()->resolveLevel1($incident, $this->actor($request), $resolution, $mutation);
             if (($result['ok'] ?? false) !== true) {
-                return Response::error(
-                    (string)($result['error_code'] ?? 'RESOLUTION_FAILED'),
-                    (string)($result['message'] ?? 'No se pudo resolver el aviso de Nivel 1.'),
-                    (int)($result['http_status'] ?? 409),
-                    is_array($result['details'] ?? null) ? $result['details'] : null
-                );
+                return $this->gatewayErrorResponse($result, 'RESOLUTION_FAILED', 'No se pudo resolver el aviso de Nivel 1.');
             }
 
             return Response::json(
                 $result,
                 200,
                 'Nivel 1 resuelto y custodia cerrada.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/incidents/{id}/escalate-to-sat
+     */
+    public function escalateIncidentToSat(Request $request): Response
+    {
+        return $this->executeSynergy(function () use ($request): Response {
+            $incidentId = $this->incidentRouteId($request);
+            $incident = (new PdoIncidentRepository($this->pdo))->findById($incidentId);
+            if ($incident === null) {
+                return Response::error('INCIDENT_NOT_FOUND', 'El expediente no existe o está dado de baja.', 404);
+            }
+            if ($incident->getStatus()->isTerminal()) {
+                return Response::error(
+                    'INVALID_INCIDENT_STATE_TRANSITION',
+                    'No se puede escalar al SAT un expediente cerrado o cancelado.',
+                    409
+                );
+            }
+
+            $body = $request->getParsedBody();
+            $mutation = isset($body['client_mutation_id'])
+                ? [
+                    'client_mutation_id' => (string)$body['client_mutation_id'],
+                    'client_occurred_at' => $body['client_occurred_at'] ?? null,
+                ]
+                : null;
+
+            $result = $this->synergy()->escalateToSat($incident->getMachineId(), $this->actor($request), $body, $mutation);
+            if (($result['ok'] ?? false) !== true) {
+                return $this->gatewayErrorResponse($result, 'ESCALATION_FAILED', 'No se pudo escalar la avería al SAT.');
+            }
+
+            return Response::json(
+                $result,
+                200,
+                'Avería escalada al SAT.'
             );
         });
     }
@@ -802,8 +938,13 @@ final class RestockerRouteController
                 ]
                 : null;
 
+            $result = $this->synergy()->escalateToSat($machineId, $this->actor($request), $body, $mutation);
+            if (($result['ok'] ?? false) !== true) {
+                return $this->gatewayErrorResponse($result, 'ESCALATION_FAILED', 'No se pudo escalar la avería al SAT.');
+            }
+
             return Response::json(
-                $this->synergy()->escalateToSat($machineId, $this->actor($request), $body, $mutation),
+                $result,
                 201,
                 'Avería escalada al SAT.'
             );
@@ -819,12 +960,32 @@ final class RestockerRouteController
             $body = $request->getParsedBody();
             $conflict = is_array($body['conflict'] ?? null) ? $body['conflict'] : [];
 
+            $result = $this->synergy()->dumpOfflineConflict($this->actor($request), $body, $conflict);
+            if (($result['ok'] ?? false) !== true) {
+                return $this->gatewayErrorResponse($result, 'CONFLICT_DUMP_FAILED', 'No se pudo archivar el conflicto offline.', 422);
+            }
+
             return Response::json(
-                $this->synergy()->dumpOfflineConflict($this->actor($request), $body, $conflict),
+                $result,
                 201,
                 'Conflicto offline archivado en auditoría.'
             );
         });
+    }
+
+    /** @param array<string, mixed> $result */
+    private function gatewayErrorResponse(
+        array $result,
+        string $defaultCode,
+        string $defaultMessage,
+        int $defaultStatus = 409
+    ): Response {
+        return Response::error(
+            (string)($result['error_code'] ?? $defaultCode),
+            (string)($result['message'] ?? $defaultMessage),
+            (int)($result['http_status'] ?? $defaultStatus),
+            is_array($result['details'] ?? null) ? $result['details'] : null
+        );
     }
 
     /**

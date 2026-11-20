@@ -348,6 +348,39 @@ try {
         $deleteBlocked = true;
     }
     $assert('El hilo interno no se borra físicamente (Art. III.1)', $deleteBlocked);
+
+    echo "\n--- 7. P1.6: los flujos oportunistas promueven L1_RESTOCKER a L2_SAT ---\n";
+    $oppRepo = new \VendGuard\Infrastructure\Repository\PdoIncidentRepository($pdo);
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS9-OPP-CLAIM', ':sanitary' => 'OK']);
+    $oppClaimMachine = (int)$machineStmt->fetchColumn();
+    $oppClaimId = $seedIncident('INC-2026-9905', $oppClaimMachine, 'L1_RESTOCKER', 'PRODUCT_JAM', 'REGISTERED', null);
+    $oppClaimed = $oppRepo->claimOpportunisticIncident($oppClaimId, $technicianId);
+    $assert(
+        'claimOpportunisticIncident promueve L1_RESTOCKER a L2_SAT',
+        $oppClaimed->getDispatchLevel()->value === 'L2_SAT'
+            && $oppClaimed->getAssignedTechnicianId() === $technicianId
+    );
+
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS9-OPP-TAKEOVER', ':sanitary' => 'OK']);
+    $oppTakeMachine = (int)$machineStmt->fetchColumn();
+    $oppTakeId = $seedIncident('INC-2026-9906', $oppTakeMachine, 'L1_RESTOCKER', 'PRODUCT_JAM', 'ASSIGNED', $restockerId);
+    $takeoverResult = $oppRepo->takeOverOpportunisticIncident($oppTakeId, $technicianId, 'Toma de relevo técnico en sede');
+    $assert(
+        'takeOverOpportunisticIncident promueve L1_RESTOCKER a L2_SAT',
+        $takeoverResult['incident']->getDispatchLevel()->value === 'L2_SAT'
+            && $takeoverResult['incident']->getAssignedTechnicianId() === $technicianId
+    );
+
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'RSS9-OPP-REOPEN', ':sanitary' => 'OK']);
+    $oppReopenMachine = (int)$machineStmt->fetchColumn();
+    $oppReopenId = $seedIncident('INC-2026-9907', $oppReopenMachine, 'L1_RESTOCKER', 'PRODUCT_JAM', 'RESOLVED', $restockerId);
+    $pdo->exec("UPDATE incidents SET resolved_at = CURRENT_TIMESTAMP - INTERVAL '4 hours' WHERE id = {$oppReopenId}");
+    $oppReopened = $oppRepo->reopenOpportunisticIncident($oppReopenId, $technicianId, 'Reincidencia física en sede bajo garantía');
+    $assert(
+        'reopenOpportunisticIncident promueve L1_RESTOCKER a L2_SAT',
+        $oppReopened->getDispatchLevel()->value === 'L2_SAT'
+            && $oppReopened->getAssignedTechnicianId() === $technicianId
+    );
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");
 } finally {

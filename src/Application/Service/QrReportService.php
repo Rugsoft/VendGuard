@@ -188,7 +188,7 @@ class QrReportService
         $classification = RestockerSatSynergyValidator::classifyCreation(
             $level1IssueType,
             $category,
-            null,
+            $machine->getSanitaryStatus(),
             $retainedMoney,
             $refundMethod
         );
@@ -361,7 +361,17 @@ class QrReportService
                 $retainedMoney,
                 $refundMethod
             )) {
-                $assignTechnicianId = $this->resolveQrMergeTechnician((int)$incident->getId());
+                $effectiveUrgency = $incomingUrgency->priorityRank() > $incident->getUrgency()->priorityRank()
+                    ? $incomingUrgency
+                    : $incident->getUrgency();
+                $effectiveTargetMinutes = min($incident->getSlaTargetMinutes(), $incomingTargetMinutes);
+                $assignTechnicianId = $this->resolveQrMergeTechnician(
+                    (int)$machine->getId(),
+                    $incomingCategory->value,
+                    $effectiveUrgency->value,
+                    $incident->getSlaTierSnapshot()->value,
+                    $effectiveTargetMinutes
+                );
             }
 
             $promotion = $this->synergyService->autoEscalateQrMerge(
@@ -398,15 +408,16 @@ class QrReportService
             $effectiveUrgency = $incomingUrgency->priorityRank() > $incident->getUrgency()->priorityRank()
                 ? $incomingUrgency
                 : $incident->getUrgency();
+            $effectiveTargetMinutes = min($incident->getSlaTargetMinutes(), $incomingTargetMinutes);
             $createdAt = $this->parseDateTime($incident->getCreatedAt()) ?? new DateTimeImmutable('now');
             $targetAt = SlaTargetCalculator::computeEffectiveTargetAt(
                 $createdAt,
-                $incomingTargetMinutes,
+                $effectiveTargetMinutes,
                 $incident->getTotalPendingInfoSeconds()
             );
             $escalated = $incident
                 ->withUrgency($effectiveUrgency)
-                ->withRecalculatedSlaTarget($incomingTargetMinutes, $targetAt);
+                ->withRecalculatedSlaTarget($effectiveTargetMinutes, $targetAt);
 
             if (!$this->incidentRepo->update($escalated)) {
                 throw new RuntimeException(
@@ -422,7 +433,7 @@ class QrReportService
                 sprintf(
                     'Objetivo de SLA actualizado de %d min a %d min (Contrato sellado: %s) tras cambio de prioridad a %s.',
                     $incident->getSlaTargetMinutes(),
-                    $incomingTargetMinutes,
+                    $effectiveTargetMinutes,
                     $incident->getSlaTierLabel(),
                     $effectiveUrgency->label()
                 )
@@ -502,14 +513,25 @@ class QrReportService
      * Si no hay sugeridor compuesto o no existe candidato elegible, devuelve
      * `null` y el gateway deja el expediente en `REGISTERED`.
      */
-    private function resolveQrMergeTechnician(int $incidentId): ?int
-    {
+    private function resolveQrMergeTechnician(
+        int $machineId,
+        string $category,
+        string $urgency,
+        string $slaTier,
+        int $slaTargetMinutes
+    ): ?int {
         if ($this->technicianSuggester === null) {
             return null;
         }
 
         try {
-            $suggestions = $this->technicianSuggester->getSuggestions($incidentId);
+            $suggestions = $this->technicianSuggester->getSuggestionsForMachine(
+                $machineId,
+                $category,
+                $urgency,
+                $slaTier,
+                $slaTargetMinutes
+            );
         } catch (\Throwable $exception) {
             // La promoción es la salvaguarda sanitaria: un fallo del recomendador
             // no puede dejar el ticket en L1. Se degrada a "sin candidato".
