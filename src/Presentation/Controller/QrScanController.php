@@ -19,7 +19,10 @@ use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Application\Service\QrReportService;
 use VendGuard\Application\Service\QrScanService;
+use VendGuard\Application\Service\RestockerSatSynergyService;
+use VendGuard\Application\Service\SuggestedTechniciansService;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
+use VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway;
 use VendGuard\Infrastructure\Storage\FileStorageCompensator;
 use VendGuard\Infrastructure\Storage\LocalFileUploader;
 use VendGuard\Presentation\Http\Request;
@@ -124,7 +127,13 @@ class QrScanController
                 null,
                 null,
                 null,
-                \VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory::createOrNull()
+                \VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory::createOrNull(),
+                null,
+                null,
+                new RestockerSatSynergyService(
+                    new PdoRestockerSatSynergyGateway()
+                ),
+                new SuggestedTechniciansService()
             );
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
         $this->fileCompensator = $fileCompensator;
@@ -347,10 +356,12 @@ class QrScanController
             'machine_code' => $machineCode,
             'category' => $category,
             'description' => $description,
+            'level1_issue_type' => $request->getBodyParam('level1_issue_type'),
             'reporter_name' => $reporterName,
             'reporter_phone' => $reporterPhone,
             'reporter_email' => $reporterEmail,
             'retained_money_amount' => $retainedMoney,
+            'refund_method' => $request->getBodyParam('refund_method'),
             'photo_path' => $photoPath,
         ];
 

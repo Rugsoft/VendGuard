@@ -179,6 +179,8 @@ class AppRouter
         // despacho asistido. Comparte puerta con la asignación, porque el panel y la
         // salvaguarda del Art. V.1 deben evaluar el mismo ranking.
         $router->get('/api/coordinator/incidents/{id}/suggested-technicians', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getSuggestedTechnicians'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/incidents/{id}/suggested-restockers', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getSuggestedRestockers'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/incidents/{id}/dispatch-level', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'dispatchLevel'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/assign', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'assignTechnician'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/cancel', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'cancelIncident'], [$coordinatorAuth]);
         // Resolución administrativa manual (Módulo 25, QA 3): exige causa raíz y
@@ -608,6 +610,14 @@ class AppRouter
         $router->post('/api/restocker/cash-collections/conflict-dump', [RestockerRouteController::class, 'dumpCashCollectionConflict'], [$restockerAuth]);
         $router->get('/api/restocker/cash-collections/{id}/reception-receipt', [RestockerRouteController::class, 'cashReceptionReceipt'], [$restockerAuth]);
         $router->post('/api/restocker/machines/{machineId}/cash-collections', [RestockerRouteController::class, 'registerCashCollection'], [$restockerAuth]);
+        $router->post('/api/restocker/incidents/{id}/start', [RestockerRouteController::class, 'startLevel1'], [$restockerAuth]);
+        $router->post('/api/restocker/incidents/{id}/resolve', [RestockerRouteController::class, 'resolveLevel1'], [$restockerAuth]);
+        $router->post('/api/restocker/incidents/{id}/escalate-to-sat', [RestockerRouteController::class, 'escalateIncidentToSat'], [$restockerAuth]);
+        $router->post('/api/restocker/machines/{machineId}/escalate-to-sat', [RestockerRouteController::class, 'escalateToSat'], [$restockerAuth]);
+        // Alias contractual de la evidencia del escalado (PR22-07). Reutiliza
+        // el uploader de visitas para no duplicar la validación de 5 MB y magic bytes.
+        $router->post('/api/restocker/incidents/upload-photo', [RestockerRouteController::class, 'uploadVisitPhoto'], [$restockerAuth]);
+        $router->post('/api/restocker/incidents/conflict-dump', [RestockerRouteController::class, 'dumpIncidentConflict'], [$restockerAuth]);
 
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)

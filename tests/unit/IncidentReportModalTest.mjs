@@ -132,6 +132,7 @@ function createModalInstance(machine, initialData = {}) {
     modelValue: true,
     machine,
     category: 'TEMPERATURE_COLD',
+    level1IssueType: '',
     description: '',
     retainedMoney: '',
     reporterName: 'Conserje Test',
@@ -163,6 +164,9 @@ function createModalInstance(machine, initialData = {}) {
   Object.defineProperty(instance, 'isFoodSafetyCritical', {
     get: () => IncidentReportModal.computed.isFoodSafetyCritical.call(instance)
   });
+  Object.defineProperty(instance, 'level1IssueTypeOptions', {
+    get: () => IncidentReportModal.computed.level1IssueTypeOptions.call(instance)
+  });
   Object.defineProperty(instance, 'modalTitle', {
     get: () => IncidentReportModal.computed.modalTitle.call(instance)
   });
@@ -187,6 +191,15 @@ assert('2.3 Template contains food safety alert notice', IncidentReportModal.tem
 // 2.4: Non-perishable does NOT trigger food safety alert
 const modalDrinks = createModalInstance({ ...perishableMachine, machine_type: 'COLD_DRINKS' }, { category: 'TEMPERATURE_COLD' });
 assert('2.4 COLD_DRINKS + TEMPERATURE_COLD does not activate isFoodSafetyCritical', modalDrinks.isFoodSafetyCritical === false);
+assert(
+  '2.5 Los motivos L1 se filtran por la categoría seleccionada',
+  IncidentReportModal.computed.level1IssueTypeOptions.call({ category: 'PRODUCT_JAM' }).length === 2
+    && IncidentReportModal.computed.level1IssueTypeOptions.call({ category: 'TEMPERATURE_COLD' }).length === 0
+);
+assert(
+  '2.6 El alta de Sede publica el selector de motivo L1',
+  IncidentReportModal.template.includes('data-testid="level1-issue-type-select"')
+);
 
 // ---------------------------------------------------------------------
 // TEST GROUP 3: Successful Incident Report Submission
@@ -220,6 +233,19 @@ assert('3.2 Payload contains category TEMPERATURE_COLD', lastCreatedPayload.cate
 assert('3.3 Payload contains description text', lastCreatedPayload.description.includes('+14ºC'));
 assert('3.4 Payload contains retained money as number', lastCreatedPayload.retained_money_amount === 2.5);
 assert('3.5 handleSubmitReport emits "created" event with new ticket code', modalToSubmit.getEmits().some(e => e.evt === 'created' && e.val.ticket_code === 'INC-2026-0088'));
+
+const modalLevel1 = createModalInstance(perishableMachine, {
+  category: 'PRODUCT_JAM',
+  level1IssueType: 'MINOR_SPIRAL_JAM',
+  description: 'Atasco leve en la espiral del carril 4',
+  reporterName: 'Carlos Conserje',
+  reporterPhone: '611223344'
+});
+await IncidentReportModal.methods.handleSubmitReport.call(modalLevel1);
+assert(
+  '3.6 El motivo L1 seleccionado viaja en el alta de Sede',
+  lastCreatedPayload?.level1_issue_type === 'MINOR_SPIRAL_JAM'
+);
 
 // ---------------------------------------------------------------------
 // TEST GROUP 4: Strict Prevention of Duplicates & Appending Comments (RF-02)

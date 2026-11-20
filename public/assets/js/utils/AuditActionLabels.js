@@ -289,6 +289,15 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'UPDATE_TROUBLESHOOTING_GUIDE', label: 'Modificación de Guía de Diagnóstico', tone: 'neutral', group: 'guides' },
   { code: 'ACTIVATE_TROUBLESHOOTING_GUIDE', label: 'Reactivación de Guía de Diagnóstico', tone: 'success', group: 'guides' },
   { code: 'DEACTIVATE_TROUBLESHOOTING_GUIDE', label: 'Desactivación de Guía de Diagnóstico', tone: 'danger', group: 'guides' },
+  // Módulo 36: sinergia operativa reponedor ↔ SAT (`dispatch_level`, Nivel 1 y escalado).
+  { code: 'START_L1_INCIDENT', label: 'Inicio de Intervención Nivel 1', tone: 'info', group: 'ticket' },
+  { code: 'RESOLVE_L1_INCIDENT', label: 'Resolución de Avería Nivel 1', tone: 'success', group: 'ticket' },
+  { code: 'DISPATCH_LEVEL_CHANGE', label: 'Cambio de Nivel Operativo (L1/L2)', tone: 'purple', group: 'ticket' },
+  { code: 'ESCALATE_INCIDENT_TO_SAT', label: 'Escalado de Avería al SAT', tone: 'warning', group: 'ticket' },
+  { code: 'QR_AUTO_ESCALATED_TO_SAT', label: 'Auto-Escalado QR a Nivel 2 SAT', tone: 'danger', group: 'ticket' },
+  { code: 'OFFLINE_RESTOCKER_INCIDENT_CONFLICT_DUMP', label: 'Conflicto Offline de Nivel 1 Archivado', tone: 'warning', group: 'ticket' },
+  { code: 'L1_HANDOVER_RESTOCKER_SHIFT_HANDOVER', label: 'Relevo de Aviso L1 por Cierre de Turno', tone: 'purple', group: 'ticket' },
+  { code: 'L1_HANDOVER_ABSENCE_COVERAGE_REASSIGN', label: 'Relevo de Aviso L1 por Ausencia', tone: 'purple', group: 'ticket' },
 ]);
 
 const CATALOG_BY_CODE = Object.freeze(

@@ -14,8 +14,8 @@
  * 4. Contador diario en vivo y autoconsulta de solo lectura «⏱️ Mis Horas», que
  *    no envía ningún identificador ajeno: el backend resuelve el `user_id` del
  *    token (Art. V.4).
- * 5. Estado base informativo de la ruta de abastecimiento, listo para las
- *    Features 24, 26 y 27 sin inventar paradas.
+ * 5. Estado de la ruta de abastecimiento con las paradas que asigna
+ *    coordinación, sin inventar ninguna.
  * 6. Ciclo móvil de la orden de carga: recepción en un toque, liquidación por
  *    lote al cierre, stock FEFO con semáforo y comprobante de la última orden
  *    liquidada (`C4`), siempre sin costes internos (Art. V.4).
@@ -39,6 +39,13 @@ import {
   CASH_COLLECTION_CONFLICT,
   CASH_COLLECTION_PENDING
 } from '../utils/CashCollectionOfflineQueue.js';
+import {
+  RestockerIncidentOfflineQueue,
+  RESTOCKER_INCIDENT_CONFLICT,
+  RESTOCKER_INCIDENT_PENDING,
+  RESTOCKER_INCIDENT_OPERATIONS
+} from '../utils/RestockerIncidentOfflineQueue.js';
+import { LEVEL1_ISSUE_TYPES } from '../utils/IncidentStatusPermissions.js';
 
 const HYGIENE_ITEMS = [
   { key: 'coffee_grounds_emptied', label: 'Cajón de posos vaciado', scope: 'hot' },
@@ -165,6 +172,31 @@ export const RestockerRouteView = {
       machines: [],
       isLoading: false,
       loadError: '',
+
+      // Avisos de Nivel 1 y Coincidencia en Sede (Módulo 36, T-RSS-11)
+      assignedL1Incidents: [],
+      l1TaxonomyCatalog: [],
+      siteCoincidence: {},
+      showL1ResolveModal: false,
+      l1ResolveIncident: null,
+      l1ResolveForm: { root_cause_id: '', standard_solution_id: '', diagnosis: '', action: '', client_mutation_id: '' },
+      l1ResolveError: '',
+      l1ResolveSuccess: '',
+      isResolvingL1: false,
+      showEscalateModal: false,
+      escalateMachine: null,
+      escalateIncident: null,
+      escalateForm: { category: 'ELECTRICAL_OFF', workshop_internal_note: '', photo_evidence_url: '', client_mutation_id: '' },
+      escalatePhotoFile: null,
+      escalatePhotoName: '',
+      escalateError: '',
+      escalateSuccess: '',
+      isEscalating: false,
+      pendingIncidentMutations: [],
+      incidentQueueSequence: 0,
+      isSyncingIncidents: false,
+      incidentSyncMessage: '',
+      incidentSyncError: '',
 
       // Consulta de solo lectura del planograma (T-PLN-13, D2, QA 2, Art. V.4)
       showPlanogramModal: false,
@@ -419,6 +451,43 @@ export const RestockerRouteView = {
     pendingVisitCount() {
       return this.pendingVisitMutations.filter((item) => item.status === RESTOCK_VISIT_PENDING).length;
     },
+    pendingIncidentCount() {
+      return this.pendingIncidentMutations.filter((item) => item.status === RESTOCKER_INCIDENT_PENDING).length;
+    },
+    conflictIncidentCount() {
+      return this.pendingIncidentMutations.filter((item) => item.status === RESTOCKER_INCIDENT_CONFLICT).length;
+    },
+    /**
+     * Causas compatibles con la categoría y el motivo L1 del aviso (H-36-08).
+     *
+     * El catálogo completo nunca llega al desplegable: se descartan las causas
+     * de otra categoría y, cuando el ticket trae un motivo L1, se reduce a la
+     * pareja semilla de ese motivo. Un ticket histórico sin motivo conserva las
+     * alternativas de su categoría, pero la primera ya es coherente.
+     */
+    l1ResolveCauseOptions() {
+      const category = String(this.l1ResolveIncident?.category || '').trim().toUpperCase();
+      if (!category) return [];
+
+      const causes = (Array.isArray(this.l1TaxonomyCatalog) ? this.l1TaxonomyCatalog : [])
+        .filter((cause) => cause
+          && cause.is_active !== false
+          && String(cause.category || '').trim().toUpperCase() === category);
+      if (causes.length === 0) return [];
+
+      const issueType = String(this.l1ResolveIncident?.level1_issue_type || '').trim().toUpperCase();
+      const definition = LEVEL1_ISSUE_TYPES.find((row) => row.value === issueType);
+      if (!definition) return causes;
+
+      const seeded = causes.filter((cause) => String(cause.code || '').toUpperCase() === definition.rootCauseCode);
+      return seeded.length > 0 ? seeded : causes;
+    },
+    l1ResolveSolutions() {
+      const cause = this.l1ResolveCauseOptions.find(
+        (row) => Number(row.id) === Number(this.l1ResolveForm.root_cause_id)
+      );
+      return Array.isArray(cause?.solutions) ? cause.solutions : [];
+    },
     conflictVisitCount() {
       return this.pendingVisitMutations.filter((item) => item.status === RESTOCK_VISIT_CONFLICT).length;
     },
@@ -462,12 +531,14 @@ export const RestockerRouteView = {
       this.loadShiftStatus();
       this.loadPendingVisitQueue();
       this.loadPendingCashQueue();
+      this.loadPendingIncidentQueue();
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       this.visitOnlineHandler = () => {
         if (!this.navigatorOnline) return;
         this.syncPendingVisits();
         this.syncPendingCashCollections();
+        this.syncPendingIncidentMutations();
       };
       window.addEventListener('online', this.visitOnlineHandler);
     }
@@ -525,6 +596,11 @@ export const RestockerRouteView = {
         };
         this.routeStops = Array.isArray(data.route_stops) ? data.route_stops : [];
         this.machines = Array.isArray(data.machines) ? data.machines : [];
+        this.assignedL1Incidents = Array.isArray(data.assigned_l1_incidents) ? data.assigned_l1_incidents : [];
+        this.l1TaxonomyCatalog = Array.isArray(data.l1_taxonomy_catalog) ? data.l1_taxonomy_catalog : [];
+        this.siteCoincidence = data.site_coincidence && typeof data.site_coincidence === 'object'
+          ? data.site_coincidence
+          : {};
         this.activeLoadingOrder = data.active_loading_order || null;
         this.lastReconciledOrder = data.last_reconciled_order || null;
         this.vanProductStocks = Array.isArray(data.van_product_stocks) ? data.van_product_stocks : [];
@@ -1283,6 +1359,415 @@ export const RestockerRouteView = {
         this.visitQueue = new RestockVisitOfflineQueue();
       }
       return this.visitQueue;
+    },
+
+    ensureIncidentQueue() {
+      if (!this.incidentQueue) {
+        this.incidentQueue = new RestockerIncidentOfflineQueue();
+      }
+      return this.incidentQueue;
+    },
+
+    async loadPendingIncidentQueue() {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId) {
+        this.pendingIncidentMutations = [];
+        return;
+      }
+      try {
+        this.pendingIncidentMutations = await this.ensureIncidentQueue().list(restockerId);
+      } catch (error) {
+        this.pendingIncidentMutations = [];
+        this.incidentSyncError = error?.message || 'No se pudo leer la cola offline de avisos L1.';
+      }
+    },
+
+    l1IssueLabel(type) {
+      const labels = {
+        STOCKOUT_EMPTY_SLOT: 'Producto agotado / Carril vacío',
+        MISSING_CONSUMABLES: 'Sin vasos / azúcar / paletinas',
+        EMPTY_CHANGE_TUBES: 'No devuelve cambio (tubos vacíos)',
+        MINOR_SPIRAL_JAM: 'Atasco leve en espiral'
+      };
+      return labels[type] || type || 'Aviso de Nivel 1';
+    },
+
+    l1StatusLabel(status) {
+      const labels = { ASSIGNED: 'Pendiente', IN_PROGRESS: 'En curso', PENDING_INFO: 'En espera de sede', REOPENED: 'Reabierta' };
+      return labels[status] || status || 'Pendiente';
+    },
+
+    siteCoincidenceForLocation(locationId) {
+      const rows = this.siteCoincidence?.[String(locationId)] ?? this.siteCoincidence?.[locationId];
+      return Array.isArray(rows) ? rows : [];
+    },
+
+    siteCoincidenceLabel(entry) {
+      const name = entry?.name || 'Compañero';
+      const code = String(entry?.operator_code ?? '').trim();
+      return code ? `${name} (${code})` : name;
+    },
+
+    siteCoincidenceSummary(locationId) {
+      return this.siteCoincidenceForLocation(locationId)
+        .map((entry) => `${this.siteCoincidenceLabel(entry)}${entry.activity_summary ? ` · ${entry.activity_summary}` : ''}`)
+        .join(' · ');
+    },
+
+    machineHasActiveL1(machine) {
+      return Boolean(machine?.active_l1_incident)
+        || this.assignedL1Incidents.some((incident) => Number(incident.machine_id) === Number(machine?.id));
+    },
+
+    machineHasActiveSat(machine) {
+      return machine?.has_active_sat_incident === true;
+    },
+
+    scrollToL1Incidents() {
+      if (typeof document === 'undefined') return;
+      document.getElementById('restocker-l1-incidents')?.scrollIntoView({ behavior: 'smooth' });
+    },
+
+    charCount(value) {
+      // Espeja `RestockerSatSynergyValidator::normalizeText()`: recorta extremos
+      // y colapsa espacios internos antes de contar caracteres reales.
+      const normalized = String(value ?? '').trim().replace(/\s+/gu, ' ');
+      return Array.from(normalized).length;
+    },
+
+    async startL1(incident) {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId || !incident) return;
+      const mutationId = createClientMutationId();
+      const payload = { client_mutation_id: mutationId };
+      try {
+        if (!this.navigatorOnline) {
+          await this.enqueueIncidentOperation(RESTOCKER_INCIDENT_OPERATIONS.START_L1, incident, payload);
+          incident.status = 'IN_PROGRESS';
+          this.incidentSyncMessage = 'Intervención L1 guardada en la cola offline.';
+          await this.loadPendingIncidentQueue();
+          return;
+        }
+        await api.restocker.startL1Incident(incident.id, payload);
+        this.incidentSyncMessage = 'Intervención de Nivel 1 iniciada.';
+        await this.loadMyRoute();
+      } catch (error) {
+        this.incidentSyncError = error?.message || 'No se pudo iniciar el aviso de Nivel 1.';
+      }
+    },
+
+    openL1Resolve(incident) {
+      this.l1ResolveIncident = incident;
+      const firstCause = this.l1ResolveCauseOptions[0] || null;
+      const firstSolution = Array.isArray(firstCause?.solutions) ? firstCause.solutions[0] : null;
+      this.l1ResolveForm = {
+        root_cause_id: firstCause?.id ?? '',
+        standard_solution_id: firstSolution?.id ?? '',
+        diagnosis: '',
+        action: '',
+        client_mutation_id: createClientMutationId()
+      };
+      this.l1ResolveError = '';
+      this.l1ResolveSuccess = '';
+      this.showL1ResolveModal = true;
+    },
+
+    onL1RootCauseChange() {
+      const first = this.l1ResolveSolutions[0] || null;
+      this.l1ResolveForm.standard_solution_id = first?.id ?? '';
+    },
+
+    /**
+     * Traduce un fallo de resolución L1 a un mensaje accionable y seguro.
+     *
+     * Solo consume `code`, `message` y `details.field` del error del API; no
+     * lee el payload crudo ni la traza. Los 500 usan un texto fijo para no
+     * filtrar SQL al operario (O-36-02).
+     */
+    l1ResolutionErrorMessage(error) {
+      const code = String(error?.code ?? '').trim();
+      const field = String(error?.details?.field ?? '').trim();
+      const safeMessages = {
+        SANITARY_L1_RESOLUTION_BLOCKED: 'La máquina está en cuarentena sanitaria: restituye la cadena de frío y emite el acta antes de resolver el aviso.',
+        L1_PENDING_PARTS_FORBIDDEN: 'Un aviso de Nivel 1 no puede quedar pendiente de repuestos: escala la avería al SAT.',
+        MISSING_ROOT_CAUSE_TAXONOMY: 'Selecciona la causa raíz y la solución estandarizada antes de resolver.',
+        ROOT_CAUSE_NOT_FOUND: 'La causa raíz o la solución ya no existe en el catálogo: recarga la ruta y elige una entrada vigente.',
+        INCOMPATIBLE_STANDARD_SOLUTION: 'La solución elegida no pertenece a la causa raíz: selecciona la pareja correcta del catálogo.',
+        INACTIVE_ROOT_CAUSE_TAXONOMY: 'La causa raíz o la solución está desactivada: elige una entrada vigente del catálogo.',
+        INVALID_RESOLUTION: 'La taxonomía de resolución no es válida: revisa la causa, la solución y los textos.',
+        INCIDENT_NOT_ASSIGNED_TO_RESTOCKER: 'Este aviso no está asignado a tu ruta: actualiza la ruta e inténtalo de nuevo.',
+        MACHINE_OUTSIDE_RESTOCKER_ZONES: 'La máquina está fuera de tus zonas asignadas: no puedes resolver este aviso.',
+        INTERNAL_SERVER_ERROR: 'No se pudo completar la operación por un fallo del servidor. Conserva lo escrito y reintenta; si persiste, avisa a coordinación.'
+      };
+
+      let message = '';
+      if (code === 'RESOLUTION_TEXT_TOO_SHORT') {
+        const labels = {
+          resolution_diagnosis: 'Diagnóstico',
+          resolution_action: 'Acción ejecutada'
+        };
+        message = `Revisa «${labels[field] || 'Diagnóstico y acción'}»: debe contener al menos 20 caracteres reales (Art. V.1).`;
+      } else if (safeMessages[code]) {
+        message = safeMessages[code];
+      } else {
+        message = String(error?.message ?? '').trim() || 'No se pudo resolver el aviso de Nivel 1.';
+      }
+
+      return code === '' ? message : `${message} (código: ${code})`;
+    },
+
+    async submitL1Resolution() {
+      const incident = this.l1ResolveIncident;
+      const restockerId = this.visitRestockerId;
+      if (!incident || !restockerId || this.isResolvingL1) return;
+      if (this.charCount(this.l1ResolveForm.diagnosis) < 20 || this.charCount(this.l1ResolveForm.action) < 20) {
+        this.l1ResolveError = 'El diagnóstico y la acción deben contener al menos 20 caracteres reales (Art. V.1).';
+        return;
+      }
+      if (this.l1ResolveCauseOptions.length === 0) {
+        this.l1ResolveError = 'No hay una causa raíz activa compatible con la categoría y el motivo del aviso.';
+        return;
+      }
+      if (!this.l1ResolveForm.root_cause_id || !this.l1ResolveForm.standard_solution_id) {
+        this.l1ResolveError = 'Selecciona la causa raíz y la solución estandarizada de Nivel 1.';
+        return;
+      }
+
+      this.isResolvingL1 = true;
+      this.l1ResolveError = '';
+      const machine = this.machines.find((row) => Number(row.id) === Number(incident.machine_id)) || {};
+      const payload = {
+        machine_id: Number(incident.machine_id),
+        sanitary_status: machine.sanitary_status ?? null,
+        root_cause_id: Number(this.l1ResolveForm.root_cause_id),
+        standard_solution_id: Number(this.l1ResolveForm.standard_solution_id),
+        diagnosis: String(this.l1ResolveForm.diagnosis).trim(),
+        action: String(this.l1ResolveForm.action).trim(),
+        client_mutation_id: this.l1ResolveForm.client_mutation_id
+      };
+      try {
+        if (!this.navigatorOnline) {
+          await this.enqueueIncidentOperation(RESTOCKER_INCIDENT_OPERATIONS.RESOLVE_L1, incident, payload);
+          this.l1ResolveSuccess = 'Resolución L1 guardada en la cola offline.';
+          this.showL1ResolveModal = false;
+          this.incidentSyncMessage = 'Resolución L1 pendiente de sincronizar.';
+          await this.loadPendingIncidentQueue();
+          return;
+        }
+        await api.restocker.resolveL1Incident(incident.id, payload);
+        this.l1ResolveSuccess = 'Nivel 1 resuelto y custodia cerrada.';
+        this.showL1ResolveModal = false;
+        await this.loadMyRoute();
+      } catch (error) {
+        this.l1ResolveError = this.l1ResolutionErrorMessage(error);
+      } finally {
+        this.isResolvingL1 = false;
+      }
+    },
+
+    openEscalate(machine, incident = null) {
+      this.escalateMachine = machine;
+      this.escalateIncident = incident;
+      this.escalateForm = {
+        category: incident?.category || 'ELECTRICAL_OFF',
+        workshop_internal_note: '',
+        photo_evidence_url: '',
+        client_mutation_id: createClientMutationId()
+      };
+      this.escalatePhotoFile = null;
+      this.escalatePhotoName = '';
+      this.escalateError = '';
+      this.escalateSuccess = '';
+      this.showEscalateModal = true;
+    },
+
+    onEscalatePhotoChange(event) {
+      const file = event?.target?.files?.[0] ?? null;
+      if (file && Number(file.size) > 5 * 1024 * 1024) {
+        this.escalatePhotoFile = null;
+        this.escalatePhotoName = '';
+        this.escalateError = 'La fotografía no puede superar los 5 MB (Art. V.5).';
+        return;
+      }
+      this.escalatePhotoFile = file;
+      this.escalatePhotoName = file?.name || '';
+      this.escalateError = '';
+    },
+
+    async submitEscalation() {
+      const machine = this.escalateMachine;
+      const restockerId = this.visitRestockerId;
+      if (!machine || !restockerId || this.isEscalating) return;
+      if (this.charCount(this.escalateForm.workshop_internal_note) < 20) {
+        this.escalateError = 'La Nota Interna de Taller debe contener al menos 20 caracteres reales (Art. V.1).';
+        return;
+      }
+      if (!this.escalatePhotoFile && !this.escalateForm.photo_evidence_url) {
+        this.escalateError = 'Adjunta una fotografía de evidencia de hasta 5 MB (Art. V.5).';
+        return;
+      }
+
+      this.isEscalating = true;
+      this.escalateError = '';
+      const payload = {
+        category: this.escalateForm.category,
+        workshop_internal_note: String(this.escalateForm.workshop_internal_note).trim(),
+        client_mutation_id: this.escalateForm.client_mutation_id
+      };
+      try {
+        if (!this.navigatorOnline) {
+          await this.enqueueIncidentOperation(
+            RESTOCKER_INCIDENT_OPERATIONS.ESCALATE_TO_SAT,
+            { id: this.escalateIncident?.id ?? null, machine_id: machine.id, machine_code: machine.code },
+            payload,
+            this.escalatePhotoFile
+          );
+          this.escalateSuccess = 'Escalado guardado en la cola offline.';
+          this.showEscalateModal = false;
+          this.incidentSyncMessage = 'Escalado al SAT pendiente de sincronizar.';
+          await this.loadPendingIncidentQueue();
+          return;
+        }
+
+        let photoPath = this.escalateForm.photo_evidence_url;
+        if (this.escalatePhotoFile) {
+          const uploaded = await api.restocker.uploadIncidentPhoto(this.escalatePhotoFile, this.escalatePhotoName);
+          photoPath = this.extractPhotoEvidenceUrl(uploaded);
+          if (!photoPath) throw new Error('La fotografía no devolvió una URL válida.');
+        }
+        await api.restocker.escalateMachineToSat(machine.id, {
+          ...payload,
+          photo_path: photoPath,
+          photo_size_bytes: Number(this.escalatePhotoFile?.size || 0),
+          photo_mime_type: String(this.escalatePhotoFile?.type || '')
+        });
+        this.escalateSuccess = 'Avería escalada al SAT.';
+        this.showEscalateModal = false;
+        await this.loadMyRoute();
+      } catch (error) {
+        this.escalateError = error?.message || 'No se pudo escalar la avería al SAT.';
+      } finally {
+        this.isEscalating = false;
+      }
+    },
+
+    async enqueueIncidentOperation(operation, incident, payload, photo = null) {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId) throw new Error('Inicia sesión como reponedor para guardar la operación.');
+      const sequence = Date.now() * 1000 + (Number(this.incidentQueueSequence || 0) % 1000);
+      this.incidentQueueSequence = (Number(this.incidentQueueSequence || 0) + 1) % 1000;
+      return this.ensureIncidentQueue().enqueue({
+        client_mutation_id: payload.client_mutation_id,
+        restocker_id: restockerId,
+        operation_type: operation,
+        incident_id: incident?.id ?? null,
+        machine_id: incident?.machine_id ?? incident?.id,
+        machine_code: incident?.machine_code ?? null,
+        payload,
+        photo,
+        photo_name: this.escalatePhotoName || null,
+        sequence_order: sequence
+      });
+    },
+
+    async syncPendingIncidentMutations() {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId) return;
+      if (!this.navigatorOnline) {
+        this.incidentSyncError = 'Sin conexión. Las operaciones L1 siguen en la cola offline.';
+        return;
+      }
+      if (this.isSyncingIncidents) return;
+
+      this.isSyncingIncidents = true;
+      this.incidentSyncError = '';
+      this.incidentSyncMessage = '';
+      let synced = 0;
+      let conflicts = 0;
+      try {
+        const queue = this.ensureIncidentQueue();
+        const pending = await queue.list(restockerId, [RESTOCKER_INCIDENT_PENDING]);
+        for (const item of pending) {
+          try {
+            const payload = { ...item.payload };
+            if (item.operation_type === RESTOCKER_INCIDENT_OPERATIONS.START_L1) {
+              await api.restocker.startL1Incident(item.incident_id, payload);
+            } else if (item.operation_type === RESTOCKER_INCIDENT_OPERATIONS.RESOLVE_L1) {
+              await api.restocker.resolveL1Incident(item.incident_id, payload);
+            } else if (item.operation_type === RESTOCKER_INCIDENT_OPERATIONS.ESCALATE_TO_SAT) {
+              if (item.photo) {
+                const uploaded = await api.restocker.uploadIncidentPhoto(item.photo, item.photo_name);
+                const photoPath = this.extractPhotoEvidenceUrl(uploaded);
+                if (!photoPath) throw new Error('La fotografía del escalado no devolvió una URL válida.');
+                payload.photo_path = photoPath;
+                payload.photo_size_bytes = Number(item.photo.size || 0);
+                payload.photo_mime_type = String(item.photo.type || '');
+              }
+              await api.restocker.escalateMachineToSat(item.machine_id, payload);
+            }
+            await queue.remove(item.client_mutation_id);
+            synced += 1;
+          } catch (error) {
+            if (this.isRetryableSyncFailure(error)) {
+              this.incidentSyncError = this.syncRetryMessage(error, 'avisos L1');
+              break;
+            }
+            await queue.markConflict(
+              item.client_mutation_id,
+              error?.message || 'La operación L1 offline fue rechazada por el servidor.'
+            );
+            conflicts += 1;
+          }
+        }
+
+        await this.loadPendingIncidentQueue();
+        if (synced > 0) await this.loadMyRoute();
+        if (synced > 0 || conflicts > 0) {
+          this.incidentSyncMessage = `${synced} operación(es) L1 sincronizada(s).${conflicts > 0 ? ` ${conflicts} conflicto(s) pendientes de archivar.` : ''}`;
+        } else if (!this.incidentSyncError) {
+          this.incidentSyncMessage = 'No hay operaciones L1 pendientes de sincronizar.';
+        }
+      } catch (error) {
+        this.incidentSyncError = error?.message || 'No se pudo sincronizar la cola offline de avisos L1.';
+      } finally {
+        this.isSyncingIncidents = false;
+      }
+    },
+
+    async archiveIncidentConflict(item) {
+      if (!item?.client_mutation_id || this.isSyncingIncidents) return;
+      this.isSyncingIncidents = true;
+      try {
+        const stopType = item.operation_type === RESTOCKER_INCIDENT_OPERATIONS.ESCALATE_TO_SAT && !item.incident_id
+          ? 'MACHINE'
+          : 'INCIDENT';
+        const stopId = Number(item.incident_id || item.machine_id || 0);
+        const reason = item.conflict_reason || 'La operación L1 offline ya no puede aplicarse.';
+        await api.restocker.dumpIncidentConflict({
+          stop_type: stopType,
+          stop_id: stopId,
+          operation_type: item.operation_type,
+          machine_id: item.machine_id,
+          incident_id: item.incident_id || null,
+          client_mutation_id: item.client_mutation_id,
+          client_occurred_at: item.payload?.client_occurred_at || item.created_at || new Date().toISOString(),
+          reason,
+          conflict: {
+            operation_type: item.operation_type,
+            stop_type: stopType,
+            stop_id: stopId,
+            reason,
+            http_status: 409
+          }
+        });
+        await this.ensureIncidentQueue().remove(item.client_mutation_id);
+        await this.loadPendingIncidentQueue();
+        this.incidentSyncMessage = 'Conflicto L1 archivado en auditoría.';
+      } catch (error) {
+        this.incidentSyncError = error?.message || 'No se pudo archivar el conflicto L1.';
+      } finally {
+        this.isSyncingIncidents = false;
+      }
     },
 
     async loadPendingVisitQueue() {
@@ -2265,16 +2750,18 @@ export const RestockerRouteView = {
           Acceso exclusivo para Cargadores / Reponedores de Ruta.
         </p>
 
-        <label style="display: block; font-size: 12px; margin-bottom: 4px;">Correo electrónico</label>
+        <label for="restocker-login-email" style="display: block; font-size: 12px; margin-bottom: 4px;">Correo electrónico</label>
         <input
+          id="restocker-login-email"
           v-model="loginEmail"
           type="email"
           autocomplete="username"
           data-testid="restocker-login-email"
           style="width: 100%; box-sizing: border-box; height: 36px; padding: 0 10px; margin-bottom: 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);"
         />
-        <label style="display: block; font-size: 12px; margin-bottom: 4px;">Contraseña</label>
+        <label for="restocker-login-password" style="display: block; font-size: 12px; margin-bottom: 4px;">Contraseña</label>
         <input
+          id="restocker-login-password"
           v-model="loginPassword"
           type="password"
           autocomplete="current-password"
@@ -2674,7 +3161,7 @@ export const RestockerRouteView = {
           </p>
         </section>
 
-        <!-- Estado base de la ruta de abastecimiento (Features 24, 26 y 27) -->
+        <!-- Estado de la ruta de abastecimiento (paradas asignadas por coordinación) -->
         <section
           data-testid="restocker-route-base"
           style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
@@ -2687,7 +3174,7 @@ export const RestockerRouteView = {
           <p v-else-if="loadError" data-testid="restocker-route-error" style="font-size: 13px; color: var(--color-urgency-critical); margin: 0;">{{ loadError }}</p>
           <p v-else-if="routeStops.length === 0" style="font-size: 13px; color: var(--color-ink-muted); margin: 0;">
             Sin paradas asignadas por ahora. Las órdenes de carga y las visitas a máquinas
-            llegarán con las Features 24, 26 y 27.
+            aparecerán aquí cuando coordinación las asigne.
           </p>
           <ul v-else style="margin: 8px 0 0 0; padding: 0; list-style: none; display: grid; gap: 8px;">
             <li
@@ -2830,6 +3317,31 @@ export const RestockerRouteView = {
                   🪙 Recaudación / Cambio
                 </button>
               </div>
+              <div
+                v-if="siteCoincidenceForLocation(machine.location_id).length > 0"
+                data-testid="restocker-site-coincidence"
+                style="font-size: 11px; background-color: var(--color-info-bg); color: var(--color-info-text); border-radius: var(--radius-interactive); padding: 6px 8px; margin-top: 8px;"
+              >
+                <div style="font-weight: 600; margin-bottom: 2px;">🤝 Coincidencia en Sede</div>
+                <div
+                  v-for="entry in siteCoincidenceForLocation(machine.location_id)"
+                  :key="entry.user_id || entry.operator_code || entry.name"
+                  style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;"
+                >
+                  <span>{{ siteCoincidenceLabel(entry) }}</span>
+                  <span v-if="entry.activity_summary">· {{ entry.activity_summary }}</span>
+                  <a
+                    v-if="entry.phone"
+                    :href="'tel:' + entry.phone"
+                    style="color: inherit; font-weight: 600; text-decoration: underline;"
+                  >📞 {{ entry.phone }}</a>
+                </div>
+              </div>
+              <div v-if="machineHasActiveL1(machine) || machineHasActiveSat(machine)" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
+                <span v-if="machineHasActiveL1(machine)" data-testid="restocker-machine-l1-badge" style="font-size: 10px; font-weight: 600; padding: 3px 7px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text);">🛒 Aviso Nivel 1</span>
+                <span v-if="machineHasActiveSat(machine)" data-testid="restocker-machine-sat-badge" style="font-size: 10px; font-weight: 600; padding: 3px 7px; border-radius: var(--radius-interactive); background-color: var(--color-info-bg); color: var(--color-info-text);">🔧 SAT en curso</span>
+              </div>
+
               <p
                 v-if="!machineCanRestock(machine)"
                 data-testid="restocker-machine-block-reason"
@@ -2837,8 +3349,113 @@ export const RestockerRouteView = {
               >
                 ⚠️ {{ machineRestockBlockReason(machine) }}
               </p>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary vg-btn-sm"
+                  data-testid="btn-escalate-machine-to-sat"
+                  :data-machine-id="machine.id"
+                  @click="openEscalate(machine)"
+                >
+                  ⚡ Escalar Avería al SAT
+                </button>
+                <button
+                  v-if="machineHasActiveL1(machine)"
+                  type="button"
+                  class="vg-btn vg-btn-primary vg-btn-sm"
+                  data-testid="btn-open-l1-incidents"
+                  @click="scrollToL1Incidents"
+                >
+                  🛒 Atender aviso Nivel 1
+                </button>
+              </div>
             </li>
           </ul>
+        </section>
+
+        <!-- Bandeja de Avisos de Nivel 1 y cola offline (Módulo 36, RF-03.1–03.2, C2) -->
+        <section
+          id="restocker-l1-incidents"
+          data-testid="restocker-l1-incidents"
+          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <h2 style="font-family: var(--font-display); font-size: 16px; font-weight: 500; margin: 0 0 4px 0;">🛒 Avisos de Nivel 1</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
+                Resuelve in situ los avisos leves de tu zona o escálalos al SAT.
+              </p>
+            </div>
+            <button
+              v-if="pendingIncidentMutations.length > 0"
+              type="button"
+              class="vg-btn vg-btn-secondary vg-btn-sm"
+              data-testid="btn-sync-l1-incidents"
+              :disabled="isSyncingIncidents"
+              @click="syncPendingIncidentMutations"
+            >
+              🔄 Sincronizar ({{ pendingIncidentCount }})
+            </button>
+          </div>
+
+          <div v-if="incidentSyncError" data-testid="restocker-l1-sync-error" style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;">⚠️ {{ incidentSyncError }}</div>
+          <div v-if="incidentSyncMessage" data-testid="restocker-l1-sync-message" style="font-size: 12px; color: var(--color-success-text); background-color: var(--color-success-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;">{{ incidentSyncMessage }}</div>
+
+          <p v-if="assignedL1Incidents.length === 0" data-testid="restocker-l1-empty" style="font-size: 13px; color: var(--color-ink-muted); margin: 12px 0 0 0;">
+            No tienes avisos de Nivel 1 asignados.
+          </p>
+          <ul v-else style="margin: 12px 0 0 0; padding: 0; list-style: none; display: grid; gap: 10px;">
+            <li
+              v-for="incident in assignedL1Incidents"
+              :key="incident.id"
+              data-testid="restocker-l1-incident-card"
+              :data-incident-id="incident.id"
+              style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px 12px;"
+            >
+              <div style="display: flex; justify-content: space-between; gap: 8px;">
+                <strong style="font-family: var(--font-display); font-size: 14px;">#{{ incident.ticket_code }}</strong>
+                <span data-testid="restocker-l1-status" style="font-size: 10px; font-weight: 600; padding: 3px 7px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text);">{{ l1StatusLabel(incident.status) }}</span>
+              </div>
+              <div style="font-size: 12px; color: var(--color-slate); margin-top: 3px;">
+                🛒 {{ l1IssueLabel(incident.level1_issue_type) }} · {{ incident.machine_code }} · {{ incident.location_name }}
+              </div>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 4px 0 0 0;">{{ incident.description }}</p>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
+                <button
+                  v-if="incident.status === 'ASSIGNED' || incident.status === 'REOPENED'"
+                  type="button"
+                  class="vg-btn vg-btn-primary vg-btn-sm"
+                  data-testid="btn-start-l1-incident"
+                  @click="startL1(incident)"
+                >▶ Iniciar Nivel 1</button>
+                <button
+                  v-if="incident.status === 'IN_PROGRESS'"
+                  type="button"
+                  class="vg-btn vg-btn-primary vg-btn-sm"
+                  data-testid="btn-resolve-l1-incident"
+                  @click="openL1Resolve(incident)"
+                >✓ Resolver en 1 toque</button>
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary vg-btn-sm"
+                  data-testid="btn-escalate-l1-incident"
+                  @click="openEscalate(machines.find((row) => Number(row.id) === Number(incident.machine_id)) || { id: incident.machine_id, code: incident.machine_code }, incident)"
+                >⚡ Escalar Avería al SAT</button>
+              </div>
+            </li>
+          </ul>
+
+          <div v-if="pendingIncidentMutations.length > 0" data-testid="restocker-offline-incident-queue" style="margin-top: 10px; padding: 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); background-color: var(--color-warning-bg);">
+            <strong style="display: block; font-size: 12px; color: var(--color-warning-text);">📥 Cola offline de avisos L1 · {{ pendingIncidentCount }} pendiente(s) · {{ conflictIncidentCount }} conflicto(s)</strong>
+            <ul style="margin: 8px 0 0 0; padding: 0; list-style: none; display: grid; gap: 6px;">
+              <li v-for="item in pendingIncidentMutations" :key="item.client_mutation_id" data-testid="restocker-offline-incident-item" style="font-size: 11px; color: var(--color-slate);">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
+                  <span><strong>{{ item.machine_code || ('Máquina #' + item.machine_id) }}</strong> · {{ item.operation_type }} · {{ item.status === 'CONFLICT' ? 'Conflicto' : 'Pendiente' }}</span>
+                  <button v-if="item.status === 'CONFLICT'" type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-archive-l1-conflict" :disabled="isSyncingIncidents" @click="archiveIncidentConflict(item)">📥 Archivar</button>
+                </div>
+              </li>
+            </ul>
+          </div>
         </section>
 
         <!-- Historial reciente y cola offline de visitas (Módulo 34, RF-05.1, C3, D4) -->
@@ -3736,6 +4353,16 @@ export const RestockerRouteView = {
                 </div>
               </div>
 
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary w-100 mt-3"
+                data-testid="btn-escalate-from-visit"
+                :data-machine-id="visitMachine?.id"
+                @click="openEscalate(visitMachine, visitMachine?.active_l1_incident || null)"
+              >
+                ⚡ Escalar Avería al SAT
+              </button>
+
               <div style="display: flex; gap: 8px; margin-top: 14px;">
                 <button type="button" class="vg-btn vg-btn-lg vg-btn-secondary flex-grow-1" @click="closeVisitAssistant">
                   Cancelar
@@ -3941,6 +4568,68 @@ export const RestockerRouteView = {
           </div>
         </div>
       </template>
+
+      <!-- MODAL L1: resolución in situ con taxonomía y textos mínimos (RF-03.2) -->
+      <div
+        v-if="showL1ResolveModal"
+        data-testid="restocker-l1-resolve-modal"
+        style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 85; padding: 0;"
+      >
+        <div style="background-color: var(--color-surface-card); width: 100%; max-height: 92vh; overflow-y: auto; border-radius: var(--radius-card) var(--radius-card) 0 0; padding: 18px 16px; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));">
+          <h2 style="font-family: var(--font-display); font-size: 17px; margin: 0 0 4px 0;">✓ Resolver Nivel 1</h2>
+          <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0 0 12px 0;">#{{ l1ResolveIncident?.ticket_code }} · Diagnóstico y acción de al menos 20 caracteres.</p>
+          <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Causa raíz</label>
+          <select v-model="l1ResolveForm.root_cause_id" class="vg-select" data-testid="l1-root-cause" @change="onL1RootCauseChange">
+            <option v-for="cause in l1ResolveCauseOptions" :key="cause.id" :value="cause.id">{{ cause.name }}</option>
+          </select>
+          <p v-if="l1ResolveCauseOptions.length === 0" role="alert" style="font-size: 12px; color: var(--color-error-text); margin: 6px 0 0 0;">
+            No hay causas raíz activas compatibles con esta categoría.
+          </p>
+          <label style="display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px 0;">Solución estandarizada</label>
+          <select v-model="l1ResolveForm.standard_solution_id" class="vg-select" data-testid="l1-standard-solution">
+            <option v-for="solution in l1ResolveSolutions" :key="solution.id" :value="solution.id">{{ solution.name }}</option>
+          </select>
+          <label style="display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px 0;">Diagnóstico ({{ charCount(l1ResolveForm.diagnosis) }}/20)</label>
+          <textarea v-model="l1ResolveForm.diagnosis" class="vg-textarea" rows="3" data-testid="l1-diagnosis" placeholder="Qué has encontrado al abrir la máquina…"></textarea>
+          <label style="display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px 0;">Acción ejecutada ({{ charCount(l1ResolveForm.action) }}/20)</label>
+          <textarea v-model="l1ResolveForm.action" class="vg-textarea" rows="3" data-testid="l1-action" placeholder="Qué has reparado o repuesto in situ…"></textarea>
+          <p v-if="l1ResolveError" role="alert" style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); padding: 8px; border-radius: var(--radius-interactive);">⚠️ {{ l1ResolveError }}</p>
+          <div style="display: flex; gap: 8px; margin-top: 14px;">
+            <button type="button" class="vg-btn vg-btn-secondary" :disabled="isResolvingL1" @click="showL1ResolveModal = false">Cancelar</button>
+            <button type="button" class="vg-btn vg-btn-primary" data-testid="btn-submit-l1-resolution" :disabled="isResolvingL1 || l1ResolveCauseOptions.length === 0" @click="submitL1Resolution">Confirmar resolución</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL ESCALADO: nota interna y foto obligatorias (RF-04.1, Art. V.1/V.5) -->
+      <div
+        v-if="showEscalateModal"
+        data-testid="restocker-escalate-modal"
+        style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 86; padding: 0;"
+      >
+        <div style="background-color: var(--color-surface-card); width: 100%; max-height: 92vh; overflow-y: auto; border-radius: var(--radius-card) var(--radius-card) 0 0; padding: 18px 16px; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));">
+          <h2 style="font-family: var(--font-display); font-size: 17px; margin: 0 0 4px 0;">⚡ Escalar Avería al SAT</h2>
+          <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0 0 12px 0;">{{ escalateMachine?.code || 'Máquina' }} · La nota y la foto viajan al SAT como nota interna.</p>
+          <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Categoría técnica</label>
+          <select v-model="escalateForm.category" class="vg-select" data-testid="escalate-category">
+            <option value="ELECTRICAL_OFF">Máquina apagada / Sin corriente</option>
+            <option value="TEMPERATURE_COLD">Temperatura / Pérdida de frío</option>
+            <option value="PAYMENT_SYSTEM">Sistema de pago / Monedero</option>
+            <option value="PRODUCT_JAM">Atasco de producto en espiral</option>
+            <option value="OTHER">Otras averías</option>
+          </select>
+          <label style="display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px 0;">Nota Interna de Taller ({{ charCount(escalateForm.workshop_internal_note) }}/20)</label>
+          <textarea v-model="escalateForm.workshop_internal_note" class="vg-textarea" rows="3" data-testid="escalate-internal-note" placeholder="Describe el fallo electromecánico observado…"></textarea>
+          <label style="display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px 0;">Fotografía de evidencia (máx. 5 MB)</label>
+          <input type="file" accept="image/jpeg,image/png,image/webp" class="vg-input" data-testid="escalate-photo" @change="onEscalatePhotoChange" />
+          <p v-if="escalatePhotoName" style="font-size: 11px; color: var(--color-ink-muted); margin: 4px 0 0 0;">📷 {{ escalatePhotoName }}</p>
+          <p v-if="escalateError" role="alert" style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); padding: 8px; border-radius: var(--radius-interactive); margin-top: 10px;">⚠️ {{ escalateError }}</p>
+          <div style="display: flex; gap: 8px; margin-top: 14px;">
+            <button type="button" class="vg-btn vg-btn-secondary" :disabled="isEscalating" @click="showEscalateModal = false">Cancelar</button>
+            <button type="button" class="vg-btn vg-btn-primary" data-testid="btn-submit-escalation" :disabled="isEscalating" @click="submitEscalation">Escalar al SAT</button>
+          </div>
+        </div>
+      </div>
     </div>
   `
 };

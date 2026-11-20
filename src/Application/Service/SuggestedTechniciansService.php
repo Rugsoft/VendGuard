@@ -67,6 +67,47 @@ final class SuggestedTechniciansService
             return null;
         }
 
+        return $this->buildSuggestions($photo, $excludeTechnicianIds);
+    }
+
+    /**
+     * Ranking para una máquina que aún no tiene ticket activo.
+     *
+     * El escalado a puerta abierta necesita elegir técnico antes de crear el
+     * expediente. La sede y la zona de la máquina ya están disponibles, así que
+     * la foto se construye con el mismo motor y la misma forma que la variante
+     * por avería; no se duplica la regla de decisión.
+     *
+     * @return SuggestedTechnicianDto|null Ranking listo para publicar.
+     */
+    public function getSuggestionsForMachine(
+        int $machineId,
+        string $category,
+        ?string $urgency = null,
+        ?string $slaTier = null,
+        ?int $slaTargetMinutes = null
+    ): ?SuggestedTechnicianDto {
+        if ($machineId < 1) {
+            return null;
+        }
+
+        $photo = $this->repository->findSuggestionPhotoForMachine(
+            $machineId,
+            $category,
+            $urgency,
+            $slaTier,
+            $slaTargetMinutes
+        );
+
+        return $photo === null ? null : $this->buildSuggestions($photo, []);
+    }
+
+    /**
+     * @param array<string, mixed> $photo
+     * @param list<int> $excludeTechnicianIds
+     */
+    private function buildSuggestions(array $photo, array $excludeTechnicianIds): SuggestedTechnicianDto
+    {
         $excluded = array_map('intval', $excludeTechnicianIds);
         $technicians = array_values(array_filter(
             $photo['technicians'],

@@ -50,8 +50,12 @@ const HEX_PATTERN = /#[0-9a-fA-F]{3,8}\b/g;
  * (`var(--color-…)`) o por dato (el `color_hex` que elige el coordinador). La cifra baja
  * desde 2.271, así que el techo baja con ella.
  * Bajarlo es la direccion esperada; subirlo exige una decision explicita en el commit.
+ *
+ * Quinto tramo (18/11, Módulo 36): las superficies de sinergia entran sin deuda nueva y
+ * los avisos de despacho L1/SAT consumen los tokens de aviso; el contador baja a **2.242**
+ * y el techo lo acompaña.
  */
-const CEILING = 2268;
+const CEILING = 2242;
 
 let assertions = 0;
 let failures = 0;

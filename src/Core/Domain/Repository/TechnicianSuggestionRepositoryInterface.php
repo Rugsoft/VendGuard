@@ -70,4 +70,28 @@ interface TechnicianSuggestionRepositoryInterface
      * @return array<string, mixed>|null Foto normalizada, o `null` si la avería no existe.
      */
     public function findSuggestionPhoto(int $incidentId): ?array;
+
+    /**
+     * Foto completa del recomendador para una máquina sin ticket activo.
+     *
+     * Es la variante que necesita el escalado a puerta abierta: la máquina
+     * todavía no tiene un expediente al que consultar, pero la sede y la zona
+     * ya permiten construir el ranking de técnicos. La forma de la foto es la
+     * misma que la de `findSuggestionPhoto()`; el bloque `incident` viaja con
+     * `id = 0` y la categoría/urgencia solicitadas por el escalado.
+     *
+     * @param int $machineId Máquina que se va a escalar.
+     * @param string $category Categoría validada del escalado.
+     * @param string|null $urgency Urgencia declarada, si la hay.
+     * @param string|null $slaTier Sellado de SLA, si la hay.
+     * @param int|null $slaTargetMinutes Objetivo de SLA, si lo hay.
+     * @return array<string, mixed>|null Foto normalizada, o `null` si la máquina no existe.
+     */
+    public function findSuggestionPhotoForMachine(
+        int $machineId,
+        string $category,
+        ?string $urgency = null,
+        ?string $slaTier = null,
+        ?int $slaTargetMinutes = null
+    ): ?array;
 }

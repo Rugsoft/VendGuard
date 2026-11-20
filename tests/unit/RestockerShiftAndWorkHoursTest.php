@@ -658,14 +658,14 @@ $assert('La regla C5 lista al reponedor inactivo con actividad', isset($allRows[
 $assert('La regla C5 excluye al inactivo sin actividad', !isset($allRows[9]));
 $assert('La fila del reponedor declara su rol', ($allRows[7]['technician_role'] ?? null) === 'RESTOCKER');
 $assert(
-    'El reponedor computa 0 intervenciones y 0 resoluciones',
-    $allRows[7]['intervention_seconds'] === 0
-        && $allRows[7]['resolved_interventions_count'] === 0
-        && $allRows[7]['intervention_formatted'] === '00h 00m'
+    'El reponedor computa sus intervenciones y resoluciones L1',
+    $allRows[7]['intervention_seconds'] === 3600
+        && $allRows[7]['resolved_interventions_count'] === 4
+        && $allRows[7]['intervention_formatted'] === '01h 00m'
 );
 $assert(
-    'El tiempo en ruta del reponedor absorbe la jornada efectiva',
-    $allRows[7]['route_seconds'] === $allRows[7]['effective_seconds']
+    'El tiempo en ruta del reponedor descuenta las intervenciones de la jornada efectiva',
+    $allRows[7]['route_seconds'] === $allRows[7]['effective_seconds'] - 3600
 );
 $assert('El técnico conserva sus intervenciones', $allRows[5]['intervention_seconds'] === 1800);
 

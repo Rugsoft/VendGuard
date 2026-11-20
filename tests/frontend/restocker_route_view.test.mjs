@@ -7,7 +7,7 @@
  * - Cabecera con nombre, `operator_code` e insignias Titular / Suplente.
  * - Ciclo completo de jornada y cierre directo sin modal de relevo SAT.
  * - Contador diario en vivo y «⏱️ Mis Horas» de solo lectura, sin id ajeno.
- * - Estado base de ruta sin paradas inventadas (Features 24, 26 y 27).
+ * - Estado base de ruta sin paradas inventadas.
  * - Listado de máquinas de las zonas vivas con resumen de stock y modal de
  *   planograma de solo lectura, sin coste ni margen (T-PLN-13, QA 2, Art. V.4).
  * - Enrutamiento de sesión del Shell Vue 3 hacia `restocker`.
@@ -27,11 +27,17 @@ globalThis.localStorage = {
 globalThis.sessionStorage = { ...globalThis.localStorage };
 
 import { readFileSync } from 'node:fs';
-import { api } from '../../public/assets/js/api.js';
+import { api, ApiError } from '../../public/assets/js/api.js';
 import { store } from '../../public/assets/js/store.js';
 import { RestockerRouteView } from '../../public/assets/js/components/RestockerRouteView.js';
 import { RestockVisitOfflineQueue } from '../../public/assets/js/utils/RestockVisitOfflineQueue.js';
 import { CashCollectionOfflineQueue } from '../../public/assets/js/utils/CashCollectionOfflineQueue.js';
+import {
+  RestockerIncidentOfflineQueue,
+  RESTOCKER_INCIDENT_PENDING,
+  RESTOCKER_INCIDENT_CONFLICT,
+  RESTOCKER_INCIDENT_OPERATIONS
+} from '../../public/assets/js/utils/RestockerIncidentOfflineQueue.js';
 import { createFakeIndexedDb } from '../Support/FakeIndexedDb.mjs';
 
 console.log('======================================================================');
@@ -115,6 +121,7 @@ const bootstrapPayload = {
         code: 'VEND-0701',
         model: 'Jofemar Vision',
         machine_type: 'COMBO',
+        location_id: 1,
         location_name: 'Hospital del Mar',
         site_code: 'HOSP-MAR',
         zone_id: 1,
@@ -135,6 +142,7 @@ const bootstrapPayload = {
         code: 'VEND-0801',
         model: 'Necta Korinto',
         machine_type: 'HOT_DRINKS',
+        location_id: 2,
         location_name: 'Torre Glòries',
         site_code: 'TORRE-GLO',
         zone_id: 2,
@@ -151,6 +159,16 @@ const bootstrapPayload = {
         fill_rate_percent: 90
       }
     ],
+    site_coincidence: {
+      1: [{
+        user_id: 7,
+        name: 'Marta Técnica Ruta BCN',
+        operator_code: 'OP-02',
+        role: 'TECHNICIAN',
+        shift_status: 'ON_SHIFT',
+        activity_summary: '1 avería SAT activa en esta sede'
+      }]
+    },
     route_stops: [],
     recent_visits: [
       {
@@ -189,8 +207,15 @@ assert('loadMyRoute() publica la zona titular y la suplente', routeVm.primaryZon
 assert('zoneRoleLabel() distingue Titular y Suplente', routeVm.zoneRoleLabel(routeVm.primaryZone) === 'Titular' && routeVm.zoneRoleLabel(routeVm.backupZones[0]) === 'Suplente');
 assert('loadMyRoute() aplica el estado de turno del bootstrap', routeVm.shiftStatus === 'MEAL_BREAK' && routeVm.activeShiftId === 45);
 assert('El contador diario formatea los segundos efectivos', routeVm.todayEffectiveFormatted === '02h 00m', routeVm.todayEffectiveFormatted);
-assert('El estado base de ruta queda vacío hasta las Features 24/26/27', routeVm.routeStops.length === 0);
+assert('El estado base de ruta queda vacío sin paradas inventadas', routeVm.routeStops.length === 0);
 assert('loadMyRoute() publica las dos máquinas de sus zonas', routeVm.machines.length === 2 && routeVm.machines[0].code === 'VEND-0701');
+assert(
+  'loadMyRoute() recibe location_id y la coincidencia indexada por sede',
+  routeVm.machines.every((machine) => Number.isInteger(machine.location_id) && machine.location_id > 0)
+    && routeVm.siteCoincidenceForLocation(routeVm.machines[0].location_id).length === 1
+    && routeVm.siteCoincidenceSummary(routeVm.machines[0].location_id).includes('Marta Técnica Ruta BCN (OP-02)')
+    && routeVm.siteCoincidenceForLocation(routeVm.machines[1].location_id).length === 0
+);
 assert('loadMyRoute() publica el historial reciente de visitas', routeVm.recentVisits.length === 1 && routeVm.recentVisits[0].visit_code === 'MRV-2026-0031');
 assert('machineHasAlert() distingue la máquina con alertas', routeVm.machineHasAlert(routeVm.machines[0]) === true && routeVm.machineHasAlert(routeVm.machines[1]) === false);
 assert('machineTypeLabel() traduce las tipologías', routeVm.machineTypeLabel('COMBO') === 'Mixta' && routeVm.machineTypeLabel('HOT_DRINKS') === 'Bebidas calientes');
@@ -325,7 +350,7 @@ assert(
   !/handover|target_technician_id|relevo de averías/i.test(templateBlock)
 );
 assert('La vista no consume la ruta SAT', !viewSource.includes('/technician/my-route') && !viewSource.includes('/coordinator/'));
-assert('El estado base de ruta está presente', viewSource.includes('data-testid="restocker-route-base"') && viewSource.includes('Features 24, 26 y 27'));
+assert('El estado base de ruta está presente con el copy vigente', viewSource.includes('data-testid="restocker-route-base"') && viewSource.includes('aparecerán aquí cuando coordinación las asigne') && !viewSource.includes('Features 24, 26 y 27'));
 assert('«Mis Horas» es un modal de solo lectura con sus insignias', viewSource.includes('data-testid="modal-my-hours"') && viewSource.includes('Cierre forzado') && viewSource.includes('Ajustado por Coordinación'));
 assert('El contador diario y su acceso están en la barra', viewSource.includes('data-testid="restocker-today-summary"') && viewSource.includes('data-testid="btn-open-my-hours"'));
 
@@ -885,6 +910,23 @@ assert('El botón de visita se deshabilita con aviso explícito', viewSource.inc
 
 await visitVm.openVisitAssistant(visitVm.machines[0]);
 assert('La visita carga el planograma de la máquina elegida', loadedVisitMachineId === 7 && visitVm.showVisitModal === true && visitVm.visitPlanogram.slots.length === 3);
+assert(
+  'El asistente de visita ofrece el escalado al SAT con la máquina y su aviso L1',
+  visitModalSource.includes('data-testid="btn-escalate-from-visit"')
+    && visitModalSource.includes('@click="openEscalate(visitMachine, visitMachine?.active_l1_incident || null)"')
+    && visitModalSource.includes('⚡ Escalar Avería al SAT')
+);
+const visitEscalationIncident = { id: 501, machine_id: 7, status: 'ASSIGNED' };
+const visitEscalationMachine = { ...visitVm.visitMachine, active_l1_incident: visitEscalationIncident };
+visitVm.openEscalate(visitEscalationMachine, visitEscalationMachine.active_l1_incident);
+assert(
+  'El escalado desde la visita abre el modal con la máquina y la incidencia abiertas',
+  visitVm.showEscalateModal === true
+    && visitVm.showVisitModal === true
+    && visitVm.escalateMachine === visitEscalationMachine
+    && visitVm.escalateIncident === visitEscalationIncident
+);
+visitVm.showEscalateModal = false;
 assert('La visita inicializa un ítem por carril y un client_mutation_id', visitVm.visitForm.items.length === 3 && visitVm.visitForm.client_mutation_id.length > 8 && visitVm.visitForm.started_at.length > 10);
 assert('La visita preselecciona el lote FEFO recomendado', visitVm.visitForm.items[0].loaded_batch_code === 'LOTE-NEW1' && visitVm.visitForm.items[1].loaded_batch_code === 'LOTE-NEW2');
 assert('El checklist inicial adapta los cinco bloques al tipo de máquina', visitVm.visitHygieneItems.length === 5 && visitVm.visitHygieneMissing.length === 4 && visitVm.visitForm.hygiene_checklist.cabin_spills_checked === null);
@@ -1654,7 +1696,7 @@ assert(
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/CashCollectionOfflineQueue.js')
     && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
-      .includes('vendguard-app-shell-v25')
+      .includes('vendguard-app-shell-v26')
 );
 assert(
   'La vista completa no expone ninguna de las cinco claves del Arqueo Ciego',
@@ -1664,6 +1706,419 @@ assert(
     && !viewSource.includes('discrepancy_eur')
     && !viewSource.includes('discrepancy_justification')
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-RSS-11 · Avisos L1, escalado y cola offline del reponedor (Módulo 36)
+// ─────────────────────────────────────────────────────────────────────────────
+const incidentVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+assert(
+  'data() arranca la bandeja L1, la taxonomía y la coincidencia sin inventar datos',
+  Array.isArray(incidentVm.assignedL1Incidents) && incidentVm.assignedL1Incidents.length === 0
+    && Array.isArray(incidentVm.l1TaxonomyCatalog) && incidentVm.l1TaxonomyCatalog.length === 0
+    && typeof incidentVm.siteCoincidence === 'object'
+);
+assert(
+  'La vista rotula la taxonomía L1 y su estado',
+  incidentVm.l1IssueLabel('STOCKOUT_EMPTY_SLOT').includes('Carril vacío')
+    && incidentVm.l1IssueLabel('MISSING_CONSUMABLES').includes('vasos')
+    && incidentVm.l1StatusLabel('IN_PROGRESS') === 'En curso'
+);
+incidentVm.siteCoincidence = {
+  4: [{
+    user_id: 7,
+    name: 'Jordi SAT',
+    operator_code: 'SAT-07',
+    phone: '+34 600 123 456',
+    activity_summary: '1 avería SAT activa en esta sede'
+  }]
+};
+assert(
+  'La Coincidencia en Sede muestra el código y el enlace tel: sin user_id',
+  incidentVm.siteCoincidenceForLocation(4).length === 1
+    && incidentVm.siteCoincidenceSummary(4).includes('Jordi SAT (SAT-07)')
+    && !incidentVm.siteCoincidenceSummary(4).includes('user_id')
+    && viewSource.includes('v-for="entry in siteCoincidenceForLocation(machine.location_id)"')
+    && viewSource.includes('{{ siteCoincidenceLabel(entry) }}')
+    && viewSource.includes("'tel:' + entry.phone")
+    && viewSource.includes('entry.operator_code')
+);
+assert(
+  'La máquina distingue aviso L1 y SAT abierto',
+  incidentVm.machineHasActiveL1({ id: 1, active_l1_incident: { level1_issue_type: 'STOCKOUT_EMPTY_SLOT' } }) === true
+    && incidentVm.machineHasActiveSat({ id: 1, has_active_sat_incident: true }) === true
+    && incidentVm.machineHasActiveL1({ id: 2 }) === false
+);
+
+assert(
+  'La vista incorpora bandeja, badge, banner y botón de escalado L1',
+  viewSource.includes('data-testid="restocker-l1-incidents"')
+    && viewSource.includes('data-testid="restocker-machine-l1-badge"')
+    && viewSource.includes('data-testid="restocker-site-coincidence"')
+    && viewSource.includes('⚡ Escalar Avería al SAT')
+);
+assert(
+  'El modal de resolución exige taxonomía y 20 caracteres en diagnóstico y acción',
+  viewSource.includes('data-testid="restocker-l1-resolve-modal"')
+    && viewSource.includes('data-testid="l1-root-cause"')
+    && viewSource.includes('data-testid="l1-standard-solution"')
+    && viewSource.includes('data-testid="l1-diagnosis"')
+    && viewSource.includes('data-testid="l1-action"')
+);
+
+const l1TaxonomyFixture = [
+  {
+    id: 31,
+    code: 'RC-L1-STOCKOUT',
+    category: 'PRODUCT_JAM',
+    name: 'Agotamiento de producto en carril de selección',
+    is_active: true,
+    solutions: [{ id: 41, name: 'Reposición de producto en carril', is_active: true }]
+  },
+  {
+    id: 32,
+    code: 'RC-L1-CONSUMABLES',
+    category: 'OTHER',
+    name: 'Falta de vasos, azúcar o paletinas en dispensador',
+    is_active: true,
+    solutions: [{ id: 42, name: 'Reposición de consumibles', is_active: true }]
+  },
+  {
+    id: 33,
+    code: 'RC-L1-SPIRAL-RELEASE',
+    category: 'PRODUCT_JAM',
+    name: 'Envase mal posicionado o trabado leve en boca de espiral',
+    is_active: true,
+    solutions: [{ id: 43, name: 'Liberación manual de envase en espiral', is_active: true }]
+  },
+  {
+    id: 34,
+    code: 'RC-L1-EMPTY-TUBES',
+    category: 'PAYMENT_SYSTEM',
+    name: 'Tubos de cambio del monedero sin moneda fraccionaria',
+    is_active: true,
+    solutions: [{ id: 44, name: 'Recarga de tubos de cambio', is_active: true }]
+  }
+];
+
+const taxonomyVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+taxonomyVm.l1TaxonomyCatalog = l1TaxonomyFixture;
+taxonomyVm.openL1Resolve({
+  id: 503,
+  machine_id: 7,
+  category: 'PRODUCT_JAM',
+  level1_issue_type: 'MINOR_SPIRAL_JAM',
+  status: 'IN_PROGRESS'
+});
+assert(
+  'La resolución filtra la causa por categoría y motivo L1 sin preseleccionar otra categoría',
+  taxonomyVm.l1ResolveCauseOptions.length === 1
+    && Number(taxonomyVm.l1ResolveForm.root_cause_id) === 33
+    && Number(taxonomyVm.l1ResolveForm.standard_solution_id) === 43
+    && !taxonomyVm.l1ResolveCauseOptions.some((cause) => Number(cause.id) === 32)
+);
+
+const legacyTaxonomyVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+legacyTaxonomyVm.l1TaxonomyCatalog = l1TaxonomyFixture;
+legacyTaxonomyVm.openL1Resolve({ id: 504, machine_id: 8, category: 'PRODUCT_JAM', status: 'IN_PROGRESS' });
+assert(
+  'Sin motivo L1 la resolución conserva solo las causas de la categoría',
+  legacyTaxonomyVm.l1ResolveCauseOptions.length === 2
+    && legacyTaxonomyVm.l1ResolveCauseOptions.every((cause) => cause.category === 'PRODUCT_JAM')
+    && Number(legacyTaxonomyVm.l1ResolveForm.root_cause_id) === 31
+);
+assert(
+  'El desplegable de causa usa la lista filtrada, no el catálogo completo',
+  viewSource.includes('v-for="cause in l1ResolveCauseOptions"')
+    && !viewSource.includes('v-for="cause in l1TaxonomyCatalog"')
+);
+assert(
+  'El modal de escalado exige nota interna y foto de hasta 5 MB',
+  viewSource.includes('data-testid="restocker-escalate-modal"')
+    && viewSource.includes('máx. 5 MB')
+    && viewSource.includes('workshop_internal_note')
+    && viewSource.includes('uploadIncidentPhoto')
+);
+
+assert(
+  'El cliente de escalado usa la ruta contractual upload-photo',
+  apiSource.includes("upload('/restocker/incidents/upload-photo'")
+);
+
+assert(
+  'El Service Worker precachea la cola L1 y sube la versión',
+  readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
+    .includes('/assets/js/utils/RestockerIncidentOfflineQueue.js')
+    && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
+      .includes('vendguard-app-shell-v26')
+);
+assert(
+  'El cliente API expone inicio, resolución, escalado y volcado de conflicto L1',
+  typeof api.restocker.startL1Incident === 'function'
+    && typeof api.restocker.resolveL1Incident === 'function'
+    && typeof api.restocker.escalateMachineToSat === 'function'
+    && typeof api.restocker.dumpIncidentConflict === 'function'
+);
+
+const incidentQueue = new RestockerIncidentOfflineQueue();
+const queuedStart = await incidentQueue.enqueue({
+  client_mutation_id: 't-rss11-start-1',
+  restocker_id: 12,
+  operation_type: RESTOCKER_INCIDENT_OPERATIONS.START_L1,
+  incident_id: 501,
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  payload: { client_mutation_id: 't-rss11-start-1' }
+});
+assert(
+  'La cola L1 usa memoria cuando no hay IndexedDB y preserva la operación',
+  incidentQueue.isMemoryBacked() === true
+    && queuedStart.status === RESTOCKER_INCIDENT_PENDING
+    && queuedStart.operation_type === 'START_L1_INCIDENT'
+);
+const listedQueue = await incidentQueue.list(12);
+assert('La cola L1 se aísla por restocker_id', listedQueue.length === 1 && listedQueue[0].incident_id === 501);
+incidentQueue.enqueue({
+  client_mutation_id: 't-rss11-start-1',
+  restocker_id: 12,
+  operation_type: RESTOCKER_INCIDENT_OPERATIONS.START_L1,
+  incident_id: 501,
+  machine_id: 7,
+  payload: { client_mutation_id: 't-rss11-start-1' }
+});
+assert('La cola L1 es idempotente por client_mutation_id', (await incidentQueue.list(12)).length === 1);
+await incidentQueue.markConflict('t-rss11-start-1', 'Ticket ya resuelto por otro operario.');
+const conflictedQueue = await incidentQueue.list(12, [RESTOCKER_INCIDENT_CONFLICT]);
+assert(
+  'La cola L1 conserva el motivo de un conflicto irresoluble',
+  conflictedQueue.length === 1 && conflictedQueue[0].conflict_reason.includes('otro operario')
+);
+await incidentQueue.clear(12);
+assert('La cola L1 se vacía al cerrar la sesión del reponedor', (await incidentQueue.list(12)).length === 0);
+
+const originalStartL1 = api.restocker.startL1Incident;
+const originalResolveL1 = api.restocker.resolveL1Incident;
+const originalEscalateMachine = api.restocker.escalateMachineToSat;
+const originalUploadIncidentPhoto = api.restocker.uploadIncidentPhoto;
+let startCalled = 0;
+let resolvePayload = null;
+let escalatedPayload = null;
+let uploadedIncidentPhoto = 0;
+api.restocker.startL1Incident = async () => { startCalled++; return {}; };
+api.restocker.resolveL1Incident = async (_id, payload) => { resolvePayload = payload; return {}; };
+api.restocker.escalateMachineToSat = async (_id, payload) => { escalatedPayload = payload; return {}; };
+api.restocker.uploadIncidentPhoto = async () => {
+  uploadedIncidentPhoto++;
+  return { photo_evidence_url: '/uploads/incidents/t-rss11.png' };
+};
+
+const offlineVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+Object.defineProperty(offlineVm, 'navigatorOnline', { get: () => false });
+const offlineIncident = { id: 501, machine_id: 7, machine_code: 'VEND-0701', status: 'ASSIGNED' };
+await offlineVm.startL1(offlineIncident);
+assert(
+  'Sin conexión el inicio L1 se encola y no golpea la API',
+  startCalled === 0 && offlineIncident.status === 'IN_PROGRESS'
+    && (await offlineVm.ensureIncidentQueue().list(12)).length === 1
+);
+assert(
+  'El primer aviso offline queda pendiente de sincronizar',
+  offlineVm.incidentSyncMessage.includes('cola offline')
+);
+await offlineVm.ensureIncidentQueue().clear(12);
+
+const resolveVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+resolveVm.assignedL1Incidents = [{
+  id: 501,
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  status: 'IN_PROGRESS',
+  category: 'PRODUCT_JAM',
+  level1_issue_type: 'STOCKOUT_EMPTY_SLOT'
+}];
+resolveVm.loadMyRoute = async () => {};
+resolveVm.l1TaxonomyCatalog = l1TaxonomyFixture;
+resolveVm.openL1Resolve(resolveVm.assignedL1Incidents[0]);
+resolveVm.l1ResolveForm.diagnosis = 'Carril sin producto y muelle correcto';
+resolveVm.l1ResolveForm.action = 'Repongo producto y verifico la entrega completa';
+await resolveVm.submitL1Resolution();
+assert(
+  'La resolución online viaja con máquina, taxonomía y textos',
+  resolvePayload?.machine_id === 7 && resolvePayload?.root_cause_id === 31
+    && resolvePayload?.standard_solution_id === 41
+    && resolvePayload?.diagnosis.includes('Carril sin producto')
+    && resolvePayload?.action.includes('Repongo producto')
+);
+
+const shortResolveVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+shortResolveVm.assignedL1Incidents = [{ id: 502, machine_id: 8, status: 'IN_PROGRESS' }];
+shortResolveVm.openL1Resolve(shortResolveVm.assignedL1Incidents[0]);
+shortResolveVm.l1ResolveForm.diagnosis = 'Corto';
+shortResolveVm.l1ResolveForm.action = 'Corto';
+await shortResolveVm.submitL1Resolution();
+assert(
+  'La resolución L1 bloquea textos de menos de 20 caracteres reales (Art. V.1)',
+  shortResolveVm.l1ResolveError.includes('20 caracteres')
+);
+
+const buildRejectedResolveVm = (incidentId) => {
+  const vm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+  vm.assignedL1Incidents = [{
+    id: incidentId,
+    machine_id: 7,
+    status: 'IN_PROGRESS',
+    category: 'PRODUCT_JAM',
+    level1_issue_type: 'STOCKOUT_EMPTY_SLOT'
+  }];
+  vm.loadMyRoute = async () => {};
+  vm.l1TaxonomyCatalog = l1TaxonomyFixture;
+  vm.openL1Resolve(vm.assignedL1Incidents[0]);
+  vm.l1ResolveForm.diagnosis = 'Carril sin producto y muelle correcto';
+  vm.l1ResolveForm.action = 'Repongo producto y verifico la entrega completa';
+  return vm;
+};
+
+api.restocker.resolveL1Incident = async () => {
+  throw new ApiError(
+    422,
+    'RESOLUTION_TEXT_TOO_SHORT',
+    'El campo «resolution_diagnosis» debe contener al menos 20 caracteres reales; se recibieron 3 (Art. V.1).',
+    { field: 'resolution_diagnosis' }
+  );
+};
+const validationResolveVm = buildRejectedResolveVm(503);
+try {
+  await validationResolveVm.submitL1Resolution();
+} finally {
+  api.restocker.resolveL1Incident = originalResolveL1;
+}
+assert(
+  'O-36-02: el 422 de textos se traduce a un campo útil y conserva el código',
+  validationResolveVm.l1ResolveError.includes('Diagnóstico')
+    && validationResolveVm.l1ResolveError.includes('20 caracteres')
+    && validationResolveVm.l1ResolveError.includes('RESOLUTION_TEXT_TOO_SHORT')
+    && !validationResolveVm.l1ResolveError.includes('resolution_diagnosis')
+);
+
+api.restocker.resolveL1Incident = async () => {
+  throw new ApiError(
+    500,
+    'INTERNAL_SERVER_ERROR',
+    'No se pudo completar la operación de Nivel 1.',
+    null,
+    { sql: 'SQLSTATE[23514] check violation' }
+  );
+};
+const serverErrorVm = buildRejectedResolveVm(504);
+try {
+  await serverErrorVm.submitL1Resolution();
+} finally {
+  api.restocker.resolveL1Incident = originalResolveL1;
+}
+assert(
+  'O-36-02: un 500 conserva un mensaje seguro y el código, sin filtrar SQL',
+  serverErrorVm.l1ResolveError.includes('fallo del servidor')
+    && serverErrorVm.l1ResolveError.includes('INTERNAL_SERVER_ERROR')
+    && !serverErrorVm.l1ResolveError.includes('SQLSTATE')
+);
+
+const whitespaceResolveVm = buildRejectedResolveVm(505);
+whitespaceResolveVm.l1ResolveForm.diagnosis = 'Espiral' + ' '.repeat(50) + 'OK';
+let whitespaceResolveApiCalls = 0;
+api.restocker.resolveL1Incident = async () => {
+  whitespaceResolveApiCalls++;
+  return {};
+};
+try {
+  await whitespaceResolveVm.submitL1Resolution();
+} finally {
+  api.restocker.resolveL1Incident = originalResolveL1;
+}
+assert(
+  'O-36-02: el contador L1 colapsa espacios internos y bloquea el envío',
+  whitespaceResolveVm.charCount(whitespaceResolveVm.l1ResolveForm.diagnosis) === 10
+    && whitespaceResolveVm.l1ResolveError.includes('20 caracteres')
+    && whitespaceResolveApiCalls === 0
+);
+
+const escalateVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+escalateVm.loadMyRoute = async () => {};
+const escalationMachine = { id: 7, code: 'VEND-0701', location_id: 4 };
+escalateVm.openEscalate(escalationMachine);
+escalateVm.escalateForm.workshop_internal_note = 'Electroválvula con fuga en el grupo de café';
+await escalateVm.submitEscalation();
+assert(
+  'El escalado exige fotografía de evidencia (Art. V.5)',
+  escalateVm.escalateError.includes('fotografía')
+);
+escalateVm.escalatePhotoFile = new Blob(['evidence'], { type: 'image/png' });
+escalateVm.escalatePhotoName = 'fuga.png';
+await escalateVm.submitEscalation();
+assert(
+  'El escalado online sube la foto y sella tamaño y MIME reales',
+  uploadedIncidentPhoto === 1 && escalatedPayload?.photo_path === '/uploads/incidents/t-rss11.png'
+    && escalatedPayload?.photo_mime_type === 'image/png'
+    && Number(escalatedPayload?.photo_size_bytes) === 8
+    && escalatedPayload?.workshop_internal_note.includes('Electroválvula')
+);
+
+const incidentSyncVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+incidentSyncVm.incidentSyncError = '';
+incidentSyncVm.loadMyRoute = async () => {};
+await incidentSyncVm.ensureIncidentQueue().enqueue({
+  client_mutation_id: 't-rss11-escalate-sync',
+  restocker_id: 12,
+  operation_type: RESTOCKER_INCIDENT_OPERATIONS.ESCALATE_TO_SAT,
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  payload: { workshop_internal_note: 'Electroválvula con fuga en el grupo de café' },
+  photo: new Blob(['evidence'], { type: 'image/png' }),
+  photo_name: 'fuga.png'
+});
+await incidentSyncVm.syncPendingIncidentMutations();
+assert(
+  'La sincronización L1 reenvía el escalado con su foto y vacía la cola',
+  uploadedIncidentPhoto === 2
+    && escalatedPayload?.photo_path === '/uploads/incidents/t-rss11.png'
+    && (await incidentSyncVm.ensureIncidentQueue().list(12)).length === 0
+);
+
+// P1.8: archivar un conflicto L1 envía stop_type, stop_id y operation_type reales en el raíz.
+const originalDumpIncidentConflict = api.restocker.dumpIncidentConflict;
+let dumpedIncidentPayload = null;
+api.restocker.dumpIncidentConflict = async (payload) => {
+  dumpedIncidentPayload = payload;
+  return { ok: true, outcome_status: 'CONFLICT_DUMPED' };
+};
+const conflictVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+await conflictVm.ensureIncidentQueue().enqueue({
+  client_mutation_id: 't-rss11-conflict-payload',
+  restocker_id: 12,
+  operation_type: RESTOCKER_INCIDENT_OPERATIONS.START_L1,
+  incident_id: 509,
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  payload: { client_occurred_at: '2026-11-20T10:00:00Z' }
+});
+await conflictVm.ensureIncidentQueue().markConflict('t-rss11-conflict-payload', 'Ya estaba iniciado');
+const [queuedConflictItem] = await conflictVm.ensureIncidentQueue().list(12, ['CONFLICT']);
+try {
+  await conflictVm.archiveIncidentConflict(queuedConflictItem);
+} finally {
+  api.restocker.dumpIncidentConflict = originalDumpIncidentConflict;
+}
+assert(
+  'P1.8: archiveIncidentConflict envía stop_type, stop_id y operation_type en nivel raíz',
+  dumpedIncidentPayload?.stop_type === 'INCIDENT'
+    && dumpedIncidentPayload?.stop_id === 509
+    && dumpedIncidentPayload?.operation_type === RESTOCKER_INCIDENT_OPERATIONS.START_L1
+    && (await conflictVm.ensureIncidentQueue().list(12)).length === 0,
+  JSON.stringify(dumpedIncidentPayload)
+);
+
+api.restocker.startL1Incident = originalStartL1;
+api.restocker.resolveL1Incident = originalResolveL1;
+api.restocker.escalateMachineToSat = originalEscalateMachine;
+api.restocker.uploadIncidentPhoto = originalUploadIncidentPhoto;
 
 api.restocker.createCashCollection = originalCreateCashCollection;
 api.restocker.getCashCollectionReceptionReceipt = originalCashReceipt;

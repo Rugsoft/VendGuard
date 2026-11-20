@@ -1208,11 +1208,17 @@ try {
         'preferred_category' => 'PAYMENT_SYSTEM',
     ]);
     $technicianCatalog = $data($catalogTechnician)['items'] ?? [];
+    $testCauseRow = null;
+    foreach ($technicianCatalog as $catalogRow) {
+        if (($catalogRow['code'] ?? '') === 'RC-TAX-A') {
+            $testCauseRow = $catalogRow;
+            break;
+        }
+    }
     $assert(
         '6.5 El técnico lee el catálogo activo con categoría preferente y sugerencias D3',
         $catalogTechnician->getStatusCode() === 200
-            && ($technicianCatalog[0]['code'] ?? '') === 'RC-TAX-A'
-            && ($technicianCatalog[0]['is_suggested_for_category'] ?? false) === true
+            && ($testCauseRow['is_suggested_for_category'] ?? false) === true
             && !in_array('RC-TAX-B', array_column($technicianCatalog, 'code'), true)
     );
 

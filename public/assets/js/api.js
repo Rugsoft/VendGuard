@@ -1420,6 +1420,52 @@ export class ApiClient {
     },
 
     /**
+     * Escalafón de reponedores de la zona de la sede, con el #1 recomendado
+     * (Módulo 36, RF-02.1.1).
+     * @param {number|string} incidentId
+     * @returns {Promise<Array<Object>>}
+     */
+    getSuggestedRestockers: (incidentId) => {
+      return this.get(`/coordinator/incidents/${encodeURIComponent(incidentId)}/suggested-restockers`);
+    },
+
+    /**
+     * Conmuta el nivel operativo del expediente y asigna su custodio (Módulo 36,
+     * RF-05.3).
+     * @param {number|string} incidentId
+     * @param {'L1_RESTOCKER'|'L2_SAT'} dispatchLevel
+     * @param {number|string} assigneeId
+     * @param {string} [level1IssueType] Motivo L1 del despacho manual (H-36-07)
+     * @param {string|null} [urgencyOverride] Urgencia final elegida (opcional)
+     * @param {string|null} [urgencyReason] Motivo obligatorio si se reclasifica
+     * @returns {Promise<Object>}
+     */
+    changeDispatchLevel: (
+      incidentId,
+      dispatchLevel,
+      assigneeId,
+      level1IssueType = '',
+      urgencyOverride = null,
+      urgencyReason = null
+    ) => {
+      const payload = {
+        dispatch_level: dispatchLevel,
+        assignee_id: Number(assigneeId)
+      };
+      if (level1IssueType) {
+        payload.level1_issue_type = level1IssueType;
+      }
+      if (urgencyOverride) {
+        payload.urgency_override = urgencyOverride;
+      }
+      if (urgencyReason) {
+        payload.urgency_override_reason = urgencyReason;
+      }
+
+      return this.post(`/coordinator/incidents/${encodeURIComponent(incidentId)}/dispatch-level`, payload);
+    },
+
+    /**
      * Assigns incident to a technician, with optional urgency reclassification (RF-05).
      * @param {number|string} incidentId
      * @param {number|string} technicianId
@@ -2206,6 +2252,26 @@ export class ApiClient {
       return this.get(`/restocker/machines/${encodeURIComponent(machineId)}/planogram`);
     },
 
+    /** Inicia la intervención de un aviso de Nivel 1 (Módulo 36, RF-03.1). */
+    startL1Incident: (incidentId, payload = {}) => {
+      return this.post(`/restocker/incidents/${encodeURIComponent(incidentId)}/start`, payload);
+    },
+
+    /** Resuelve in situ un aviso de Nivel 1 con taxonomía y textos mínimos (RF-03.2). */
+    resolveL1Incident: (incidentId, payload) => {
+      return this.post(`/restocker/incidents/${encodeURIComponent(incidentId)}/resolve`, payload);
+    },
+
+    /** Escala al SAT desde una máquina de las zonas vivas (RF-04.1, Art. V.5). */
+    escalateMachineToSat: (machineId, payload) => {
+      return this.post(`/restocker/machines/${encodeURIComponent(machineId)}/escalate-to-sat`, payload);
+    },
+
+    /** Archiva en auditoría una operación offline rechazada (C2, Art. III.3). */
+    dumpIncidentConflict: (payload) => {
+      return this.post('/restocker/incidents/conflict-dump', payload);
+    },
+
     /**
      * Stock FEFO del propio reponedor autenticado (Módulo 33, RF-05.2, Art. V.4).
      * La respuesta no transporta costes ni márgenes.
@@ -2213,6 +2279,13 @@ export class ApiClient {
      */
     getVanStocks: () => {
       return this.get('/restocker/van-stocks');
+    },
+
+    /** Sube la evidencia fotográfica de una avería escalada (Art. V.5). */
+    uploadIncidentPhoto: (photo, photoName = null) => {
+      const formData = new FormData();
+      formData.append('photo', photo, photoName || photo?.name || 'incident-evidence');
+      return this.upload('/restocker/incidents/upload-photo', formData);
     },
 
     /**

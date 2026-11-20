@@ -532,6 +532,108 @@ $assert("8.7 Expediente formal persistido en tabla refund_requests", $refundRow 
 $assert("8.8 Estado inicial es PENDING_INSPECTION", ($refundRow['status'] ?? '') === 'PENDING_INSPECTION');
 $assert("8.9 Importe reclamado persistido como 2.50", (float)($refundRow['claimed_amount'] ?? 0) === 2.50);
 
+// =========================================================================
+// CASE 9: Portal L1 pre-classification — eligible creation and quarantine (D2 / EARS 01.2)
+// =========================================================================
+echo "\n--- Caso 9: Pre-clasificación L1 del alta de Portal (elegible y cuarentena) ---\n";
+
+// The hot-drinks machine has no live incident after Case 4; clear any residue
+// from Case 2 and make sure it starts outside quarantine.
+TestDataCleaner::purgeIncidentsByMachine($pdo, $hotDrinksMachine->getId());
+$pdo->prepare("UPDATE machines SET sanitary_status = 'OK' WHERE id = :id")
+    ->execute([':id' => $hotDrinksMachine->getId()]);
+
+// Positive composition: an eligible Portal alert must be born in L1_RESTOCKER,
+// with the deterministic category mapping and no technician assigned.
+$req9Eligible = new Request(
+    method: 'POST',
+    path: '/api/incidents',
+    queryParams: [],
+    parsedBody: [
+        'machine_id' => (string)$hotDrinksMachine->getId(),
+        'category' => 'OTHER',
+        'description' => 'Faltan vasos y azúcar en el dispensador; el reponedor puede resolverlo en su ruta.',
+        'level1_issue_type' => 'MISSING_CONSUMABLES',
+    ],
+    headers: [
+        'Authorization' => "Bearer {$tokenLoc1}",
+        'Content-Type' => 'application/x-www-form-urlencoded',
+    ]
+);
+
+$res9Eligible = $router->dispatch($req9Eligible);
+$body9Eligible = $res9Eligible->getDecodedBody();
+$data9Eligible = $body9Eligible['data'] ?? [];
+
+$stmt9Eligible = $pdo->prepare(
+    'SELECT dispatch_level, category, level1_issue_type, status, assigned_technician_id
+       FROM incidents WHERE id = :id'
+);
+$stmt9Eligible->execute([':id' => (int)($data9Eligible['id'] ?? 0)]);
+$row9Eligible = $stmt9Eligible->fetch(PDO::FETCH_ASSOC);
+
+// Release the machine before the quarantine scenario so it can receive a new alert.
+TestDataCleaner::purgeIncidentsByMachine($pdo, $hotDrinksMachine->getId());
+$pdo->prepare("UPDATE machines SET sanitary_status = 'QUARANTINE' WHERE id = :id")
+    ->execute([':id' => $hotDrinksMachine->getId()]);
+
+$req9 = new Request(
+    method: 'POST',
+    path: '/api/incidents',
+    queryParams: [],
+    parsedBody: [
+        'machine_id' => (string)$hotDrinksMachine->getId(),
+        'category' => 'OTHER',
+        'description' => 'La máquina está en cuarentena sanitaria y requiere revisión del SAT.',
+        'level1_issue_type' => 'MISSING_CONSUMABLES',
+    ],
+    headers: [
+        'Authorization' => "Bearer {$tokenLoc1}",
+        'Content-Type' => 'application/x-www-form-urlencoded',
+    ]
+);
+
+$res9 = $router->dispatch($req9);
+$body9 = $res9->getDecodedBody();
+$data9 = $body9['data'] ?? [];
+
+$stmt9 = $pdo->prepare('SELECT dispatch_level, category, level1_issue_type, status FROM incidents WHERE id = :id');
+$stmt9->execute([':id' => (int)($data9['id'] ?? 0)]);
+$row9 = $stmt9->fetch(PDO::FETCH_ASSOC);
+
+$assert(
+    '9.1 Ambas altas de Portal responden 201 y no exponen nivel ni taxonomía',
+    $res9Eligible->getStatusCode() === 201
+        && $res9->getStatusCode() === 201
+        && !array_key_exists('dispatch_level', $data9Eligible)
+        && !array_key_exists('level1_issue_type', $data9Eligible)
+        && !array_key_exists('dispatch_level', $data9)
+        && !array_key_exists('level1_issue_type', $data9),
+    'eligible=' . $res9Eligible->getStatusCode() . ' quarantine=' . $res9->getStatusCode()
+        . ' eligible_data=' . json_encode($data9Eligible)
+);
+
+$assert(
+    '9.2 El Portal elegible crea L1_RESTOCKER y la cuarentena fuerza L2_SAT',
+    is_array($row9Eligible)
+        && $row9Eligible['dispatch_level'] === 'L1_RESTOCKER'
+        && $row9Eligible['category'] === 'OTHER'
+        && $row9Eligible['level1_issue_type'] === 'MISSING_CONSUMABLES'
+        && $row9Eligible['status'] === 'REGISTERED'
+        && $row9Eligible['assigned_technician_id'] === null
+        && is_array($row9)
+        && $row9['dispatch_level'] === 'L2_SAT'
+        && $row9['category'] === 'OTHER'
+        && $row9['level1_issue_type'] === 'MISSING_CONSUMABLES'
+        && $row9['status'] === 'REGISTERED',
+    'eligible=' . json_encode($row9Eligible) . ' quarantine=' . json_encode($row9)
+);
+
+// Restore the park so later suites are not contaminated.
+$pdo->prepare("UPDATE machines SET sanitary_status = 'OK' WHERE id = :id")
+    ->execute([':id' => $hotDrinksMachine->getId()]);
+TestDataCleaner::purgeIncidentsByMachine($pdo, $hotDrinksMachine->getId());
+
 // Resumen final
 echo "\n======================================================================\n";
 if ($failures === 0) {

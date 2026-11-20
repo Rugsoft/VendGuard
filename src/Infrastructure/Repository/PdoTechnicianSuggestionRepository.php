@@ -101,6 +101,52 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
             return null;
         }
 
+        return $this->buildSuggestionPhoto($incident, $incidentId);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findSuggestionPhotoForMachine(
+        int $machineId,
+        string $category,
+        ?string $urgency = null,
+        ?string $slaTier = null,
+        ?int $slaTargetMinutes = null
+    ): ?array {
+        if ($machineId < 1) {
+            return null;
+        }
+
+        $machine = $this->findMachineTarget($machineId);
+        if ($machine === null) {
+            return null;
+        }
+
+        $normalizedCategory = strtoupper(trim($category));
+        $incident = [
+            'id' => 0,
+            'ticket_code' => '',
+            'priority' => strtoupper(trim((string)($urgency ?? 'MEDIUM'))),
+            'sla_tier_snapshot' => $slaTier,
+            'sla_target_minutes' => $slaTargetMinutes,
+            'machine_type' => $machine['machine_type'],
+            'category' => $normalizedCategory !== '' ? $normalizedCategory : 'OTHER',
+            'machine_model' => $machine['machine_model'],
+            'location' => $machine['location'],
+        ];
+
+        return $this->buildSuggestionPhoto($incident, 0);
+    }
+
+    /**
+     * Construye la foto multi-consulta a partir de un objetivo ya resuelto.
+     *
+     * @param array<string, mixed> $incident
+     * @return array<string, mixed>
+     */
+    private function buildSuggestionPhoto(array $incident, int $incidentId): array
+    {
         $location = $incident['location'];
         $zoneId = $location['zone_id'];
         $targetLocationId = $location['id'];
@@ -133,9 +179,11 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
 
         return [
             'incident' => [
-                'id' => $incident['id'],
-                'ticket_code' => $incident['ticket_code'],
+                'id' => (int)$incident['id'],
+                'ticket_code' => (string)$incident['ticket_code'],
                 'priority' => $incident['priority'],
+                'sla_tier_snapshot' => $incident['sla_tier_snapshot'] ?? null,
+                'sla_target_minutes' => $incident['sla_target_minutes'] ?? null,
                 'machine_type' => $incident['machine_type'],
                 'category' => $incident['category'],
                 'machine_model' => $incident['machine_model'],
@@ -146,6 +194,64 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
             ],
             'technicians' => $rows,
             'options' => $this->findBaseCoordinates(),
+        ];
+    }
+
+    /**
+     * Sede, zona y modelo de una máquina sin ticket activo.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function findMachineTarget(int $machineId): ?array
+    {
+        $sql = "
+            SELECT
+                m.machine_type,
+                m.model AS machine_model,
+                l.id AS location_id,
+                l.site_code AS location_site_code,
+                l.name AS location_name,
+                l.postal_code AS location_postal_code,
+                l.zone_id AS location_zone_id,
+                l.latitude AS location_latitude,
+                l.longitude AS location_longitude,
+                z.name AS zone_name
+            FROM machines m
+            LEFT JOIN locations l ON l.id = m.location_id
+            LEFT JOIN operational_zones z ON z.id = l.zone_id
+            WHERE m.id = :id
+              AND m.is_active = TRUE
+              AND m.deleted_at IS NULL
+            LIMIT 1
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':id', $machineId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+
+        $machineType = $row['machine_type'] !== null ? (string)$row['machine_type'] : null;
+        $machineModel = isset($row['machine_model']) && $row['machine_model'] !== null
+            ? trim((string)$row['machine_model'])
+            : null;
+
+        return [
+            'machine_type' => $machineType,
+            'machine_model' => $machineModel !== null && $machineModel !== '' ? $machineModel : null,
+            'location' => [
+                'id' => $row['location_id'] !== null ? (int)$row['location_id'] : null,
+                'site_code' => $row['location_site_code'] !== null ? (string)$row['location_site_code'] : null,
+                'name' => $row['location_name'] !== null ? (string)$row['location_name'] : null,
+                'postal_code' => $row['location_postal_code'] !== null ? (string)$row['location_postal_code'] : null,
+                'zone_id' => $row['location_zone_id'] !== null ? (int)$row['location_zone_id'] : null,
+                'zone_name' => $row['zone_name'] !== null ? (string)$row['zone_name'] : null,
+                'latitude' => $row['location_latitude'] !== null ? (float)$row['location_latitude'] : null,
+                'longitude' => $row['location_longitude'] !== null ? (float)$row['location_longitude'] : null,
+            ],
         ];
     }
 

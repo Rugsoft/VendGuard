@@ -46,14 +46,18 @@ class AdminUserService
      */
     private ?OnCallTechnicianRepositoryInterface $onCallRepo;
 
+    private ?RestockerSatSynergyService $synergyService;
+
     public function __construct(
         UserRepositoryInterface $userRepo,
         ?AuditLogger $auditLogger = null,
-        ?OnCallTechnicianRepositoryInterface $onCallRepo = null
+        ?OnCallTechnicianRepositoryInterface $onCallRepo = null,
+        ?RestockerSatSynergyService $synergyService = null
     ) {
         $this->userRepo = $userRepo;
         $this->auditLogger = $auditLogger ?? new AuditLogger();
         $this->onCallRepo = $onCallRepo;
+        $this->synergyService = $synergyService;
     }
 
     /**
@@ -442,13 +446,41 @@ class AdminUserService
             }
         }
 
-        // 4. Ejecución del borrado lógico
+        // 4. C1: la baja de un reponedor releva sus L1 antes de apagar la
+        // cuenta. Un aviso en IN_PROGRESS bloquea la baja con 409.
+        if ($targetUser->getRole()->isRestocker() && $this->synergyService !== null) {
+            $handover = $this->synergyService->handoverLevel1(
+                $id,
+                'DEACTIVATION',
+                'Baja de cuenta de reponedor'
+            );
+
+            if (($handover['ok'] ?? false) !== true) {
+                $blockedCodes = array_values(array_map(
+                    static fn (mixed $code): string => (string)$code,
+                    (array)($handover['blocked_ticket_codes'] ?? [])
+                ));
+                $detail = $blockedCodes !== []
+                    ? ' Avisos en curso: ' . implode(', ', $blockedCodes) . '.'
+                    : '';
+
+                throw new PendingIncidentsBlockedException(
+                    count($blockedCodes),
+                    $id,
+                    'No se puede dar de baja al reponedor porque tiene avisos L1 en curso.' . $detail,
+                    (string)($handover['error_code'] ?? 'SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1'),
+                    (int)($handover['http_status'] ?? 409)
+                );
+            }
+        }
+
+        // 5. Ejecución del borrado lógico
         $success = $this->userRepo->softDelete($id);
         if (!$success) {
             return false;
         }
 
-        // 5. Auditoría inmutable sincrónica (RF-05, EARS 4.4)
+        // 6. Auditoría inmutable sincrónica (RF-05, EARS 4.4)
         $metadata = [
             'role'   => $targetUser->getRole()->value,
             'reason' => 'Baja administrativa',

@@ -791,6 +791,9 @@ export const TechnicianRouteView = {
         const res = await api.post('/technician/shift/start');
         this.applyShiftResponse(res, 'ON_SHIFT');
         await this.persistOfflineShiftStatus();
+        // O-36-01: site coincidence depends on the open shift, so refresh the
+        // route in the same cycle instead of waiting for a manual reload.
+        await this.loadRoute();
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo iniciar el turno.';
       } finally {
@@ -1341,6 +1344,49 @@ export const TechnicianRouteView = {
       } catch (error) {
         return null;
       }
+    },
+
+    /** ¿La parada fue abierta o escalada por un reponedor in situ? (RF-04.1). */
+    wasEscalatedByRestocker(incident) {
+      return Boolean(incident?.escalated_from_restocker_id)
+        || Boolean(incident?.escalated_to_sat_at);
+    },
+
+    /** Nota Interna de Taller con la que se escaló la parada (RF-05.2.2). */
+    workshopInternalNote(incident) {
+      const note = incident?.workshop_internal_note;
+      return typeof note === 'string' ? note.trim() : '';
+    },
+
+    /** Foto del escalado: la de la nota interna o, en su defecto, la del expediente. */
+    workshopInternalPhoto(incident) {
+      const photo = incident?.workshop_internal_photo_path || incident?.photo_path;
+      return typeof photo === 'string' ? photo.trim() : '';
+    },
+
+    /** ¿La parada trae contexto interno que destacar en la tarjeta? */
+    hasWorkshopInternalContext(incident) {
+      return this.workshopInternalNote(incident) !== ''
+        || this.workshopInternalPhoto(incident) !== '';
+    },
+
+    /** Reponedores en turno de la misma sede que publica el servidor (D4). */
+    siteCoincidenceFor(incident) {
+      return Array.isArray(incident?.site_coincidence) ? incident.site_coincidence : [];
+    },
+
+    /** Etiqueta legible de un compañero: nombre y código de operador, sin `user_id`. */
+    siteCoincidenceLabel(entry) {
+      const name = entry?.name || 'Compañero';
+      const code = String(entry?.operator_code ?? '').trim();
+      return code ? `${name} (${code})` : name;
+    },
+
+    /** Resumen legible de la coincidencia en sede, sin exponer identificadores internos. */
+    siteCoincidenceSummary(incident) {
+      return this.siteCoincidenceFor(incident)
+        .map((entry) => `${this.siteCoincidenceLabel(entry)}${entry.activity_summary ? ` · ${entry.activity_summary}` : ''}`)
+        .join(' · ');
     },
 
     /** Normaliza una parada del paquete local a la forma que pinta la tarjeta. */
@@ -4249,6 +4295,14 @@ export const TechnicianRouteView = {
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <IncidentBadge type="urgency" :value="incident.urgency" />
                 <IncidentBadge type="status" :value="incident.status" />
+                <!-- Insignia de escalado desde la parada del reponedor (Módulo 36, RF-04.1). -->
+                <span
+                  v-if="wasEscalatedByRestocker(incident)"
+                  data-testid="tech-escalated-by-restocker"
+                  style="display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid var(--color-warning-border); border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); color: var(--color-warning-text); font-size: 11px; font-weight: 700;"
+                >
+                  ⚡ Escalado por Reponedor In Situ
+                </span>
                 <!-- Insignia de trabajo local pendiente de envío (EARS 03.3.2) -->
                 <span
                   v-if="offlineStopBadgeLabel(incident)"
@@ -4298,6 +4352,30 @@ export const TechnicianRouteView = {
                   {{ slaContractFor(incident).critical_reason === 'COLD_CHAIN' ? '🌡️' : '⏱️' }}
                   {{ slaContractFor(incident).critical_reason_label }}
                 </span>
+              </div>
+
+              <!-- 🤝 Coincidencia en Sede (Módulo 36, D4): reponedores en turno
+                   que ya trabajan esta misma sede. Solo lectura, nunca bloquea. -->
+              <div
+                v-if="siteCoincidenceFor(incident).length > 0"
+                class="vg-alert vg-alert-info"
+                data-testid="tech-site-coincidence"
+                style="margin-top: 6px; font-size: 12px;"
+              >
+                <strong>🤝 Coincidencia en Sede:</strong>
+                <div
+                  v-for="entry in siteCoincidenceFor(incident)"
+                  :key="entry.user_id || entry.operator_code || entry.name"
+                  style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px;"
+                >
+                  <span>{{ siteCoincidenceLabel(entry) }}</span>
+                  <span v-if="entry.activity_summary">· {{ entry.activity_summary }}</span>
+                  <a
+                    v-if="entry.phone"
+                    :href="'tel:' + entry.phone"
+                    style="color: inherit; font-weight: 600; text-decoration: underline;"
+                  >📞 {{ entry.phone }}</a>
+                </div>
               </div>
 
               <!-- Disponibilidad del repuesto en la furgoneta (Módulo 23, RF-05.4 / QA 3).
@@ -4382,6 +4460,40 @@ export const TechnicianRouteView = {
                 Avería reportada:
               </strong>
               {{ incident.description }}
+            </div>
+
+            <!-- Nota Interna de Taller y foto del escalado (Módulo 36, RF-05.2.2).
+                 El técnico SAT es el destinatario legítimo de la nota (Art. V.4);
+                 se destaca aquí para que no tenga que abrir el hilo del ticket. -->
+            <div
+              v-if="hasWorkshopInternalContext(incident)"
+              data-testid="tech-workshop-internal-note"
+              style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-left: 3px solid var(--color-warning); color: var(--color-warning-text); border-radius: var(--radius-interactive, 4px); padding: 8px 10px; margin-bottom: 12px; font-size: 12px; line-height: 1.35;"
+            >
+              <strong style="display: block; font-size: 11px; text-transform: uppercase; margin-bottom: 3px;">
+                🔒 Nota Interna de Taller (Confidencial)
+              </strong>
+              <p v-if="workshopInternalNote(incident)" style="margin: 0; white-space: pre-line;">
+                {{ workshopInternalNote(incident) }}
+              </p>
+              <div v-if="incident.workshop_internal_note_at" style="margin-top: 3px; font-size: 11px; opacity: 0.85;">
+                {{ formatTime(incident.workshop_internal_note_at) }}
+                <span v-if="incident.workshop_internal_note_author">· {{ incident.workshop_internal_note_author }}</span>
+              </div>
+              <a
+                v-if="workshopInternalPhoto(incident)"
+                :href="workshopInternalPhoto(incident)"
+                target="_blank"
+                rel="noopener"
+                style="display: inline-block; margin-top: 6px;"
+              >
+                <img
+                  :src="workshopInternalPhoto(incident)"
+                  data-testid="tech-workshop-internal-photo"
+                  alt="Evidencia fotográfica del escalado"
+                  style="max-height: 120px; max-width: 100%; border-radius: var(--radius-interactive, 4px); border: 1px solid var(--color-warning-border); object-fit: cover;"
+                />
+              </a>
             </div>
 
             <!-- Status Context Highlights -->

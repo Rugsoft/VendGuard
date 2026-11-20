@@ -1,0 +1,817 @@
+# Auditoría de la Spec 36 · Brechas que impiden el 100 %
+
+- **Módulo:** 36 · Sinergia Operativa Reponedor ↔ Técnico SAT (`36-restocker-sat-synergy`)
+- **Especificación auditada:** [`specs/36-restocker-sat-synergy/spec.md`](../specs/36-restocker-sat-synergy/spec.md) (v1.0)
+- **Espejo funcional:** [`specs/functional/restocker_sat_synergy_spec.md`](../specs/functional/restocker_sat_synergy_spec.md)
+- **Contratos técnicos:** [`specs/technical/restocker_sat_synergy_contracts.md`](../specs/technical/restocker_sat_synergy_contracts.md)
+- **Sistema de Diseño:** [`docs/design.md`](design.md)
+- **Tareas:** [`specs/36-restocker-sat-synergy/tasks.md`](../specs/36-restocker-sat-synergy/tasks.md) · [`odd/tasks/restocker-sat-synergy.md`](../odd/tasks/restocker-sat-synergy.md)
+- **Matriz de trazabilidad:** [`specs/36-restocker-sat-synergy/traceability-matrix.md`](../specs/36-restocker-sat-synergy/traceability-matrix.md)
+- **Fecha de auditoría:** 2026-11-19
+- **Última actualización:** 2026-11-19 · H-36-01 a H-36-05 cerradas; FIX-36-01..08 conservados como historial; reauditoría de aceptación en §10
+- **Rama:** `feat/restocker-sat-synergy`
+- **Base auditada:** `95f9af1f1f481b14eeaf4b3acfcd623e791486e8` · árbol limpio antes de crear este acta
+- **Base de la reauditoría:** `d25cbad` · árbol limpio
+- **Alcance:** auditoría de los `RF-01`–`RF-05`, sus criterios EARS, `RNF-01`–`RNF-03`, las decisiones `D1`–`D4`, los casos `C1`–`C2`, las 9 salvaguardas `QA-*`, el §6, los 4 criterios de Definition of Done y las 12 tareas `T-RSS-01`–`T-RSS-12`, con ejecución real de las suites. FIX-36-01 a FIX-36-07 se corrigieron con prueba de composición o de invariante; FIX-36-08 cerró la trazabilidad con la evidencia focalizada del 2026-11-19.
+
+> Este documento es un acta viva de hallazgos: registra la evidencia previa de las brechas y los cierres de FIX-36-01 a FIX-36-08. La matriz, las tareas y el ODD quedaron sincronizados con la evidencia focalizada; la certificación global vigente es **441/16.993**, el canal `new_engine` queda en **71/71** y H-36-05 se cerró al reducir «crear» a 210,5 ms y «ruta» a 209,4 ms sin cambiar el esquema; H-36-04 añadió la medición real de layout a 360 px.
+
+> [!NOTE]
+> **Reauditoría de aceptación del 2026-11-19 (ver §10).** La Spec 36 queda cerrada: los FIX-36-01..08 siguen siendo correcciones válidas y **H-36-01 (`RF-04.1`/`D4`), H-36-02 (`RF-05.2.2`/DoD 3), H-36-03 (`RF-01.2`), H-36-04 (`RNF-03`) y H-36-05 (DoD 4) quedaron cerradas el 2026-11-19**. El estado vigente es **4/4 DoD**, **12/12 tareas sin reservas** y **71/71 en `new_engine`**.
+
+---
+
+## 1. Veredicto ejecutivo (histórico · superado por §10)
+
+**Veredicto histórico (superado por la reauditoría de §10):** la Spec 36 se declaró cerrada documentalmente con la evidencia focalizada de los FIX-36; la certificación global del 2026-11-19 está en verde y el canal `new_engine` queda en 69/70 por una deriva de esquema del pooler. **La reauditoría posterior concluyó que no estaba al 100 %; H-36-01 a H-36-05 la cerraron el 2026-11-19.**
+
+La implementación de esquema, dominio, gateway, servicios, API y frontend es amplia, y sus suites focalizadas están en verde. La corrida global vigente deja este resultado:
+
+```text
+php tests/run_all.php   # certificación global del 2026-11-19
+441 suites · 16.993 aserciones · 0 fallos · DocMetricsGuard coherente · exit=0
+```
+
+Las 8 suites focalizadas de esquema/API ejecutadas (4 del módulo y 4 de convergencia/paridad global) también pasan:
+
+```text
+PostgresRestockerSatSynergySchemaTest   30/30
+PostgresSchemaTest                     153/153
+PostgresConstitutionalTest              86/86
+SchemaConvergenceParityTest             42/42
+PdoRestockerSatSynergyGatewayTest       24/24
+RestockerSatSynergyApiTest              55/55
+RestockerSatSynergyConstitutionalTest   17/17
+CloudDeploySchemaParityTest             55/55
+```
+
+Y las 12 tareas están marcadas `[x]` en `tasks.md` y en el ODD.
+
+**Las brechas funcionales y la deuda documental están cerradas.** Los tests de componentes que usan dobles se complementan ahora con composiciones HTTP/PostgreSQL reales para QR, C1, escalado, alta de Coordinación y alta de Portal; el escalado está disponible también dentro del asistente de visita y la matriz enlaza cada composición con su requisito.
+
+En concreto:
+
+1. **`QA-LIM-01` / Art. II — ✅ corregido el 2026-11-19:** el QR real ya inyecta la sinergia, propaga el método de reembolso y relee el expediente antes de ajustar urgencia/SLA. La composición se certifica en `RestockerSatSynergyApiTest` bloques 6 a 8 (55/55).
+2. **`C1` — ✅ corregido el 2026-11-19:** el cierre de turno, la ausencia y la baja inyectan la sinergia, comprueban el resultado de `handoverLevel1()` y ejecutan el relevo antes de cerrar o desactivar. La composición se certifica en `RestockerSatSynergyApiTest` bloque 7.
+3. **`D3` / `RF-03.2` — ✅ corregido el 2026-11-19:** el escalado del reponedor ya inyecta el resolvedor de técnico y el notificador; la composición se certifica en `RestockerSatSynergyApiTest` bloque 8.
+4. **`D2.2` / `RF-01.2` — ✅ corregido el 2026-11-19:** el alta de Coordinación lee `level1_issue_type`, aplica `classifyCreation()` con las exclusiones de cuarentena y reclamación y persiste `dispatch_level`/`level1_issue_type`; la composición se certifica en `RestockerSatSynergyApiTest` bloque 9.
+
+El botón de escalado dentro del asistente de Visita de Reposición (`RF-05.2.1`) ya está cubierto y el mapeo determinista de `level1_issue_type` ya es un invariante duro de dominio/SQL (`EARS 01.1.2`).
+
+**Conclusión corta histórica (superada por §10):** FIX-36-01 a FIX-36-08 están cerrados. La evidencia focalizada cubre las composiciones de QR, C1, escalado, alta de Coordinación, alta de Portal, el botón de escalado dentro de la visita y el mapeo determinista L1 en dominio y motor: **11 suites propias, 561 aserciones, 0 fallos**. La certificación global del 2026-11-19 queda en **441/16.993, 0 fallos**; el canal `new_engine` queda en **69/70** por el esquema del pooler sin la migración 032, no por una regresión del módulo. **La reauditoría de §10 mantiene la evidencia verde, pero no acepta el cierre al 100 %.**
+
+---
+
+## 2. Matriz de brechas
+
+| Orden | ID | Prioridad | Brecha | Requisito afectado | Estado |
+|---:|---|---|---|---|---|
+| **1** | **FIX-36-01** | **P0 · Bloqueante sanitario** | El QR real no auto-escalaba una absorción térmica/eléctrica o una reclamación digital sobre un L1; además no asignaba técnico, no encolaba aviso y un `update()` posterior podía revertir la promoción | `RF-02.2`, `QA-LIM-01`, Art. II | **Cerrada (2026-11-19)** |
+| **2** | **FIX-36-02** | **P0 · Bloqueante C1** | El cierre de turno, la ausencia y la baja no invocaban `handoverLevel1` en producción; el cierre además ignoraba el resultado `ok=false` | `RF-04.2`, `C1`, Art. V.3 | **Cerrada (2026-11-19)** |
+| **3** | **FIX-36-03** | **P0 · Bloqueante D3** | El escalado del reponedor se construye solo con el gateway: sin `technicianResolver` ni `notifier`, queda en `REGISTERED` y sin aviso en el outbox | `RF-03.2`, `D3`, Art. V.3 | **Cerrada (2026-11-19)** |
+| **4** | **FIX-36-04** | **P1 · Alto** | El alta de Coordinación no leía `level1_issue_type` ni fijaba `dispatch_level`; siempre creaba `L2_SAT` | `RF-01.2`, `D2.2` | **Cerrada (2026-11-19)** |
+| **5** | **FIX-36-05** | **P1 · Alto** | El botón «⚡ Escalar Avería al SAT» no existía dentro del asistente de Visita de Reposición del Módulo 34 | `RF-05.2.1` | **Cerrada (2026-11-19)** |
+| **6** | **FIX-36-06** | **P2 · Medio** | El mapeo determinista `level1_issue_type` ↔ `category` no se impone en el constructor de `Incident` ni en el CHECK SQL; solo en `classifyCreation()` | `EARS 01.1.2`, `RNF-02` | **Cerrada (2026-11-19)** |
+| **7** | **FIX-36-07** | **P2 · Medio** | El alta de Portal con L1 ya tiene composición HTTP/PostgreSQL; QR, relevo C1, escalado y Coordinación también están cubiertos | DoD 2, DoD 4, cobertura | **Cerrada (2026-11-19)** |
+| **8** | **FIX-36-08** | **P3 · Documental** | La matriz y los cierres de tareas ya citan las composiciones reales (bloques 6–9), corrigen la ruta y recuento de `LocationPortalReopenAuditTest` y distinguen la certificación global vigente y el 71/71 actual de `new_engine` (H-36-05 cerrada) de la evidencia focalizada | Trazabilidad, DoD, tareas | **Cerrada (2026-11-19)** |
+
+### Lectura de prioridades
+
+- **P0:** incumple una regla constitucional o impide certificar el módulo. Debe corregirse antes de cualquier cierre.
+- **P1:** no rompe necesariamente el runtime, pero deja un requisito funcional sin cumplir.
+- **P2:** deuda de defensa en profundidad o de cobertura; mantiene la certificación incompleta.
+- **P3:** deuda documental y de trazabilidad; debe corregirse después de los anteriores para que la matriz no vuelva a certificar de más.
+
+---
+
+## 3. Detalle de las brechas
+
+### FIX-36-01 · El QR real no ejecutaba `QA-LIM-01` · P0 · ✅ Cerrada (2026-11-19)
+
+#### Requisito
+
+`RF-02.2` y `QA-LIM-01` exigen que, cuando `QrReportService::mergeIntoExistingIncident()` absorba un reporte grave sobre un ticket `L1_RESTOCKER` (`TEMPERATURE_COLD`, `ELECTRICAL_OFF`, reclamación > 10,00 € o método digital), el sistema, **en la misma transacción**:
+
+- conmute `dispatch_level = 'L2_SAT'` y actualice la categoría;
+- cierre la custodia del reponedor con `QR_AUTO_ESCALATED_TO_SAT`;
+- asigne al mejor Técnico SAT mediante `TechnicianAssignmentSuggester` (`QR_AUTO_ESCALATION_TO_SAT`) o lo deje en `REGISTERED` si no hay candidato;
+- encole la alerta en `notification_outbox`.
+
+El Art. II exige además que una avería térmica o eléctrica jamás quede en `L1_RESTOCKER`.
+
+#### Evidencia previa (antes de la corrección)
+
+`src/Presentation/Controller/QrScanController.php:122-128` construye `QrReportService` sin el séptimo argumento (`RestockerSatSynergyService`):
+
+```php
+$this->qrReportService = $qrReportService
+    ?? new QrReportService(
+        null,
+        null,
+        null,
+        NotificationOutboxEnqueuerFactory::createOrNull()
+    );
+```
+
+`QrReportService::mergeIntoExistingIncident()` solo ejecuta el bloque de auto-escalado si `$this->synergyService !== null`; en producción es `null`. Por tanto, un reporte QR de `TEMPERATURE_COLD` sobre un ticket L1:
+
+- no se promociona a `L2_SAT`;
+- no cierra la custodia del reponedor;
+- no asigna técnico SAT;
+- no encola alerta;
+- y la categoría entrante no se persiste: el ticket permanece en `L1_RESTOCKER` con la categoría antigua (por ejemplo, `OTHER`), dejando el aviso térmico solo como comentario.
+
+Además, aunque se inyectara el servicio sin corregir el flujo:
+
+1. `QrReportService` pasa `assignTechnicianId = null`, por lo que `promoteToSatOnQrMerge()` deja el ticket en `REGISTERED` y no invoca ningún sugeridor.
+2. `QrReportService` también pasa `refundMethod = null`, por lo que una reclamación digital (`BIZUM` / `TRANSFERENCIA_BANCARIA`) no dispara la condición de auto-escalado aunque el servicio esté inyectado.
+3. `promoteToSatOnQrMerge()` no encola nada en `notification_outbox`; `autoEscalateQrMerge()` no recibe ningún notificador.
+4. Si la urgencia entrante es mayor, `QrReportService` llama después a `PdoIncidentRepository::update($escalated)` con el objeto `Incident` **antiguo** (L1, categoría antigua, reponedor asignado). Ese `update()` escribe `assigned_technician_id`, `category`, `status` y `started_at` desde el objeto obsoleto (`PdoIncidentRepository.php:2792-2825`), revirtiendo la asignación, la categoría y el estado que acababa de fijar el gateway.
+
+#### Cobertura previa
+
+`RestockerSatSynergyIntegrationsTest` 27/27 prueba `shouldAutoEscalateQrMerge()` y que el servicio delega en el gateway, pero con un **gateway falso**. `RestockerSatSynergyApiTest` cubría entonces 18/18 el alta QR L1 y la opacidad del nivel, no la absorción de un reporte grave sobre un L1. La composición real se añadió en el bloque 6 de esa misma suite (ver «Cierre»).
+
+#### Impacto (antes de la corrección)
+
+Es una violación directa del Art. II y del caso límite §6.1: una máquina con un aviso L1 por consumibles puede recibir un reporte de frío y quedarse en la cola del reponedor, sin SAT y sin cuarentena. El test verde no lo detecta porque no ejecuta esa composición.
+
+#### Corrección aplicada
+
+1. `QrScanController` compone `QrReportService` con `RestockerSatSynergyService` sobre `PdoRestockerSatSynergyGateway`, `SuggestedTechniciansService` y el outbox real. La inyección ya no depende de un doble de test.
+2. El `refund_method` del payload QR se propaga a `QrReportService::report()`, a `classifyCreation()` y a `mergeIntoExistingIncident()` hasta `autoEscalateQrMerge()`.
+3. Tras `promoted=true`, `QrReportService` relee el expediente con `findById()` antes de ajustar urgencia y SLA. El `update()` posterior ya no reescribe categoría, custodio, estado ni `started_at` desde la foto L1 obsoleta.
+4. El técnico SAT se resuelve con `SuggestedTechniciansService` y se pasa como `assignTechnicianId`; `NotificationOutboxEnqueuerService::enqueueAssignment()` encola la asignación y, cuando la promoción entra en riesgo de cadena de frío, la alerta `COLD_CHAIN_IMMEDIATE_ALERT` a Coordinación.
+5. `PdoRestockerSatSynergyGateway::closeOpenCustody()` normaliza el actor de sistema `0` a `NULL` en `unassigned_by`; sin ello, la custodia del QR violaba la FK de usuarios.
+6. La composición se prueba en el bloque 6 de `RestockerSatSynergyApiTest`, con el router y PostgreSQL reales: 55/55 en total.
+
+#### Criterios de aceptación
+
+- [x] Un reporte QR térmico sobre un L1 termina en `L2_SAT` con `category = 'TEMPERATURE_COLD'`.
+- [x] La custodia del reponedor se cierra con `QR_AUTO_ESCALATED_TO_SAT`.
+- [x] Se asigna un Técnico SAT si hay candidato; si no, el gateway lo deja en `REGISTERED`. La alerta a Coordinación se emite en el mismo outbox cuando la promoción entra en riesgo de cadena de frío (`COLD_CHAIN_IMMEDIATE_ALERT`, aserción 6.7); el fallback sin candidato está cubierto por `PdoRestockerSatSynergyGatewayTest` 24/24.
+- [x] La alerta llega a `notification_outbox`.
+- [x] Una reclamación digital (`BIZUM` / `TRANSFERENCIA_BANCARIA`) sobre un L1 también auto-escala.
+- [x] La prueba falla si se elimina la inyección del servicio o si el `update()` vuelve a escribir la categoría/asignación antigua.
+
+#### Cierre
+
+Cerrada el 2026-11-19 con evidencia reproducible:
+
+- **Composición real:** `RestockerSatSynergyApiTest` bloque 6, **55/55** en total, exit 0. El escenario térmico verifica `dispatch_level=L2_SAT`, `category=TEMPERATURE_COLD`, `status=ASSIGNED`, `assigned_technician_id=7`, `urgency=CRITICAL`, `sla_target_minutes=240`, custodia `QR_AUTO_ESCALATED_TO_SAT` cerrada y `QR_AUTO_ESCALATION_TO_SAT` abierta, aviso de asignación y alerta de cadena de frío a Coordinación. El escenario digital con `BIZUM` y 9,50 € promociona a L2 con `category=OTHER`.
+- **No reversión:** la aserción 6.3 comprueba que el `update()` posterior conserva la asignación al técnico SAT y `status=ASSIGNED`.
+- **Regresiones:** `PdoRestockerSatSynergyGatewayTest` 24/24, `RestockerSatSynergyConstitutionalTest` 17/17, `QrRefundCaptureTest` 105 aserciones, `QrSanitaryQuarantineModeTest` 35 aserciones (con `.env.battery`), `QrEndpointsIntegrationTest` 0 fallos y `PublicRefundTrackingApiTest` 58/58 en batería limpia.
+- **Batería global (2026-11-19):** `441/441 suites · 16.993 aserciones · 0 fallos · exit 0`; `DocMetricsGuard` corregido en la repetición. La cifra 441/16.987 queda solo como referencia histórica L14.
+
+---
+
+### FIX-36-02 · `C1` no estaba cableado en cierre, ausencia ni baja · P0 · ✅ Cerrada (2026-11-19)
+
+#### Requisito
+
+`RF-04.2` y `C1` exigen:
+
+- **Cierre de turno:** si el reponedor tiene un L1 en `IN_PROGRESS`, el cierre se rechaza con `409 SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1`; los `ASSIGNED`/`PENDING_INFO` se relevan al siguiente reponedor en turno o vuelven a `REGISTERED`.
+- **Ausencia vigente:** los L1 vivos se relevan con `ABSENCE_COVERAGE_REASSIGN`.
+- **Baja de cuenta (`is_active = FALSE`):** los L1 vivos se relevan o vuelven a `REGISTERED`.
+
+#### Evidencia previa (antes de la corrección)
+
+- `src/Presentation/Controller/TechnicianShiftController.php:69-77` construye `ShiftLifecycleService` con 7 argumentos; el octavo (`RestockerSatSynergyService`) queda `null`.
+- `src/Presentation/Routing/Router.php:339` instancia los controladores con `new $controller()` sin inyección, por lo que se usa el constructor por defecto anterior.
+- `src/Application/Service/ShiftLifecycleService.php:271` llama a `$this->synergyService?->handoverLevel1(...)` pero **ignora el resultado**. El gateway devuelve `['ok' => false, 'error_code' => 'SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1']`; no lanza excepción, así que el turno se cierra igualmente.
+- `src/Presentation/Controller/CoordinatorAbsenceController.php:39-48` construye `TechnicianAbsenceService` con 8 argumentos; el noveno (`RestockerSatSynergyService`) queda `null`, por lo que `createAbsence()` no ejecuta el relevo.
+- `src/Application/Service/AdminUserService.php` (`deactivateUser()`) hace `softDelete()` sin relevo.
+- `src/Application/Service/AdminStaffService.php` (`deactivateUser()`) cierra el turno directamente con `shiftRepo->closeShift()`, sin pasar por `ShiftLifecycleService` ni por la sinergia.
+
+Resultado: **no se entrega el 409, no se reasignan los L1 y la baja puede dejar avisos asignados a una cuenta inactiva**. El gateway 24/24 demuestra que el gateway sabe bloquear y relevar; no demuestra que la ruta real lo llame.
+
+#### Cobertura previa
+
+`PdoRestockerSatSynergyGatewayTest` 24/24 prueba `handoverLevel1()` directamente. `RestockerSatSynergyIntegrationsTest` 27/27 prueba la delegación del servicio. Ninguna suite ejecutaba `POST /api/technician/shifts/close` con un L1 en `IN_PROGRESS`, ni `PATCH /api/coordinator/users/{id}/deactivate` con un L1 `ASSIGNED`, ni el alta de ausencia real. La composición se añadió en el bloque 7 de `RestockerSatSynergyApiTest` (ver «Cierre»).
+
+#### Impacto (antes de la corrección)
+
+El reponedor podía cerrar su jornada dejando un L1 en curso; los avisos `ASSIGNED` quedaban huérfanos; una baja dejaba tickets L1 asignados a un usuario inactivo. Es un incumplimiento directo de `C1` y del Art. V.3 (custodio activo único y coherente).
+
+#### Corrección aplicada
+
+1. `TechnicianShiftController` compone `ShiftLifecycleService` con `RestockerSatSynergyService` sobre `PdoRestockerSatSynergyGateway`; `closeShift()` comprueba `ok` y lanza `InvalidShiftTransitionException` con `SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1` y HTTP 409.
+2. `CoordinatorAbsenceController` compone `TechnicianAbsenceService` con la sinergia; el relevo se ejecuta dentro de la transacción del alta, después de comprobar solapamientos, y un `ok=false` lanza `InvalidAbsenceException` 409.
+3. `AdminUserService::deactivateUser()` recibe la sinergia opcional y, para un `RESTOCKER`, ejecuta `handoverLevel1()` antes del `softDelete`; un bloqueo se traduce en `PendingIncidentsBlockedException` 409.
+4. `AdminStaffService::deactivateUser()` recibe la sinergia opcional y ejecuta el relevo antes de cerrar el turno; después delega en `AdminUserService` para la baja lógica.
+5. `PdoRestockerSatSynergyGateway` hace que `begin()`/`commit()`/`rollback()` respeten la transacción exterior: el relevo participa en ella sin confirmarla ni deshacerla por su cuenta.
+6. La composición se prueba en el bloque 7 de `RestockerSatSynergyApiTest`, con router y PostgreSQL reales.
+
+#### Criterios de aceptación
+
+- [x] `POST /api/technician/shifts/close` con un L1 `IN_PROGRESS` responde `409 SHIFT_CLOSE_BLOCKED_IN_PROGRESS_L1` y no cierra el turno.
+- [x] Con un L1 `ASSIGNED`, el cierre reasigna al reponedor suplente o lo devuelve a `REGISTERED`.
+- [x] El alta de una ausencia vigente ejecuta el relevo `ABSENCE_COVERAGE_REASSIGN`.
+- [x] La baja de cuenta ejecuta el relevo y no deja L1 asignados a un usuario inactivo.
+- [x] Las pruebas fallan si se vuelve a construir el servicio sin la sinergia o si se ignora el resultado.
+
+#### Cierre
+
+Cerrada el 2026-11-19 con evidencia reproducible:
+
+- **Composición real:** `RestockerSatSynergyApiTest` bloque 7, **55/55** en total, exit 0. 7.1/7.2 verifican el 409 y que el turno sigue abierto; 7.3-7.6 el cierre con un L1 `ASSIGNED` reasignado al suplente y la custodia `RESTOCKER_SHIFT_HANDOVER`; 7.7-7.9 el alta de ausencia vigente y la custodia `ABSENCE_COVERAGE_REASSIGN`; 7.10-7.12 la baja directa sin dejar el L1 en la cuenta inactiva; 7.13-7.15 la baja por staff con el turno cerrado y el motivo contractual.
+- **Regresiones:** `ShiftLifecycleServiceTest` 12/12, `TechnicianAbsenceServiceTest` 17/17, `RestockerSatSynergyIntegrationsTest` 27/27, `AdminUserServiceTest` 74 aserciones, `AdminStaffRestockerServiceTest` 26/26, `RestockerShiftAndWorkHoursTest` 38/38, `PdoRestockerSatSynergyGatewayTest` 24/24, `QrEndpointsIntegrationTest` 0 fallos, `CoordinatorAbsenceApiTest` 23/23 y `RestockerStaffHttpTest` 18/18.
+- **Batería global (2026-11-19):** **441/441 suites · 16.993 aserciones · 0 fallos · exit 0**. La evidencia focalizada deja `RestockerSatSynergyApiTest` en **55/55**.
+
+---
+
+### FIX-36-03 · El escalado del reponedor no asigna técnico ni encola aviso · P0 · ✅ Cerrada (2026-11-19)
+
+#### Requisito
+
+`RF-03.2` y `D3` exigen que «⚡ Escalar Avería al SAT»:
+
+- valide nota, foto y categoría;
+- ejecute las tres ramas bajo `FOR UPDATE`;
+- invoque `TechnicianAssignmentSuggester` para asignar al mejor Técnico SAT (`RESTOCKER_ESCALATION_TO_SAT`) o deje `REGISTERED` si no hay candidato;
+- encole la alerta en `notification_outbox`.
+
+#### Evidencia previa (antes de la corrección)
+
+`src/Presentation/Controller/RestockerRouteController.php:166-168` construye el servicio solo con el gateway:
+
+```php
+$this->synergyService = $synergyService ?? new RestockerSatSynergyService(
+    new \VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway($pdo)
+);
+```
+
+`RestockerSatSynergyService::__construct()` acepta `technicianResolver` y `notifier` opcionales; `escalateToSat()` solo resuelve técnico si el resolver no es `null` y solo notifica si el notifier no es `null`. En producción ambos son `null`.
+
+El gateway, por su parte, solo lee `assign_technician_id` del payload (`PdoRestockerSatSynergyGateway.php:518`); no tiene un sugeridor propio. Si el cliente no envía ese campo, el ticket queda en `REGISTERED` con `assigned_technician_id = NULL` y no se encola `RESTOCKER_ESCALATION_TO_SAT`.
+
+#### Cobertura previa
+
+`PdoRestockerSatSynergyGatewayTest` 24/24 prueba las tres ramas, pero el escenario proporciona un `assign_technician_id` explícito. `RestockerSatSynergyConstitutionalTest` 17/17 prueba la absorción sobre un L2 preexistente, no la asignación automática desde una máquina limpia. No había una prueba HTTP real del escalado sin `assign_technician_id`.
+
+#### Impacto (antes de la corrección)
+
+El reponedor escalaba una avería y el ticket quedaba en la cola de Coordinación en vez de llegar al SAT; además no se generaba el aviso interno. El flujo funcionaba en los tests porque el test inyectaba el técnico, pero no en la composición real.
+
+#### Corrección aplicada
+
+1. `RestockerRouteController::buildSynergyService()` compone el gateway real, `SuggestedTechniciansService` con `PdoTechnicianSuggestionRepository`, `PdoIncidentRepository` y `NotificationOutboxEnqueuerFactory::create($pdo)`.
+2. El resolvedor consulta el ticket activo de la máquina y reutiliza `SuggestedTechniciansService::getSuggestions()`; si la máquina está limpia, usa la nueva `getSuggestionsForMachine()` con categoría, urgencia y SLA del escalado. Solo devuelve el `top_technician_id` del ranking, sin duplicar la regla de decisión.
+3. Se añadió `findSuggestionPhotoForMachine()` al puerto `TechnicianSuggestionRepositoryInterface` y a `PdoTechnicianSuggestionRepository`. La foto usa sede, zona, tipo y modelo de la máquina y alimenta el mismo motor de ranking; `findSuggestionPhoto()` se refactorizó sobre un `buildSuggestionPhoto()` compartido.
+4. El notificador descarta replays idempotentes y la Rama C (`MERGED_INTO_EXISTING_SAT_TICKET`), relee el expediente y encola `enqueueAssignment()` si queda `ASSIGNED` o `enqueueSla2hUnassignedAlert()` —alerta a Coordinación— si queda `REGISTERED`.
+5. El bloque 8 de `RestockerSatSynergyApiTest` ejecuta el router y PostgreSQL reales con dos máquinas limpias: una con técnico elegible y otra sin candidato tras desactivar temporalmente al único técnico.
+
+#### Criterios de aceptación
+
+- [x] El escalado sin `assign_technician_id` asigna al mejor Técnico SAT disponible.
+- [x] Sin candidato, el ticket queda `REGISTERED` y se encola alerta a Coordinación.
+- [x] La Rama C conserva la custodia del técnico existente; el notificador no la toca y el gateway la certifica en 24/24.
+- [x] La prueba falla si el controlador vuelve a construir el servicio sin resolver/notifier: 8.2 quedaría en `REGISTERED` y 8.3/8.6 sin aviso.
+
+#### Cierre
+
+Cerrada el 2026-11-19 con evidencia reproducible:
+
+- **Composición real:** `RestockerSatSynergyApiTest` bloque 8, **55/55** en total, exit 0. 8.1-8.3 verifican `L2_SAT`, `ASSIGNED`, `assigned_technician_id=7` y la fila `TECHNICIAN_ASSIGNED` del outbox; 8.4-8.6 verifican `REGISTERED`, `assigned_technician_id=NULL` y la alerta `SLA_IMMINENCE_2H_UNASSIGNED` con `recipient_role=COORDINATOR`.
+- **Regresiones:** `RestockerSatSynergyServiceTest` 34/34, `PdoRestockerSatSynergyGatewayTest` 24/24, `SuggestedTechniciansApiTest` 24/24 y `php -l` sin errores en los cinco archivos modificados.
+- **Alcance:** no se modificaron FIX-36-01 ni FIX-36-02; sus bloques 6 y 7 siguen verdes dentro de la misma suite.
+
+---
+
+### FIX-36-04 · El alta de Coordinación no pre-clasificaba L1 · P1 · ✅ Cerrada (2026-11-19)
+
+#### Requisito
+
+`RF-01.2` y `D2.2` exigen que, cuando se cree una incidencia desde el panel de Coordinación (`POST /api/coordinator/incidents`) informando un `level1_issue_type` válido, el expediente nazca en `dispatch_level = 'L1_RESTOCKER'` con la categoría del mapeo `QA-AMB-01`, salvo exclusión térmica/eléctrica, cuarentena o reclamación grave.
+
+#### Evidencia previa (antes de la corrección)
+
+En el bloque de alta (`src/Presentation/Controller/CoordinatorController.php:406-620`) no se leía `level1_issue_type`. El bloque de construcción (líneas 525-540) creaba el `Incident` sin `dispatchLevel` ni `level1IssueType`:
+
+```php
+$incident = new Incident(
+    id: null,
+    ticketCode: $ticketCode,
+    machineId: $machine->getId(),
+    locationId: $location->getId(),
+    category: $category,
+    description: $description,
+    urgency: $urgency,
+    status: IncidentStatus::REGISTERED,
+    assignedTechnicianId: null,
+    reporterName: $reporterName,
+    cycleStartedAt: $now->format(DATE_ATOM),
+    slaTargetAt: $slaTargetAt->format(DATE_ATOM),
+    slaTierSnapshot: $slaTier,
+    slaTargetMinutes: $slaTargetMinutes
+);
+```
+
+El constructor de `Incident` aplicaba el valor por defecto `L2_SAT`. Por tanto, toda alta desde Coordinación nacía en `L2_SAT`, aunque el operador hubiera seleccionado un motivo L1.
+
+#### Corrección aplicada
+
+1. `CoordinatorController::createIncident()` lee `level1_issue_type`, lo normaliza con `Level1IssueType::tryFrom()` —vacío o inválido queda en `null`— y ejecuta `RestockerSatSynergyValidator::classifyCreation()` antes de calcular urgencia y SLA, igual que Portal y QR. Le pasa el estado sanitario hidratado en `Machine`, el importe retenido y el método de devolución, de modo que las cuatro exclusiones de `D2` se evalúan también en Coordinación. La categoría solicitada solo se conserva cuando la clasificación no impone el mapeo `QA-AMB-01`.
+2. El `Incident` se construye con `dispatchLevel` y `level1IssueType`. `PdoIncidentRepository::create()` los persiste en las dos ramas de inserción: la genérica y la CTE de PostgreSQL. La rama CTE era la que los omitía y hacía que la base aplicara `L2_SAT`/`NULL` por defecto.
+3. `RestockerSatSynergyApiTest` bloque 9 cubre el alta real desde Coordinación en HTTP/PostgreSQL: 9.1-9.2 crean con `MISSING_CONSUMABLES` y verifican `L1_RESTOCKER`, `OTHER`, `MISSING_CONSUMABLES` y `REGISTERED`; 9.3-9.4 fuerzan `TEMPERATURE_COLD`; 9.5 cubre una máquina en `QUARANTINE`; 9.6 una reclamación de 10,01 €; y 9.7 el método digital `BIZUM`. Los cuatro escenarios excluyentes persisten `L2_SAT` con `level1_issue_type` como rastro.
+
+#### Criterios de aceptación
+
+- [x] Un alta de Coordinación con `level1_issue_type` elegible nace en `L1_RESTOCKER`.
+- [x] Una exclusión térmica/eléctrica, cuarentena o reclamación grave fuerza `L2_SAT`.
+- [x] La prueba falla si el controlador vuelve a ignorar `level1_issue_type`.
+
+#### Cierre verificado
+
+- **Composición real:** `RestockerSatSynergyApiTest` bloque 9, **55/55** en total, exit 0. La fila 9.2 queda en `dispatch_level=L1_RESTOCKER`, `category=OTHER`, `level1_issue_type=MISSING_CONSUMABLES`, `status=REGISTERED`; las filas 9.4-9.7 fuerzan `L2_SAT` por térmica, cuarentena, importe de 10,01 € y método digital, conservando `level1_issue_type` como rastro.
+- **Regresiones:** `php -l` sin errores en `Machine`, `PdoMachineRepository`, el controlador, el repositorio de incidencias y la suite; los bloques 6 a 8 de QR/C1/escalado siguen verdes dentro de la misma suite.
+- **Alcance:** se añadió el estado sanitario a la hidratación de `Machine` y se persistió el importe retenido declarado en el alta; no se modificaron FIX-36-01, FIX-36-02 ni FIX-36-03.
+
+---
+
+### FIX-36-05 · Escalado dentro del asistente de visita · P1 · ✅ Cerrada (2026-11-19)
+
+#### Requisito
+
+`RF-05.2.1` exige el botón «⚡ Escalar Avería al SAT» en cada tarjeta de máquina **y dentro del asistente de Visita de Reposición del Módulo 34**, para reportar averías descubiertas a puerta abierta.
+
+#### Evidencia
+
+La brecha consistía en que `public/assets/js/components/RestockerRouteView.js` solo invocaba `openEscalate()` desde la tarjeta de máquina y la bandeja de avisos L1. El modal `data-testid="modal-restock-visit"` no ofrecía ninguna acción de escalado, de modo que una avería descubierta a puerta abierta obligaba a cerrar el asistente y buscar la tarjeta.
+
+#### Impacto
+
+El reponedor podía escalar desde la tarjeta, pero no desde el flujo guiado de visita, que es el contexto natural donde descubre la avería con la máquina abierta. Era una desviación de alcance funcional, no un fallo de backend.
+
+#### Corrección aplicada
+
+1. El asistente de visita incorpora un botón «⚡ Escalar Avería al SAT» (`data-testid="btn-escalate-from-visit"`) junto a las acciones de cierre. Invoca `openEscalate(visitMachine, visitMachine?.active_l1_incident || null)`, conserva la máquina abierta y propaga la incidencia L1 cuando existe.
+2. `RestockerRouteView` mantiene el asistente de visita debajo del modal de escalado (`z-index` 75 frente a 86), por lo que el reponedor no pierde el contexto al reportar la avería.
+3. `restocker_route_view.test.mjs` extrae el bloque completo de `modal-restock-visit`, comprueba que el botón y su expresión de apertura están dentro, y ejecuta `openEscalate()` con la máquina y su aviso L1.
+
+#### Criterios de aceptación
+
+- [x] El botón «⚡ Escalar Avería al SAT» aparece dentro del asistente de visita.
+- [x] Abre el modal de escalado con la máquina y la incidencia correctas.
+- [x] La prueba falla si se retira del modal de visita.
+
+#### Cierre verificado
+
+- **Composición real:** `node tests/frontend/restocker_route_view.test.mjs` → **236/236 aserciones, 0 fallos, exit 0**. Las dos aserciones nuevas verifican el botón dentro de `visitModalSource` y que `openEscalate()` conserva `visitMachine` y su `active_l1_incident`.
+- **Regresiones:** la suite completa de `RestockerRouteView` sigue verde, incluidos los flujos de visita, FEFO, evidencia, cola offline y L1.
+- **Alcance:** el botón queda disponible en tarjeta, bandeja L1 y asistente de visita; no se modificó el contrato de escalado ni el backend.
+
+---
+
+### FIX-36-06 · El mapeo determinista ya es un invariante duro · P2 · Cerrada (2026-11-19)
+
+#### Requisito
+
+`EARS 01.1.2` exige imponer «tanto en el dominio como mediante la restricción SQL `chk_incidents_l1_dispatch_coherence`» que, si `level1_issue_type IS NOT NULL`, su categoría compatible en la creación inicial sea determinista (`STOCKOUT_EMPTY_SLOT`/`MINOR_SPIRAL_JAM` → `PRODUCT_JAM`, `EMPTY_CHANGE_TUBES` → `PAYMENT_SYSTEM`, `MISSING_CONSUMABLES` → `OTHER`).
+
+#### Evidencia
+
+- `src/Core/Domain/Model/Incident.php` validaba L1 térmico/eléctrico, `PENDING_PARTS`, `pending_parts_reason` y el rastro de escalado, pero **no llamaba a `Level1IssueType::isCompatibleWith()`**.
+- `isCompatibleWith()` solo tenía su definición en `src/Core/Domain/ValueObject/Level1IssueType.php`; no había ninguna llamada en `src/`.
+- El CHECK `chk_incidents_l1_dispatch_coherence` (`database/supabase_migrations/032_restocker_sat_synergy.sql`) no imponía la correspondencia `level1_issue_type` ↔ `category`.
+- El comportamiento externo era correcto porque `RestockerSatSynergyValidator::classifyCreation()` sobrescribía la categoría con `mappedCategory()` en QR y Portal; pero la defensa en profundidad que pide el EARS no estaba completa.
+
+#### Impacto
+
+Una escritura directa desde el repositorio o una futura ruta que construya `Incident` sin pasar por `classifyCreation()` podría persistir una pareja incoherente. No es un fallo observado en los canales actuales, pero sí una brecha de defensa en profundidad y de fidelidad literal al EARS.
+
+#### Corrección aplicada
+
+1. `Incident::__construct()` rechaza una pareja incoherente cuando `dispatchLevel->isLevel1()` y `level1IssueType !== null`, reutilizando `Level1IssueType::isCompatibleWith()`. La guarda no se aplica en `L2_SAT`: allí el motivo puede conservarse como rastro histórico de origen aunque la categoría pase a `TEMPERATURE_COLD` o `ELECTRICAL_OFF` (`EARS 01.1.2`).
+2. `chk_incidents_l1_dispatch_coherence` exige el mapeo determinista dentro de la rama `L1_RESTOCKER`, tanto en `database/supabase_migrations/032_restocker_sat_synergy.sql` como en `database/supabase_init.sql`. Una consola SQL o un importador ya no pueden persistir una pareja incoherente en Nivel 1; el motor responde `SQLSTATE 23514`.
+3. La regresión queda cubierta en dominio y en PostgreSQL, incluido el control positivo de que un `L2_SAT` con rastro histórico incoherente sigue siendo válido.
+
+#### Criterios de aceptación
+
+- [x] Una pareja `level1_issue_type`/`category` incompatible no puede persistirse en L1.
+- [x] La regla se aplica en el dominio, no solo en el validador de creación.
+- [x] La prueba falla si se elimina la validación.
+
+#### Cierre verificado
+
+- **Dominio:** `php tests/unit/RestockerSatSynergyDomainModelsTest.php` → **36/36 aserciones, exit 0**. Rechaza `STOCKOUT_EMPTY_SLOT` con `PAYMENT_SYSTEM` en L1 y acepta un `L2_SAT` térmico que conserva `STOCKOUT_EMPTY_SLOT` como rastro histórico.
+- **Motor:** `source deploy/local/postgres/.env.docker-tls && php tests/integration/PostgresRestockerSatSynergySchemaTest.php` → **30/30 aserciones, exit 0**. La pareja incoherente en L1 se rechaza con `23514` y la fila `L2_SAT` con rastro histórico se persiste.
+- **Convergencia:** `php tests/integration/SchemaConvergenceParityTest.php` → **42/42 aserciones, exit 0**; el DDL base y las 32 migraciones convergen y la restricción conserva su nombre.
+- **Alcance:** la batería global se reejecutó el 2026-11-19 y quedó en 441/16.993 · 0 fallos; las suites afectadas y la convergencia también quedaron verificadas. El canal `new_engine` queda en 71/71 con H-36-05 cerrada.
+
+---
+
+### FIX-36-07 · Pruebas de composición de los flujos · P2 · Cerrada
+
+#### Requisito
+
+El DoD 2 exige que los servicios de aplicación impongan las reglas, y el DoD 4 que toda la batería pase al 100 %. La trazabilidad debe demostrar que la composición real, no solo los servicios aislados, cumple la Spec.
+
+#### Evidencia
+
+El alta de Portal con `level1_issue_type` era el último flujo sin composición real. Se cubre ahora en `CreateIncidentEndpointTest` caso 9: la máquina se marca `QUARANTINE` en PostgreSQL, el Portal despacha `POST /api/incidents` con `MISSING_CONSUMABLES` y la fila persistida queda en `L2_SAT`, `OTHER`, `MISSING_CONSUMABLES` y `REGISTERED`.
+
+La absorción QR, el relevo C1, el escalado real, el alta L1 de Coordinación y el alta de Portal ya tienen composición en `RestockerSatSynergyApiTest` bloques 6 a 9 y `CreateIncidentEndpointTest` caso 9.
+
+#### Impacto
+
+La batería no protege las rutas que realmente usa el usuario. Una regresión en la composición puede pasar desapercibida, como ya ocurre con los P0.
+
+#### Corrección propuesta
+
+Añadir pruebas de integración HTTP/PostgreSQL para cada flujo anterior, con aserciones sobre el estado persistido y los efectos colaterales (custodia, asignación, outbox, auditoría). No sustituir estas pruebas por dobles de servicio.
+
+#### Criterios de aceptación
+
+- [x] Cada flujo de composición tiene una prueba que falla si se elimina la inyección correspondiente.
+- [x] Las pruebas verifican el estado en PostgreSQL, no solo el retorno HTTP.
+- [x] La matriz enlaza cada prueba con su requisito; el enlace quedó cerrado en FIX-36-08.
+
+#### Cierre verificado
+
+- **Composición real:** `CreateIncidentEndpointTest` caso 9 (9.1-9.2), exit 0. La cuarentena se hidrata desde `Machine`, el alta responde 201 y PostgreSQL conserva `dispatch_level=L2_SAT`, `category=OTHER`, `level1_issue_type=MISSING_CONSUMABLES` y `status=REGISTERED`.
+- **Regresiones:** la suite completa de creación de incidencias sigue en verde; `php -l` sin errores en el controlador y la prueba.
+- **Alcance:** el alta de Portal ahora comparte el estado sanitario hidratado con Coordinación y QR. El enlace de la matriz quedó cerrado en FIX-36-08.
+
+---
+
+### FIX-36-08 · La trazabilidad y los cierres de tareas sobrecertifican · P3 · ✅ Cerrada (2026-11-19)
+
+#### Evidencia
+
+- `specs/36-restocker-sat-synergy/traceability-matrix.md` cita ahora `C1` con `RestockerSatSynergyApiTest` bloque 7 (55/55), además de `RestockerSatSynergyIntegrationsTest` 27/27, `PdoRestockerSatSynergyGatewayTest` 24/24 y `RestockerShiftAndWorkHoursTest` 38/38. La composición real es la fuente principal; las suites de servicio/gateway quedan como apoyo.
+- La misma matriz cita `QA-LIM-01` con `RestockerSatSynergyApiTest` bloque 6 (55/55), que ejecuta la absorción QR real con asignación y outbox; `RestockerSatSynergyIntegrationsTest` 27/27 y `RestockerSatSynergyConstitutionalTest` 17/17 quedan como cobertura complementaria, no como certificación única.
+- `docs/auditoria_spec_36_brechas.md` (este documento) registra la corrección y enlaza la evidencia.
+- `LocationPortalReopenAuditTest` se cita con su ruta real, [`tests/unit/LocationPortalReopenAuditTest.php`](../tests/unit/LocationPortalReopenAuditTest.php), 18/18, y se identifica como auditoría auxiliar que no certifica la promoción `dispatch_level`.
+- `tasks.md` y el ODD mantienen las 12 tareas `[x]`, pero sus cierres ya se contrastaron con la composición real: `T-RSS-06` cita el bloque 8 y el alta de Coordinación del bloque 9; `T-RSS-07` cita el bloque 7; `T-RSS-08` cita el bloque 9 y `CreateIncidentEndpointTest` caso 9; `T-RSS-11` cita el botón de visita; y `T-RSS-12` distingue la evidencia focalizada (11 suites, 561 aserciones) de la certificación global vigente (441/16.993); el canal `new_engine` queda en 71/71, con H-36-05 cerrada. La matriz ya enlaza todas esas composiciones.
+
+#### Impacto
+
+La matriz y las tareas son la base de la certificación. Si declaran cubierto lo que no se ejecuta, una auditoría futura puede volver a dar por cerrado el módulo sin corregir los P0. La corrección elimina esa sobrecertificación y deja explícito qué evidencia es focalizada y cuál es la última certificación global completa.
+
+#### Corrección aplicada
+
+1. La matriz cita las composiciones HTTP/PostgreSQL reales de los bloques 6–9 para `QA-LIM-01`, `C1`, `D2`, `D3` y `RF-02`–`RF-05`.
+2. `LocationPortalReopenAuditTest` queda en `tests/unit/` con 18/18 y marcada como auditoría auxiliar; `ReopenIncidentEndpointTest` se cita con la salvedad de que no certifica la promoción `dispatch_level`.
+3. `tasks.md` y el ODD corrigen las cifras (`28/28` → `30/30`, dominio `34/34` → `36/36`, API `13/16/18` → `55/55`) y enlazan los fixes con sus commits reales.
+4. La cifra global vigente es 441/16.993; la evidencia focalizada es 11 suites propias / 561 aserciones. El canal `new_engine` se publica en 71/71: H-36-05 quedó cerrada al bajar «crear»/«ruta» por debajo de 250 ms sin tocar el esquema.
+
+#### Criterios de aceptación
+
+- [x] La matriz no declara `C1` ni `QA-LIM-01` cubiertos por pruebas que no ejecutan la composición real; cita los bloques 6 a 9.
+- [x] Las 12 tareas tienen evidencia reproducible y coherente con el código de producción.
+- [x] El estado del módulo refleja la realidad: cerrado documentalmente, con la certificación global vigente 441/16.993 y el canal `new_engine` en 71/71; H-36-05 cerrada.
+
+#### Cierre verificado
+
+- **Composición:** `RestockerSatSynergyApiTest` 55/55 (bloques 6–9), `CreateIncidentEndpointTest` caso 9 `exit=0` y `RestockerSatSynergyConstitutionalTest` 17/17.
+- **Trazabilidad:** las 11 suites propias suman 561 aserciones verdes; `LocationPortalReopenAuditTest` 18/18; `CoordinatorButtonVariantsGuardTest` 23/23; `restocker_route_view.test.mjs` 236/236; `FrontendTemplateCompileTest` 15/15.
+- **Alcance:** no se reabrió ningún fix funcional. La única regresión de guarda (geometría en línea del botón `btn-escalate-from-visit`) se corrigió con `w-100 mt-3`. La batería global se reejecutó: 441/16.993, 0 fallos; el canal `new_engine` queda en 71/71 con H-36-05 cerrada.
+
+---
+
+## 4. Definition of Done (§8)
+
+| DoD | Comprobación | Estado |
+| :--- | :--- | :--- |
+| **1. Migración `032` y convergencia 1:1 con tipos #43/#44, ampliaciones, columnas, CHECK y 4 semillas** | `032_restocker_sat_synergy.sql` con tipos, columnas, FK, CHECK —incluido el mapeo determinista L1—, índice, operaciones Offline y las 4 parejas `RC-L1-*`/`SS-L1-*`; `supabase_seeds.sql` con 11 referencias; `SchemaConvergenceParityTest` 42/42; `PostgresRestockerSatSynergySchemaTest` 30/30; `CloudDeploySchemaParityTest` 55/55 | ✅ |
+| **2. Los servicios de aplicación imponen pre-clasificación, resolución L1, escalado en 3 ramas, auto-escalado QR, reapertura, `site_coincidence`, relevo C1, horas y opacidad** | Servicios y gateway verdes; QR, C1, el escalado, el alta L1 de Coordinación y el alta de Portal inyectan sinergia y tienen composición real (`RestockerSatSynergyApiTest` bloques 6–9 y `CreateIncidentEndpointTest` caso 9); la matriz enlaza cada composición | ✅ |
+| **3. `RestockerRouteView`, `TechnicianRouteView` y Coordinación implementan la operativa completa, el botón de escalado, el banner, la cola Offline y el filtro/triaje dual** | Frontend 236/236 + 18/18 + guards verdes; el botón «⚡ Escalar Avería al SAT» está en tarjeta, bandeja L1 y asistente de visita | ✅ |
+| **4. Toda la batería unitaria, de integración PostgreSQL/HTTP, frontend y blindaje constitucional al 100 %** | Evidencia focalizada: **11 suites propias · 561 aserciones · 0 fallos** + `RestockerSatLayoutBrowserTest` **22/22** a 360 × 800; `RestockerSatSynergyApiTest` 55/55 (bloques 6–9), `CreateIncidentEndpointTest` caso 9 `exit=0`, guardas 23/23 y frontend 236/236 + 18/18. Global: **441/16.993 · 0 fallos**. `new_engine`: **71/71 · 2.342 aserciones · 0 fallos**; `PoolerLatencyMeasurementTest` **30/30** con «crear» 210,5 ms y «ruta» 209,4 ms | ✅ |
+
+> **Reauditoría 2026-11-19 (§10):** los DoD 1 y 2 se mantienen, **DoD 3 se cumple** tras cerrar H-36-02 y **DoD 4 se cumple** con `new_engine` en 71/71 y el pooler en 30/30. H-36-01 a H-36-05 quedaron cerradas; `RNF-03` tiene medición real a 360 px y `RNF-01` ya no tiene deuda de latencia remota.
+
+---
+
+## 5. Estado de las 12 tareas
+
+| Tarea | Marca | Evidencia | Observación |
+| :--- | :---: | :--- | :--- |
+| `T-RSS-01` | `[x]` | Migración `032`, convergencia, semillas | ✅ coherente |
+| `T-RSS-02` | `[x]` | Contratos y `PostgresRestockerSatSynergySchemaTest` 30/30 | ✅ coherente |
+| `T-RSS-03` | `[x]` | Domain models 36/36 | ✅ coherente |
+| `T-RSS-04` | `[x]` | Validador 46/46 | ✅ coherente |
+| `T-RSS-05` | `[x]` | Gateway 24/24 | ✅ coherente |
+| `T-RSS-06` | `[x]` | Servicio 34/34; API 55/55 | ✅ el escalado del reponedor resuelve técnico y encola aviso (bloque 8); QR, C1 y el alta L1 de Coordinación (bloque 9) también están cableados |
+| `T-RSS-07` | `[x]` | Integraciones 27/27 | ✅ `C1` cableado en cierre, ausencia y baja (bloque 7) |
+| `T-RSS-08` | `[x]` | API 55/55; constitucional 17/17 | ✅ el alta de Coordinación ya pre-clasifica L1 (bloque 9); el alta de Portal compone el caso elegible L1 y la exclusión por cuarentena (`CreateIncidentEndpointTest` caso 9) |
+| `T-RSS-09` | `[x]` | API/constitucional, `site_coincidence`, filtro y promoción | ✅ incluye la composición QR/C1 real (bloques 6 y 7) |
+| `T-RSS-10` | `[x]` | Frontend 18/18 | ✅ coherente |
+| `T-RSS-11` | `[x]` | Frontend 236/236 | ✅ botón de escalado en tarjeta, bandeja L1 y asistente de visita |
+| `T-RSS-12` | `[x]` | 11 suites propias · 561 aserciones + layout L1/SAT 22/22; global 441/441 · 16.993; `new_engine` 71/71 | ✅ evidencia focalizada real y certificación completa; la matriz enlaza QR, C1, escalado, alta de Coordinación, alta de Portal, botón de visita y medición 360 px. `PoolerLatencyMeasurementTest` 30/30; H-36-05 cerrada |
+
+**Las 12 tareas están cerradas y respaldadas por la composición real o por la evidencia focalizada.**
+
+> **Reauditoría 2026-11-19 (§10):** la marca `[x]` se conserva en las 12 tareas y **el cierre de `T-RSS-12` queda aceptado**: `new_engine` está en 71/71 y el pooler en 30/30. Las reservas de `T-RSS-11` y `T-RSS-10` quedaron cerradas con H-36-01 y H-36-02: ambas vistas muestran `operator_code`/`tel:` y la tarjeta técnica pinta insignia, nota interna y foto desde el payload real. H-36-04 cerró la reserva de `RNF-03` con la suite de navegador a 360 × 800; H-36-05 cerró la de DoD 4.
+
+---
+
+## 6. Evidencia ejecutada
+
+### 6.1. Batería global (2026-11-19)
+
+```text
+php tests/run_all.php   # certificación global del 2026-11-19
+Total Suites Ejecutadas    : 441
+Total Aserciones Evaluadas : 16993
+Fallos Detectados          : 0
+Cifras documentadas        : COHERENTES
+RESULTADO: 100% EN VERDE. (0 errors, 0 failures)
+RUN_ALL_CLEAN_EXIT:0
+```
+
+Nota: la primera pasada de esta corrida terminó con 0 fallos de suites pero con 4 desviaciones de `DocMetricsGuard` porque README y `features_pendientes.md` aún declaraban 16.987. Se corrigieron las cifras a 16.993 y la repetición quedó en 441/441 · 16.993 · 0, con `DocMetricsGuard` coherente. La evidencia focalizada de cierre sigue siendo 11 suites y 561 aserciones.
+
+### 6.2. Suites del módulo y guardas
+
+| Suite | Aserciones | Exit |
+| :--- | ---: | ---: |
+| `tests/unit/RestockerSatSynergyDomainModelsTest.php` | 36/36 | 0 |
+| `tests/unit/RestockerSatSynergyValidatorTest.php` | 46/46 | 0 |
+| `tests/unit/RestockerSatSynergyServiceTest.php` | 34/34 | 0 |
+| `tests/unit/RestockerSatSynergyIntegrationsTest.php` | 27/27 | 0 |
+| `tests/unit/RestockerShiftAndWorkHoursTest.php` | 38/38 | 0 |
+| `tests/integration/PostgresRestockerSatSynergySchemaTest.php` | 30/30 | 0 |
+| `tests/integration/PdoRestockerSatSynergyGatewayTest.php` | 24/24 | 0 |
+| `tests/integration/RestockerSatSynergyApiTest.php` | 55/55 | 0 |
+| `tests/integration/RestockerSatSynergyConstitutionalTest.php` | 17/17 | 0 |
+| `tests/integration/SchemaConvergenceParityTest.php` | 42/42 | 0 |
+| `tests/integration/PostgresSchemaTest.php` | 153/153 | 0 |
+| `tests/integration/PostgresConstitutionalTest.php` | 86/86 | 0 |
+| `tests/integration/CloudDeploySchemaParityTest.php` | 55/55 | 0 |
+| `tests/integration/RestockerRbacConstitutionalTest.php` | 27/27 | 0 |
+| `tests/integration/PdoWorkHoursRoleFilterTest.php` | 18/18 | 0 |
+| `tests/frontend/technician_and_coordinator_synergy.test.mjs` | 18/18 | 0 |
+| `tests/frontend/restocker_route_view.test.mjs` | 236/236 | 0 |
+| `tests/unit/CoordinatorButtonVariantsGuardTest.mjs` | 23/23 | 0 |
+| `tests/unit/FrontendTemplateCompileTest.mjs` | 15/15 | 0 |
+| `tests/unit/DesignTokenDebtRatchetTest.mjs` | 3/3 | 0 |
+| `tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs` | 45/45 | 0 |
+| `tests/unit/MobileShellLayoutGuardTest.mjs` | 7/7 | 0 |
+
+### 6.3. Canal `new_engine` (corrida completa · 2026-11-19)
+
+```text
+source deploy/local/postgres/.env.docker-tls
+php tests/run_new_engine.php
+Suites evaluadas    : 71
+Suites en verde     : 71
+No ejecutables      : 0
+Aserciones          : 2342
+Fallos              : 0
+RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
+```
+
+`PoolerLatencyMeasurementTest` completó sus 20 rondas contra el pooler de certificación (`deploy/local/supabase/.env.local`, Supavisor 6543) y pasó **30/30**. La medición limpia dejó «crear» en **210,5 ms** de mediana (p95 271,1 ms), «ruta» en **209,4 ms** (p95 235,5 ms) y «listar» en 210,3 ms; las seis operaciones quedaron por debajo de 250 ms. La mejora no toca el esquema: el `SAVEPOINT` del alta viaja como prefijo de la misma sentencia preparada que la CTE y la última Nota Interna de Taller se lee en la consulta del tablero de ruta. `CreateIncidentEndpointTest` quedó en `exit=0`, `TicketCodeRaceRetryTest` en 0 fallos y 6.4 volvió a verde. El canal queda en **71 suites · 71 verdes · 2.342 aserciones · 0 fallos** y `exit=0`; H-36-05 queda cerrada por latencia, no por el esquema.
+
+---
+
+## 7. Orden de corrección recomendado
+
+```text
+1. ✅ FIX-36-01  Cablear y corregir la absorción QR grave (QA-LIM-01 / Art. II) · cerrado 2026-11-19
+2. ✅ FIX-36-02  Cablear C1: cierre de turno, ausencia y baja · cerrado 2026-11-19
+3. ✅ FIX-36-03  Inyectar resolvedor de técnico y notificador en el escalado · cerrado 2026-11-19
+4. ✅ FIX-36-04  Pre-clasificación L1 en el alta de Coordinación · cerrado 2026-11-19
+5. ✅ FIX-36-05  Botón de escalado dentro del asistente de visita · cerrado 2026-11-19
+6. ✅ FIX-36-06  Invariante de mapeo en dominio/SQL · cerrado 2026-11-19
+7. ✅ FIX-36-07  Pruebas de composición de todos los flujos anteriores · cerrado 2026-11-19
+8. ✅ FIX-36-08  Matriz, tareas, ODD y acta sincronizados · cerrado 2026-11-19
+```
+
+FIX-36-01 a FIX-36-08 están cerrados. La Spec 36 queda cerrada con la certificación global vigente 441/16.993 y el canal `new_engine` en 71/71; H-36-05 cerrada.
+
+---
+
+## 8. Criterio de cierre de este backlog
+
+La Spec 36 queda cerrada con estos criterios:
+
+- [x] El QR real auto-escale una absorción térmica/eléctrica sobre un L1, cierre la custodia, asigne SAT o deje `REGISTERED` con alerta, y encole en `notification_outbox`. Cerrado el 2026-11-19; `RestockerSatSynergyApiTest` 55/55.
+- [x] El cierre de turno bloquee un L1 `IN_PROGRESS` con `409` y releve `ASSIGNED`/`PENDING_INFO`. Cerrado el 2026-11-19; aserciones 7.1-7.6 sobre un `ASSIGNED`; la consulta de relevo incluye ambos estados.
+- [x] La ausencia y la baja de cuenta releven los L1 vivos. Cerrado el 2026-11-19; aserciones 7.7-7.15.
+- [x] El escalado del reponedor asigne técnico y encole aviso sin `assign_technician_id`. Cerrado el 2026-11-19; aserciones 8.1-8.6 de `RestockerSatSynergyApiTest` 55/55.
+- [x] El alta de Coordinación pre-clasifique L1 y respete las exclusiones de cuarentena y reclamación. Cerrado el 2026-11-19; aserciones 9.1-9.7 de `RestockerSatSynergyApiTest` 55/55.
+- [x] El alta de Portal pre-clasifique L1 y respete la cuarentena. Cerrado el 2026-11-19; aserciones 9.1-9.2 de `CreateIncidentEndpointTest`.
+- [x] El botón de escalado exista dentro del asistente de visita. Cerrado el 2026-11-19; `restocker_route_view.test.mjs` 236/236, aserciones del botón y de `openEscalate()` con la máquina y su aviso L1.
+- [x] El mapeo `level1_issue_type` ↔ `category` sea un invariante de dominio y SQL. Cerrado el 2026-11-19; dominio 36/36 y esquema 30/30.
+- [x] Existan pruebas de composición que fallen si se elimina cualquiera de los cableados anteriores. Cerrado el 2026-11-19; bloques 6–9 de `RestockerSatSynergyApiTest` y caso 9 de `CreateIncidentEndpointTest`.
+- [x] La matriz, las tareas y el ODD reflejen la evidencia real, sin declarar cubierto lo que no se ejecuta. Cerrado el 2026-11-19; matriz con 11 suites propias/561 aserciones y enlaces a las composiciones reales.
+- [x] La evidencia focalizada (`11 suites · 561 aserciones`) quede en verde tras las correcciones. Verificado el 2026-11-19: `RestockerSatSynergyApiTest` 55/55, guardas 23/23 y frontend 236/236. La batería global se reejecutó y quedó en `441/441 · 16.993 · 0`; el canal `new_engine` queda en 71/71 con H-36-05 cerrada.
+
+> **Reauditoría 2026-11-19 (§10):** este criterio de cierre se conserva como historial, pero no acredita la aceptación final. La reauditoría encontró requisitos de interfaz sin cablear y el canal `new_engine` sigue sin estar al 100 %. El veredicto vigente está en §10.7.
+
+---
+
+## 9. Referencias
+
+- [`specs/36-restocker-sat-synergy/spec.md`](../specs/36-restocker-sat-synergy/spec.md) · `RF-01.2`, `RF-02.2`, `RF-03.2`, `RF-04.2`, `RF-05.2`, `EARS 01.1.2`, `D2`, `D3`, `C1`, `QA-LIM-01`, Art. II y Art. V.
+- [`specs/functional/restocker_sat_synergy_spec.md`](../specs/functional/restocker_sat_synergy_spec.md) · espejo funcional.
+- [`specs/technical/restocker_sat_synergy_contracts.md`](../specs/technical/restocker_sat_synergy_contracts.md) · contratos de endpoints y esquema.
+- [`specs/36-restocker-sat-synergy/tasks.md`](../specs/36-restocker-sat-synergy/tasks.md) · 12/12 tareas marcadas.
+- [`odd/tasks/restocker-sat-synergy.md`](../odd/tasks/restocker-sat-synergy.md) · ODD y logs.
+- [`specs/36-restocker-sat-synergy/traceability-matrix.md`](../specs/36-restocker-sat-synergy/traceability-matrix.md) · matriz corregida con la evidencia focalizada de FIX-36-08.
+- `src/Presentation/Controller/QrScanController.php` · composición real de `QrReportService` con sinergia, sugeridor de técnicos y outbox.
+- `src/Application/Service/QrReportService.php` · propagación de `refund_method`, relectura tras la promoción y encolado de la asignación.
+- `tests/integration/RestockerSatSynergyApiTest.php` · bloques 6 a 9 de composición QR/C1/escalado/alta de Coordinación (55/55).
+- `src/Infrastructure/Repository/PdoIncidentRepository.php:2792-2825` · `update()` que reescribe la categoría/asignación desde el objeto obsoleto.
+- `src/Presentation/Controller/TechnicianShiftController.php` · composición de `ShiftLifecycleService` con la sinergia real.
+- `src/Application/Service/ShiftLifecycleService.php` · comprobación del resultado de `handoverLevel1()` y traducción a 409.
+- `src/Presentation/Controller/CoordinatorAbsenceController.php` · composición de `TechnicianAbsenceService` con la sinergia real.
+- `src/Application/Service/TechnicianAbsenceService.php` · relevo dentro de la transacción del alta de ausencia.
+- `src/Application/Service/AdminUserService.php` · relevo del restocker antes del `softDelete`.
+- `src/Application/Service/AdminStaffService.php` · relevo antes del cierre de turno por baja.
+- `src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php` · transacciones anidadas y relevo `handoverLevel1()`.
+- `src/Presentation/Controller/RestockerRouteController.php` · `buildSynergyService()` compone gateway, resolvedor de técnico y notificador reales.
+- `src/Application/Service/SuggestedTechniciansService.php` · ranking por avería y por máquina sin ticket activo.
+- `src/Core/Domain/Repository/TechnicianSuggestionRepositoryInterface.php` · contrato de foto del recomendador por máquina.
+- `src/Infrastructure/Repository/PdoTechnicianSuggestionRepository.php` · `findSuggestionPhotoForMachine()` y `buildSuggestionPhoto()` compartido.
+- `src/Application/Service/RestockerSatSynergyService.php:45-55, 150-185` · resolver/notifier opcionales.
+- `src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php:518` · `assign_technician_id` explícito; el resolvedor lo rellena cuando el cliente no lo envía.
+- `src/Presentation/Controller/CoordinatorController.php:408-505` · alta de Coordinación con lectura de `level1_issue_type` y `classifyCreation()`.
+- `public/assets/js/components/RestockerRouteView.js:3249, 3333, 4250` · escalado disponible en tarjeta, bandeja y asistente de visita; el botón de visita usa `w-100 mt-3` en lugar de geometría en línea.
+- `src/Core/Domain/Model/Incident.php` · constructor con `isCompatibleWith()` para L1 y rastro histórico admitido en L2.
+- `database/supabase_migrations/032_restocker_sat_synergy.sql` · CHECK con el mapeo `level1_issue_type` ↔ `category` dentro de la rama L1.
+
+---
+
+## 10. Reauditoría de aceptación · 2026-11-19
+
+- **Base:** `d25cbad` · árbol limpio · sin cambios de código durante la auditoría.
+- **Alcance:** lectura requisito por requisito de `spec.md` y su espejo funcional, `restocker_sat_synergy_contracts.md` y `docs/design.md`; ejecución de las 25 suites solicitadas, dos guardas adicionales de frontend y el test del pooler; contraste con `tasks.md` y el ODD.
+- **Veredicto vigente:** **la Spec 36 queda 100 % cumplida**. Los FIX-36-01..08 no se reabren: las brechas de §10.6 fueron hallazgos de aceptación, no regresiones de esos fixes. H-36-01 a H-36-05 quedaron cerradas, `new_engine` está en 71/71 y el DoD 4 se cumple.
+
+### 10.1. Resultado ejecutivo
+
+La evidencia focalizada sigue siendo sólida: **11 suites propias, 561 aserciones, 0 fallos**, más `RestockerSatLayoutBrowserTest` **22/22** a 360 × 800. La batería hermética global está en **441 suites / 16.993 aserciones / 0 fallos**. El canal `new_engine` queda en **71/71**, con **2.342 aserciones y 0 fallos** en la corrida completa; `PoolerLatencyMeasurementTest` pasó **30/30**, con «crear» en 210,5 ms y «ruta» en 209,4 ms. El pooler ya tiene la migración 032 y completó las 20 rondas; H-36-05 queda cerrada.
+
+La diferencia con el cierre anterior no está en las suites del núcleo, sino en la **aceptación de la interfaz y de la certificación completa**:
+
+1. `RF-04.1` exigía nombre, `operator_code` y enlace `tel:` del compañero; **H-36-01 quedó cerrada el 2026-11-19** y ambas vistas ya los muestran.
+2. `RF-05.2.2` exigía que la tarjeta del técnico activara la insignia de escalado y destacara la Nota Interna y la foto; **H-36-02 quedó cerrada el 2026-11-19** y el payload real de `/api/technician/my-route` ya publica el rastro, la nota y la foto.
+3. `RF-01.2` describía rutas que no coincidían literalmente con el router real y no tenía una composición de Portal elegible L1; **H-36-03 quedó cerrada el 2026-11-19** con los paths alineados y el caso positivo compuesto.
+4. `RNF-03` ya tiene medición real de scroll horizontal a 360 px; **H-36-04 quedó cerrada el 2026-11-19**.
+5. `new_engine` queda al 100 % (71/71, 2.342 aserciones, 0 fallos) y el DoD 4 se cumple; H-36-05 se cerró con «crear» en 210,5 ms y «ruta» en 209,4 ms, sin cambiar el esquema.
+
+### 10.2. Evidencia ejecutada
+
+**Suites focalizadas del módulo (561 aserciones de dominio/frontend + 22 de layout):**
+
+| Suite | Resultado |
+| :--- | ---: |
+| `RestockerSatSynergyDomainModelsTest.php` | 36/36 · `exit=0` |
+| `RestockerSatSynergyValidatorTest.php` | 46/46 · `exit=0` |
+| `RestockerSatSynergyServiceTest.php` | 34/34 · `exit=0` |
+| `RestockerSatSynergyIntegrationsTest.php` | 27/27 · `exit=0` |
+| `RestockerShiftAndWorkHoursTest.php` | 38/38 · `exit=0` |
+| `PostgresRestockerSatSynergySchemaTest.php` | 30/30 · `exit=0` |
+| `PdoRestockerSatSynergyGatewayTest.php` | 24/24 · `exit=0` |
+| `RestockerSatSynergyApiTest.php` | 55/55 · `exit=0` |
+| `RestockerSatSynergyConstitutionalTest.php` | 17/17 · `exit=0` |
+| `restocker_route_view.test.mjs` | 236/236 · `exit=0` |
+| `technician_and_coordinator_synergy.test.mjs` | 18/18 · `exit=0` |
+| `RestockerSatLayoutBrowserTest.php` (H-36-04) | 22/22 · `exit=0` · Chromium real a 360 × 800 |
+
+**Esquema, composición y guardas:**
+
+| Suite | Resultado |
+| :--- | ---: |
+| `SchemaConvergenceParityTest.php` | 42/42 · `exit=0` |
+| `PostgresSchemaTest.php` | 153/153 · `exit=0` |
+| `PostgresConstitutionalTest.php` | 86/86 · `exit=0` |
+| `CloudDeploySchemaParityTest.php` | 55/55 · `exit=0` |
+| `RestockerRbacConstitutionalTest.php` | 27/27 · `exit=0` |
+| `PdoWorkHoursRoleFilterTest.php` | 18/18 · `exit=0` |
+| `LocationPortalReopenAuditTest.php` | 18/18 · auditoría auxiliar |
+| `CreateIncidentEndpointTest.php` | casos 9.1–9.2 (Portal elegible L1 y cuarentena) · `exit=0` |
+| `ReopenIncidentEndpointTest.php` | caso 9.1–9.5 · `exit=0`; no certifica la promoción `dispatch_level` |
+| `CoordinatorButtonVariantsGuardTest.mjs` | 23/23 · 413 botones |
+| `FrontendTemplateCompileTest.mjs` | 15/15 · 5.157 expresiones |
+| `DesignTokenDebtRatchetTest.mjs` | 3/3 |
+| `OfflinePwaAssetsAndUiGuardTest.mjs` | 45/45 |
+| `MobileShellLayoutGuardTest.mjs` | 7/7 |
+| `TechnicianRouteViewTest.mjs` adicional | 181/181 |
+| `CoordinatorDashboardViewTest.mjs` adicional | 143/143 |
+| `PoolerLatencyMeasurementTest.php` con el pooler real | **30/30** (crear 210,5 ms y ruta 209,4 ms), `exit=0` |
+
+**Certificación completa:**
+
+```text
+Batería global: 441 suites · 16.993 aserciones · 0 fallos · exit=0
+new_engine:    71 evaluadas · 71 verdes · 2.342 aserciones · 0 fallos
+               (corrida completa con .env.docker-tls y pooler real)
+Pooler:        30/30 aserciones · crear 210,5 ms / ruta 209,4 ms · exit=0
+```
+
+### 10.3. Cobertura por RF y EARS
+
+| Criterio | Estado | Evidencia y observación |
+| :--- | :---: | :--- |
+| **RF-01.1** · Tipos #43/#44, columnas, FK, CHECK, 49 tablas y 44 enums | ✅ | Schema 30/30, Domain 36/36, Convergence 42/42, PostgresSchema 153/153, CloudDeploy 55/55. El CHECK incluye el mapeo determinista y el rastro de escalado. |
+| **RF-01.2** · QR, Portal y Coordinación; exclusiones de categoría, cuarentena y reclamación | ✅ | Validator 46/46, Integrations 27/27, API 55/55 (QR y Coordinación), `CreateIncidentEndpointTest` caso 9 (Portal elegible L1 y cuarentena, con paths reales). H-36-03 cerrada. |
+| **RF-01.3** · 4 parejas `RC-L1-*` / `SS-L1-*` | ✅ | Schema 30/30: 4 causas, categorías, nombres, solución predeterminada activa y 49 tablas. |
+| **RF-02.1** · Sugerencia de reponedor, carga L1 y despacho/conmutación L1↔L2 | ✅ | Service 34/34, Gateway 24/24, API 55/55. |
+| **RF-02.2** · Auto-escalado en absorción QR grave | ✅ | Integrations 27/27, API 55/55 bloque 6, Constitutional 17/17. |
+| **RF-02.3** · Reapertura < 48 h y promoción a L2 | ✅ | Integrations 27/27 y Constitutional 17/17; la composición HTTP de reapertura no añade la aserción de promoción. |
+| **RF-03.1** · Inicio/resolución L1, cuarentena, textos, taxonomía y sin A4/repuestos | ✅ | Gateway 24/24, Service 34/34, API 55/55, Constitutional 17/17; Gateway comprueba ausencia de `incident_service_sheets`. |
+| **RF-03.2** · Escalado por máquina, nota/foto, tres ramas, custodia y outbox | ✅ | Gateway 24/24, Service 34/34, API 55/55 bloque 8, Restocker 236/236. La ruta por máquina satisface el “o” de la spec. |
+| **RF-04.1** · Coincidencia en Sede y banner con nombre, código y `tel:` | ✅ | Backend y tests de servicio/API verdes; H-36-01 cerrada: ambas vistas muestran `operator_code` y enlace `tel:`; `restocker_route_view` 236/236 y `technician_and_coordinator_synergy` 18/18. |
+| **RF-04.2** · Bloqueo y relevo de turno/ausencia/baja | ✅ | API 55/55 bloque 7, Gateway 24/24, Integrations 27/27, Shift 38/38. |
+| **RF-05.1** · Cola Offline, idempotencia y volcado de conflicto | ✅ | Schema 30/30, API 55/55, Restocker 236/236, Service 34/34. |
+| **RF-05.2** · Superficies Restocker y Técnico | ✅ | Restocker 236/236; Técnico 181/181, 18/18 y composición HTTP real (bloque 8.3) con rastro de escalado, Nota Interna y foto. H-36-02 cerrada. |
+| **RF-05.3** · Horas, filtro y triaje dual | ✅ | Shift 38/38, WorkHours 18/18, Frontend 18/18, API 55/55. |
+
+### 10.4. RNF, decisiones, casos límite y QA
+
+| Referencia | Estado | Evidencia |
+| :--- | :---: | :--- |
+| **RNF-01** · 49 tablas, 44 enums, borrado físico e inmutabilidad | ✅ | PostgresSchema 153/153, PostgresConstitutional 86/86, Schema 30/30, Convergence 42/42. El pooler remoto ya tiene la 032 y cumple el presupuesto de latencia: `PoolerLatencyMeasurementTest` 30/30, «crear» 210,5 ms y «ruta» 209,4 ms. H-36-05 cerrada. |
+| **RNF-02** · CHECK sanitario, notas internas, foto ≤ 5 MB y DTOs opacos | ✅ / ⚠️ | Validator 46/46, Domain 36/36, Constitutional 17/17, API 55/55 (QR). Portal/A4 no tienen una aserción focalizada propia. |
+| **RNF-03** · PHP/Vue vanilla, tokens y 360 px sin scroll | ✅ | Botones 23/23, plantillas 15/15, tokens 3/3, PWA 45/45, móvil 7/7 y `RestockerSatLayoutBrowserTest` **22/22** en Chromium real a 360 × 800 (L1 y SAT). H-36-04 cerrada. |
+| **D1** · Expediente único y `dispatch_level` | ✅ | Schema 30/30 y Domain 36/36. |
+| **D2** · Pre-clasificación y despacho dual | ✅ | Validator 46/46, Integrations 27/27, API 55/55 y `CreateIncidentEndpointTest` caso 9 (Portal elegible L1 y cuarentena). |
+| **D3** · Resolución L1 y escalado en tres ramas | ✅ | Gateway 24/24, Service 34/34, API 55/55, Restocker 236/236. |
+| **D4** · Coincidencia en Sede | ✅ | Backend 24/24 y API 55/55; H-36-01 cerrada: las dos vistas muestran `operator_code` y `tel:`. |
+| **C1** · Cierre, ausencia y baja con relevo | ✅ | API 55/55 bloque 7, Gateway 24/24, Shift 38/38. |
+| **C2** · Offline, horas y métricas | ✅ | API 55/55, Restocker 236/236, Shift 38/38. |
+| **QA-AMB-01** · Mapeo y semillas | ✅ | Validator 46/46, Schema 30/30, Domain 36/36. |
+| **QA-AMB-02** · Ampliación de enums | ✅ | Schema 30/30. |
+| **QA-CON-01** · RBAC y coherencia rol/nivel | ✅ | Validator 46/46, API 55/55, RBAC 27/27. |
+| **QA-CON-02** · Atribución horaria | ✅ | Shift 38/38, WorkHours 18/18, Integrations 27/27. |
+| **QA-LIM-01** · Auto-escalado QR grave | ✅ | Integrations 27/27, API 55/55 bloque 6, Constitutional 17/17. |
+| **QA-LIM-02** · Promoción en reapertura | ✅ | Integrations 27/27 y Constitutional 17/17. |
+| **QA-LIM-03** · Prohibición de repuestos en L1 | ✅ | Schema 30/30, Validator 46/46, Domain 36/36. |
+| **QA-CONST-01** · Guarda sanitaria | ✅ | Schema 30/30, Domain 36/36, Constitutional 17/17. |
+| **QA-CONST-02** · Absorción idempotente sobre L2 | ✅ | Gateway 24/24 y Constitutional 17/17. |
+| **QA-CONST-03** · Opacidad Sede/QR/A4 | ✅ / ⚠️ | Domain 36/36 y QR 55/55; Portal/A4 sin aserción específica. |
+
+Los cuatro casos límite del §6 pasan: QR térmico (API bloque 6 e Integrations), absorción sobre L2 preexistente (Gateway y Constitutional), reapertura < 48 h (Integrations y Constitutional) y cierre de turno `IN_PROGRESS` vs `ASSIGNED` (API bloque 7, Gateway y Shift).
+
+### 10.5. Definition of Done y tareas
+
+| DoD | Estado | Motivo |
+| :--- | :---: | :--- |
+| **1** · Migración, convergencia, tipos, columnas, CHECK y semillas | ✅ | Convergence 42/42, CloudDeploy 55/55, Schema 30/30. |
+| **2** · Servicios de aplicación completos | ✅ | Service 34/34, Integrations 27/27, Gateway 24/24, API 55/55. |
+| **3** · Frontend completo | ✅ | H-36-01 y H-36-02 cerradas: el banner muestra `operator_code`/`tel:` y la tarjeta técnica pinta insignia, Nota Interna y foto desde el payload real. |
+| **4** · Toda la batería al 100 % | ✅ | Global 441/16.993 verde; `new_engine` 71/71 y pooler 30/30. |
+
+**Resultado: 4/4 DoD.** Las 12 tareas conservan `[x]` en `tasks.md` y ✅ en el ODD; el cierre de `T-RSS-12` queda aceptado:
+
+| Tarea | Marca | Reserva |
+| :--- | :---: | :--- |
+| `T-RSS-01` a `T-RSS-09` y `T-RSS-11` | `[x]` | Sin reservas; H-36-01 cerrada y evidencia focalizada verde. |
+| `T-RSS-10` | `[x]` | Sin reservas; H-36-02 cerrada: payload, tarjeta y composición HTTP certificados. |
+| `T-RSS-12` | `[x]` | Documentación y cifras correctas; `new_engine` 71/71 y pooler 30/30. H-36-05 cerrada. |
+
+### 10.6. Brechas de aceptación y cierres de H-36-01 a H-36-05
+
+#### H-36-01 · `RF-04.1` / `D4`: el banner ya muestra código y teléfono del compañero · P1 · ✅ Cerrada (2026-11-19)
+
+El gateway devuelve `operator_code`, `phone`, `shift_status` y `activity_summary` (`src/Infrastructure/Repository/PdoRestockerSatSynergyGateway.php:749-758,841-847`). Antes del fix, las dos vistas reducían la coincidencia a nombre y actividad y no existía enlace `tel:`; el test de restocker validaba un resumen “sin identificadores”, inferior a la spec.
+
+**Corrección aplicada:** `RestockerRouteView.js` y `TechnicianRouteView.js` incorporan `siteCoincidenceLabel(entry)` y renderizan una fila por compañero con `Nombre (operator_code)`, actividad y enlace `tel:` cuando `phone` existe. Los `user_id` siguen fuera de la UI. Se ampliaron las aserciones existentes para que fallen si desaparecen `operator_code` o `tel:`.
+
+**Cierre verificado:** `restocker_route_view.test.mjs` **236/236** y `technician_and_coordinator_synergy.test.mjs` **18/18**, ambos `exit=0`; `FrontendTemplateCompileTest.mjs` 15/15, 79 plantillas y 5.157 expresiones. La reserva de `T-RSS-11` queda cerrada; la de `T-RSS-10` quedó cerrada después con H-36-02 (§10.6).
+
+#### H-36-02 · `RF-05.2.2`: insignia, Nota Interna y foto del técnico cableadas · P1 · ✅ Cerrada (2026-11-19)
+
+`TechnicianRouteView.js` decidía la insignia con `escalated_from_restocker_id`/`escalated_to_sat_at`, pero `TechnicianController::stopPayload()` no publicaba ninguno de esos campos, ni `workshop_internal_note` ni `photo_path`. La insignia no podía activarse en una ruta real y la vista rápida no tenía la Nota Interna ni la foto. Las suites verdes no lo detectaban porque el test de frontend usaba un objeto sintético y la composición HTTP solo miraba `site_coincidence`.
+
+**Corrección aplicada:** nueva capacidad `IncidentWorkshopNotesRepositoryInterface::findLastInternalNotesForIncidents()`, implementada por `PdoIncidentRepository` con una única consulta agregada de la última nota interna por expediente. `TechnicianController::stopPayload()` publica `escalated_from_restocker_id`, `escalated_to_sat_at`, `workshop_internal_note`, `workshop_internal_note_at`, `workshop_internal_note_author`, `workshop_internal_photo_path` y `photo_path`; los dos caminos de la ruta (tablero y lecturas) pasan la nota por lote. `TechnicianRouteView.js` pinta el bloque `🔒 Nota Interna de Taller (Confidencial)` con la foto ampliable cuando existe, sin exponer `user_id` ni `dispatch_level` en la plantilla.
+
+**Cierre verificado:** `technician_and_coordinator_synergy.test.mjs` **18/18** (guardas integradas en las aserciones existentes) y `RestockerSatSynergyApiTest.php` **55/55** (bloque 8.3: composición real sobre `/api/technician/my-route` con rastro, nota y foto), ambos `exit=0`; `FrontendTemplateCompileTest.mjs` **15/15**. La reserva de `T-RSS-10` queda cerrada.
+
+#### H-36-03 · `RF-01.2`: paths canónicos alineados y alta de Portal elegible L1 compuesta · P2 · ✅ Cerrada (2026-11-19)
+
+La spec y el contrato nombraban `/api/public/qr/{code}/report` y `/api/portal/incidents`; el router real expone `/api/qr/report` y `/api/incidents` (`src/Presentation/Routing/AppRouter.php:639,133`). La conducta estaba probada, pero los paths canónicos no, y `CreateIncidentEndpointTest` caso 9 solo cubría la exclusión por cuarentena.
+
+**Corrección aplicada:** `spec.md`, el espejo funcional y `restocker_sat_synergy_contracts.md` publican ya los paths reales; también se corrigió la referencia de `operational_zones_contracts.md`. El caso 9 de `CreateIncidentEndpointTest` compone ahora **dos altas reales de Portal**: una elegible `OTHER`/`MISSING_CONSUMABLES` que nace en `L1_RESTOCKER` sin técnico, y una en cuarentena que fuerza `L2_SAT`; ambas respuestas 201 mantienen la opacidad de `dispatch_level`/`level1_issue_type`.
+
+**Cierre verificado:** `CreateIncidentEndpointTest.php` **exit=0**, casos 9.1–9.2 en verde. La reserva documental de `RF-01.2` queda cerrada; `T-RSS-08` mantiene su cierre sin reservas.
+
+#### H-36-04 · `RNF-03`: medición real a 360 px de L1/SAT · P2 · ✅ Cerrada (2026-11-19)
+
+Las guardas de tokens, botones, plantillas, PWA y shell móvil pasaban, pero el test de restocker solo validaba `max-width: 480px` y ausencia de `min-width: 1024px` (`tests/frontend/restocker_route_view.test.mjs:355-358`). No había una medición de `scrollWidth` a 360 px como la que existe en otros módulos.
+
+**Corrección aplicada:** nueva suite `tests/integration/RestockerSatLayoutBrowserTest.php` (`new_engine`) y runner `tests/Support/RestockerSatLayoutBrowserRunner.mjs`, con dos arneses que montan `RestockerRouteView` y `TechnicianRouteView` con los estilos de producción. A 360 × 800, con Chromium real y la barra de scroll oculta, se miden `document.documentElement.scrollWidth`, `body.scrollWidth`, los rectángulos de la bandeja y tarjeta L1, la coincidencia en sede, la insignia de escalado, la Nota Interna, la foto y las acciones alcanzables; cualquier elemento visible fuera de 0–360 px hace fallar la suite.
+
+**Cierre verificado:** `php tests/integration/RestockerSatLayoutBrowserTest.php` → **22/22 aserciones · `exit=0`**. L1 y SAT no generan scroll horizontal del documento ni de sus contenedores; la tarjeta, la nota, la foto y los botones quedan dentro de 0–360 px. No hubo desbordamiento real que corregir en producción.
+
+#### H-36-05 · DoD 4: presupuesto de latencia del pooler · P0 de certificación · ✅ Cerrada (2026-11-19)
+
+`PoolerLatencyMeasurementTest` completaba sus 20 rondas contra el pooler, pero incumplía el presupuesto de 250 ms: «crear» medía **252,5 ms** de mediana (p95 288,9 ms) y «ruta» **254,1 ms** (p95 369,8 ms). Caían 2 de 30 aserciones y el canal quedaba en 70/71. El esquema ya incluía la migración 032, así que la brecha era de latencia, no de columna.
+
+**Corrección aplicada:** dos recortes de ida y vuelta, sin tocar el esquema.
+
+- `PdoIncidentRepository::findRouteBoard()` incorpora la última Nota Interna de Taller con un agregado `MAX(incident_comments.id)` y un join, de modo que `TechnicianController::routeFromBoard()` ya no paga `workshopNotesByIds()`: una consulta menos por ruta.
+- `PdoIncidentRepository::create()` conserva el `SAVEPOINT` —necesario para la recuperación de G7 y para la subtransacción que exige 6.4— pero lo envía como prefijo de la misma sentencia preparada PostgreSQL que ejecuta la CTE. Se elimina la ida y vuelta separada del `SAVEPOINT` y el `RELEASE SAVEPOINT` redundante. Se descartó quitar el savepoint: 6.4 detectaba marcadores `xmax` de bloqueos FK y G7 no podía esperar al índice único.
+
+**Cierre verificado:** `PoolerLatencyMeasurementTest` **30/30**; medición de 20 muestras con «crear» **210,5 ms** (p95 271,1 ms), «ruta» **209,4 ms** (p95 235,5 ms) y «listar» 210,3 ms; 6.4 en verde. `CreateIncidentEndpointTest` `exit=0`, `TicketCodeRaceRetryTest` 0 fallos, `RestockerSatSynergyApiTest` 55/55. El canal completo queda en **71/71 · 2.342 aserciones · 0 fallos · `exit=0`**. No se modificó el esquema remoto; la migración 032 ya estaba aplicada en el destino.
+
+### 10.7. Veredicto final
+
+**Sí, la Spec 36 está 100 % cumplida.** El núcleo de dominio, esquema, gateway, servicios, API y la interfaz están implementados y verdes; la evidencia focalizada es **11 suites / 561 aserciones**. H-36-01 (`RF-04.1`/`D4`), H-36-02 (`RF-05.2.2`/DoD 3), H-36-03 (`RF-01.2`), H-36-04 (`RNF-03`) y H-36-05 (DoD 4) quedaron cerradas. El DoD 4 se cumple: `new_engine` **71/71**, 2.342 aserciones, 0 fallos, y el pooler **30/30** con «crear» 210,5 ms y «ruta» 209,4 ms.
+
+Las 12 tareas están marcadas `[x]` y **el cierre de `T-RSS-12` queda aceptado**; `T-RSS-10` queda cerrada por H-36-02, `T-RSS-11` por H-36-01 y `T-RSS-12` por H-36-05. H-36-01 a H-36-05 se corrigieron en las vistas, el payload, los paths, la suite de navegador y las dos consultas del alta/ruta, y esta acta registra los cambios sobre la base `d25cbad`.

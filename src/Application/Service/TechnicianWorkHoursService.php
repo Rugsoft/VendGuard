@@ -563,11 +563,11 @@ final class TechnicianWorkHoursService
             }
         }
 
-        // D2: el reponedor aún no tiene visitas de reposición (Feature 24); sus
-        // métricas de intervención y resolución computan en cero por contrato.
-        $isRestocker = $profile['role'] === UserRole::RESTOCKER->value;
-        $interventionSeconds = $isRestocker ? 0 : $metrics['intervention_seconds'];
-        $resolvedCount = $isRestocker ? 0 : $metrics['resolved_interventions_count'];
+        // QA-CON-02: las intervenciones L1 resueltas por un reponedor se
+        // atribuyen a su rol y suman a su actividad, sin colisionar con las
+        // métricas de los técnicos SAT.
+        $interventionSeconds = $metrics['intervention_seconds'];
+        $resolvedCount = $metrics['resolved_interventions_count'];
         $routeSeconds = max(0, $effectiveSeconds - $interventionSeconds);
 
         $sessionsCount = count($shifts);

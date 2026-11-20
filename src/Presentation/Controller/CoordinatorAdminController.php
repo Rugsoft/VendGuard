@@ -10,6 +10,7 @@ use VendGuard\Application\Service\AdminLocationService;
 use VendGuard\Application\Service\AdminMachineService;
 use VendGuard\Application\Service\AdminStaffService;
 use VendGuard\Application\Service\AdminUserService;
+use VendGuard\Application\Service\RestockerSatSynergyService;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\GeoDistanceService;
 use VendGuard\Core\Domain\Exception\ActiveMachinesBlockedException;
@@ -33,6 +34,7 @@ use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
@@ -70,16 +72,21 @@ class CoordinatorAdminController
         $machineRepo = new PdoMachineRepository();
         $userRepo = new PdoUserRepository();
 
+        $synergy = new RestockerSatSynergyService(
+            new PdoRestockerSatSynergyGateway()
+        );
+
         $this->locationService = $locationService ?? new AdminLocationService($locationRepo, $auditLogger);
         $this->machineService = $machineService ?? new AdminMachineService($machineRepo, $locationRepo, $auditLogger);
-        $this->userService = $userService ?? new AdminUserService($userRepo, $auditLogger);
+        $this->userService = $userService ?? new AdminUserService($userRepo, $auditLogger, null, $synergy);
         $this->staffService = $staffService ?? new AdminStaffService(
             $this->userService,
             $userRepo,
             new PdoTechnicianShiftRepository(),
             $auditLogger,
             new PdoTechnicianShiftLogRepository(),
-            new PdoTransactionManager()
+            new PdoTransactionManager(),
+            $synergy
         );
     }
 

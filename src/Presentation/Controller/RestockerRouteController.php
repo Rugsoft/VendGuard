@@ -12,8 +12,10 @@ use VendGuard\Application\Service\MachinePlanogramService;
 use VendGuard\Application\Service\MachineCashCollectionService;
 use VendGuard\Application\Service\MachineRestockVisitService;
 use VendGuard\Application\Service\ProductLoadingOrderService;
+use VendGuard\Application\Service\RestockerSatSynergyService;
 use VendGuard\Application\Service\RestockerVanStockService;
 use VendGuard\Application\Service\ShiftLifecycleService;
+use VendGuard\Application\Service\SuggestedTechniciansService;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
@@ -21,25 +23,36 @@ use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineOutsideRestockerZonesException;
 use VendGuard\Core\Domain\Exception\MachineRestockVisitValidationException;
 use VendGuard\Core\Domain\Exception\ProductLoadingValidationException;
+use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\SlaTier;
+use VendGuard\Core\Service\SlaTargetCalculator;
+use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoInSituRestockVisitGateway;
+use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
+use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionGateway;
 use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionRepository;
 use VendGuard\Infrastructure\Repository\PdoMachinePlanogramRepository;
+use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRestockVisitRepository;
 use VendGuard\Infrastructure\Repository\PdoOperationalZoneRepository;
 use VendGuard\Infrastructure\Repository\PdoProductLoadingOrderRepository;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
+use VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway;
 use VendGuard\Infrastructure\Repository\PdoRestockerVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianSuggestionRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
@@ -68,6 +81,8 @@ use VendGuard\Presentation\Http\Response;
  */
 final class RestockerRouteController
 {
+    private PDO $pdo;
+
     private UserRepositoryInterface $userRepo;
 
     private OperationalZoneRepositoryInterface $zoneRepo;
@@ -86,6 +101,8 @@ final class RestockerRouteController
 
     private MachineCashCollectionService $cashCollections;
 
+    private ?RestockerSatSynergyService $synergyService;
+
     public function __construct(
         ?PDO $pdo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -96,9 +113,11 @@ final class RestockerRouteController
         ?RestockerVanStockService $vanStockService = null,
         ?MachineRestockVisitService $visitService = null,
         ?MachineRestockVisitRepositoryInterface $visitRepository = null,
-        ?MachineCashCollectionService $cashCollections = null
+        ?MachineCashCollectionService $cashCollections = null,
+        ?RestockerSatSynergyService $synergyService = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
+        $this->pdo = $pdo;
         $this->userRepo = $userRepo ?? new PdoUserRepository($pdo);
         $this->zoneRepo = $zoneRepo ?? new PdoOperationalZoneRepository($pdo);
 
@@ -155,6 +174,8 @@ final class RestockerRouteController
             $pdo
         );
 
+        $this->synergyService = $synergyService ?? $this->buildSynergyService($pdo);
+
         $this->visitService = $visitService ?? new MachineRestockVisitService(
             $this->visitRepository,
             new PdoMachinePlanogramRepository($pdo),
@@ -167,6 +188,172 @@ final class RestockerRouteController
             new AuditLogger(),
             null,
             $this->cashCollections
+        );
+    }
+
+    /**
+     * Compone el escalado real: resuelve el técnico con el recomendador de
+     * siempre y encola el aviso en el outbox de notificaciones.
+     */
+    private function buildSynergyService(PDO $pdo): RestockerSatSynergyService
+    {
+        $suggestions = new SuggestedTechniciansService(
+            new PdoTechnicianSuggestionRepository($pdo)
+        );
+        $incidents = new PdoIncidentRepository($pdo);
+        $machines = new PdoMachineRepository($pdo);
+        $locations = new PdoLocationRepository($pdo);
+        $notifications = NotificationOutboxEnqueuerFactory::create($pdo);
+        $beforeSnapshots = [];
+
+        $resolver = static function (int $machineId, array $payload) use (
+            $suggestions,
+            $incidents,
+            $machines,
+            $locations,
+            &$beforeSnapshots
+        ): ?array {
+            $incident = $incidents->findActiveByMachineId($machineId);
+            $beforeSnapshots[$machineId] = $incident;
+
+            $machine = $machines->findById($machineId);
+            if ($machine === null) {
+                return null;
+            }
+
+            // Si un ticket RESOLVED ya superó su garantía de 48 h, escalateToSat() lo
+            // cerrará y abrirá un expediente nuevo (Rama B) con el cálculo fresco.
+            if ($incident !== null && $incident->getStatus() === IncidentStatus::RESOLVED) {
+                $occurredAtRaw = trim((string)($payload['client_occurred_at'] ?? ''));
+                $occurredAt = $occurredAtRaw !== ''
+                    ? new \DateTimeImmutable($occurredAtRaw)
+                    : new \DateTimeImmutable('now');
+                $resolvedAtRaw = $incident->getResolvedAt();
+                $withinWarranty = $resolvedAtRaw !== null
+                    && $occurredAt <= (new \DateTimeImmutable($resolvedAtRaw))->modify('+48 hours');
+                if (!$withinWarranty) {
+                    $incident = null;
+                }
+            }
+
+            $incomingCategory = IncidentCategory::tryFrom(strtoupper(trim((string)($payload['category'] ?? 'OTHER'))))
+                ?? IncidentCategory::OTHER;
+
+            // La ponderación de candidatos (especialmente la guardia 24/7 de frío)
+            // debe evaluarse con la severidad resultante post-escalado, no con la
+            // categoría leve anterior de L1 o del parte previo (Art. II).
+            $targetCategory = $incomingCategory;
+            if ($incident !== null
+                && !$incident->getDispatchLevel()->isLevel1()
+                && $incident->getStatus() !== IncidentStatus::RESOLVED) {
+                $severityOrder = static fn (IncidentCategory $cat): int => match ($cat) {
+                    IncidentCategory::OTHER => 1,
+                    IncidentCategory::PRODUCT_JAM => 2,
+                    IncidentCategory::PAYMENT_SYSTEM => 3,
+                    IncidentCategory::ELECTRICAL_OFF => 4,
+                    IncidentCategory::TEMPERATURE_COLD => 5,
+                };
+                if ($severityOrder($incident->getCategory()) > $severityOrder($incomingCategory)) {
+                    $targetCategory = $incident->getCategory();
+                }
+            }
+
+            $calcUrgency = UrgencyCalculator::calculate($machine->getMachineType(), $targetCategory);
+            $effectiveUrgency = ($incident !== null && $incident->getUrgency()->priorityRank() > $calcUrgency->priorityRank())
+                ? $incident->getUrgency()
+                : $calcUrgency;
+
+            $slaTier = $incident?->getSlaTierSnapshot()
+                ?? ($locations->findById($machine->getLocationId())?->getSlaTier() ?? SlaTier::STANDARD);
+            $calcSlaMinutes = SlaTargetCalculator::calculateTargetMinutes(
+                $slaTier,
+                $machine->getMachineType(),
+                $targetCategory,
+                $effectiveUrgency
+            );
+            $effectiveSlaMinutes = $incident !== null
+                ? min($incident->getSlaTargetMinutes(), $calcSlaMinutes)
+                : $calcSlaMinutes;
+
+            $suggestion = $suggestions->getSuggestionsForMachine(
+                $machineId,
+                $targetCategory->value,
+                $effectiveUrgency->value,
+                $slaTier->value,
+                $effectiveSlaMinutes
+            );
+
+            if ($suggestion === null) {
+                return null;
+            }
+
+            $topId = (int)($suggestion->recommendation['top_technician_id'] ?? 0);
+            if ($topId <= 0) {
+                return null;
+            }
+
+            foreach ($suggestion->rankedTechnicians as $candidate) {
+                if ((int)($candidate['technician_id'] ?? 0) === $topId) {
+                    return [
+                        'id' => $topId,
+                        'name' => (string)($candidate['name'] ?? ''),
+                    ];
+                }
+            }
+
+            return ['id' => $topId];
+        };
+
+        $notifier = static function (string $event, array $payload) use ($notifications, $incidents, &$beforeSnapshots): void {
+            if ($event !== RestockerSatSynergyService::EVENT_ESCALATED_TO_SAT
+                || ($payload['ok'] ?? false) !== true
+                || ($payload['idempotent_replay'] ?? false) === true) {
+                return;
+            }
+
+            $incidentId = (int)($payload['incident_id'] ?? 0);
+            $after = $incidentId > 0 ? $incidents->findById($incidentId) : null;
+            if ($after === null) {
+                return;
+            }
+
+            $machineId = (int)($payload['machine_id'] ?? 0);
+            $before = $beforeSnapshots[$machineId] ?? null;
+            unset($beforeSnapshots[$machineId]);
+
+            $outcome = (string)($payload['escalation_outcome'] ?? '');
+            if ($outcome === 'MERGED_INTO_EXISTING_SAT_TICKET') {
+                if (($payload['assigned_on_merge'] ?? false) === true
+                    || ($payload['reopened_from_warranty'] ?? false) === true) {
+                    if (($payload['status'] ?? '') === 'ASSIGNED') {
+                        $notifications->enqueueAssignment($before ?? $after, $after);
+                    } else {
+                        $notifications->enqueueSla2hUnassignedAlert($after);
+                    }
+                }
+                // Si la absorción o reapertura elevó a riesgo térmico, emitir la Alerta Inmediata de Frío (Art. II).
+                $notifications->enqueueColdChainAlert($after);
+
+                return;
+            }
+
+            if (($payload['status'] ?? '') === 'ASSIGNED') {
+                $notifications->enqueueAssignment($before ?? $after, $after);
+            } else {
+                // Sin candidato la avería queda REGISTERED: Coordinación recibe la
+                // alerta de cobertura para que el triaje no dependa de mirar el panel.
+                $notifications->enqueueSla2hUnassignedAlert($after);
+            }
+
+            // En Rama B o cuando `$before === $after`, `enqueueAssignment` no dispara la
+            // alerta diferencial de frío; la comprobación idempotente la garantiza siempre (Art. II).
+            $notifications->enqueueColdChainAlert($after);
+        };
+
+        return new RestockerSatSynergyService(
+            new PdoRestockerSatSynergyGateway($pdo),
+            $resolver,
+            $notifier
         );
     }
 
@@ -208,6 +395,48 @@ final class RestockerRouteController
             $vanStock = $this->vanStockService->getOwnVanStock($restockerId);
             $cashRoute = $this->cashCollections->enrichRestockerRoute($restockerId, $machines);
 
+            // Módulo 36 (D3/D4): avisos L1 asignados, banderas por máquina,
+            // taxonomía de Nivel 1 y Coincidencia en Sede de las sedes de la ruta.
+            $machineIds = array_map(static fn (array $machine): int => (int)($machine['id'] ?? 0), $cashRoute['machines']);
+            $level1Context = (new \VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway($this->pdo))
+                ->restockerLevel1RouteContext($restockerId, $machineIds);
+            $machineFlags = $level1Context['machine_flags'];
+            $machinesWithLevels = array_map(static function (array $machine) use ($machineFlags): array {
+                $flags = $machineFlags[(int)($machine['id'] ?? 0)] ?? [];
+                $machine['active_l1_incident'] = ($flags['has_active_l1_incident'] ?? false)
+                    ? ['level1_issue_type' => $flags['active_l1_issue_type'] ?? null]
+                    : null;
+                $machine['has_active_sat_incident'] = (bool)($flags['has_active_sat_incident'] ?? false);
+
+                return $machine;
+            }, $cashRoute['machines']);
+
+            $locationIds = [];
+            foreach ($machinesWithLevels as $machine) {
+                $locationId = (int)($machine['location_id'] ?? 0);
+                if ($locationId > 0) {
+                    $locationIds[$locationId] = $locationId;
+                }
+            }
+            foreach ($level1Context['assigned_incidents'] as $incident) {
+                $locationId = (int)($incident['location_id'] ?? 0);
+                if ($locationId > 0) {
+                    $locationIds[$locationId] = $locationId;
+                }
+            }
+            $siteCoincidence = $locationIds !== []
+                ? $this->synergy()->siteCoincidence('RESTOCKER', $restockerId, array_values($locationIds))
+                : [];
+
+            $level1Taxonomy = [];
+            foreach ((new \VendGuard\Infrastructure\Repository\PdoRootCauseRepository($this->pdo))
+                ->findActiveCatalogWithSolutions() as $cause) {
+                if (!str_starts_with($cause->getCode(), 'RC-L1-')) {
+                    continue;
+                }
+                $level1Taxonomy[] = $cause->toArray();
+            }
+
             return Response::json([
                 'restocker' => [
                     'id' => $restocker->getId(),
@@ -226,7 +455,10 @@ final class RestockerRouteController
                     'started_at' => $shift->startedAt,
                     'today_effective_seconds' => (int)($shift->todaySummary['effective_seconds'] ?? 0),
                 ],
-                'machines' => $cashRoute['machines'],
+                'machines' => $machinesWithLevels,
+                'assigned_l1_incidents' => $level1Context['assigned_incidents'],
+                'l1_taxonomy_catalog' => $level1Taxonomy,
+                'site_coincidence' => $siteCoincidence,
                 'route_stops' => [],
                 'active_loading_order' => $loadingContext['active_loading_order'],
                 'last_reconciled_order' => $loadingContext['last_reconciled_order'],
@@ -497,6 +729,7 @@ final class RestockerRouteController
 
     /**
      * POST /api/restocker/visits/photo
+     * POST /api/restocker/incidents/upload-photo (alias contractual del escalado)
      *
      * Evidencia fotográfica por `multipart/form-data` o base64 seguro. El
      * uploader valida el tope de 5 MB y los magic bytes reales (`Art. V.5`).
@@ -586,6 +819,176 @@ final class RestockerRouteController
     }
 
     /**
+     * POST /api/restocker/incidents/{id}/start
+     */
+    public function startLevel1(Request $request): Response
+    {
+        return $this->executeSynergy(function () use ($request): Response {
+            $body = $request->getParsedBody();
+            $mutation = isset($body['client_mutation_id'])
+                ? [
+                    'client_mutation_id' => (string)$body['client_mutation_id'],
+                    'client_occurred_at' => $body['client_occurred_at'] ?? null,
+                ]
+                : null;
+
+            $result = $this->synergy()->startLevel1($this->incidentRouteId($request), $this->actor($request), $mutation);
+            if (($result['ok'] ?? false) !== true) {
+                return $this->gatewayErrorResponse($result, 'START_L1_FAILED', 'No se pudo iniciar la intervención de Nivel 1.');
+            }
+
+            return Response::json(
+                $result,
+                200,
+                'Intervención de Nivel 1 iniciada.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/incidents/{id}/resolve
+     */
+    public function resolveLevel1(Request $request): Response
+    {
+        return $this->executeSynergy(function () use ($request): Response {
+            $body = $request->getParsedBody();
+            $incident = [
+                'id' => $this->incidentRouteId($request),
+                'machine_id' => (int)($body['machine_id'] ?? 0),
+                'sanitary_status' => $body['sanitary_status'] ?? null,
+            ];
+            $resolution = [
+                'diagnosis' => $body['resolution_diagnosis'] ?? $body['diagnosis'] ?? null,
+                'action' => $body['resolution_action'] ?? $body['action'] ?? null,
+                'root_cause_id' => $body['root_cause_id'] ?? null,
+                'standard_solution_id' => $body['standard_solution_id'] ?? null,
+            ];
+            $mutation = isset($body['client_mutation_id'])
+                ? [
+                    'client_mutation_id' => (string)$body['client_mutation_id'],
+                    'client_occurred_at' => $body['client_occurred_at'] ?? null,
+                ]
+                : null;
+
+            $result = $this->synergy()->resolveLevel1($incident, $this->actor($request), $resolution, $mutation);
+            if (($result['ok'] ?? false) !== true) {
+                return $this->gatewayErrorResponse($result, 'RESOLUTION_FAILED', 'No se pudo resolver el aviso de Nivel 1.');
+            }
+
+            return Response::json(
+                $result,
+                200,
+                'Nivel 1 resuelto y custodia cerrada.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/incidents/{id}/escalate-to-sat
+     */
+    public function escalateIncidentToSat(Request $request): Response
+    {
+        return $this->executeSynergy(function () use ($request): Response {
+            $incidentId = $this->incidentRouteId($request);
+            $incident = (new PdoIncidentRepository($this->pdo))->findById($incidentId);
+            if ($incident === null) {
+                return Response::error('INCIDENT_NOT_FOUND', 'El expediente no existe o está dado de baja.', 404);
+            }
+            if ($incident->getStatus()->isTerminal()) {
+                return Response::error(
+                    'INVALID_INCIDENT_STATE_TRANSITION',
+                    'No se puede escalar al SAT un expediente cerrado o cancelado.',
+                    409
+                );
+            }
+
+            $body = $request->getParsedBody();
+            $mutation = isset($body['client_mutation_id'])
+                ? [
+                    'client_mutation_id' => (string)$body['client_mutation_id'],
+                    'client_occurred_at' => $body['client_occurred_at'] ?? null,
+                ]
+                : null;
+
+            $result = $this->synergy()->escalateToSat($incident->getMachineId(), $this->actor($request), $body, $mutation);
+            if (($result['ok'] ?? false) !== true) {
+                return $this->gatewayErrorResponse($result, 'ESCALATION_FAILED', 'No se pudo escalar la avería al SAT.');
+            }
+
+            return Response::json(
+                $result,
+                200,
+                'Avería escalada al SAT.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/machines/{machineId}/escalate-to-sat
+     */
+    public function escalateToSat(Request $request): Response
+    {
+        return $this->executeSynergy(function () use ($request): Response {
+            $body = $request->getParsedBody();
+            $machineId = (int)($request->getRouteParam('machineId') ?? 0);
+            $mutation = isset($body['client_mutation_id'])
+                ? [
+                    'client_mutation_id' => (string)$body['client_mutation_id'],
+                    'client_occurred_at' => $body['client_occurred_at'] ?? null,
+                ]
+                : null;
+
+            $result = $this->synergy()->escalateToSat($machineId, $this->actor($request), $body, $mutation);
+            if (($result['ok'] ?? false) !== true) {
+                return $this->gatewayErrorResponse($result, 'ESCALATION_FAILED', 'No se pudo escalar la avería al SAT.');
+            }
+
+            return Response::json(
+                $result,
+                201,
+                'Avería escalada al SAT.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/incidents/conflict-dump
+     */
+    public function dumpIncidentConflict(Request $request): Response
+    {
+        return $this->executeSynergy(function () use ($request): Response {
+            $body = $request->getParsedBody();
+            $conflict = is_array($body['conflict'] ?? null) ? $body['conflict'] : [];
+
+            $result = $this->synergy()->dumpOfflineConflict($this->actor($request), $body, $conflict);
+            if (($result['ok'] ?? false) !== true) {
+                return $this->gatewayErrorResponse($result, 'CONFLICT_DUMP_FAILED', 'No se pudo archivar el conflicto offline.', 422);
+            }
+
+            return Response::json(
+                $result,
+                201,
+                'Conflicto offline archivado en auditoría.'
+            );
+        });
+    }
+
+    /** @param array<string, mixed> $result */
+    private function gatewayErrorResponse(
+        array $result,
+        string $defaultCode,
+        string $defaultMessage,
+        int $defaultStatus = 409
+    ): Response {
+        return Response::error(
+            (string)($result['error_code'] ?? $defaultCode),
+            (string)($result['message'] ?? $defaultMessage),
+            (int)($result['http_status'] ?? $defaultStatus),
+            is_array($result['details'] ?? null) ? $result['details'] : null
+        );
+    }
+
+    /**
      * POST /api/restocker/visits/conflict-dump
      *
      * Archiva en auditoría una mutación offline rechazada (`C3`, `Art. III.3`).
@@ -599,6 +1002,45 @@ final class RestockerRouteController
                 'Conflicto offline archivado en auditoría.'
             );
         });
+    }
+
+    private function executeSynergy(callable $operation): Response
+    {
+        try {
+            return $operation();
+        } catch (RestockerSatSynergyValidationException $exception) {
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $exception->getField() === null ? null : ['field' => $exception->getField()]
+            );
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('VALIDATION_ERROR', $exception->getMessage(), 400);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo en la operación de sinergia L1: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo completar la operación de Nivel 1.', 500);
+        }
+    }
+
+    private function synergy(): RestockerSatSynergyService
+    {
+        if ($this->synergyService === null) {
+            throw new \RuntimeException('El servicio de sinergia no está disponible.');
+        }
+
+        return $this->synergyService;
+    }
+
+    private function incidentRouteId(Request $request): int
+    {
+        $raw = (string)($request->getRouteParam('id') ?? '');
+        if ($raw === '' || !ctype_digit($raw) || (int)$raw <= 0) {
+            throw new InvalidArgumentException('El identificador de la avería debe ser un número entero positivo.');
+        }
+
+        return (int)$raw;
     }
 
     private function executeVisit(callable $operation): Response

@@ -36,6 +36,7 @@ use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OpportunisticIncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentWorkshopNotesRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitarySlaWatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
@@ -63,7 +64,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * El orden del triaje no es una diferencia de dialecto —tiene forma común—, pero tampoco se
  * escribe a mano dos veces: se deriva del rango de prioridad que declara el dominio.
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface, OpportunisticIncidentRepositoryInterface, IncidentAssignmentAuditRepositoryInterface, IncidentPauseTransitionRepositoryInterface, IncidentCustodyReleaseInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface, OpportunisticIncidentRepositoryInterface, IncidentAssignmentAuditRepositoryInterface, IncidentPauseTransitionRepositoryInterface, IncidentCustodyReleaseInterface, IncidentWorkshopNotesRepositoryInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -172,8 +173,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         // convertía en un 500. Lo descubrió la carrera G8 (portal de sede con notificaciones
         // activas: el alta se envuelve en su unidad de trabajo y el duplicado se traduce dentro
         // de ella). PostgreSQL y MariaDB comparten la forma, así que el punto no es de dialecto.
+        // En PostgreSQL el `SAVEPOINT` viaja como prefijo de la misma sentencia preparada que
+        // hace el alta: sigue existiendo el punto de retorno, pero no cuesta una ida y vuelta.
         $savepoint = $isOwnTransaction ? null : 'vg_incident_insert_' . bin2hex(random_bytes(4));
-        if ($savepoint !== null) {
+        if ($savepoint !== null && !$this->dialect->isPostgres()) {
             $this->pdo->exec('SAVEPOINT ' . $savepoint);
         }
 
@@ -208,6 +211,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             reporter_email,
                             cycle_started_at,
                             category,
+                            dispatch_level,
+                            level1_issue_type,
                             description,
                             retained_money_amount,
                             photo_path,
@@ -249,6 +254,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             :reporter_email,
                             :cycle_started_at,
                             :category,
+                            :dispatch_level,
+                            :level1_issue_type,
                             :description,
                             :retained_money_amount,
                             :photo_path,
@@ -308,6 +315,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     LEFT JOIN existing_check ex ON true;
                 ";
 
+                // One protocol round trip: PostgreSQL accepts the savepoint as a prefix
+                // of the prepared statement and returns the CTE result as the last rowset.
+                if ($savepoint !== null) {
+                    $sql = 'SAVEPOINT ' . $savepoint . ";\n" . $sql;
+                }
+
                 $stmt = $this->pdo->prepare($sql);
                 $stmt->bindValue(':ticket_code', $incident->getTicketCode(), PDO::PARAM_STR);
                 $stmt->bindValue(':machine_id', $incident->getMachineId(), PDO::PARAM_INT);
@@ -322,6 +335,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     PDO::PARAM_STR
                 );
                 $stmt->bindValue(':category', $incident->getCategory()->value, PDO::PARAM_STR);
+                $stmt->bindValue(':dispatch_level', $incident->getDispatchLevel()->value, PDO::PARAM_STR);
+                $stmt->bindValue(
+                    ':level1_issue_type',
+                    $incident->getLevel1IssueType()?->value,
+                    $incident->getLevel1IssueType() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+                );
                 $stmt->bindValue(':description', $incident->getDescription(), PDO::PARAM_STR);
                 $stmt->bindValue(':retained_money_amount', $incident->getRetainedMoneyAmount(), $incident->getRetainedMoneyAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':photo_path', $incident->getPhotoPath(), $incident->getPhotoPath() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
@@ -436,6 +455,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     reporter_email,
                     cycle_started_at,
                     category,
+                    dispatch_level,
+                    level1_issue_type,
                     description,
                     retained_money_amount,
                     photo_path,
@@ -476,6 +497,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     :reporter_email,
                     :cycle_started_at,
                     :category,
+                    :dispatch_level,
+                    :level1_issue_type,
                     :description,
                     :retained_money_amount,
                     :photo_path,
@@ -523,6 +546,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 PDO::PARAM_STR
             );
             $stmt->bindValue(':category', $incident->getCategory()->value, PDO::PARAM_STR);
+            $stmt->bindValue(':dispatch_level', $incident->getDispatchLevel()->value, PDO::PARAM_STR);
+            $stmt->bindValue(
+                ':level1_issue_type',
+                $incident->getLevel1IssueType()?->value,
+                $incident->getLevel1IssueType() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+            );
             $stmt->bindValue(':description', $incident->getDescription(), PDO::PARAM_STR);
             $stmt->bindValue(':retained_money_amount', $incident->getRetainedMoneyAmount(), $incident->getRetainedMoneyAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $stmt->bindValue(':photo_path', $incident->getPhotoPath(), $incident->getPhotoPath() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
@@ -563,10 +592,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $note
             );
 
-            if ($savepoint !== null) {
-                $this->pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
-            }
-
+            // The savepoint is deliberately left to the enclosing transaction: COMMIT
+            // releases it. Releasing it here would add one network round trip to every
+            // create and spend the RNF-01 budget without changing isolation or durability.
             if ($isOwnTransaction) {
                 $this->pdo->commit();
             }
@@ -1130,6 +1158,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         if (!empty($filters['assigned_technician_id'])) {
             $sql .= " AND i.assigned_technician_id = :assigned_technician_id";
             $params[':assigned_technician_id'] = (int)$filters['assigned_technician_id'];
+        }
+
+        if (!empty($filters['dispatch_level']) && $filters['dispatch_level'] !== 'ALL') {
+            $sql .= " AND i.dispatch_level = :dispatch_level";
+            $params[':dispatch_level'] = (string)$filters['dispatch_level'];
         }
 
         if (isset($filters['active_only']) && $filters['active_only'] === true) {
@@ -1831,7 +1864,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             $sql = "
                 UPDATE incidents
-                SET status = 'IN_PROGRESS',
+                SET dispatch_level = 'L2_SAT',
+                    status = 'IN_PROGRESS',
                     assigned_technician_id = :technician_id,
                     assigned_at = COALESCE(assigned_at, :instant),
                     started_at = COALESCE(started_at, :instant),
@@ -1949,7 +1983,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             $sql = "
                 UPDATE incidents
-                SET status = 'IN_PROGRESS',
+                SET dispatch_level = 'L2_SAT',
+                    status = 'IN_PROGRESS',
                     assigned_technician_id = :technician_id,
                     assigned_at = :instant,
                     started_at = COALESCE(started_at, :instant),
@@ -2091,7 +2126,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             $sql = "
                 UPDATE incidents
-                SET status = 'IN_PROGRESS',
+                SET dispatch_level = 'L2_SAT',
+                    status = 'IN_PROGRESS',
                     assigned_technician_id = :technician_id,
                     assigned_at = :instant,
                     started_at = :instant,
@@ -2400,7 +2436,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
      *
      * @param int $technicianId
      * @param list<string> $statuses
-     * @return array<int, array{incident: Incident, machine: Machine|null, location: Location|null, settings: array<string, mixed>|null, comments_total: int, site_response_since_pause: bool}>
+     * @return array<int, array{incident: Incident, machine: Machine|null, location: Location|null, settings: array<string, mixed>|null, comments_total: int, site_response_since_pause: bool, workshop_note: array{note: string, author_name: string, photo_path: string|null, created_at: string|null}|null}>
      */
     public function findRouteBoard(int $technicianId, array $statuses = []): array
     {
@@ -2431,6 +2467,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 m.is_seasonal_pause AS board_settings_is_seasonal_pause,
                 m.seasonal_pause_reason AS board_settings_seasonal_pause_reason,
                 m.seasonal_pause_until AS board_settings_seasonal_pause_until,
+                wn.comment_text AS board_workshop_note,
+                wn.author_name AS board_workshop_author_name,
+                wn.photo_path AS board_workshop_photo_path,
+                wn.created_at AS board_workshop_created_at,
                 ps.default_frequency_days AS board_settings_default_frequency_days,
                 ps.max_allowed_days AS board_settings_max_allowed_days,
                 ps.advance_warning_days AS board_settings_advance_warning_days,
@@ -2453,6 +2493,13 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             LEFT JOIN locations l ON i.location_id = l.id
             LEFT JOIN preventive_settings ps
                 ON {$this->dialect->castToText('ps.machine_type')} = {$this->dialect->castToText('m.machine_type')}
+            LEFT JOIN (
+                SELECT c.incident_id, MAX(c.id) AS last_internal_id
+                FROM incident_comments c
+                WHERE c.is_internal = {$this->dialect->booleanLiteral(true)}
+                GROUP BY c.incident_id
+            ) wl ON wl.incident_id = i.id
+            LEFT JOIN incident_comments wn ON wn.id = wl.last_internal_id
             WHERE i.assigned_technician_id = :technician_id
               AND i.deleted_at IS NULL
         ";
@@ -2505,6 +2552,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     ]),
                 'comments_total' => (int)$row['board_comments_total'],
                 'site_response_since_pause' => (bool)$row['board_site_response_since_pause'],
+                'workshop_note' => $this->hydrateBoardWorkshopNote($row),
             ];
         }
 
@@ -2568,6 +2616,37 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             'updated_at' => $row['board_location_updated_at'],
             'deleted_at' => $row['board_location_deleted_at'],
         ]);
+    }
+
+    /**
+     * Latest internal workshop note of a route row, or null when the incident has none.
+     *
+     * The board reads it in the same query as the stop, so the technician route does not
+     * pay an extra network round trip per board. Only internal comments are eligible
+     * (Art. V.4) and the newest insertion wins, matching `findLastInternalNotesForIncidents()`.
+     *
+     * @param array<string, mixed> $row
+     * @return array{note: string, author_name: string, photo_path: string|null, created_at: string|null}|null
+     */
+    private function hydrateBoardWorkshopNote(array $row): ?array
+    {
+        if (!array_key_exists('board_workshop_note', $row) || $row['board_workshop_note'] === null) {
+            return null;
+        }
+
+        $photo = isset($row['board_workshop_photo_path']) && trim((string)$row['board_workshop_photo_path']) !== ''
+            ? (string)$row['board_workshop_photo_path']
+            : null;
+        $createdAt = isset($row['board_workshop_created_at']) && trim((string)$row['board_workshop_created_at']) !== ''
+            ? (string)$row['board_workshop_created_at']
+            : null;
+
+        return [
+            'note' => trim((string)$row['board_workshop_note']),
+            'author_name' => trim((string)($row['board_workshop_author_name'] ?? '')),
+            'photo_path' => $photo,
+            'created_at' => $createdAt,
+        ];
     }
 
     /**
@@ -3365,6 +3444,81 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         return $counts;
+    }
+
+    /**
+     * Última Nota Interna de Taller de cada expediente en UNA sola consulta
+     * (Módulo 36, RF-05.2.2; T-HYBRID-27 · RNF-01).
+     *
+     * La tarjeta del técnico SAT necesita la nota y la foto con las que el reponedor
+     * escaló la avería. Pedirlas parada a parada con `getComments()` reintroduciría el
+     * N+1 que la bandeja ya curó; esta lectura agrega el último comentario interno por
+     * expediente y el controlador lo publica en el payload de la parada.
+     *
+     * El «último» se resuelve por `MAX(id)`, el orden de inserción del servidor, que es
+     * el mismo orden cronológico con el que el hilo se escribe. Sólo se leen notas con
+     * `is_internal = TRUE` (Art. V.4); los expedientes sin nota no aparecen en el mapa.
+     *
+     * @param list<int> $incidentIds
+     * @return array<int, array{note: string, author_name: string, photo_path: string|null, created_at: string|null}>
+     */
+    public function findLastInternalNotesForIncidents(array $incidentIds): array
+    {
+        $ids = [];
+        foreach ($incidentIds as $rawId) {
+            $id = (int)$rawId;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach (array_values($ids) as $index => $id) {
+            $key = ":workshop_incident_{$index}";
+            $placeholders[] = $key;
+            $params[$key] = $id;
+        }
+
+        $internal = $this->dialect->booleanLiteral(true);
+        $sql = 'SELECT c.incident_id, c.comment_text, c.author_name, c.photo_path, c.created_at'
+            . ' FROM incident_comments c'
+            . ' JOIN ('
+            . '   SELECT incident_id, MAX(id) AS last_id'
+            . '     FROM incident_comments'
+            . "    WHERE is_internal = {$internal}"
+            . '      AND incident_id IN (' . implode(', ', $placeholders) . ')'
+            . '    GROUP BY incident_id'
+            . ' ) latest ON latest.last_id = c.id';
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $notes = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $photo = isset($row['photo_path']) && trim((string)$row['photo_path']) !== ''
+                ? (string)$row['photo_path']
+                : null;
+            $createdAt = isset($row['created_at']) && trim((string)$row['created_at']) !== ''
+                ? (string)$row['created_at']
+                : null;
+
+            $notes[(int)$row['incident_id']] = [
+                'note' => trim((string)($row['comment_text'] ?? '')),
+                'author_name' => trim((string)($row['author_name'] ?? '')),
+                'photo_path' => $photo,
+                'created_at' => $createdAt,
+            ];
+        }
+
+        return $notes;
     }
 
     /**
@@ -4242,6 +4396,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 'Sellado defensivo del tramo heredado al reabrir la avería desde el portal de sede.'
             );
             $reopenedAt = new DateTimeImmutable('now');
+            $promoteToSat = \VendGuard\Core\Service\RestockerSatSynergyValidator::isReopenPromotionRequired(
+                $incident->getDispatchLevel()->value,
+                $incident->getResolvedAt(),
+                $reopenedAt
+            );
             $resolvedAt = $incident->getResolvedAt();
             $closedSeconds = 0;
             if ($resolvedAt !== null) {
@@ -4268,6 +4427,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $sql = "
                 UPDATE incidents
                 SET status = 'REOPENED',
+                    dispatch_level = CASE WHEN :promote_to_sat::boolean
+                        THEN 'L2_SAT'::incident_dispatch_level
+                        ELSE dispatch_level END,
                     assigned_technician_id = NULL,
                     assigned_at = NULL,
                     reopened_at = :reopened_at,
@@ -4285,6 +4447,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             $stmt = $this->pdo->prepare($sql);
             $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->bindValue(':promote_to_sat', $promoteToSat ? 'true' : 'false', PDO::PARAM_STR);
             $stmt->bindValue(':reopen_reason', trim($reasonText), PDO::PARAM_STR);
             $stmt->bindValue(':reopened_at', $reopenedAt->format('Y-m-d H:i:sP'), PDO::PARAM_STR);
             $stmt->bindValue(':total_pending_info_seconds', $newTotalPendingInfoSeconds, PDO::PARAM_INT);
@@ -4303,6 +4466,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 'RESOLVED',
                 'REOPENED',
                 "Reapertura solicitada por la sede ({$eventNumber}ª reincidencia). Motivo: " . trim($reasonText)
+                . ($promoteToSat ? ' Reapertura en garantía (< 48 h) promovida automáticamente de Nivel 1 (Reponedor) a Nivel 2 (SAT Técnico).' : '')
             );
 
             $reopened = $this->findById($incidentId);

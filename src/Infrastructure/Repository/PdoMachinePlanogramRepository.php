@@ -717,6 +717,7 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
                 m.code,
                 m.model,
                 m.machine_type,
+                m.location_id,
                 m.sanitary_status,
                 m.is_blocked_no_access,
                 m.is_seasonal_pause,
@@ -769,7 +770,7 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
               )
             {$machineFilter}
             GROUP BY
-                m.id, m.code, m.model, m.machine_type, m.sanitary_status,
+                m.id, m.code, m.model, m.machine_type, m.location_id, m.sanitary_status,
                 m.is_blocked_no_access, m.is_seasonal_pause,
                 l.name, l.site_code, oz.id, oz.code, oz.name
             ORDER BY m.code ASC
@@ -897,6 +898,7 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
             'code' => (string)$row['code'],
             'model' => (string)$row['model'],
             'machine_type' => $machineType ?? MachineType::SNACKS,
+            'location_id' => (int)$row['location_id'],
             'location_name' => (string)$row['location_name'],
             'site_code' => (string)$row['site_code'],
             'zone_id' => (int)$row['zone_id'],

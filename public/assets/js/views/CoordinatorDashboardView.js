@@ -31,6 +31,7 @@ import {
   isPendingAssignment,
   isPendingInfoStatus,
   isTerminalStatus,
+  LEVEL1_ISSUE_TYPES,
   normalizeIncidentStatus,
   normalizeUrgency
 } from '../utils/IncidentStatusPermissions.js';
@@ -133,6 +134,7 @@ export const CoordinatorDashboardView = {
       // Filters
       filterStatus: '',
       filterUrgency: '',
+      filterDispatchLevel: '',
       filterSearch: '',
       filterSlaOnly: false,
 
@@ -148,6 +150,16 @@ export const CoordinatorDashboardView = {
       showAssignModal: false,
       selectedIncident: null,
       assignTechnicianId: 2,
+      // Selector de nivel operativo del Triaje (RF-05.3): el despacho L1 usa la
+      // sugerencia de reponedores de la zona; L2 conserva la asignación SAT.
+      assignDispatchLevel: 'L2_SAT',
+      // Motivo L1 del despacho manual: si el ticket nació sin taxonomía, el
+      // coordinador debe elegir una pareja coherente antes de conmutar (H-36-07).
+      assignLevel1IssueType: '',
+      assignRestockerId: null,
+      restockerSuggestions: [],
+      isLoadingRestockers: false,
+      restockersError: '',
       assignUrgencyOverride: '',
       assignUrgencyReason: '',
       isAssigning: false,
@@ -246,6 +258,11 @@ export const CoordinatorDashboardView = {
     };
   },
   computed: {
+    /** Motivos L1 compatibles con la categoría del expediente abierto (QA-AMB-01). */
+    assignLevel1IssueTypeOptions() {
+      const category = this.selectedIncident?.category;
+      return LEVEL1_ISSUE_TYPES.filter((issueType) => issueType.category === category);
+    },
     isAuthenticated() {
       return store.isCoordinator && store.state.user !== null;
     },
@@ -303,6 +320,13 @@ export const CoordinatorDashboardView = {
     isInactivityReasonValid() {
       return this.inactivityReasonLength >= 20;
     },
+    /** Reponedor #1 recomendado de la zona para el despacho L1 (RF-02.1.1). */
+    recommendedRestocker() {
+      return Array.isArray(this.restockerSuggestions) && this.restockerSuggestions.length > 0
+        ? this.restockerSuggestions[0]
+        : null;
+    },
+
     filteredIncidents() {
       return this.incidents.filter(inc => {
         // Quick filter of the contractual pause (Módulo 11, plan §4.4).
@@ -321,6 +345,11 @@ export const CoordinatorDashboardView = {
 
         // Urgency filter
         if (this.filterUrgency && normalizeUrgency(inc.urgency) !== normalizeUrgency(this.filterUrgency)) {
+          return false;
+        }
+
+        // Nivel operativo (RF-05.3): ALL no filtra; L1 y L2 se comparan tal cual.
+        if (this.filterDispatchLevel && inc.dispatch_level !== this.filterDispatchLevel) {
           return false;
         }
 
@@ -740,7 +769,8 @@ export const CoordinatorDashboardView = {
       this.incidentsError = '';
 
       try {
-        const data = await api.coordinator.getIncidents();
+        const filters = this.filterDispatchLevel ? { dispatch_level: this.filterDispatchLevel } : {};
+        const data = await api.coordinator.getIncidents(filters);
         this.incidents = Array.isArray(data) ? data : [];
         this.lastUpdated = new Date();
         this.$emit('refresh', this.incidents);
@@ -1161,7 +1191,19 @@ export const CoordinatorDashboardView = {
 
     openAssignModal(incident) {
       this.selectedIncident = incident;
-      this.assignTechnicianId = incident.assigned_technician_id || (this.technicians[0]?.id || null);
+      // Un expediente L1 puede estar custodiado por un reponedor. Ese id no es
+      // un técnico SAT válido para el selector: se ignora y se ofrece la lista
+      // de técnicos activos (D1, QA-CON-01).
+      const assignedId = Number(incident.assigned_technician_id || 0);
+      const assignedTechnician = this.technicians.find((tech) => Number(tech.id) === assignedId);
+      this.assignTechnicianId = incident.dispatch_level === 'L1_RESTOCKER'
+        ? (assignedTechnician?.id ?? this.technicians[0]?.id ?? null)
+        : (incident.assigned_technician_id || (this.technicians[0]?.id || null));
+      this.assignDispatchLevel = incident.dispatch_level === 'L1_RESTOCKER' ? 'L1_RESTOCKER' : 'L2_SAT';
+      this.assignLevel1IssueType = incident.level1_issue_type || '';
+      this.assignRestockerId = null;
+      this.restockerSuggestions = [];
+      this.restockersError = '';
       this.assignUrgencyOverride = '';
       this.assignUrgencyReason = '';
       this.assignError = '';
@@ -1174,6 +1216,9 @@ export const CoordinatorDashboardView = {
       // El ranking llega del servidor en paralelo: la apertura del panel no espera a la
       // sugerencia y, si falla, el coordinador conserva el despacho manual (RF-06.3).
       this.loadAssignmentSuggestions(incident.id);
+      if (this.assignDispatchLevel === 'L1_RESTOCKER') {
+        this.loadAssignRestockerSuggestions(incident.id);
+      }
     },
 
     closeAssignModal() {
@@ -1184,6 +1229,54 @@ export const CoordinatorDashboardView = {
       this.suggestionsError = '';
       this.assignOverrideJustification = '';
       this.assignTechnicianChosenByUser = false;
+      this.assignDispatchLevel = 'L2_SAT';
+      this.assignLevel1IssueType = '';
+      this.assignRestockerId = null;
+      this.restockerSuggestions = [];
+      this.isLoadingRestockers = false;
+      this.restockersError = '';
+    },
+
+    /** Al conmutar a L1 se carga el escalafón de reponedores de la zona. */
+    onAssignDispatchLevelChange() {
+      if (this.assignDispatchLevel !== 'L1_RESTOCKER') {
+        this.assignRestockerId = null;
+        this.restockerSuggestions = [];
+        this.restockersError = '';
+        return;
+      }
+      this.loadAssignRestockerSuggestions(this.selectedIncident?.id);
+    },
+
+    /**
+     * Carga los reponedores de la zona del expediente y preselecciona al
+     * `#1 RECOMENDADO ⭐` (RF-02.1.1). Un fallo no bloquea el despacho manual.
+     */
+    async loadAssignRestockerSuggestions(incidentId) {
+      if (incidentId === null || incidentId === undefined || incidentId === '') {
+        return;
+      }
+      this.isLoadingRestockers = true;
+      this.restockersError = '';
+      try {
+        const suggestions = await api.coordinator.getSuggestedRestockers(incidentId);
+        this.restockerSuggestions = Array.isArray(suggestions) ? suggestions : [];
+        if (this.recommendedRestocker && this.assignRestockerId === null) {
+          this.assignRestockerId = this.recommendedRestocker.user_id;
+        }
+      } catch (err) {
+        this.restockerSuggestions = [];
+        this.restockersError = err?.message
+          || 'No se pudo cargar la sugerencia de reponedores. Puede elegir uno manualmente.';
+      } finally {
+        this.isLoadingRestockers = false;
+      }
+    },
+
+    applySuggestedRestocker(restocker) {
+      if (restocker?.user_id !== undefined) {
+        this.assignRestockerId = Number(restocker.user_id);
+      }
     },
 
     /**
@@ -1287,6 +1380,14 @@ export const CoordinatorDashboardView = {
      */
     async assignSuggestedTechnician() {
       if (!this.selectedIncident || this.suggestedTechnicianId === null) {
+        return;
+      }
+
+      if (this.selectedIncident.dispatch_level === 'L1_RESTOCKER') {
+        this.assignDispatchLevel = 'L2_SAT';
+        this.assignTechnicianId = this.suggestedTechnicianId;
+        this.assignTechnicianChosenByUser = false;
+        await this.performLevel2Dispatch();
         return;
       }
 
@@ -1610,7 +1711,105 @@ export const CoordinatorDashboardView = {
      */
     async submitAssignment() {
       if (!this.selectedIncident) return;
+      if (this.assignDispatchLevel === 'L1_RESTOCKER') {
+        await this.performLevel1Dispatch();
+        return;
+      }
+      // El expediente nació en L1: la conmutación a L2 debe viajar por el
+      // endpoint de nivel, que valida rol/categoría y reabre la custodia SAT.
+      // Usar `assignTechnician()` dejaba el ticket en L1 (PR22-02).
+      if (this.selectedIncident.dispatch_level === 'L1_RESTOCKER') {
+        await this.performLevel2Dispatch();
+        return;
+      }
       await this.performAssignment(this.assignTechnicianId);
+    },
+
+    /**
+     * Despacho L1 en un clic (RF-05.2.2/RF-05.3): conmuta el nivel y asigna al
+     * reponedor elegido, con el #1 recomendado preseleccionado.
+     */
+    async performLevel1Dispatch() {
+      if (!this.selectedIncident || !this.assignRestockerId) {
+        this.assignError = 'Selecciona un reponedor de zona antes de confirmar el despacho de Nivel 1.';
+        return;
+      }
+      if (!this.assignLevel1IssueType) {
+        this.assignError = 'Selecciona el motivo de Nivel 1 del expediente antes de confirmar el despacho.';
+        return;
+      }
+
+      this.assignError = '';
+      this.isAssigning = true;
+      store.setLoading(true);
+      try {
+        const result = await api.coordinator.changeDispatchLevel(
+          this.selectedIncident.id,
+          'L1_RESTOCKER',
+          this.assignRestockerId,
+          this.assignLevel1IssueType
+        );
+        store.addAlert(
+          `Incidencia #${this.selectedIncident.ticket_code} despachada al reponedor de zona.`,
+          'success',
+          5000
+        );
+        this.$emit('assigned', result);
+        this.closeAssignModal();
+        await this.loadIncidents();
+      } catch (err) {
+        this.assignError = err.message || 'Error al despachar el aviso de Nivel 1.';
+      } finally {
+        this.isAssigning = false;
+        store.setLoading(false);
+      }
+    },
+
+    /**
+     * Conmutación L1→L2 desde el modal de Triaje. Usa el endpoint dedicado de
+     * nivel para que el expediente cambie de nivel, estado y custodio en una
+     * sola transacción (D1, D2.3, QA-CON-01).
+     */
+    async performLevel2Dispatch() {
+      if (!this.selectedIncident || !this.assignTechnicianId) {
+        this.assignError = 'Selecciona un técnico SAT antes de conmutar el expediente a Nivel 2.';
+        return;
+      }
+      if (this.assignUrgencyOverride && !this.assignUrgencyReason.trim()) {
+        this.assignError = 'Es obligatorio indicar el motivo justificado de la reclasificación de urgencia (EARS 5.3).';
+        return;
+      }
+
+      this.assignError = '';
+      this.isAssigning = true;
+      store.setLoading(true);
+      try {
+        const result = await api.coordinator.changeDispatchLevel(
+          this.selectedIncident.id,
+          'L2_SAT',
+          this.assignTechnicianId,
+          '',
+          this.assignUrgencyOverride || null,
+          this.assignUrgencyReason.trim() || null
+        );
+        store.addAlert(
+          `Incidencia #${this.selectedIncident.ticket_code} conmutada a Nivel 2 SAT.`,
+          'success',
+          5000
+        );
+        this.$emit('assigned', result);
+        this.closeAssignModal();
+        await this.loadIncidents();
+        this.refreshTerritorialMap();
+      } catch (err) {
+        this.assignError = err.message || 'Error al conmutar la incidencia a Nivel 2 SAT.';
+        if (this.selectedIncident?.id !== undefined && this.selectedIncident?.id !== null) {
+          await this.refreshIncidentRow(this.selectedIncident.id);
+        }
+      } finally {
+        this.isAssigning = false;
+        store.setLoading(false);
+      }
     },
 
     /**
@@ -1739,12 +1938,25 @@ export const CoordinatorDashboardView = {
       this.filterSlaOnly = true;
     },
 
+    /** El filtro de nivel se resuelve en servidor; el cambio recarga la bandeja. */
+    onDispatchLevelFilterChange() {
+      this.loadIncidents(true);
+    },
+
     clearFilters() {
       this.filterStatus = '';
       this.filterUrgency = '';
+      this.filterDispatchLevel = '';
       this.filterSearch = '';
       this.filterSlaOnly = false;
       this.filterPausedOnly = false;
+    },
+
+    /** Etiqueta visible del nivel operativo en la fila de triaje. */
+    dispatchLevelLabel(incident) {
+      return incident?.dispatch_level === 'L1_RESTOCKER'
+        ? '🛒 Reponedor N1'
+        : '🔧 SAT N2';
     },
 
     /**
@@ -1794,7 +2006,7 @@ export const CoordinatorDashboardView = {
           <h2 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 22px; font-weight: 700; color: var(--color-ink, #000000); margin: 0;">
             Panel de Coordinación
           </h2>
-          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, #6c7e9d); margin-top: 6px;">
+          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted); margin-top: 6px;">
             Identifícate con tus credenciales de operador para supervisar el parque de vending.
           </p>
           <div style="margin-top: 10px;">
@@ -1815,7 +2027,7 @@ export const CoordinatorDashboardView = {
 
         <form @submit.prevent="handleInternalLogin">
           <div style="margin-bottom: 16px;">
-            <label for="coord-email" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="coord-email" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Correo electrónico
             </label>
             <input
@@ -1830,7 +2042,7 @@ export const CoordinatorDashboardView = {
           </div>
 
           <div style="margin-bottom: 16px;">
-            <label for="coord-password" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="coord-password" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Contraseña
             </label>
             <input
@@ -2143,7 +2355,7 @@ export const CoordinatorDashboardView = {
         <!-- 2. Metrics Summary Bar (8px cards) -->
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
           <div class="vg-card" style="padding: 16px; border-radius: var(--radius-card, 8px);">
-            <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); font-weight: 600; text-transform: uppercase;">
+            <div style="font-size: 12px; color: var(--color-ink-muted); font-weight: 600; text-transform: uppercase;">
               Avisos Activos
             </div>
             <div style="font-size: 26px; font-weight: 700; color: var(--color-ink, #000000); font-family: var(--font-display, 'DM Sans', sans-serif); margin-top: 4px;">
@@ -2218,6 +2430,19 @@ export const CoordinatorDashboardView = {
               <option value="LOW">Baja</option>
             </select>
 
+            <!-- Nivel operativo (Módulo 36, RF-05.3) -->
+            <select
+              v-model="filterDispatchLevel"
+              class="vg-select"
+              style="max-width: 180px; height: 36px;"
+              data-testid="select-dispatch-level-filter"
+              @change="onDispatchLevelFilterChange"
+            >
+              <option value="">Todos los niveles</option>
+              <option value="L1_RESTOCKER">🛒 Nivel 1 · Reponedor</option>
+              <option value="L2_SAT">🔧 Nivel 2 · SAT</option>
+            </select>
+
             <!-- Only SLA Breach Toggle -->
             <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #991b1b; cursor: pointer;">
               <input type="checkbox" v-model="filterSlaOnly" />
@@ -2233,7 +2458,7 @@ export const CoordinatorDashboardView = {
             </label>
 
             <button
-              v-if="filterStatus || filterUrgency || filterSearch || filterSlaOnly || filterPausedOnly"
+              v-if="filterStatus || filterUrgency || filterDispatchLevel || filterSearch || filterSlaOnly || filterPausedOnly"
               type="button"
               class="vg-btn vg-btn-sm vg-btn-secondary"
               @click="clearFilters"
@@ -2254,7 +2479,7 @@ export const CoordinatorDashboardView = {
               📄 Etiquetas de Sede (A4)
             </button>
 
-            <span style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+            <span style="font-size: 12px; color: var(--color-ink-muted);">
               Sondeo activo (60s)
             </span>
             <button
@@ -2273,7 +2498,7 @@ export const CoordinatorDashboardView = {
           <div class="vg-triage-table-scroll">
             <table class="vg-triage-table" style="width: 100%; border-collapse: collapse; text-align: left; font-family: var(--font-body, Inter, sans-serif); font-size: 13px;">
               <thead>
-                <tr style="background-color: #fafbfc; border-bottom: 1px solid var(--color-hairline, #c8cfda); color: var(--color-ink-muted, #6c7e9d); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;">
+                <tr style="background-color: var(--color-canvas); border-bottom: 1px solid var(--color-hairline); color: var(--color-ink-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;">
                   <th style="padding: 12px 16px;">Ticket / SLA</th>
                   <th style="padding: 12px 16px;">Sede / Ubicación</th>
                   <th style="padding: 12px 16px;">Máquina</th>
@@ -2285,12 +2510,12 @@ export const CoordinatorDashboardView = {
               </thead>
               <tbody>
                 <tr v-if="isLoading && incidents.length === 0">
-                  <td colspan="7" style="text-align: center; padding: 32px; color: var(--color-ink-muted, #6c7e9d);">
+                  <td colspan="7" style="text-align: center; padding: 32px; color: var(--color-ink-muted);">
                     Cargando averías del parque...
                   </td>
                 </tr>
                 <tr v-else-if="filteredIncidents.length === 0">
-                  <td colspan="7" style="text-align: center; padding: 32px; color: var(--color-ink-muted, #6c7e9d);">
+                  <td colspan="7" style="text-align: center; padding: 32px; color: var(--color-ink-muted);">
                     No se han encontrado averías con los filtros actuales.
                   </td>
                 </tr>
@@ -2343,7 +2568,7 @@ export const CoordinatorDashboardView = {
                       </span>
                       <span
                         v-else
-                        style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);"
+                        style="font-size: 11px; color: var(--color-ink-muted);"
                       >
                         Espera: {{ inc.waiting_minutes ?? inc.sla_minutes_elapsed ?? 0 }}m
                       </span>
@@ -2352,10 +2577,10 @@ export const CoordinatorDashboardView = {
 
                   <!-- 2. Sede -->
                   <td style="padding: 14px 16px; vertical-align: top;">
-                    <div style="font-weight: 600; color: var(--color-slate, #2c333f);">
+                    <div style="font-weight: 600; color: var(--color-slate);">
                       {{ inc.location_name || inc.location_site_code || inc.site_code }}
                     </div>
-                    <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 2px;">
+                    <div style="font-size: 12px; color: var(--color-ink-muted); margin-top: 2px;">
                       {{ inc.floor_wing || 'Ubicación no especificada' }}
                     </div>
                     <div v-if="inc.sla_tier_label" class="mt-1" data-testid="row-sla-tier" style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
@@ -2371,7 +2596,7 @@ export const CoordinatorDashboardView = {
                     <div style="font-weight: 600; color: var(--color-ink, #000000);">
                       {{ inc.machine_code }}
                     </div>
-                    <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+                    <div style="font-size: 12px; color: var(--color-ink-muted);">
                       {{ inc.machine_model || 'Vending' }}
                     </div>
                   </td>
@@ -2385,6 +2610,13 @@ export const CoordinatorDashboardView = {
                   <td style="padding: 14px 16px; vertical-align: top;">
                     <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
                       <IncidentBadge :value="inc.status" type="status" size="sm" />
+                      <span
+                        data-testid="row-dispatch-level"
+                        style="font-size: 11px; font-weight: 700; color: var(--color-slate);"
+                      >
+                        {{ dispatchLevelLabel(inc) }}
+                        <template v-if="inc.level1_issue_type">· {{ inc.level1_issue_type }}</template>
+                      </span>
                       <IncidentBadge
                         v-if="opportunisticModeLabel(inc)"
                         :value="inc.opportunistic_mode"
@@ -2404,7 +2636,7 @@ export const CoordinatorDashboardView = {
 
                   <!-- 6. Técnico -->
                   <td style="padding: 14px 16px; vertical-align: top;">
-                    <div v-if="inc.assigned_technician?.name || inc.technician_name" style="font-weight: 500; color: var(--color-slate, #2c333f);">
+                    <div v-if="inc.assigned_technician?.name || inc.technician_name" style="font-weight: 500; color: var(--color-slate);">
                       👤 {{ inc.assigned_technician?.name || inc.technician_name }}
                     </div>
                     <span v-else style="font-size: 12px; color: #dc2626; font-weight: 600;">
@@ -2842,16 +3074,110 @@ export const CoordinatorDashboardView = {
             </p>
           </section>
 
+          <!-- Selector de nivel operativo (RF-05.3, Módulo 36) -->
+          <div style="margin-bottom: 16px;">
+            <label for="assign-dispatch-level" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Nivel operativo del despacho
+            </label>
+            <select
+              id="assign-dispatch-level"
+              v-model="assignDispatchLevel"
+              class="vg-select"
+              :disabled="isAssigning"
+              data-testid="assign-dispatch-level-select"
+              @change="onAssignDispatchLevelChange"
+            >
+              <option value="L2_SAT">🔧 Nivel 2 · Técnico SAT</option>
+              <option value="L1_RESTOCKER">🛒 Nivel 1 · Reponedor de zona</option>
+            </select>
+          </div>
+
+          <!-- Motivo L1 del despacho manual (H-36-07, QA-AMB-01) -->
+          <div
+            v-if="assignDispatchLevel === 'L1_RESTOCKER' && assignLevel1IssueTypeOptions.length > 0"
+            style="margin-bottom: 16px;"
+            data-testid="assign-level1-issue-type-block"
+          >
+            <label for="assign-level1-issue-type" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Motivo de Nivel 1 <span style="color: var(--color-urgency-critical);">*</span>
+            </label>
+            <select
+              id="assign-level1-issue-type"
+              v-model="assignLevel1IssueType"
+              class="vg-select"
+              :disabled="isAssigning"
+              data-testid="assign-level1-issue-type-select"
+            >
+              <option value="">Selecciona un motivo coherente con la categoría</option>
+              <option v-for="issueType in assignLevel1IssueTypeOptions" :key="issueType.value" :value="issueType.value">
+                {{ issueType.label }}
+              </option>
+            </select>
+            <p style="margin: 6px 0 0; font-size: 12px; color: var(--color-ink-muted);">
+              El motivo queda sellado en el expediente y permite el 1-Tap del reponedor.
+            </p>
+          </div>
+
+          <!-- Reponedor #1 RECOMENDADO ⭐ (Módulo 36, RF-02.1.1) -->
+          <section
+            v-if="assignDispatchLevel === 'L1_RESTOCKER'"
+            data-testid="assign-restocker-suggestions"
+            style="margin-bottom: 16px;"
+          >
+            <div v-if="isLoadingRestockers" style="font-size: 12px; color: var(--color-ink-muted);">
+              Cargando reponedores de la zona...
+            </div>
+            <div v-else-if="recommendedRestocker" class="vg-alert vg-alert-info">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase;">
+                #1 RECOMENDADO ⭐
+              </div>
+              <div style="margin-top: 4px; font-size: 14px; font-weight: 700;">
+                {{ recommendedRestocker.name }}
+                <span style="font-size: 12px; font-weight: 500;">
+                  · {{ recommendedRestocker.operator_code }} ·
+                  {{ recommendedRestocker.active_l1_incidents_count }} aviso(s) L1
+                </span>
+              </div>
+              <button
+                type="button"
+                class="vg-btn vg-btn-sm vg-btn-primary"
+                data-testid="btn-apply-recommended-restocker"
+                @click="applySuggestedRestocker(recommendedRestocker)"
+              >
+                Despachar al #1 recomendado
+              </button>
+            </div>
+            <p v-else-if="restockersError" style="font-size: 12px; color: var(--color-error-text);" role="alert">
+              {{ restockersError }}
+            </p>
+            <p v-else style="font-size: 12px; color: var(--color-ink-muted);">
+              No hay reponedores en turno para la zona de esta sede.
+            </p>
+            <select
+              v-if="restockerSuggestions.length > 0"
+              v-model="assignRestockerId"
+              class="vg-select"
+              style="margin-top: 8px;"
+              data-testid="assign-restocker-select"
+              :disabled="isAssigning"
+            >
+              <option v-for="restocker in restockerSuggestions" :key="restocker.user_id" :value="restocker.user_id">
+                {{ restocker.name }} ({{ restocker.operator_code }}) · {{ restocker.active_l1_incidents_count }} L1
+              </option>
+            </select>
+          </section>
+
           <!-- Technician Selector -->
           <div style="margin-bottom: 16px;">
-            <label for="assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Seleccionar Técnico de Campo <span style="color: #dc2626;">*</span>
             </label>
             <select
+              v-if="assignDispatchLevel === 'L2_SAT'"
               id="assign-tech-select"
               v-model="assignTechnicianId"
               class="vg-select"
-              required
+              :required="assignDispatchLevel === 'L2_SAT'"
               :disabled="isAssigning"
               data-testid="assign-technician-select"
               @change="onAssignTechnicianChange"
@@ -2871,8 +3197,8 @@ export const CoordinatorDashboardView = {
 
           <!-- Urgency Reclassification (Optional / Audit trail required) -->
           <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 14px; margin-bottom: 16px;">
-            <label style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
-              Reclasificar nivel de urgencia <span style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);">(Opcional)</span>
+            <label style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Reclasificar nivel de urgencia <span style="font-size: 11px; color: var(--color-ink-muted);">(Opcional)</span>
             </label>
             <div style="display: flex; gap: 8px; margin-bottom: 10px;">
               <select v-model="assignUrgencyOverride" class="vg-select" :disabled="isAssigning">
@@ -2956,10 +3282,10 @@ export const CoordinatorDashboardView = {
             <button
               type="submit"
               class="vg-btn vg-btn-primary"
-              :disabled="isAssigning || !assignTechnicianId || !assignOverrideJustificationValid"
+              :disabled="isAssigning || (assignDispatchLevel === 'L1_RESTOCKER' ? (!assignRestockerId || !assignLevel1IssueType) : !assignTechnicianId) || !assignOverrideJustificationValid"
               data-testid="assign-submit"
             >
-              <span v-if="!isAssigning">Confirmar Asignación</span>
+              <span v-if="!isAssigning">{{ assignDispatchLevel === 'L1_RESTOCKER' ? 'Despachar al Reponedor' : 'Confirmar Asignación' }}</span>
               <span v-else>Guardando...</span>
             </button>
           </div>
@@ -2981,7 +3307,7 @@ export const CoordinatorDashboardView = {
         <form v-if="bulkAssignSite" @submit.prevent="submitBulkAssignment" data-testid="bulk-assign-form">
           <!-- Pending incidents summary -->
           <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 16px;">
-            <div style="font-size: 12px; font-weight: 700; color: var(--color-slate, #2c333f); text-transform: uppercase; margin-bottom: 8px;">
+            <div style="font-size: 12px; font-weight: 700; color: var(--color-slate); text-transform: uppercase; margin-bottom: 8px;">
               Incidencias activas de {{ bulkAssignSite.siteCode }}<span v-if="hasAssignedIncidents()" data-testid="bulk-assign-batch-note">: se cambiará el responsable de las marcadas</span>
             </div>
             <ul style="margin: 0; padding-left: 18px; font-size: 13px; color: var(--color-ink, #000000);">
@@ -2991,7 +3317,7 @@ export const CoordinatorDashboardView = {
                 <span
                   v-if="incidentOwnerLabel(inc)"
                   data-testid="bulk-assign-row-owner"
-                  style="margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--color-ink-muted, #6c7e9d); border: 1px solid var(--color-hairline, #c8cfda); border-radius: 4px; padding: 1px 6px;"
+                  style="margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--color-ink-muted); border: 1px solid var(--color-hairline); border-radius: 4px; padding: 1px 6px;"
                 >{{ incidentOwnerLabel(inc) }}</span>
               </li>
             </ul>
@@ -3034,7 +3360,7 @@ export const CoordinatorDashboardView = {
 
           <!-- Technician Selector -->
           <div style="margin-bottom: 16px;">
-            <label for="bulk-assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="bulk-assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Técnico de Campo responsable <span style="color: #dc2626;">*</span>
             </label>
             <select
@@ -3054,14 +3380,14 @@ export const CoordinatorDashboardView = {
                 {{ t.name }} ({{ t.email }})
               </option>
             </select>
-            <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
+            <div style="font-size: 12px; color: var(--color-ink-muted); margin-top: 4px;">
               El mismo técnico quedará como único responsable activo de todas las incidencias listadas (Art. II: un responsable activo por incidencia).<span v-if="hasAssignedIncidents()"> Para las incidencias ya asignadas, el cambio de responsable exige motivo justificado (RF-07.3).</span>
             </div>
           </div>
 
           <!-- Reassignment Reason (mandatory as soon as the batch carries assigned incidents, RF-07.3) -->
           <div v-if="hasAssignedIncidents()" style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 14px; margin-bottom: 16px;">
-            <label for="bulk-assign-reassignment-reason" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+            <label for="bulk-assign-reassignment-reason" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
               Motivo de la reasignación <span style="color: #dc2626;">* (Obligatorio para las incidencias ya asignadas)</span>
             </label>
             <textarea
@@ -3074,7 +3400,7 @@ export const CoordinatorDashboardView = {
               :disabled="isBulkAssigning"
               data-testid="bulk-assign-reassignment-reason"
             ></textarea>
-            <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
+            <div style="font-size: 12px; color: var(--color-ink-muted); margin-top: 4px;">
               El cambio de responsable exige al menos 10 caracteres reales y queda registrado en el historial inmutable de cada incidencia (RF-07.3).
             </div>
           </div>
@@ -3102,8 +3428,8 @@ export const CoordinatorDashboardView = {
 
           <!-- Urgency Reclassification (Optional / Audit trail required) -->
           <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 14px; margin-bottom: 16px;">
-            <label for="bulk-assign-urgency" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
-              Reclasificar urgencia del lote <span style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);">(Opcional, afecta a todas)</span>
+            <label for="bulk-assign-urgency" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Reclasificar urgencia del lote <span style="font-size: 11px; color: var(--color-ink-muted);">(Opcional, afecta a todas)</span>
             </label>
             <select id="bulk-assign-urgency" v-model="bulkAssignUrgencyOverride" class="vg-select" :disabled="isBulkAssigning" data-testid="bulk-assign-urgency">
               <option value="">Mantener la urgencia actual de cada incidencia</option>
@@ -3164,12 +3490,12 @@ export const CoordinatorDashboardView = {
         @close="closeCancelModal"
       >
         <form v-if="selectedIncident" @submit.prevent="submitCancellation">
-          <p style="font-size: 13px; color: var(--color-slate, #2c333f); margin-bottom: 14px; line-height: 1.4;">
+          <p style="font-size: 13px; color: var(--color-slate); margin-bottom: 14px; line-height: 1.4;">
             Conforme a la Constitución (Art. III) y la norma RF-06, la incidencia pasará a estado <strong>CANCELADA</strong> conservando íntegro su historial en base de datos (borrado lógico).
           </p>
 
           <div style="margin-bottom: 16px;">
-            <label for="cancel-reason-input" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 4px;">
+            <label for="cancel-reason-input" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 4px;">
               Motivo obligatorio del descarte <span style="color: #dc2626;">*</span>
             </label>
             <textarea

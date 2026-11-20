@@ -18,6 +18,8 @@ use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\Level1IssueType;
+use VendGuard\Core\Service\RestockerSatSynergyValidator;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
@@ -48,6 +50,8 @@ class QrReportService
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
     private ?TransactionManagerInterface $transactionManager;
     private ?IncidentTicketAllocator $ticketAllocator;
+    private ?RestockerSatSynergyService $synergyService;
+    private ?SuggestedTechniciansService $technicianSuggester;
 
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
@@ -55,7 +59,9 @@ class QrReportService
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
         ?TransactionManagerInterface $transactionManager = null,
-        ?IncidentTicketAllocator $ticketAllocator = null
+        ?IncidentTicketAllocator $ticketAllocator = null,
+        ?RestockerSatSynergyService $synergyService = null,
+        ?SuggestedTechniciansService $technicianSuggester = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
@@ -63,6 +69,8 @@ class QrReportService
         $this->notificationEnqueuer = $notificationEnqueuer;
         $this->transactionManager = $transactionManager;
         $this->ticketAllocator = $ticketAllocator;
+        $this->synergyService = $synergyService;
+        $this->technicianSuggester = $technicianSuggester;
     }
 
     /**
@@ -166,6 +174,28 @@ class QrReportService
             $retainedMoney = $val;
         }
 
+        $refundMethod = isset($payload['refund_method']) && trim((string)$payload['refund_method']) !== ''
+            ? strtoupper(trim((string)$payload['refund_method']))
+            : null;
+
+        // RF-01.2 / QA-LIM-01: la pre-clasificación L1 solo se sella si la
+        // categoría, el estado sanitario y la reclamación lo permiten.
+        $level1IssueType = null;
+        $rawIssueType = strtoupper(trim((string)($payload['level1_issue_type'] ?? '')));
+        if ($rawIssueType !== '') {
+            $level1IssueType = Level1IssueType::tryFrom($rawIssueType);
+        }
+        $classification = RestockerSatSynergyValidator::classifyCreation(
+            $level1IssueType,
+            $category,
+            $machine->getSanitaryStatus(),
+            $retainedMoney,
+            $refundMethod
+        );
+        $category = $classification['category'];
+        $dispatchLevel = $classification['dispatch_level'];
+        $level1IssueType = $classification['level1_issue_type'];
+
         $photoPath = isset($payload['photo_path']) && trim((string)$payload['photo_path']) !== ''
             ? trim((string)$payload['photo_path'])
             : null;
@@ -182,6 +212,7 @@ class QrReportService
                 $reporterName,
                 $reporterEmail,
                 $retainedMoney,
+                $refundMethod,
                 $photoPath
             );
         }
@@ -204,7 +235,7 @@ class QrReportService
         //       única notificación, y nunca responde un 500 por una colisión de azar.
         try {
             $enqueuer = $this->notificationEnqueuer;
-            $created = $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $location, $category, $description, $urgency, $slaTier, $slaTargetMinutes, $reporterName, $reporterPhone, $retainedMoney, $photoPath, $reporterEmail, $enqueuer): Incident {
+            $created = $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $location, $category, $description, $urgency, $slaTier, $slaTargetMinutes, $reporterName, $reporterPhone, $retainedMoney, $photoPath, $reporterEmail, $enqueuer, $dispatchLevel, $level1IssueType): Incident {
                 $newIncident = new Incident(
                     id: null,
                     ticketCode: $ticketCode,
@@ -221,7 +252,9 @@ class QrReportService
                     photoPath: $photoPath,
                     reporterEmail: $reporterEmail,
                     slaTierSnapshot: $slaTier,
-                    slaTargetMinutes: $slaTargetMinutes
+                    slaTargetMinutes: $slaTargetMinutes,
+                    dispatchLevel: $dispatchLevel,
+                    level1IssueType: $level1IssueType
                 );
 
                 if ($enqueuer === null) {
@@ -277,6 +310,7 @@ class QrReportService
                     $reporterName,
                     $reporterEmail,
                     $retainedMoney,
+                    $refundMethod,
                     $photoPath,
                     true
                 );
@@ -299,6 +333,7 @@ class QrReportService
         ?string $reporterName,
         ?string $reporterEmail,
         ?float $retainedMoney,
+        ?string $refundMethod,
         ?string $photoPath,
         bool $isRaceCondition = false
     ): array {
@@ -313,6 +348,58 @@ class QrReportService
             $incomingUrgency
         );
 
+        // QA-LIM-01: una absorción grave sobre un aviso L1 lo auto-escala en la
+        // misma unidad de trabajo, antes de anexar la nueva observación.
+        $before = $incident;
+        $promotedIncident = null;
+        $assignTechnicianId = null;
+
+        if ($this->synergyService !== null) {
+            if (RestockerSatSynergyService::shouldAutoEscalateQrMerge(
+                $incident->getDispatchLevel(),
+                $incomingCategory,
+                $retainedMoney,
+                $refundMethod
+            )) {
+                $effectiveUrgency = $incomingUrgency->priorityRank() > $incident->getUrgency()->priorityRank()
+                    ? $incomingUrgency
+                    : $incident->getUrgency();
+                $effectiveTargetMinutes = min($incident->getSlaTargetMinutes(), $incomingTargetMinutes);
+                $assignTechnicianId = $this->resolveQrMergeTechnician(
+                    (int)$machine->getId(),
+                    $incomingCategory->value,
+                    $effectiveUrgency->value,
+                    $incident->getSlaTierSnapshot()->value,
+                    $effectiveTargetMinutes
+                );
+            }
+
+            $promotion = $this->synergyService->autoEscalateQrMerge(
+                (int)$incident->getId(),
+                $incident->getDispatchLevel(),
+                $incomingCategory,
+                $retainedMoney,
+                $refundMethod,
+                ['id' => 0, 'name' => 'QR Auto-Escalation', 'role' => 'SYSTEM'],
+                $assignTechnicianId
+            );
+
+            if (($promotion['ok'] ?? false) !== true) {
+                throw new RuntimeException('No se pudo auto-escalar el expediente fusionado por QR.');
+            }
+
+            if (($promotion['promoted'] ?? false) === true) {
+                // El gateway ya conmutó nivel, categoría, estado y custodio. Se
+                // relee antes de tocar urgencia/SLA para que el update posterior
+                // no reescriba esos campos desde la foto L1 obsoleta.
+                $promotedIncident = $this->incidentRepo->findById((int)$incident->getId());
+                if ($promotedIncident === null) {
+                    throw new RuntimeException('No se pudo releer el expediente auto-escalado por QR.');
+                }
+                $incident = $promotedIncident;
+            }
+        }
+
         if ($incomingUrgency->priorityRank() > $incident->getUrgency()->priorityRank()
             || $incomingTargetMinutes < $incident->getSlaTargetMinutes()
         ) {
@@ -321,15 +408,16 @@ class QrReportService
             $effectiveUrgency = $incomingUrgency->priorityRank() > $incident->getUrgency()->priorityRank()
                 ? $incomingUrgency
                 : $incident->getUrgency();
+            $effectiveTargetMinutes = min($incident->getSlaTargetMinutes(), $incomingTargetMinutes);
             $createdAt = $this->parseDateTime($incident->getCreatedAt()) ?? new DateTimeImmutable('now');
             $targetAt = SlaTargetCalculator::computeEffectiveTargetAt(
                 $createdAt,
-                $incomingTargetMinutes,
+                $effectiveTargetMinutes,
                 $incident->getTotalPendingInfoSeconds()
             );
             $escalated = $incident
                 ->withUrgency($effectiveUrgency)
-                ->withRecalculatedSlaTarget($incomingTargetMinutes, $targetAt);
+                ->withRecalculatedSlaTarget($effectiveTargetMinutes, $targetAt);
 
             if (!$this->incidentRepo->update($escalated)) {
                 throw new RuntimeException(
@@ -345,7 +433,7 @@ class QrReportService
                 sprintf(
                     'Objetivo de SLA actualizado de %d min a %d min (Contrato sellado: %s) tras cambio de prioridad a %s.',
                     $incident->getSlaTargetMinutes(),
-                    $incomingTargetMinutes,
+                    $effectiveTargetMinutes,
                     $incident->getSlaTierLabel(),
                     $effectiveUrgency->label()
                 )
@@ -390,6 +478,10 @@ class QrReportService
             });
         }
 
+        if ($promotedIncident !== null && $this->notificationEnqueuer !== null) {
+            $this->notificationEnqueuer->enqueueAssignment($before, $incident);
+        }
+
         return [
             // Un segundo consumidor sobre el mismo ticket genera su propio
             // expediente de reintegro (RF-REF-08, caso límite 4), así que también
@@ -413,6 +505,43 @@ class QrReportService
             ],
             'message' => "Otro usuario acaba de reportar una avería en esta máquina hace un momento (Ticket {$incident->getTicketCode()}). Hemos registrado tus observaciones en dicho ticket.",
         ];
+    }
+
+    /**
+     * RF-02.2 / QA-LIM-01: mejor Técnico SAT para una absorción QR.
+     *
+     * Si no hay sugeridor compuesto o no existe candidato elegible, devuelve
+     * `null` y el gateway deja el expediente en `REGISTERED`.
+     */
+    private function resolveQrMergeTechnician(
+        int $machineId,
+        string $category,
+        string $urgency,
+        string $slaTier,
+        int $slaTargetMinutes
+    ): ?int {
+        if ($this->technicianSuggester === null) {
+            return null;
+        }
+
+        try {
+            $suggestions = $this->technicianSuggester->getSuggestionsForMachine(
+                $machineId,
+                $category,
+                $urgency,
+                $slaTier,
+                $slaTargetMinutes
+            );
+        } catch (\Throwable $exception) {
+            // La promoción es la salvaguarda sanitaria: un fallo del recomendador
+            // no puede dejar el ticket en L1. Se degrada a "sin candidato".
+            error_log('[vendguard] No se pudo resolver el Técnico SAT para la absorción QR: ' . $exception);
+            return null;
+        }
+
+        $topId = (int)($suggestions?->recommendation['top_technician_id'] ?? 0);
+
+        return $topId > 0 ? $topId : null;
     }
 
     /**

@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use InvalidArgumentException;
+use Throwable;
+use VendGuard\Application\Service\RestockerSatSynergyService;
+use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
+
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
 use VendGuard\Core\Domain\Service\CustodyChannelResolver;
@@ -42,9 +47,11 @@ use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\Level1IssueType;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\ColdChainOverridePolicy;
+use VendGuard\Core\Service\RestockerSatSynergyValidator;
 use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Core\Service\ResolutionTaxonomyValidator;
@@ -139,6 +146,8 @@ class CoordinatorController
     /** Cierre con trazabilidad de repuestos y taxonomía (Módulos 06 y 25); perezoso. */
     private ?SparePartTraceabilityService $traceabilityService = null;
 
+    private ?RestockerSatSynergyService $synergyService = null;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -158,7 +167,8 @@ class CoordinatorController
         ?SparePartRequestRepositoryInterface $sparePartRequestRepo = null,
         ?VanStockRepositoryInterface $vanStockRepo = null,
         ?SparePartTraceabilityService $traceabilityService = null,
-        ?TechnicianAbsenceRepositoryInterface $absenceRepo = null
+        ?TechnicianAbsenceRepositoryInterface $absenceRepo = null,
+        ?RestockerSatSynergyService $synergyService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->absenceRepo = $absenceRepo;
@@ -189,6 +199,123 @@ class CoordinatorController
         $this->sparePartRequestRepo = $sparePartRequestRepo;
         $this->vanStockRepo = $vanStockRepo;
         $this->traceabilityService = $traceabilityService;
+        $this->synergyService = $synergyService;
+    }
+
+    /**
+     * GET /api/coordinator/incidents/{id}/suggested-restockers
+     */
+    public function getSuggestedRestockers(Request $request): Response
+    {
+        $incidentId = (int)($request->getRouteParam('id') ?? 0);
+        if ($incidentId <= 0) {
+            return Response::error('INVALID_INCIDENT_ID', 'El identificador de la avería no es válido.', 400);
+        }
+
+        return $this->executeSynergy(fn (): Response => Response::json(
+            $this->synergy()->suggestRestockers($incidentId),
+            200
+        ));
+    }
+
+    /**
+     * POST /api/coordinator/incidents/{id}/dispatch-level
+     */
+    public function dispatchLevel(Request $request): Response
+    {
+        $incidentId = (int)($request->getRouteParam('id') ?? 0);
+        $incident = $incidentId > 0 ? $this->incidentRepo->findById($incidentId) : null;
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', 'La avería no existe.', 404);
+        }
+
+        $assigneeId = (int)($request->getBodyParam('assignee_id') ?? 0);
+        $assignee = $assigneeId > 0 ? $this->userRepo->findById($assigneeId) : null;
+        if ($assignee === null) {
+            return Response::error('ASSIGNEE_NOT_FOUND', 'El operario indicado no existe o está inactivo.', 422);
+        }
+
+        $actor = [
+            'id' => (int)($request->getAttribute('user_id') ?? 0),
+            'name' => (string)($request->getAttribute('user_name') ?? 'Coordinación'),
+            'role' => 'COORDINATOR',
+        ];
+
+        $rawLevel1IssueType = $request->getBodyParam('level1_issue_type');
+        $rawUrgencyOverride = $request->getBodyParam('urgency_override')
+            ?? $request->getBodyParam('urgency');
+        $rawUrgencyReason = $request->getBodyParam('urgency_override_reason')
+            ?? $request->getBodyParam('urgency_reason');
+        $targetLevel = (string)($request->getBodyParam('dispatch_level') ?? '');
+        $level1IssueType = is_string($rawLevel1IssueType) ? trim($rawLevel1IssueType) : '';
+        $assigneePayload = [
+            'id' => (int)$assignee->getId(),
+            'role' => $assignee->getRole()->value,
+            'is_active' => $assignee->isActive(),
+        ];
+        $urgencyOverride = is_string($rawUrgencyOverride) ? trim($rawUrgencyOverride) : null;
+        $urgencyReason = is_string($rawUrgencyReason) ? trim($rawUrgencyReason) : null;
+
+        return $this->executeSynergy(function () use (
+            $incident,
+            $level1IssueType,
+            $targetLevel,
+            $assigneePayload,
+            $actor,
+            $urgencyOverride,
+            $urgencyReason
+        ): Response {
+            $result = $this->synergy()->dispatchLevel(
+                [
+                    'id' => (int)$incident->getId(),
+                    'category' => $incident->getCategory()->value,
+                    'level1_issue_type' => $level1IssueType,
+                ],
+                $targetLevel,
+                $assigneePayload,
+                $actor,
+                $urgencyOverride,
+                $urgencyReason
+            );
+
+            if (($result['ok'] ?? false) !== true) {
+                return Response::error(
+                    (string)($result['error_code'] ?? 'DISPATCH_LEVEL_FAILED'),
+                    (string)($result['message'] ?? 'No se pudo actualizar el nivel operativo.'),
+                    (int)($result['http_status'] ?? 409),
+                    is_array($result['details'] ?? null) ? $result['details'] : null
+                );
+            }
+
+            $after = $this->incidentRepo->findById((int)$incident->getId());
+            if ($after !== null && ($enqueuer = $this->notifications()) !== null) {
+                $enqueuer->enqueueAssignment($incident, $after);
+            }
+
+            return Response::json($result, 200, 'Nivel operativo actualizado.');
+        });
+    }
+
+    private function synergy(): RestockerSatSynergyService
+    {
+        return $this->synergyService ??= new RestockerSatSynergyService(
+            new \VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway()
+        );
+    }
+
+    private function executeSynergy(callable $operation): Response
+    {
+        try {
+            return $operation();
+        } catch (RestockerSatSynergyValidationException $exception) {
+            return Response::error($exception->getErrorCode(), $exception->getMessage(), $exception->getHttpStatusCode());
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('VALIDATION_ERROR', $exception->getMessage(), 400);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo en la sinergia L1 de coordinación: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo completar la operación de Nivel 1.', 500);
+        }
     }
 
     /**
@@ -404,6 +531,51 @@ class CoordinatorController
             );
         }
 
+        // D2 / EARS 01.2: las exclusiones de Nivel 1 también miran la
+        // reclamación declarada en el alta, no solo el motivo rápido. El
+        // estado sanitario viaja hidratado en la máquina.
+        $retainedMoneyRaw = $request->getBodyParam('retained_money_amount');
+        $retainedMoney = null;
+        if ($retainedMoneyRaw !== null && trim((string)$retainedMoneyRaw) !== '') {
+            if (!is_numeric($retainedMoneyRaw)) {
+                return Response::error(
+                    'INVALID_MONEY_AMOUNT',
+                    'El importe retenido debe ser un valor numérico.',
+                    422
+                );
+            }
+            $retainedMoney = (float)$retainedMoneyRaw;
+            if ($retainedMoney < 0) {
+                return Response::error(
+                    'INVALID_MONEY_AMOUNT',
+                    'El importe de dinero retenido no puede ser negativo.',
+                    422
+                );
+            }
+        }
+
+        $rawRefundMethod = $request->getBodyParam('refund_method');
+        $refundMethod = $rawRefundMethod !== null && trim((string)$rawRefundMethod) !== ''
+            ? trim((string)$rawRefundMethod)
+            : null;
+
+        // RF-01.2 / D2.2: la pre-clasificación de Coordinación comparte el
+        // predicado de Portal y QR. La categoría solicitada solo se conserva
+        // cuando la clasificación no impone el mapeo QA-AMB-01.
+        $requestedCategory = $category;
+        $rawIssueType = strtoupper(trim((string)($request->getBodyParam('level1_issue_type') ?? '')));
+        $level1IssueType = $rawIssueType !== '' ? Level1IssueType::tryFrom($rawIssueType) : null;
+        $classification = RestockerSatSynergyValidator::classifyCreation(
+            $level1IssueType,
+            $requestedCategory,
+            $machine->getSanitaryStatus(),
+            $retainedMoney,
+            $refundMethod
+        );
+        $category = $classification['category'];
+        $dispatchLevel = $classification['dispatch_level'];
+        $level1IssueType = $classification['level1_issue_type'];
+
         // 3. Urgencia automática y sellado contractual. El perfil sale de la
         //    sede en este instante; el objetivo, de la matriz RF-01 y del techo
         //    sanitario. El vencimiento se ancla al mismo reloj que la apertura.
@@ -438,7 +610,10 @@ class CoordinatorController
                     $now,
                     $slaTargetAt,
                     $reporterName,
-                    $userId
+                    $userId,
+                    $retainedMoney,
+                    $dispatchLevel,
+                    $level1IssueType
                 ): Incident {
                     $incident = new Incident(
                         id: null,
@@ -451,10 +626,13 @@ class CoordinatorController
                         status: IncidentStatus::REGISTERED,
                         assignedTechnicianId: null,
                         reporterName: $reporterName,
+                        retainedMoneyAmount: $retainedMoney,
                         cycleStartedAt: $now->format(DATE_ATOM),
                         slaTargetAt: $slaTargetAt->format(DATE_ATOM),
                         slaTierSnapshot: $slaTier,
-                        slaTargetMinutes: $slaTargetMinutes
+                        slaTargetMinutes: $slaTargetMinutes,
+                        dispatchLevel: $dispatchLevel,
+                        level1IssueType: $level1IssueType
                     );
 
                     $enqueuer = $this->notifications();
@@ -618,7 +796,22 @@ class CoordinatorController
             $filters['active_only'] = true;
         }
 
-        // 6. Consultar repositorio con los filtros aplicados
+        // 6. Filtro opcional por nivel operativo (RF-05.3)
+        $dispatchParam = strtoupper(trim((string)$request->getQuery('dispatch_level')));
+        if ($dispatchParam !== '') {
+            if (!in_array($dispatchParam, ['ALL', 'L1_RESTOCKER', 'L2_SAT'], true)) {
+                return Response::error(
+                    'INVALID_DISPATCH_LEVEL_FILTER',
+                    'El nivel de despacho debe ser ALL, L1_RESTOCKER o L2_SAT.',
+                    400
+                );
+            }
+            if ($dispatchParam !== 'ALL') {
+                $filters['dispatch_level'] = $dispatchParam;
+            }
+        }
+
+        // 7. Consultar repositorio con los filtros aplicados
         $incidents = $this->incidentRepo->findAll($filters);
 
         // 6.b Recuento agregado de las conversaciones de TODA la bandeja en una sola
@@ -692,6 +885,11 @@ class CoordinatorController
 
             // Construir representación final combinando toArray() y contratos específicos
             $item = array_merge($incident->toArray(), [
+                // Coordinación sí ve el nivel operativo (RF-05.3); Portal, QR y
+                // albaranes no lo reciben porque no pasan por esta bandeja.
+                'dispatch_level' => $incident->getDispatchLevel()->value,
+                'dispatch_level_label' => $incident->getDispatchLevel()->label(),
+                'level1_issue_type' => $incident->getLevel1IssueType()?->value,
                 'assigned_technician' => $assignedTechnician,
                 'sla_minutes_elapsed' => $minutesWaiting,
                 'waiting_minutes' => $minutesWaiting,
@@ -979,6 +1177,16 @@ class CoordinatorController
         $technician = $this->userRepo->findById($technicianId, onlyActive: true);
         if ($technician === null || $technician->getRole()->value !== 'TECHNICIAN') {
             return Response::error('TECHNICIAN_NOT_FOUND', "No se encontró ningún técnico de ruta activo con ID {$technicianId}.", 422);
+        }
+
+        // QA-CON-01 / D1: un expediente en Nivel 1 no puede asignarse a un Técnico SAT
+        // sin conmutar primero su nivel operativo mediante /dispatch-level.
+        if ($incident->getDispatchLevel()->isLevel1()) {
+            return Response::error(
+                'INVALID_ASSIGNEE_ROLE_FOR_DISPATCH_LEVEL',
+                'Un expediente en Nivel 1 (L1_RESTOCKER) no puede asignarse a un Técnico SAT sin conmutar primero su nivel operativo a L2_SAT.',
+                422
+            );
         }
 
         // 6. Validar estado actual: asignación inicial desde REGISTERED/REOPENED y

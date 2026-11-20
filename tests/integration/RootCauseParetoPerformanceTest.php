@@ -170,10 +170,13 @@ try {
                 'Solución sintética de rendimiento ' || rc.code,
                 TRUE
            FROM root_causes rc
+          WHERE rc.code LIKE 'RC-PERF-%'
           ORDER BY rc.id"
     );
     $taxonomyPairs = (int)$perfPdo->query(
-        'SELECT COUNT(*) FROM standard_solutions ss JOIN root_causes rc ON rc.id = ss.root_cause_id'
+        "SELECT COUNT(*) FROM standard_solutions ss
+           JOIN root_causes rc ON rc.id = ss.root_cause_id
+          WHERE rc.code LIKE 'RC-PERF-%'"
     )->fetchColumn();
     $assert('El escenario declara ocho causas con su solución predeterminada', $taxonomyPairs === 8, "parejas: {$taxonomyPairs}");
 

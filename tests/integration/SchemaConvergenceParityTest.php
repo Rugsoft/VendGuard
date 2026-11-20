@@ -333,6 +333,7 @@ try {
             '029_product_loading_orders_and_cold_picking.sql',
             '030_in_situ_restock_visit_and_fefo.sql',
             '031_cash_collection_vault_audit.sql',
+            '032_restocker_sat_synergy.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -378,6 +379,7 @@ try {
         '029_product_loading_orders_and_cold_picking.sql',
         '030_in_situ_restock_visit_and_fefo.sql',
         '031_cash_collection_vault_audit.sql',
+        '032_restocker_sat_synergy.sql',
     ];
     $ledgerFiles = array_map(static fn (array $row): string => (string)$row['filename'], $ledgerRows);
     $ledgerChecksumsOk = true;
@@ -385,7 +387,7 @@ try {
         $ledgerChecksumsOk = $ledgerChecksumsOk && strlen((string)$ledgerRow['checksum']) === 64;
     }
     $assert(
-        'El libro registra las 30 migraciones, en orden, con su huella de 64 caracteres',
+        'El libro registra las 32 migraciones, en orden, con su huella de 64 caracteres',
         $ledgerFiles === $expectedLedgerFiles && $ledgerChecksumsOk,
         'registradas: ' . count($ledgerRows)
     );
@@ -421,8 +423,8 @@ try {
         count($pgColumns) >= 49
     );
     $assert(
-        'incidents declara las 52 columnas del contrato (43 + 7 de taxonomía + 2 de SLA)',
-        count($pgColumns['incidents'] ?? []) === 52,
+        'incidents declara las 56 columnas del contrato (43 + 7 de taxonomía + 2 de SLA + 4 de Nivel 1)',
+        count($pgColumns['incidents'] ?? []) === 56,
         'columnas: ' . count($pgColumns['incidents'] ?? [])
     );
     $assert(
@@ -472,16 +474,19 @@ try {
     $pgEnums = $readEnums($pgPdo, $schema);
 
     $assert(
-        'incident_assignments declara los 9 canales de apertura y las 10 causas de cierre',
+        'incident_assignments declara los 13 canales de apertura y las 13 causas de cierre (Módulos 26 y 36)',
         ($pgEnums['incident_assignments.assignment_source'] ?? []) === [
             'COORDINATOR_ASSIGN', 'COORDINATOR_REASSIGN', 'ABSENCE_COVERAGE_REASSIGN',
             'OPPORTUNISTIC_NEW', 'OPPORTUNISTIC_ASSUMED', 'OPPORTUNISTIC_TAKEOVER',
             'OPPORTUNISTIC_WARRANTY_REOPEN', 'SHIFT_HANDOVER', 'SANITARY_FAILSAFE_GUARD',
+            'RESTOCKER_ESCALATION_TO_SAT', 'RESTOCKER_SHIFT_HANDOVER',
+            'QR_AUTO_ESCALATION_TO_SAT', 'WARRANTY_REOPEN_ESCALATION_TO_SAT',
         ]
         && ($pgEnums['incident_assignments.unassignment_reason_type'] ?? []) === [
             'REASSIGNED_BY_COORDINATOR', 'ABSENCE_COVERAGE_REASSIGN', 'TAKEN_OVER_IN_SITU',
             'SHIFT_HANDOVER', 'SANITARY_FAILSAFE_GUARD', 'SANITARY_FAILSAFE_UNASSIGNED',
             'RESOLVED', 'CHRONIC_REPLACEMENT_CLOSED', 'WARRANTY_REOPENED', 'CANCELLED',
+            'ESCALATED_TO_SAT_BY_RESTOCKER', 'QR_AUTO_ESCALATED_TO_SAT', 'RESTOCKER_SHIFT_HANDOVER',
         ],
         sprintf(
             'canales: %d · causas: %d',
@@ -519,9 +524,46 @@ try {
         ]
     );
     $assert(
-        'El esquema declara los 48 conjuntos ENUM nativos del dominio (42 tipos)',
-        count($pgEnums) === 48,
+        'El esquema declara los 50 conjuntos ENUM nativos del dominio (44 tipos)',
+        count($pgEnums) === 50,
         'conjuntos: ' . count($pgEnums)
+    );
+
+    // Módulo 36: el nivel de despacho y el subtipo de Nivel 1 son tipos propios,
+    // no texto libre, y el expediente los declara en su forma canónica.
+    $assert(
+        'incidents declara el nivel de despacho y el subtipo de Nivel 1 (Módulo 36, D1 y D2)',
+        ($pgEnums['incidents.dispatch_level'] ?? []) === ['L1_RESTOCKER', 'L2_SAT']
+        && ($pgEnums['incidents.level1_issue_type'] ?? []) === [
+            'STOCKOUT_EMPTY_SLOT', 'MISSING_CONSUMABLES', 'EMPTY_CHANGE_TUBES', 'MINOR_SPIRAL_JAM',
+        ],
+        sprintf(
+            'niveles: %d · subtipos: %d',
+            count($pgEnums['incidents.dispatch_level'] ?? []),
+            count($pgEnums['incidents.level1_issue_type'] ?? [])
+        )
+    );
+
+    $l1GuardStmt = $pgPdo->prepare(
+        "SELECT constraint_name FROM information_schema.table_constraints
+          WHERE table_schema = :schema AND table_name = 'incidents'
+            AND constraint_name = 'chk_incidents_l1_dispatch_coherence'"
+    );
+    $l1GuardStmt->execute([':schema' => $schema]);
+    $assert(
+        'La guarda chk_incidents_l1_dispatch_coherence está declarada en incidents (Módulo 36, Art. II)',
+        (string)$l1GuardStmt->fetchColumn() === 'chk_incidents_l1_dispatch_coherence'
+    );
+
+    $dispatchIndexStmt = $pgPdo->prepare(
+        "SELECT indexname FROM pg_indexes
+          WHERE schemaname = :schema AND tablename = 'incidents'
+            AND indexname = 'idx_incidents_dispatch_level_status'"
+    );
+    $dispatchIndexStmt->execute([':schema' => $schema]);
+    $assert(
+        'Índice idx_incidents_dispatch_level_status presente en incidents (Módulo 36, D1)',
+        (string)$dispatchIndexStmt->fetchColumn() === 'idx_incidents_dispatch_level_status'
     );
 
     $assert(
@@ -547,8 +589,8 @@ try {
     $enumTypesStmt->execute([':schema' => $schema]);
     $enumTypeCount = (int)$enumTypesStmt->fetchColumn();
     $assert(
-        'El esquema declara los 42 tipos ENUM nativos distintos del contrato',
-        $enumTypeCount === 42,
+        'El esquema declara los 44 tipos ENUM nativos distintos del contrato',
+        $enumTypeCount === 44,
         'tipos: ' . $enumTypeCount
     );
 
