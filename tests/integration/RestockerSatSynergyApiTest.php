@@ -157,7 +157,7 @@ try {
     // PR22-04: dedicated machines keep the lifecycle guard isolated from the
     // fixtures used by the later QR and coordinator flows.
     $stateMachineIds = [];
-    foreach (['RSS8-STATE-21', 'RSS8-STATE-22', 'RSS8-STATE-23', 'RSS8-STATE-24'] as $stateMachineCode) {
+    foreach (['RSS8-STATE-21', 'RSS8-STATE-22', 'RSS8-STATE-23', 'RSS8-STATE-24', 'RSS8-STATE-25'] as $stateMachineCode) {
         $machineStmt->execute([':location_id' => $locationId, ':code' => $stateMachineCode]);
         $stateMachineIds[$stateMachineCode] = (int)$machineStmt->fetchColumn();
     }
@@ -335,6 +335,21 @@ try {
     $pdo->prepare("UPDATE incidents SET paused_at = CURRENT_TIMESTAMP - INTERVAL '30 minutes' WHERE id = :id")
         ->execute([':id' => $protectedDispatchStates['PENDING_INFO']]);
 
+    // PR22-06: a reopened L1 can still be under the restocker's custody after a
+    // direct reassignment and must be startable again.
+    $reopenedIncidentId = $seedIncident(
+        'INC-2026-8816',
+        $stateMachineIds['RSS8-STATE-25'],
+        $restockerId,
+        'REOPENED'
+    );
+    $pdo->prepare(
+        "UPDATE incidents
+            SET started_at = CURRENT_TIMESTAMP - INTERVAL '2 days',
+                reopened_at = CURRENT_TIMESTAMP - INTERVAL '1 hour'
+          WHERE id = :id"
+    )->execute([':id' => $reopenedIncidentId]);
+
     $seedCustody = static function (int $seedIncidentId, ?int $assigneeId = null) use ($pdo, $restockerId): void {
         $stmt = $pdo->prepare(
             "INSERT INTO incident_assignments (
@@ -354,6 +369,7 @@ try {
     $seedCustody($deactivateIncidentId, $deactivateRestockerId);
     $seedCustody($staffDeactivateIncidentId, $staffRestockerId);
     $seedCustody($taxonomyIncidentId);
+    $seedCustody($reopenedIncidentId);
 
     $userRepo = new PdoUserRepository($pdo);
     $authService = new AuthService(null, $userRepo);
@@ -395,6 +411,62 @@ try {
         'client_occurred_at' => '2026-11-18 09:00:00+00',
     ], $restockerToken);
     $assert('El reenvío devuelve idempotent_replay', ($data($replay)['idempotent_replay'] ?? false) === true);
+
+    $reopenedAt = '2026-11-18 09:05:00+00';
+    $reopenedStart = $call('POST', "/api/restocker/incidents/{$reopenedIncidentId}/start", [
+        'client_mutation_id' => 'rss08-start-reopened',
+        'client_occurred_at' => $reopenedAt,
+    ], $restockerToken);
+    $reopenedStartBody = $data($reopenedStart);
+    $assert(
+        'PR22-06: el L1 REOPENED asignado se inicia en IN_PROGRESS',
+        $reopenedStart->getStatusCode() === 200
+            && ($reopenedStartBody['status'] ?? '') === 'IN_PROGRESS'
+            && ($reopenedStartBody['started_at'] ?? '') === $reopenedAt,
+        'status=' . $reopenedStart->getStatusCode()
+            . ' code=' . $errorCode($reopenedStart)
+            . ' body=' . json_encode($reopenedStartBody)
+    );
+
+    $reopenedHistoryStmt = $pdo->prepare(
+        "SELECT from_status
+           FROM incident_history
+          WHERE incident_id = :id AND action_note = 'START_L1_INCIDENT'
+          ORDER BY id DESC LIMIT 1"
+    );
+    $reopenedHistoryStmt->execute([':id' => $reopenedIncidentId]);
+    $reopenedAuditStmt = $pdo->prepare(
+        "SELECT previous_state
+           FROM audit_log
+          WHERE entity_id = :id AND action = 'START_L1_INCIDENT'
+          ORDER BY id DESC LIMIT 1"
+    );
+    $reopenedAuditStmt->execute([':id' => $reopenedIncidentId]);
+    $reopenedAuditState = json_decode((string)$reopenedAuditStmt->fetchColumn(), true);
+    $reopenedHistoryFrom = $reopenedHistoryStmt->fetchColumn();
+    $reopenedRowStmt = $pdo->prepare(
+        'SELECT status, (started_at = :expected::timestamptz) AS started_at_matches
+           FROM incidents WHERE id = :id'
+    );
+    $reopenedRowStmt->execute([':expected' => $reopenedAt, ':id' => $reopenedIncidentId]);
+    $reopenedRow = $reopenedRowStmt->fetch();
+    $assert(
+        'PR22-06: historial y auditoría conservan REOPENED y started_at se refresca',
+        is_array($reopenedRow)
+            && $reopenedRow['status'] === 'IN_PROGRESS'
+            && in_array($reopenedRow['started_at_matches'], [true, 1, '1', 't'], true)
+            && $reopenedHistoryFrom === 'REOPENED'
+            && is_array($reopenedAuditState)
+            && ($reopenedAuditState['status'] ?? '') === 'REOPENED',
+        'row=' . json_encode($reopenedRow)
+            . ' history=' . json_encode($reopenedHistoryFrom)
+            . ' audit=' . json_encode($reopenedAuditState)
+    );
+
+    // The reopened fixture stays isolated from the later shift and absence flow.
+    $pdo->prepare(
+        "UPDATE incidents SET status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP WHERE id = :id"
+    )->execute([':id' => $reopenedIncidentId]);
 
     $resolve = $call('POST', "/api/restocker/incidents/{$incidentId}/resolve", [
         'machine_id' => $machineId,

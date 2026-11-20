@@ -110,26 +110,32 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                 );
             }
 
-            if ((string)$incident['status'] !== 'ASSIGNED') {
+            $previousStatus = (string)$incident['status'];
+            if (!in_array($previousStatus, ['ASSIGNED', 'REOPENED'], true)) {
                 return $this->fail(
                     'INVALID_INCIDENT_STATE_TRANSITION',
                     409,
-                    'Solo un aviso ASSIGNED puede iniciarse.'
+                    'Solo un aviso ASSIGNED o REOPENED puede iniciarse.'
                 );
             }
 
             $occurredAt = $this->occurredAt($mutation);
+            // A reopened L1 starts a new intervention cycle; an assigned L1 keeps
+            // its original start timestamp for idempotent retries.
+            $startedAtExpression = $previousStatus === 'REOPENED'
+                ? ':occurred_at::timestamptz'
+                : 'COALESCE(started_at, :occurred_at::timestamptz)';
             $stmt = $this->pdo->prepare(
                 'UPDATE incidents
                     SET status = \'IN_PROGRESS\',
-                        started_at = COALESCE(started_at, :occurred_at::timestamptz),
+                        started_at = ' . $startedAtExpression . ',
                         updated_at = CURRENT_TIMESTAMP
                   WHERE id = :id'
             );
             $stmt->execute([':occurred_at' => $occurredAt, ':id' => $incidentId]);
 
-            $this->insertHistory($incidentId, $this->actorId($actor), 'ASSIGNED', 'IN_PROGRESS', 'START_L1_INCIDENT');
-            $this->audit($incidentId, 'START_L1_INCIDENT', $actor, ['status' => 'ASSIGNED'], ['status' => 'IN_PROGRESS']);
+            $this->insertHistory($incidentId, $this->actorId($actor), $previousStatus, 'IN_PROGRESS', 'START_L1_INCIDENT');
+            $this->audit($incidentId, 'START_L1_INCIDENT', $actor, ['status' => $previousStatus], ['status' => 'IN_PROGRESS']);
 
             $payload = [
                 'ok' => true,
