@@ -13,8 +13,8 @@ use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
 use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
-use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\SlaTargetCalculator;
+use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
@@ -1212,13 +1212,14 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         ?array $mutation
     ): array {
         $status = $technicianId !== null ? 'ASSIGNED' : 'REGISTERED';
-        $urgency = (string)($payload['urgency'] ?? $this->defaultUrgency($category));
-        $urgencyLevel = UrgencyLevel::tryFrom(strtoupper(trim($urgency)))
-            ?? UrgencyLevel::fromString($this->defaultUrgency($category));
+        $machineType = MachineType::fromString((string)$machine['machine_type']);
+        // H-36-09: la urgencia se deriva de la máquina y la categoría, igual
+        // que en el alta ordinaria. El payload no puede rebajarla ni alterar
+        // el objetivo contractual de la sede.
+        $urgencyLevel = UrgencyCalculator::calculate($machineType, $category);
         $urgency = $urgencyLevel->value;
         $slaTier = SlaTier::tryFrom(strtoupper(trim((string)($machine['sla_tier'] ?? ''))))
             ?? SlaTier::STANDARD;
-        $machineType = MachineType::fromString((string)$machine['machine_type']);
         $slaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
             $slaTier,
             $machineType,
@@ -1756,13 +1757,6 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
             IncidentCategory::ELECTRICAL_OFF => 4,
             IncidentCategory::TEMPERATURE_COLD => 5,
         };
-    }
-
-    private function defaultUrgency(IncidentCategory $category): string
-    {
-        return in_array($category, [IncidentCategory::TEMPERATURE_COLD, IncidentCategory::ELECTRICAL_OFF], true)
-            ? 'CRITICAL'
-            : 'MEDIUM';
     }
 
     private function toBool(mixed $value): bool

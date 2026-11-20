@@ -998,20 +998,22 @@ try {
     );
 
     // H-36-09: una máquina limpia de sede CRITICAL_INFRASTRUCTURE_24_7 debe
-    // heredar el perfil de la sede y calcular 240 min, ignorando el SLA del cliente.
+    // derivar HIGH desde SNACKS + ELECTRICAL_OFF y calcular 240 min, ignorando
+    // tanto la urgencia manipulada a LOW como el SLA del cliente.
     $criticalEscalation = $call('POST', "/api/restocker/machines/{$criticalMachineId}/escalate-to-sat", [
         'category' => 'ELECTRICAL_OFF',
         'workshop_internal_note' => 'La máquina no enciende y el display queda completamente apagado.',
         'photo_path' => '/uploads/incidents/rss08_critical_sla.jpg',
-        'urgency' => 'CRITICAL',
+        'urgency' => 'LOW',
         'sla_target_minutes' => 1440,
         'client_mutation_id' => 'rss08-escalate-critical-sla',
         'client_occurred_at' => '2026-11-18 11:10:00+00',
     ], $restockerToken);
     $criticalEscalationData = $data($criticalEscalation);
     $assert(
-        '8.3.1 El escalado desde sede crítica hereda el perfil SLA de la ubicación',
+        '8.3.1 El escalado deriva la urgencia y hereda el SLA de la ubicación',
         $criticalEscalation->getStatusCode() === 201
+            && ($criticalEscalationData['urgency'] ?? null) === 'HIGH'
             && ($criticalEscalationData['sla_tier_snapshot'] ?? null) === 'CRITICAL_INFRASTRUCTURE_24_7'
             && (int)($criticalEscalationData['sla_target_minutes'] ?? 0) === 240,
         'status=' . $criticalEscalation->getStatusCode() . ' body=' . json_encode($criticalEscalationData)
@@ -1024,9 +1026,10 @@ try {
     $criticalIncidentStmt->execute([':id' => (int)($criticalEscalationData['incident_id'] ?? 0)]);
     $criticalIncidentRow = $criticalIncidentStmt->fetch();
     $assert(
-        '8.3.2 El SLA crítico se persiste y no acepta minutos del cliente',
+        '8.3.2 El SLA crítico se persiste con la urgencia derivada y no acepta el payload',
         is_array($criticalIncidentRow)
             && $criticalIncidentRow['category'] === 'ELECTRICAL_OFF'
+            && $criticalIncidentRow['urgency'] === 'HIGH'
             && $criticalIncidentRow['sla_tier_snapshot'] === 'CRITICAL_INFRASTRUCTURE_24_7'
             && (int)$criticalIncidentRow['sla_target_minutes'] === 240,
         'row=' . json_encode($criticalIncidentRow)
