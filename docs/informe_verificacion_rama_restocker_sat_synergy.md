@@ -5,8 +5,8 @@
 - **HEAD verificado:** `2777bfd` · `perf(synergy): close the H-36-05 pooler latency budget`
 - **Estado del árbol:** limpio antes y después de la corrida inicial de verificación, que **no modificó código ni esquema**. La corrección posterior de V-01 **sí modificó el test** [`tests/integration/IncidentCommentsPerformanceAndSecurityTest.php`](../tests/integration/IncidentCommentsPerformanceAndSecurityTest.php); no se tocó esquema ni código de producto.
 - **Alcance:** batería global (`php tests/run_all.php`), canal `new_engine` acotado a las suites de la rama, medición del pooler, arranque de la app local y humo real de UI con los cuatro perfiles (sede, coordinación, técnico SAT y reponedor).
-- **Naturaleza del documento:** acta de verificación. La corrida inicial registró el estado observado **sin modificar código**; la corrección de V-01 cambió únicamente el test de rendimiento y seguridad, la de V-02 el login del reponedor y la de V-03 el copy de la ruta de abastecimiento. V-01, V-02 y V-03 quedaron resueltos. La corrida de navegador posterior abrió **H-36-06 a H-36-10**; `H-36-06`, `H-36-07`, `H-36-08` y `H-36-09` ya están corregidos y **H-36-10 sigue abierto**. El detalle está en [hallazgos_pruebas_navegador_spec36.md](hallazgos_pruebas_navegador_spec36.md).
-- **Última actualización:** 2026-11-20 · V-01, V-02 y V-03 resueltos; batería global en verde. La verificación de navegador posterior abrió H-36-06 a H-36-10; `H-36-06` se corrigió con hidratación de snapshots y composición HTTP/PostgreSQL, `H-36-07` con selector de motivo en Sede y persistencia en el despacho L1, y `H-36-08` con filtrado de causas por categoría/motivo y rechazo 422 de causas de otra categoría, y `H-36-09` con la derivación de urgencia desde tipo de máquina y categoría y la herencia del perfil SLA de la sede en la rama de ticket SAT nuevo; H-36-10 sigue abierto (ver [hallazgos_pruebas_navegador_spec36.md](hallazgos_pruebas_navegador_spec36.md)).
+- **Naturaleza del documento:** acta de verificación. La corrida inicial registró el estado observado **sin modificar código**; la corrección de V-01 cambió únicamente el test de rendimiento y seguridad, la de V-02 el login del reponedor y la de V-03 el copy de la ruta de abastecimiento. V-01, V-02 y V-03 quedaron resueltos. La corrida de navegador posterior abrió **H-36-06 a H-36-10**; los cinco hallazgos están corregidos. El detalle está en [hallazgos_pruebas_navegador_spec36.md](hallazgos_pruebas_navegador_spec36.md).
+- **Última actualización:** 2026-11-20 · V-01, V-02 y V-03 resueltos; batería global en verde. La verificación de navegador posterior abrió H-36-06 a H-36-10; `H-36-06` se corrigió con hidratación de snapshots y composición HTTP/PostgreSQL, `H-36-07` con selector de motivo en Sede y persistencia en el despacho L1, y `H-36-08` con filtrado de causas por categoría/motivo y rechazo 422 de causas de otra categoría, y `H-36-09` con la derivación de urgencia desde tipo de máquina y categoría y la herencia del perfil SLA de la sede en la rama de ticket SAT nuevo, y `H-36-10` con la publicación de `location_id` en el DTO de máquina y la composición de la Coincidencia en Sede en la vista del reponedor; no quedan hallazgos P1/P2 abiertos (ver [hallazgos_pruebas_navegador_spec36.md](hallazgos_pruebas_navegador_spec36.md)).
 
 ---
 
@@ -25,7 +25,7 @@
 
 Cifras de H-36-05 confirmadas en Supavisor 6543: «crear» 210,5 ms (p95 271,1), «ruta» 209,4 ms (p95 235,5) y «listar» 210,3 ms, dentro del presupuesto de 250 ms.
 
-**Conclusión tras las correcciones de V-01, V-02 y V-03 (2026-11-20):** la batería global queda en **441 suites · 16.993 aserciones · 0 fallos · exit 0**, con **197/197 PHP Unit, 106/106 JS Unit, 135/135 integración y 3/3 E2E**, y `DocMetricsGuard` declara las cifras coherentes con el README. **Esta conclusión no cierra la rama:** la verificación de navegador posterior abrió H-36-06 a H-36-10. `H-36-06`, `H-36-07`, `H-36-08` y `H-36-09` ya están corregidos; H-36-10 sigue abierto; ver [hallazgos_pruebas_navegador_spec36.md](hallazgos_pruebas_navegador_spec36.md).
+**Conclusión tras las correcciones de V-01, V-02 y V-03 (2026-11-20):** la batería global queda en **441 suites · 16.993 aserciones · 0 fallos · exit 0**, con **197/197 PHP Unit, 106/106 JS Unit, 135/135 integración y 3/3 E2E**, y `DocMetricsGuard` declara las cifras coherentes con el README. **La rama queda cerrada:** la verificación de navegador posterior abrió H-36-06 a H-36-10 y los cinco hallazgos ya están corregidos; ver [hallazgos_pruebas_navegador_spec36.md](hallazgos_pruebas_navegador_spec36.md).
 
 ---
 
@@ -89,7 +89,7 @@ Cargar `.env.docker-tls` y `.env.local` juntos sobrescribe `DATABASE_URL` y hace
 - Modal de escalado: valida la nota mínima y la foto obligatoria.
 - El servidor se detuvo al terminar y no quedaron procesos de prueba.
 - No se tomaron capturas ni se alteraron datos del parque.
-- La corrida de navegador posterior (2026-11-20) encontró los hallazgos H-36-06 a H-36-10; `H-36-06`, `H-36-07`, `H-36-08` y `H-36-09` se corrigieron después y H-36-10 sigue abierto. Su detalle, evidencia y criterio de cierre están en [hallazgos_pruebas_navegador_spec36.md](hallazgos_pruebas_navegador_spec36.md).
+- La corrida de navegador posterior (2026-11-20) encontró los hallazgos H-36-06 a H-36-10; `H-36-06` a `H-36-10` se corrigieron después. Su detalle, evidencia y criterio de cierre están en [hallazgos_pruebas_navegador_spec36.md](hallazgos_pruebas_navegador_spec36.md).
 
 ---
 
@@ -101,7 +101,7 @@ Cargar `.env.docker-tls` y `.env.local` juntos sobrescribe `DATABASE_URL` y hace
 | V-02 · etiquetado del login | P2 | No · resuelto (2026-11-20) | Etiquetas asociadas con `for`/`id`; `data-testid` conservados |
 | V-03 · copy obsoleto | P4 | No · resuelto (2026-11-20) | Estado vacío sin números de feature; guarda en la suite frontend |
 
-Este criterio cubre solo los hallazgos V-01, V-02 y V-03 de la corrida inicial. **No cierra la rama:** `H-36-06` (P1) se corrigió con hidratación de snapshots y una prueba de composición HTTP/PostgreSQL; `H-36-07` (P2) se corrigió con el selector de motivo en Sede y su persistencia en el despacho L1; `H-36-08` (P2) se corrigió con el filtrado de causas por categoría/motivo y la validación 422 de categoría; `H-36-09` (P2) se corrigió derivando la urgencia de tipo de máquina y categoría y heredando el perfil SLA de la sede en la rama de ticket SAT nuevo; H-36-10 (P2) sigue abierto y se documenta en [hallazgos_pruebas_navegador_spec36.md](hallazgos_pruebas_navegador_spec36.md).
+Este criterio cubre solo los hallazgos V-01, V-02 y V-03 de la corrida inicial. **Los hallazgos de navegador se cerraron después:** `H-36-06` (P1) se corrigió con hidratación de snapshots y una prueba de composición HTTP/PostgreSQL; `H-36-07` (P2) se corrigió con el selector de motivo en Sede y su persistencia en el despacho L1; `H-36-08` (P2) se corrigió con el filtrado de causas por categoría/motivo y la validación 422 de categoría; `H-36-09` (P2) se corrigió derivando la urgencia de tipo de máquina y categoría y heredando el perfil SLA de la sede en la rama de ticket SAT nuevo; `H-36-10` (P2) se corrigió publicando `location_id` en el DTO de máquina y componiendo la Coincidencia en Sede en la vista del reponedor. El detalle está en [hallazgos_pruebas_navegador_spec36.md](hallazgos_pruebas_navegador_spec36.md).
 
 El README ya declara 135/135 integraciones y 441 suites · 16.993 aserciones, cifras que la corrida posterior confirma.
 

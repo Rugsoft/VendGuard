@@ -121,6 +121,7 @@ const bootstrapPayload = {
         code: 'VEND-0701',
         model: 'Jofemar Vision',
         machine_type: 'COMBO',
+        location_id: 1,
         location_name: 'Hospital del Mar',
         site_code: 'HOSP-MAR',
         zone_id: 1,
@@ -141,6 +142,7 @@ const bootstrapPayload = {
         code: 'VEND-0801',
         model: 'Necta Korinto',
         machine_type: 'HOT_DRINKS',
+        location_id: 2,
         location_name: 'Torre Glòries',
         site_code: 'TORRE-GLO',
         zone_id: 2,
@@ -157,6 +159,16 @@ const bootstrapPayload = {
         fill_rate_percent: 90
       }
     ],
+    site_coincidence: {
+      1: [{
+        user_id: 7,
+        name: 'Marta Técnica Ruta BCN',
+        operator_code: 'OP-02',
+        role: 'TECHNICIAN',
+        shift_status: 'ON_SHIFT',
+        activity_summary: '1 avería SAT activa en esta sede'
+      }]
+    },
     route_stops: [],
     recent_visits: [
       {
@@ -197,6 +209,13 @@ assert('loadMyRoute() aplica el estado de turno del bootstrap', routeVm.shiftSta
 assert('El contador diario formatea los segundos efectivos', routeVm.todayEffectiveFormatted === '02h 00m', routeVm.todayEffectiveFormatted);
 assert('El estado base de ruta queda vacío sin paradas inventadas', routeVm.routeStops.length === 0);
 assert('loadMyRoute() publica las dos máquinas de sus zonas', routeVm.machines.length === 2 && routeVm.machines[0].code === 'VEND-0701');
+assert(
+  'loadMyRoute() recibe location_id y la coincidencia indexada por sede',
+  routeVm.machines.every((machine) => Number.isInteger(machine.location_id) && machine.location_id > 0)
+    && routeVm.siteCoincidenceForLocation(routeVm.machines[0].location_id).length === 1
+    && routeVm.siteCoincidenceSummary(routeVm.machines[0].location_id).includes('Marta Técnica Ruta BCN (OP-02)')
+    && routeVm.siteCoincidenceForLocation(routeVm.machines[1].location_id).length === 0
+);
 assert('loadMyRoute() publica el historial reciente de visitas', routeVm.recentVisits.length === 1 && routeVm.recentVisits[0].visit_code === 'MRV-2026-0031');
 assert('machineHasAlert() distingue la máquina con alertas', routeVm.machineHasAlert(routeVm.machines[0]) === true && routeVm.machineHasAlert(routeVm.machines[1]) === false);
 assert('machineTypeLabel() traduce las tipologías', routeVm.machineTypeLabel('COMBO') === 'Mixta' && routeVm.machineTypeLabel('HOT_DRINKS') === 'Bebidas calientes');

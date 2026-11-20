@@ -598,6 +598,35 @@ try {
             && array_key_exists('has_active_sat_incident', $routeMachine),
         'machine_keys=' . implode(',', array_keys($routeMachine))
     );
+
+    // H-36-10: la tarjeta del reponedor indexa la coincidencia con
+    // `machine.location_id`, así que el DTO debe publicar el id persistido.
+    $routeLocationIds = array_map(
+        static fn (array $machine): int => (int)($machine['location_id'] ?? 0),
+        $restockerRouteData['machines'] ?? []
+    );
+    $storedMachineLocations = $pdo
+        ->query("SELECT code, location_id FROM machines WHERE code LIKE 'RSS8-%'")
+        ->fetchAll(PDO::FETCH_KEY_PAIR);
+    $locationsMatchDatabase = $routeLocationIds !== [];
+    foreach ($restockerRouteData['machines'] as $routeMachineRow) {
+        if ((int)($storedMachineLocations[$routeMachineRow['code']] ?? 0)
+            !== (int)($routeMachineRow['location_id'] ?? 0)) {
+            $locationsMatchDatabase = false;
+        }
+    }
+    $assert(
+        'H-36-10: cada máquina de la ruta publica el location_id persistido',
+        $locationsMatchDatabase,
+        'machines=' . json_encode($routeLocationIds)
+    );
+    $routeCoincidence = $restockerRouteData['site_coincidence'][$locationId] ?? [];
+    $assert(
+        'H-36-10: la coincidencia se indexa por location_id y contiene al técnico en turno',
+        in_array($locationId, $routeLocationIds, true)
+            && in_array($technicianId, array_column($routeCoincidence, 'user_id'), true),
+        'location=' . $locationId . ' coincidence=' . json_encode($routeCoincidence)
+    );
     $qrIncidentId = (int)($qrBody['incident_id'] ?? 0);
     $storedStmt = $pdo->prepare('SELECT dispatch_level, level1_issue_type FROM incidents WHERE id = :id');
     $storedStmt->execute([':id' => $qrIncidentId]);
