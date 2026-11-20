@@ -5,8 +5,8 @@
 - **HEAD verificado:** `2777bfd` · `perf(synergy): close the H-36-05 pooler latency budget`
 - **Estado del árbol:** limpio antes y después de la corrida inicial de verificación, que **no modificó código ni esquema**. La corrección posterior de V-01 **sí modificó el test** [`tests/integration/IncidentCommentsPerformanceAndSecurityTest.php`](../tests/integration/IncidentCommentsPerformanceAndSecurityTest.php); no se tocó esquema ni código de producto.
 - **Alcance:** batería global (`php tests/run_all.php`), canal `new_engine` acotado a las suites de la rama, medición del pooler, arranque de la app local y humo real de UI con los cuatro perfiles (sede, coordinación, técnico SAT y reponedor).
-- **Naturaleza del documento:** acta de verificación. La corrida inicial registró el estado observado **sin modificar código**; la corrección de V-01 cambió únicamente el test de rendimiento y seguridad y la de V-02 el login del reponedor. V-03 sigue abierto.
-- **Última actualización:** 2026-11-20 · V-01 resuelto con validación por catálogo y V-02 con etiquetado accesible verificado en navegador; batería global en verde.
+- **Naturaleza del documento:** acta de verificación. La corrida inicial registró el estado observado **sin modificar código**; la corrección de V-01 cambió únicamente el test de rendimiento y seguridad, la de V-02 el login del reponedor y la de V-03 el copy de la ruta de abastecimiento. No queda ningún hallazgo abierto.
+- **Última actualización:** 2026-11-20 · V-01, V-02 y V-03 resueltos; batería global en verde.
 
 ---
 
@@ -25,7 +25,7 @@
 
 Cifras de H-36-05 confirmadas en Supavisor 6543: «crear» 210,5 ms (p95 271,1), «ruta» 209,4 ms (p95 235,5) y «listar» 210,3 ms, dentro del presupuesto de 250 ms.
 
-**Conclusión tras la corrección de V-01 (2026-11-20):** la batería global queda en **441 suites · 16.993 aserciones · 0 fallos · exit 0**, con **197/197 PHP Unit, 106/106 JS Unit, 135/135 integración y 3/3 E2E**, y `DocMetricsGuard` declara las cifras coherentes con el README. Queda abierto V-03, no bloqueante.
+**Conclusión tras las correcciones de V-01, V-02 y V-03 (2026-11-20):** la batería global queda en **441 suites · 16.993 aserciones · 0 fallos · exit 0**, con **197/197 PHP Unit, 106/106 JS Unit, 135/135 integración y 3/3 E2E**, y `DocMetricsGuard` declara las cifras coherentes con el README. No queda ningún hallazgo abierto.
 
 ---
 
@@ -64,13 +64,15 @@ Cifras de H-36-05 confirmadas en Supavisor 6543: «crear» 210,5 ms (p95 271,1),
 
 ---
 
-### V-03 · P4 · Copy obsoleto en la ruta de abastecimiento
+### V-03 · P4 · RESUELTO (2026-11-20) — Copy obsoleto en la ruta de abastecimiento
+
+**Resolución.** El estado vacío dice ahora «Sin paradas asignadas por ahora. Las órdenes de carga y las visitas a máquinas aparecerán aquí cuando coordinación las asigne.», sin referencias a números de feature. Se actualizaron también el comentario de sección y el bullet 5 del docblock del componente, y la aserción de plantilla de `restocker_route_view.test.mjs` exige el copy nuevo y la ausencia del antiguo. Evidencia en la interfaz real (tras limpiar la caché del service worker): la sección `restocker-route-base` muestra el texto nuevo y `Features 24, 26 y 27` ya no aparece; suite frontend **236/236, exit 0**.
 
 - **Archivo:** [`public/assets/js/components/RestockerRouteView.js`](../public/assets/js/components/RestockerRouteView.js) · líneas 3085–3087
-- **Texto actual:** «Sin paradas asignadas por ahora. Las órdenes de carga y las visitas a máquinas llegarán con las Features 24, 26 y 27.»
+- **Texto anterior (antes de la corrección):** «Sin paradas asignadas por ahora. Las órdenes de carga y las visitas a máquinas llegarán con las Features 24, 26 y 27.»
 - **Qué ocurre:** el mensaje anuncia como futuras funcionalidades que ya están implementadas (órdenes de carga del Módulo 33, visitas y planograma). El estado vacío describe un producto anterior.
 - **Impacto:** copy engañoso para el operario; no afecta a la operación ni a la seguridad. Solo se muestra cuando `routeStops` está vacío.
-- **Recomendación (no aplicada):** reescribir el estado vacío sin referencias a números de feature, por ejemplo indicando que no hay paradas asignadas y que las órdenes y visitas aparecerán cuando coordinación las asigne.
+- **Corrección aplicada:** estado vacío reescrito sin números de feature, indicando que las órdenes y visitas aparecerán cuando coordinación las asigne.
 
 ---
 
@@ -96,7 +98,7 @@ Cargar `.env.docker-tls` y `.env.local` juntos sobrescribe `DATABASE_URL` y hace
 | :--- | :--- | :--- | :--- |
 | V-01 · aserción 1.8 | P2 | No · resuelto (2026-11-20) | Validación por catálogo con latencia y plan a escala conservados |
 | V-02 · etiquetado del login | P2 | No · resuelto (2026-11-20) | Etiquetas asociadas con `for`/`id`; `data-testid` conservados |
-| V-03 · copy obsoleto | P4 | No | Actualizar el texto del estado vacío |
+| V-03 · copy obsoleto | P4 | No · resuelto (2026-11-20) | Estado vacío sin números de feature; guarda en la suite frontend |
 
 El README ya declara 135/135 integraciones y 441 suites · 16.993 aserciones, cifras que la corrida posterior confirma.
 

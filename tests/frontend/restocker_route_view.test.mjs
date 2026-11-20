@@ -7,7 +7,7 @@
  * - Cabecera con nombre, `operator_code` e insignias Titular / Suplente.
  * - Ciclo completo de jornada y cierre directo sin modal de relevo SAT.
  * - Contador diario en vivo y «⏱️ Mis Horas» de solo lectura, sin id ajeno.
- * - Estado base de ruta sin paradas inventadas (Features 24, 26 y 27).
+ * - Estado base de ruta sin paradas inventadas.
  * - Listado de máquinas de las zonas vivas con resumen de stock y modal de
  *   planograma de solo lectura, sin coste ni margen (T-PLN-13, QA 2, Art. V.4).
  * - Enrutamiento de sesión del Shell Vue 3 hacia `restocker`.
@@ -195,7 +195,7 @@ assert('loadMyRoute() publica la zona titular y la suplente', routeVm.primaryZon
 assert('zoneRoleLabel() distingue Titular y Suplente', routeVm.zoneRoleLabel(routeVm.primaryZone) === 'Titular' && routeVm.zoneRoleLabel(routeVm.backupZones[0]) === 'Suplente');
 assert('loadMyRoute() aplica el estado de turno del bootstrap', routeVm.shiftStatus === 'MEAL_BREAK' && routeVm.activeShiftId === 45);
 assert('El contador diario formatea los segundos efectivos', routeVm.todayEffectiveFormatted === '02h 00m', routeVm.todayEffectiveFormatted);
-assert('El estado base de ruta queda vacío hasta las Features 24/26/27', routeVm.routeStops.length === 0);
+assert('El estado base de ruta queda vacío sin paradas inventadas', routeVm.routeStops.length === 0);
 assert('loadMyRoute() publica las dos máquinas de sus zonas', routeVm.machines.length === 2 && routeVm.machines[0].code === 'VEND-0701');
 assert('loadMyRoute() publica el historial reciente de visitas', routeVm.recentVisits.length === 1 && routeVm.recentVisits[0].visit_code === 'MRV-2026-0031');
 assert('machineHasAlert() distingue la máquina con alertas', routeVm.machineHasAlert(routeVm.machines[0]) === true && routeVm.machineHasAlert(routeVm.machines[1]) === false);
@@ -331,7 +331,7 @@ assert(
   !/handover|target_technician_id|relevo de averías/i.test(templateBlock)
 );
 assert('La vista no consume la ruta SAT', !viewSource.includes('/technician/my-route') && !viewSource.includes('/coordinator/'));
-assert('El estado base de ruta está presente', viewSource.includes('data-testid="restocker-route-base"') && viewSource.includes('Features 24, 26 y 27'));
+assert('El estado base de ruta está presente con el copy vigente', viewSource.includes('data-testid="restocker-route-base"') && viewSource.includes('aparecerán aquí cuando coordinación las asigne') && !viewSource.includes('Features 24, 26 y 27'));
 assert('«Mis Horas» es un modal de solo lectura con sus insignias', viewSource.includes('data-testid="modal-my-hours"') && viewSource.includes('Cierre forzado') && viewSource.includes('Ajustado por Coordinación'));
 assert('El contador diario y su acceso están en la barra', viewSource.includes('data-testid="restocker-today-summary"') && viewSource.includes('data-testid="btn-open-my-hours"'));
 

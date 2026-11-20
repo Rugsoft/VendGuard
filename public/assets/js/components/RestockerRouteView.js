@@ -14,8 +14,8 @@
  * 4. Contador diario en vivo y autoconsulta de solo lectura «⏱️ Mis Horas», que
  *    no envía ningún identificador ajeno: el backend resuelve el `user_id` del
  *    token (Art. V.4).
- * 5. Estado base informativo de la ruta de abastecimiento, listo para las
- *    Features 24, 26 y 27 sin inventar paradas.
+ * 5. Estado de la ruta de abastecimiento con las paradas que asigna
+ *    coordinación, sin inventar ninguna.
  * 6. Ciclo móvil de la orden de carga: recepción en un toque, liquidación por
  *    lote al cierre, stock FEFO con semáforo y comprobante de la última orden
  *    liquidada (`C4`), siempre sin costes internos (Art. V.4).
@@ -3073,7 +3073,7 @@ export const RestockerRouteView = {
           </p>
         </section>
 
-        <!-- Estado base de la ruta de abastecimiento (Features 24, 26 y 27) -->
+        <!-- Estado de la ruta de abastecimiento (paradas asignadas por coordinación) -->
         <section
           data-testid="restocker-route-base"
           style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
@@ -3086,7 +3086,7 @@ export const RestockerRouteView = {
           <p v-else-if="loadError" data-testid="restocker-route-error" style="font-size: 13px; color: var(--color-urgency-critical); margin: 0;">{{ loadError }}</p>
           <p v-else-if="routeStops.length === 0" style="font-size: 13px; color: var(--color-ink-muted); margin: 0;">
             Sin paradas asignadas por ahora. Las órdenes de carga y las visitas a máquinas
-            llegarán con las Features 24, 26 y 27.
+            aparecerán aquí cuando coordinación las asigne.
           </p>
           <ul v-else style="margin: 8px 0 0 0; padding: 0; list-style: none; display: grid; gap: 8px;">
             <li
