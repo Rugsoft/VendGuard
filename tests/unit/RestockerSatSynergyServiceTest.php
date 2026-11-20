@@ -98,11 +98,25 @@ final class SynergyGatewayDouble implements RestockerSatSynergyGatewayInterface
         return ['ok' => true, 'promoted' => true];
     }
 
-    public function assignDispatchLevel(array $incident, string $dispatchLevel, array $assignee, array $actor): array
-    {
-        $this->calls[] = ['method' => 'assignDispatchLevel', 'args' => compact('incident', 'dispatchLevel', 'assignee', 'actor')];
+    public function assignDispatchLevel(
+        array $incident,
+        string $dispatchLevel,
+        array $assignee,
+        array $actor,
+        ?string $urgencyOverride = null,
+        ?string $urgencyReason = null
+    ): array {
+        $this->calls[] = [
+            'method' => 'assignDispatchLevel',
+            'args' => compact('incident', 'dispatchLevel', 'assignee', 'actor', 'urgencyOverride', 'urgencyReason'),
+        ];
 
-        return ['ok' => true, 'incident_id' => (int)$incident['id'], 'dispatch_level' => $dispatchLevel];
+        return [
+            'ok' => true,
+            'incident_id' => (int)$incident['id'],
+            'dispatch_level' => $dispatchLevel,
+            'urgency' => $urgencyOverride ?? 'MEDIUM',
+        ];
     }
 
     public function recordConflictDump(array $actor, array $mutation, array $conflict): array
@@ -193,6 +207,34 @@ assertSynergy(
     $gateway->lastCall()['args']['assignee']['id'] === 4
         && $gateway->lastCall()['args']['incident']['level1_issue_type'] === 'MINOR_SPIRAL_JAM',
     'el custodio y el motivo L1 llegan íntegros al gateway'
+);
+
+$dispatchWithUrgency = $service->dispatchLevel(
+    ['id' => 11, 'category' => 'PRODUCT_JAM'],
+    'L2_SAT',
+    $technician,
+    $actor,
+    'HIGH',
+    'La sede confirma que el pago está bloqueado y exige prioridad alta.'
+);
+assertSynergy(($dispatchWithUrgency['ok'] ?? false) === true, 'la conmutación a L2 con urgencia devuelve ok');
+assertSynergy(
+    $gateway->lastCall()['args']['urgencyOverride'] === 'HIGH'
+        && $gateway->lastCall()['args']['urgencyReason'] === 'La sede confirma que el pago está bloqueado y exige prioridad alta.',
+    'la urgencia y su motivo llegan íntegros al gateway'
+);
+
+assertSynergyRejects(
+    static fn () => $service->dispatchLevel(
+        ['id' => 12, 'category' => 'PRODUCT_JAM'],
+        'L2_SAT',
+        $technician,
+        $actor,
+        'HIGH',
+        ''
+    ),
+    'URGENCY_REASON_REQUIRED',
+    422
 );
 
 // ── 2. Inicio y resolución in situ ─────────────────────────────────────

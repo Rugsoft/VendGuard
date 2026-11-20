@@ -84,13 +84,17 @@ interface RestockerSatSynergyGatewayInterface
      * @param array<string, mixed> $incident
      * @param array<string, mixed> $assignee
      * @param array<string, mixed> $actor
+     * @param string|null $urgencyOverride  Urgencia final elegida por Coordinación, o null.
+     * @param string|null $urgencyReason    Motivo obligatorio cuando se reclasifica.
      * @return array<string, mixed>
      */
     public function assignDispatchLevel(
         array $incident,
         string $dispatchLevel,
         array $assignee,
-        array $actor
+        array $actor,
+        ?string $urgencyOverride = null,
+        ?string $urgencyReason = null
     ): array;
 
     /**

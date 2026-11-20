@@ -11,6 +11,7 @@ use VendGuard\Core\Domain\Repository\RestockerSatSynergyGatewayInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
 use VendGuard\Core\Domain\ValueObject\Level1IssueType;
+use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\RestockerSatSynergyValidator;
 
 /**
@@ -64,7 +65,14 @@ final class RestockerSatSynergyService
      * @param array<string, mixed> $actor
      * @return array<string, mixed>
      */
-    public function dispatchLevel(array $incident, string $targetLevel, array $assignee, array $actor): array
+    public function dispatchLevel(
+        array $incident,
+        string $targetLevel,
+        array $assignee,
+        array $actor,
+        ?string $urgencyOverride = null,
+        ?string $urgencyReason = null
+    ): array
     {
         $level = IncidentDispatchLevel::tryFrom(strtoupper(trim($targetLevel)));
         if ($level === null) {
@@ -107,7 +115,31 @@ final class RestockerSatSynergyService
             unset($incident['level1_issue_type']);
         }
 
-        return $this->gateway->assignDispatchLevel($incident, $level->value, $assignee, $actor);
+        // La urgencia elegida por Coordinación no puede viajar sin su rastro de
+        // auditoría. La validación vive aquí para que cualquier cliente HTTP
+        // reciba el mismo 422 antes de tocar la custodia (EARS 5.3).
+        $cleanUrgency = $urgencyOverride !== null ? strtoupper(trim($urgencyOverride)) : '';
+        $cleanReason = $urgencyReason !== null ? trim($urgencyReason) : '';
+        if ($cleanUrgency !== '') {
+            if (!UrgencyLevel::isValid($cleanUrgency)) {
+                throw RestockerSatSynergyValidationException::invalidUrgency($cleanUrgency);
+            }
+            if ($cleanReason === '') {
+                throw RestockerSatSynergyValidationException::urgencyReasonRequired();
+            }
+        } else {
+            $cleanUrgency = null;
+            $cleanReason = null;
+        }
+
+        return $this->gateway->assignDispatchLevel(
+            $incident,
+            $level->value,
+            $assignee,
+            $actor,
+            $cleanUrgency,
+            $cleanReason
+        );
     }
 
     /**

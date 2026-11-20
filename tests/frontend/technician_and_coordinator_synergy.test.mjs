@@ -176,10 +176,19 @@ assert('El despacho L1 emite assigned para refrescar la vista', emitted?.event =
 // PR22-02: un expediente que nació en L1 y se conmuta a L2 debe viajar por
 // dispatch-level, no por assignTechnician (que dejaba el nivel intacto).
 let level2Dispatched = null;
+let level2Calls = 0;
 let assignTechnicianCalls = 0;
 const originalAssignTechnician = api.coordinator.assignTechnician;
-api.coordinator.changeDispatchLevel = async (id, level, assigneeId) => {
-  level2Dispatched = { id, level, assigneeId };
+api.coordinator.changeDispatchLevel = async (
+  id,
+  level,
+  assigneeId,
+  level1IssueType,
+  urgencyOverride,
+  urgencyReason
+) => {
+  level2Calls++;
+  level2Dispatched = { id, level, assigneeId, level1IssueType, urgencyOverride, urgencyReason };
   return { id, dispatch_level: level, assigned_technician_id: assigneeId };
 };
 api.coordinator.assignTechnician = async () => {
@@ -194,13 +203,24 @@ coordinator.selectedIncident = {
 };
 coordinator.assignDispatchLevel = 'L2_SAT';
 coordinator.assignTechnicianId = 10;
+coordinator.assignUrgencyOverride = 'HIGH';
+coordinator.assignUrgencyReason = '';
 coordinator.refreshTerritorialMap = () => {};
 await coordinator.submitAssignment();
 assert(
-  'El cambio L1→L2 llama a dispatch-level con el técnico SAT elegido',
+  'El cambio L1→L2 exige motivo cuando se reclasifica la urgencia',
+  level2Calls === 0 && coordinator.assignError.includes('motivo justificado'),
+  JSON.stringify({ level2Calls, error: coordinator.assignError })
+);
+coordinator.assignUrgencyReason = 'La sede confirma el bloqueo del cobro y exige prioridad alta.';
+await coordinator.submitAssignment();
+assert(
+  'El cambio L1→L2 llama a dispatch-level con técnico y urgencia elegidos',
   level2Dispatched?.id === 5
     && level2Dispatched?.level === 'L2_SAT'
     && level2Dispatched?.assigneeId === 10
+    && level2Dispatched?.urgencyOverride === 'HIGH'
+    && level2Dispatched?.urgencyReason === 'La sede confirma el bloqueo del cobro y exige prioridad alta.'
     && assignTechnicianCalls === 0,
   JSON.stringify({ level2Dispatched, assignTechnicianCalls })
 );

@@ -7,6 +7,7 @@ namespace VendGuard\Core\Domain\Exception;
 use DomainException;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
+use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 
 /**
  * RestockerSatSynergyValidationException
@@ -40,6 +41,8 @@ final class RestockerSatSynergyValidationException extends DomainException
     public const L1_DISPATCH_FORBIDDEN_FOR_CATEGORY = 'L1_DISPATCH_FORBIDDEN_FOR_CATEGORY';
     public const INVALID_ASSIGNEE_ROLE_FOR_DISPATCH_LEVEL = 'INVALID_ASSIGNEE_ROLE_FOR_DISPATCH_LEVEL';
     public const INVALID_LEVEL1_ISSUE_TYPE = 'INVALID_LEVEL1_ISSUE_TYPE';
+    public const INVALID_URGENCY = 'INVALID_URGENCY';
+    public const URGENCY_REASON_REQUIRED = 'URGENCY_REASON_REQUIRED';
     public const RESOLUTION_TEXT_TOO_SHORT = 'RESOLUTION_TEXT_TOO_SHORT';
     public const ESCALATION_INTERNAL_NOTE_REQUIRED = 'ESCALATION_INTERNAL_NOTE_REQUIRED';
     public const ESCALATION_PHOTO_REQUIRED = 'ESCALATION_PHOTO_REQUIRED';
@@ -176,6 +179,31 @@ final class RestockerSatSynergyValidationException extends DomainException
             422,
             'level1_issue_type',
             ['level1_issue_type' => $issueType, 'category' => $category->value]
+        );
+    }
+
+    public static function invalidUrgency(string $value): self
+    {
+        return new self(
+            self::INVALID_URGENCY,
+            sprintf(
+                'Nivel de urgencia «%s» no reconocido. Valores aceptados: %s.',
+                $value,
+                implode(', ', UrgencyLevel::values())
+            ),
+            422,
+            'urgency_override',
+            ['urgency_override' => $value]
+        );
+    }
+
+    public static function urgencyReasonRequired(): self
+    {
+        return new self(
+            self::URGENCY_REASON_REQUIRED,
+            'La reclasificación de urgencia exige un motivo justificado (urgency_override_reason obligatorio).',
+            422,
+            'urgency_override_reason'
         );
     }
 

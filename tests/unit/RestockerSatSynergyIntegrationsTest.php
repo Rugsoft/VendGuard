@@ -64,8 +64,14 @@ final class IntegrationGatewayDouble implements RestockerSatSynergyGatewayInterf
         return ['ok' => true, 'promoted' => true, 'dispatch_level' => 'L2_SAT'];
     }
 
-    public function assignDispatchLevel(array $incident, string $dispatchLevel, array $assignee, array $actor): array
-    {
+    public function assignDispatchLevel(
+        array $incident,
+        string $dispatchLevel,
+        array $assignee,
+        array $actor,
+        ?string $urgencyOverride = null,
+        ?string $urgencyReason = null
+    ): array {
         return ['ok' => true];
     }
 

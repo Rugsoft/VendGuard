@@ -14,6 +14,7 @@ use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
 use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
+use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -223,7 +224,9 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         array $incident,
         string $dispatchLevel,
         array $assignee,
-        array $actor
+        array $actor,
+        ?string $urgencyOverride = null,
+        ?string $urgencyReason = null
     ): array {
         $level = IncidentDispatchLevel::tryFrom(strtoupper(trim($dispatchLevel)));
         if ($level === null) {
@@ -232,6 +235,8 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
 
         $incidentId = (int)($incident['id'] ?? 0);
         $assigneeId = (int)($assignee['id'] ?? 0);
+        $cleanUrgencyOverride = $urgencyOverride !== null ? strtoupper(trim($urgencyOverride)) : '';
+        $cleanUrgencyReason = $urgencyReason !== null ? trim($urgencyReason) : '';
 
         $this->begin();
         try {
@@ -267,9 +272,49 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                 }
             }
 
+            $currentUrgency = UrgencyLevel::fromString((string)$current['urgency']);
+            $finalUrgency = $currentUrgency;
+            if ($cleanUrgencyOverride !== '') {
+                if ($cleanUrgencyReason === '') {
+                    return $this->fail(
+                        'URGENCY_REASON_REQUIRED',
+                        422,
+                        'La reclasificación de urgencia exige un motivo justificado.'
+                    );
+                }
+                $finalUrgency = UrgencyLevel::fromString($cleanUrgencyOverride);
+            }
+            $urgencyChanged = $finalUrgency !== $currentUrgency;
+            $recalculatedSlaTargetMinutes = null;
+            $recalculatedSlaTargetAt = null;
+            if ($urgencyChanged) {
+                $machineType = MachineType::fromString((string)($current['machine_type'] ?? ''));
+                $slaTier = SlaTier::tryFrom(strtoupper(trim((string)($current['sla_tier_snapshot'] ?? ''))))
+                    ?? SlaTier::tryFrom(strtoupper(trim((string)($current['location_sla_tier'] ?? ''))))
+                    ?? SlaTier::STANDARD;
+                $recalculatedSlaTargetMinutes = SlaTargetCalculator::calculateTargetMinutes(
+                    $slaTier,
+                    $machineType,
+                    IncidentCategory::fromString((string)$current['category']),
+                    $finalUrgency
+                );
+                $recalculatedSlaTargetAt = SlaTargetCalculator::computeEffectiveTargetAt(
+                    new DateTimeImmutable((string)$current['created_at']),
+                    $recalculatedSlaTargetMinutes,
+                    (int)($current['total_pending_info_seconds'] ?? 0)
+                )->format('Y-m-d\TH:i:sP');
+            }
+
             $status = $assigneeId > 0 ? 'ASSIGNED' : 'REGISTERED';
             $level1IssueType = trim((string)($incident['level1_issue_type'] ?? ''));
             $this->closeOpenCustody($incidentId, $actor, 'REASSIGNED_BY_COORDINATOR', 'Cambio de nivel operativo', null);
+
+            $urgencySet = $recalculatedSlaTargetMinutes !== null
+                ? ",
+                        urgency = :urgency::urgency_level,
+                        sla_target_minutes = :sla_minutes::integer,
+                        sla_target_at = :sla_target_at::timestamptz"
+                : '';
 
             $stmt = $this->pdo->prepare(
                 'UPDATE incidents
@@ -278,18 +323,24 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                         assigned_technician_id = :assignee_id,
                         status = :status,
                         assigned_at = CASE WHEN :assignee_flag::bigint IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
-                        started_at = NULL,
+                        started_at = NULL' . $urgencySet . ',
                         updated_at = CURRENT_TIMESTAMP
                   WHERE id = :id'
             );
-            $stmt->execute([
+            $params = [
                 ':dispatch_level' => $level->value,
                 ':level1_issue_type' => $level1IssueType !== '' ? $level1IssueType : null,
                 ':assignee_id' => $assigneeId > 0 ? $assigneeId : null,
                 ':assignee_flag' => $assigneeId > 0 ? $assigneeId : null,
                 ':status' => $status,
                 ':id' => $incidentId,
-            ]);
+            ];
+            if ($recalculatedSlaTargetMinutes !== null) {
+                $params[':urgency'] = $finalUrgency->value;
+                $params[':sla_minutes'] = $recalculatedSlaTargetMinutes;
+                $params[':sla_target_at'] = $recalculatedSlaTargetAt;
+            }
+            $stmt->execute($params);
 
             if ($assigneeId > 0) {
                 $this->openCustody($incidentId, $assigneeId, 'COORDINATOR_ASSIGN', $this->actorId($actor), null);
@@ -301,13 +352,26 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                 (string)$current['status'],
                 $status,
                 'DISPATCH_LEVEL_CHANGE:' . $level->value
+                    . ($urgencyChanged ? ':URGENCY:' . $finalUrgency->value : '')
             );
             $this->audit(
                 $incidentId,
                 'DISPATCH_LEVEL_CHANGE',
                 $actor,
-                ['dispatch_level' => (string)$current['dispatch_level'], 'level1_issue_type' => $current['level1_issue_type'] ?? null],
-                ['dispatch_level' => $level->value, 'level1_issue_type' => $level1IssueType !== '' ? $level1IssueType : ($current['level1_issue_type'] ?? null), 'assigned_technician_id' => $assigneeId > 0 ? $assigneeId : null]
+                [
+                    'dispatch_level' => (string)$current['dispatch_level'],
+                    'level1_issue_type' => $current['level1_issue_type'] ?? null,
+                    'urgency' => $currentUrgency->value,
+                    'sla_target_minutes' => $current['sla_target_minutes'] ?? null,
+                ],
+                [
+                    'dispatch_level' => $level->value,
+                    'level1_issue_type' => $level1IssueType !== '' ? $level1IssueType : ($current['level1_issue_type'] ?? null),
+                    'assigned_technician_id' => $assigneeId > 0 ? $assigneeId : null,
+                    'urgency' => $finalUrgency->value,
+                    'sla_target_minutes' => $recalculatedSlaTargetMinutes ?? ($current['sla_target_minutes'] ?? null),
+                    'urgency_override_reason' => $cleanUrgencyOverride !== '' ? mb_substr($cleanUrgencyReason, 0, 1000) : null,
+                ]
             );
             $this->commit();
 
@@ -318,6 +382,9 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                 'level1_issue_type' => $level1IssueType !== '' ? $level1IssueType : ($current['level1_issue_type'] ?? null),
                 'status' => $status,
                 'assigned_technician_id' => $assigneeId > 0 ? $assigneeId : null,
+                'urgency' => $finalUrgency->value,
+                'sla_target_minutes' => $recalculatedSlaTargetMinutes ?? ($current['sla_target_minutes'] ?? null),
+                'urgency_changed' => $urgencyChanged,
             ];
         } catch (Throwable $exception) {
             $this->rollback();
@@ -1372,7 +1439,8 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
     private function lockIncident(int $incidentId): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT i.*, m.sanitary_status, m.code AS machine_code, l.zone_id
+            'SELECT i.*, m.sanitary_status, m.code AS machine_code, m.machine_type AS machine_type,
+                    l.zone_id, l.sla_tier AS location_sla_tier
                FROM incidents i
                INNER JOIN machines m ON m.id = i.machine_id
                INNER JOIN locations l ON l.id = i.location_id

@@ -497,9 +497,50 @@ try {
     $dispatch = $call('POST', "/api/coordinator/incidents/{$dispatchIncidentId}/dispatch-level", [
         'dispatch_level' => 'L2_SAT',
         'assignee_id' => $technicianId,
+        'urgency_override' => 'CRITICAL',
+        'urgency_override_reason' => 'La sede confirma que el cobro está bloqueado y exige prioridad inmediata.',
     ], $coordinatorToken);
     $assert('La conmutación a L2 responde 200', $dispatch->getStatusCode() === 200, 'status=' . $dispatch->getStatusCode() . ' ' . $errorCode($dispatch));
-    $assert('El nivel conmutado es L2_SAT', ($data($dispatch)['dispatch_level'] ?? '') === 'L2_SAT');
+    $dispatchData = $data($dispatch);
+    $assert('El nivel conmutado es L2_SAT', ($dispatchData['dispatch_level'] ?? '') === 'L2_SAT');
+    $assert(
+        'La conmutación aplica la urgencia elegida',
+        ($dispatchData['urgency'] ?? '') === 'CRITICAL'
+            && ($dispatchData['urgency_changed'] ?? false) === true,
+        'body=' . json_encode($dispatchData)
+    );
+
+    $dispatchRowStmt = $pdo->prepare(
+        'SELECT urgency, sla_target_minutes, sla_target_at FROM incidents WHERE id = :id'
+    );
+    $dispatchRowStmt->execute([':id' => $dispatchIncidentId]);
+    $dispatchRow = $dispatchRowStmt->fetch();
+    $assert(
+        'La urgencia y el SLA quedan persistidos con la conmutación',
+        is_array($dispatchRow)
+            && $dispatchRow['urgency'] === 'CRITICAL'
+            && (int)$dispatchRow['sla_target_minutes'] === 480
+            && $dispatchRow['sla_target_at'] !== null,
+        'row=' . json_encode($dispatchRow)
+    );
+
+    $dispatchAuditStmt = $pdo->prepare(
+        "SELECT previous_state, new_state FROM audit_log
+          WHERE entity_id = :id AND action = 'DISPATCH_LEVEL_CHANGE'
+          ORDER BY id DESC LIMIT 1"
+    );
+    $dispatchAuditStmt->execute([':id' => $dispatchIncidentId]);
+    $dispatchAudit = $dispatchAuditStmt->fetch();
+    $dispatchAuditNew = is_array($dispatchAudit)
+        ? json_decode((string)$dispatchAudit['new_state'], true)
+        : null;
+    $assert(
+        'La auditoría registra la urgencia aplicada y su motivo',
+        is_array($dispatchAuditNew)
+            && ($dispatchAuditNew['urgency'] ?? '') === 'CRITICAL'
+            && ($dispatchAuditNew['urgency_override_reason'] ?? '') === 'La sede confirma que el cobro está bloqueado y exige prioridad inmediata.',
+        'audit=' . json_encode($dispatchAuditNew)
+    );
 
     // H-36-07: el 422 por pareja incompatible no debe mutar el expediente.
     $incompatibleL1 = $call('POST', "/api/coordinator/incidents/{$manualL1IncidentId}/dispatch-level", [

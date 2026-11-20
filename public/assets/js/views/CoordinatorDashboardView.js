@@ -1767,6 +1767,10 @@ export const CoordinatorDashboardView = {
         this.assignError = 'Selecciona un técnico SAT antes de conmutar el expediente a Nivel 2.';
         return;
       }
+      if (this.assignUrgencyOverride && !this.assignUrgencyReason.trim()) {
+        this.assignError = 'Es obligatorio indicar el motivo justificado de la reclasificación de urgencia (EARS 5.3).';
+        return;
+      }
 
       this.assignError = '';
       this.isAssigning = true;
@@ -1775,7 +1779,10 @@ export const CoordinatorDashboardView = {
         const result = await api.coordinator.changeDispatchLevel(
           this.selectedIncident.id,
           'L2_SAT',
-          this.assignTechnicianId
+          this.assignTechnicianId,
+          '',
+          this.assignUrgencyOverride || null,
+          this.assignUrgencyReason.trim() || null
         );
         store.addAlert(
           `Incidencia #${this.selectedIncident.ticket_code} conmutada a Nivel 2 SAT.`,

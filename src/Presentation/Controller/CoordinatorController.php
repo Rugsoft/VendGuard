@@ -242,6 +242,10 @@ class CoordinatorController
         ];
 
         $rawLevel1IssueType = $request->getBodyParam('level1_issue_type');
+        $rawUrgencyOverride = $request->getBodyParam('urgency_override')
+            ?? $request->getBodyParam('urgency');
+        $rawUrgencyReason = $request->getBodyParam('urgency_override_reason')
+            ?? $request->getBodyParam('urgency_reason');
 
         return $this->executeSynergy(fn (): Response => Response::json(
             $this->synergy()->dispatchLevel(
@@ -252,7 +256,9 @@ class CoordinatorController
                 ],
                 (string)($request->getBodyParam('dispatch_level') ?? ''),
                 ['id' => (int)$assignee->getId(), 'role' => $assignee->getRole()->value, 'is_active' => $assignee->isActive()],
-                $actor
+                $actor,
+                is_string($rawUrgencyOverride) ? trim($rawUrgencyOverride) : null,
+                is_string($rawUrgencyReason) ? trim($rawUrgencyReason) : null
             ),
             200,
             'Nivel operativo actualizado.'

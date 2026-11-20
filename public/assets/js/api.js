@@ -1436,15 +1436,30 @@ export class ApiClient {
      * @param {'L1_RESTOCKER'|'L2_SAT'} dispatchLevel
      * @param {number|string} assigneeId
      * @param {string} [level1IssueType] Motivo L1 del despacho manual (H-36-07)
+     * @param {string|null} [urgencyOverride] Urgencia final elegida (opcional)
+     * @param {string|null} [urgencyReason] Motivo obligatorio si se reclasifica
      * @returns {Promise<Object>}
      */
-    changeDispatchLevel: (incidentId, dispatchLevel, assigneeId, level1IssueType = '') => {
+    changeDispatchLevel: (
+      incidentId,
+      dispatchLevel,
+      assigneeId,
+      level1IssueType = '',
+      urgencyOverride = null,
+      urgencyReason = null
+    ) => {
       const payload = {
         dispatch_level: dispatchLevel,
         assignee_id: Number(assigneeId)
       };
       if (level1IssueType) {
         payload.level1_issue_type = level1IssueType;
+      }
+      if (urgencyOverride) {
+        payload.urgency_override = urgencyOverride;
+      }
+      if (urgencyReason) {
+        payload.urgency_override_reason = urgencyReason;
       }
 
       return this.post(`/coordinator/incidents/${encodeURIComponent(incidentId)}/dispatch-level`, payload);

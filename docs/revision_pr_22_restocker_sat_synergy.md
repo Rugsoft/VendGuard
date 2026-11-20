@@ -75,7 +75,7 @@ y crear un caso de regresión sobre una máquina sin incidencia activa que esper
 
 **Prioridad:** P1 · **Requisito afectado:** D1, D2.3, QA-CON-01; contrato de `PUT /api/coordinator/incidents/{id}/assign`.
 
-**Estado:** ✅ **Solucionado** · el modal usa `changeDispatchLevel()` para L1→L2 y evita preseleccionar al reponedor como técnico SAT; regresión frontend y API focalizada.
+**Estado:** ✅ **Solucionado** · el modal usa `changeDispatchLevel()` para L1→L2, evita preseleccionar al reponedor como técnico SAT y propaga la urgencia elegida con su motivo para recalcular el SLA y auditarlo.
 
 ### Evidencia
 
@@ -219,8 +219,8 @@ Registrar la ruta contractual como alias o endpoint dedicado, reutilizando el up
 
 | ID | Cambio | Regresión |
 | :--- | :--- | :--- |
-| `PR22-01` | `QrScanController` incluye `level1_issue_type` en el payload del alta QR. | `RestockerSatSynergyApiTest`: alta nueva sobre `RSS8-SNACK-20`, `201`, `L1_RESTOCKER` y motivo persistido (**69/69**). |
-| `PR22-02` | `CoordinatorDashboardView` conmuta L1→L2 mediante `changeDispatchLevel()` y no reutiliza el id del reponedor como técnico SAT. | Frontend de sinergia: L1→L2 llama a `dispatch-level` y no a `assignTechnician` (**21/21**). |
+| `PR22-01` | `QrScanController` incluye `level1_issue_type` en el payload del alta QR. | `RestockerSatSynergyApiTest`: alta nueva sobre `RSS8-SNACK-20`, `201`, `L1_RESTOCKER` y motivo persistido (**72/72**). |
+| `PR22-02` | `CoordinatorDashboardView` conmuta L1→L2 mediante `changeDispatchLevel()` y no reutiliza el id del reponedor como técnico SAT; la urgencia elegida viaja con su motivo, se recalcula el SLA y queda en `audit_log`. | Frontend de sinergia: L1→L2 llama a `dispatch-level` con urgencia y exige motivo (**22/22**); API: urgencia aplicada, SLA 480 y motivo auditado (**72/72**). |
 | `PR22-03` | `PdoRestockerSatSynergyGateway` calcula urgencia, SLA y `sla_target_at` en servidor para las ramas A y C; descarta `urgency`/`sla_target_minutes` del cliente. | Gateway: L1 térmico con payload `LOW`/60 exige `CRITICAL`/240; rama C recalcula al alza (**26/26**). |
 
 ---
