@@ -125,6 +125,12 @@ interface ProductLoadingOrderRepositoryInterface
      * consultas: contexto del reponedor, zonas cubiertas hoy, huecos por
      * producto —con la variante de alertas y la completa— y máquinas omitidas.
      *
+     * `$machineIds` acota la demanda a las máquinas indicadas (Módulo 37,
+     * `TODAY_ROUTE`, `QA-5`): `null` conserva el alcance de flota completo y una
+     * lista vacía devuelve `slot_demand` sin filas.
+     *
+     * @param list<int>|null $machineIds
+     *
      * @return array{
      *   restocker: array<string, mixed>|null,
      *   zones: list<array<string, mixed>>,
@@ -132,5 +138,9 @@ interface ProductLoadingOrderRepositoryInterface
      *   excluded_unavailable_machines_count: int
      * }
      */
-    public function fetchProposalInputs(int $restockerId, ?DateTimeImmutable $reference = null): array;
+    public function fetchProposalInputs(
+        int $restockerId,
+        ?DateTimeImmutable $reference = null,
+        ?array $machineIds = null
+    ): array;
 }

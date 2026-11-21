@@ -456,6 +456,67 @@ final class PdoRestockRoutePlannerGateway implements RestockRoutePlannerGatewayI
     /**
      * {@inheritdoc}
      */
+    public function restoreMachineSanitaryOkIfClear(int $machineId, string $serviceDate): bool
+    {
+        if ($machineId <= 0 || !preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/', $serviceDate)) {
+            return false;
+        }
+
+        $stmt = $this->pdo->prepare(
+            "UPDATE machines m
+                SET sanitary_status = 'OK',
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE m.id = :machine_id
+                AND m.sanitary_status = 'EXPIRED'
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM machine_planogram_slots sl
+                      INNER JOIN vending_products vp ON vp.id = sl.product_id
+                     WHERE sl.machine_id = m.id
+                       AND sl.is_active = TRUE
+                       AND vp.is_active = TRUE
+                       AND vp.requires_cold_chain = TRUE
+                       AND sl.current_expiration_date <= :service_date
+                )"
+        );
+        $stmt->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
+        $stmt->bindValue(':service_date', $serviceDate, PDO::PARAM_STR);
+        $stmt->execute();
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function findActiveReassignmentsForRestocker(int $restockerId, string $serviceDate): array
+    {
+        if ($restockerId <= 0 || !preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/', $serviceDate)) {
+            return [];
+        }
+
+        $stmt = $this->pdo->prepare(
+            "SELECT * FROM restock_route_daily_overrides
+              WHERE target_restocker_id = :restocker_id
+                AND service_date = :service_date
+                AND override_type = 'REASSIGNED'
+                AND status = 'ACTIVE'
+              ORDER BY machine_id ASC
+              FOR UPDATE"
+        );
+        $stmt->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        $stmt->bindValue(':service_date', $serviceDate, PDO::PARAM_STR);
+        $stmt->execute();
+
+        return array_map(
+            static fn (array $row): RestockRouteDailyOverride => RestockRouteDailyOverride::fromDatabaseRow($row),
+            $stmt->fetchAll(PDO::FETCH_ASSOC)
+        );
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function enqueueFefoSkipAlert(
         int $machineId,
         string $serviceDate,

@@ -258,8 +258,11 @@ final class FakeProductLoadingOrderRepositoryForServiceTest implements ProductLo
         return $row === null ? null : ProductLoadingOrderItem::fromDatabaseRow($row);
     }
 
-    public function fetchProposalInputs(int $restockerId, ?DateTimeImmutable $reference = null): array
-    {
+    public function fetchProposalInputs(
+        int $restockerId,
+        ?DateTimeImmutable $reference = null,
+        ?array $machineIds = null
+    ): array {
         if ($restockerId === 9) {
             return [
                 'restocker' => null,

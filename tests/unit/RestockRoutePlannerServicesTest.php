@@ -340,6 +340,34 @@ final class FakeRestockRouteGateway implements RestockRoutePlannerGatewayInterfa
         return $previous !== 'EXPIRED';
     }
 
+    public function restoreMachineSanitaryOkIfClear(int $machineId, string $serviceDate): bool
+    {
+        if (($this->machines[$machineId]['sanitary_status'] ?? null) !== 'EXPIRED') {
+            return false;
+        }
+
+        $this->machines[$machineId]['sanitary_status'] = 'OK';
+
+        return true;
+    }
+
+    public function findActiveReassignmentsForRestocker(int $restockerId, string $serviceDate): array
+    {
+        $matches = [];
+        foreach ($this->overrides as $override) {
+            if ($override->getTargetRestockerId() !== $restockerId
+                || $override->getServiceDate() !== $serviceDate
+                || $override->getStatus()->value !== 'ACTIVE'
+                || $override->getOverrideType()->value !== 'REASSIGNED') {
+                continue;
+            }
+
+            $matches[] = $override;
+        }
+
+        return $matches;
+    }
+
     public function enqueueFefoSkipAlert(
         int $machineId,
         string $serviceDate,

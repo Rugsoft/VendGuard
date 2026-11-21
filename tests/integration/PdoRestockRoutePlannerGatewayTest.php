@@ -465,7 +465,20 @@ try {
                 [':machine' => $machineIds[4]]
             ) === 'EXPIRED'
     );
+    $assert(
+        '4.1b restoreMachineSanitaryOkIfClear restituye OK sin lotes vencidos',
+        $gateway->restoreMachineSanitaryOkIfClear($machineIds[4], $today) === true
+            && (string)$scalar(
+                $pdo,
+                'SELECT sanitary_status FROM machines WHERE id = :machine',
+                [':machine' => $machineIds[4]]
+            ) === 'OK'
+    );
     $pdo->exec("UPDATE machines SET sanitary_status = 'QUARANTINE' WHERE id = {$machineIds[3]}");
+    $assert(
+        '4.1c La cuarentena no se restituye a OK',
+        $gateway->restoreMachineSanitaryOkIfClear($machineIds[3], $today) === false
+    );
     $assert(
         '4.2 La cuarentena no se degrada a EXPIRED',
         $gateway->markMachineSanitaryExpired($machineIds[3]) === false
@@ -575,6 +588,15 @@ try {
         null,
         $coordinatorId
     ));
+
+    $activeReassignments = $gateway->findActiveReassignmentsForRestocker($receiverId, $today);
+    $assert(
+        '6.2b findActiveReassignmentsForRestocker devuelve el desvío vivo del receptor',
+        count($activeReassignments) === 1
+            && $activeReassignments[0]->getId() === $reassignmentId
+            && $activeReassignments[0]->getMachineId() === $machineIds[1],
+        json_encode(array_map(static fn($row): array => $row->toArray(), $activeReassignments))
+    );
 
     $assert(
         '6.3 El desvío activo habilita la máquina en el planograma M32',

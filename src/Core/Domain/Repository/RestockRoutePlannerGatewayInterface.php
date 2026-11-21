@@ -146,6 +146,29 @@ interface RestockRoutePlannerGatewayInterface
     public function markMachineSanitaryExpired(int $machineId): bool;
 
     /**
+     * Restituye `'OK'` una máquina sellada `EXPIRED` cuando ya no queda ningún
+     * lote refrigerado caducado en sus carriles (`QA-1`).
+     *
+     * La condición se evalúa en el motor: el servicio no puede decidir con una
+     * foto previa sin arriesgar una carrera con otra visita. La cuarentena no se
+     * toca.
+     *
+     * @return bool `true` si la fila cambió de estado.
+     */
+    public function restoreMachineSanitaryOkIfClear(int $machineId, string $serviceDate): bool;
+
+    /**
+     * Desvíos `REASSIGNED` vivos que apuntan a un reponedor en la fecha.
+     *
+     * Se leen con `FOR UPDATE` dentro de la transacción que revoca: la baja, la
+     * ausencia o el cierre de turno del receptor no pueden competir con una
+     * visita en curso (`QA-3`).
+     *
+     * @return list<RestockRouteDailyOverride>
+     */
+    public function findActiveReassignmentsForRestocker(int $restockerId, string $serviceDate): array;
+
+    /**
      * Encola la alerta interna de Coordinación al omitir una parada con FEFO.
      *
      * La plantilla y la prioridad son invariantes del módulo; el canal, el

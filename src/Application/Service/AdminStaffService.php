@@ -64,6 +64,7 @@ class AdminStaffService
     private ?TechnicianShiftLogRepositoryInterface $shiftLogRepo;
     private ?TransactionManagerInterface $transactions;
     private ?RestockerSatSynergyService $synergyService;
+    private ?RestockRouteReassignmentRevoker $routeRevoker;
 
     public function __construct(
         AdminUserService $adminUsers,
@@ -72,7 +73,8 @@ class AdminStaffService
         ?AuditLogger $auditLogger = null,
         ?TechnicianShiftLogRepositoryInterface $shiftLogRepo = null,
         ?TransactionManagerInterface $transactions = null,
-        ?RestockerSatSynergyService $synergyService = null
+        ?RestockerSatSynergyService $synergyService = null,
+        ?RestockRouteReassignmentRevoker $routeRevoker = null
     ) {
         $this->adminUsers = $adminUsers;
         $this->userRepo = $userRepo;
@@ -81,6 +83,7 @@ class AdminStaffService
         $this->shiftLogRepo = $shiftLogRepo;
         $this->transactions = $transactions;
         $this->synergyService = $synergyService;
+        $this->routeRevoker = $routeRevoker;
     }
 
     /**
@@ -223,6 +226,17 @@ class AdminStaffService
             if (!$this->adminUsers->deactivateUser($id, $actor, $clientIp)) {
                 throw new RuntimeException(
                     "No se pudo desactivar la cuenta #{$id}: la baja se deshace para no dejar el turno cerrado y la cuenta activa."
+                );
+            }
+
+            // QA-3: la baja del receptor revoca sus desvíos vivos del día antes
+            // de confirmar la transacción.
+            if ($isRestocker) {
+                $this->routeRevoker?->revokeForRestocker(
+                    $id,
+                    RestockRouteReassignmentRevoker::CAUSE_DEACTIVATION,
+                    isset($actor['id']) ? (int)$actor['id'] : null,
+                    new DateTimeImmutable('now')
                 );
             }
 

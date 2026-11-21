@@ -8,12 +8,14 @@ use Closure;
 use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
+use LogicException;
 use PDO;
 use Throwable;
 use VendGuard\Core\Domain\Enum\ProductLoadingDemandMode;
 use VendGuard\Core\Domain\Enum\ProductLoadingItemReason;
 use VendGuard\Core\Domain\Enum\ProductLoadingOrderStatus;
 use VendGuard\Core\Domain\Exception\ProductLoadingValidationException;
+use VendGuard\Core\Domain\Exception\RestockRoutePlannerValidationException;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\ProductLoadingOrder;
 use VendGuard\Core\Domain\Model\ProductLoadingOrderItem;
@@ -26,6 +28,7 @@ use VendGuard\Core\Domain\Repository\RestockerVanStockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\Repository\VendingProductRepositoryInterface;
 use VendGuard\Core\Service\ProductLoadingValidator;
+use VendGuard\Core\Service\RestockCadenceEvaluator;
 
 /**
  * ProductLoadingOrderService
@@ -98,7 +101,8 @@ final class ProductLoadingOrderService
         ?AuditLogger $auditLogger = null,
         private readonly ?PDO $pdo = null,
         private readonly ?Closure $orderCodeGenerator = null,
-        private readonly ?MachineRestockVisitRepositoryInterface $restockVisitRepository = null
+        private readonly ?MachineRestockVisitRepositoryInterface $restockVisitRepository = null,
+        private readonly ?RestockRoutePlannerService $routePlanner = null
     ) {
         $this->auditLogger = $auditLogger ?? new AuditLogger();
     }
@@ -122,7 +126,11 @@ final class ProductLoadingOrderService
         $mode = ProductLoadingDemandMode::fromString($demandMode);
         $this->assertSafetyBuffer($safetyBufferPct);
 
-        $inputs = $this->orderRepository->fetchProposalInputs($restockerId, $reference);
+        $inputs = $this->orderRepository->fetchProposalInputs(
+            $restockerId,
+            $reference,
+            $this->routeMachineIds($restockerId, $mode, $reference)
+        );
         $restocker = $inputs['restocker'];
 
         if ($restocker === null) {
@@ -241,7 +249,11 @@ final class ProductLoadingOrderService
                 continue;
             }
 
-            $inputs = $this->orderRepository->fetchProposalInputs($restockerId);
+            $inputs = $this->orderRepository->fetchProposalInputs(
+                $restockerId,
+                null,
+                $this->routeMachineIds($restockerId, $mode, null)
+            );
             $restocker = $inputs['restocker'];
 
             if ($restocker === null) {
@@ -856,9 +868,11 @@ final class ProductLoadingOrderService
         $usableStock = $this->stockRepository->sumUsableQuantityByProduct($restockerId, $reference);
         $usableTotal = array_sum($usableStock);
 
+        $fillsEveryGap = $mode->includesAllGaps() || $mode->isTodayRoute();
+
         $items = [];
         foreach ($inputs['slot_demand'] as $row) {
-            $gap = $mode->includesAllGaps()
+            $gap = $fillsEveryGap
                 ? (int)($row['gap_qty_all'] ?? 0)
                 : (int)($row['gap_qty_alerts'] ?? 0);
 
@@ -937,9 +951,64 @@ final class ProductLoadingOrderService
             return ProductLoadingItemReason::LOW_STOCK_ALERT;
         }
 
-        return $mode->includesAllGaps()
+        return $mode->includesAllGaps() || $mode->isTodayRoute()
             ? ProductLoadingItemReason::ROUTE_GAP_FILL
             : ProductLoadingItemReason::LOW_STOCK_ALERT;
+    }
+
+    /**
+     * Máquinas `PENDING` de la ruta efectiva del reponedor (Módulo 37, `D5`).
+     *
+     * `TODAY_ROUTE` limita la foto de huecos a las paradas que el planificador
+     * entrega para la fecha civil: quedan fuera las completadas, omitidas y
+     * bloqueadas. En los demás modos devuelve `null` y la consulta conserva el
+     * alcance de flota histórico.
+     *
+     * @return list<int>|null
+     */
+    private function routeMachineIds(
+        int $restockerId,
+        ProductLoadingDemandMode $mode,
+        ?DateTimeImmutable $reference
+    ): ?array {
+        if (!$mode->isTodayRoute()) {
+            return null;
+        }
+
+        if ($this->routePlanner === null) {
+            throw new LogicException(
+                'El modo TODAY_ROUTE exige el planificador de rutas del Módulo 37.'
+            );
+        }
+
+        $now = $reference ?? new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'));
+        $serviceDate = RestockCadenceEvaluator::today($now);
+
+        try {
+            $route = $this->routePlanner->buildRestockerRoute($restockerId, $serviceDate, null, $now);
+        } catch (RestockRoutePlannerValidationException $exception) {
+            if ($exception->getErrorCode() === RestockRoutePlannerValidationException::RESTOCKER_NOT_FOUND) {
+                return [];
+            }
+
+            throw $exception;
+        }
+
+        $machineIds = [];
+        foreach ($route['route_plan']['stops'] ?? [] as $stop) {
+            if (!is_array($stop)) {
+                continue;
+            }
+
+            foreach ($stop['machines'] ?? [] as $machine) {
+                $machineId = (int)($machine['machine_id'] ?? 0);
+                if ($machineId > 0) {
+                    $machineIds[$machineId] = $machineId;
+                }
+            }
+        }
+
+        return array_values($machineIds);
     }
 
     /**

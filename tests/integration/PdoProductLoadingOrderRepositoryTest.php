@@ -581,6 +581,19 @@ try {
         !isset($demandByProduct[$quarantineProductId])
         && !isset($demandByProduct[$ambientProductId])
     );
+
+    $scoped = $repo->fetchProposalInputs($restockerA, $today, [$okMachineId]);
+    $assert(
+        '6.2b El filtro por machine_ids acota la demanda a la ruta efectiva (TODAY_ROUTE)',
+        array_column($scoped['slot_demand'], 'product_id') === [$coldProductId]
+        && (int)$scoped['slot_demand'][0]['gap_qty_all'] === 13,
+        json_encode($scoped['slot_demand'])
+    );
+    $emptyScope = $repo->fetchProposalInputs($restockerA, $today, []);
+    $assert(
+        '6.2c Una ruta sin paradas no devuelve demanda',
+        $emptyScope['slot_demand'] === []
+    );
     $assert(
         '6.3 Los dos carriles del producto refrigerado se agregan por producto',
         isset($demandByProduct[$coldProductId])
