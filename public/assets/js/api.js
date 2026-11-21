@@ -2338,6 +2338,29 @@ export class ApiClient {
      */
     reconcileLoadingOrder: (orderId, payload) => {
       return this.post(`/restocker/product-loading-orders/${encodeURIComponent(orderId)}/reconcile`, payload);
+    },
+
+    /**
+     * Omisión de una parada de la ruta efectiva de hoy (Módulo 37, RF-05.1).
+     * El backend exige motivo de 20..500 caracteres reales y resuelve el
+     * reponedor desde el token; la mutación es idempotente por
+     * `client_mutation_id`.
+     * @param {number|string} machineId
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    skipRestockStop: (machineId, payload) => {
+      return this.post(`/restocker/route/stops/${encodeURIComponent(machineId)}/skip`, payload);
+    },
+
+    /**
+     * Archiva en auditoría una omisión offline rechazada de forma irreversible
+     * (Módulo 37, C3, Art. III.3).
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    dumpRestockOverrideConflict: (payload) => {
+      return this.post('/restocker/route/override-conflict-dump', payload);
     }
   };
 

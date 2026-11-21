@@ -45,6 +45,12 @@ import {
   RESTOCKER_INCIDENT_PENDING,
   RESTOCKER_INCIDENT_OPERATIONS
 } from '../utils/RestockerIncidentOfflineQueue.js';
+import {
+  RestockRouteOverrideOfflineQueue,
+  RESTOCK_ROUTE_OVERRIDE_CONFLICT,
+  RESTOCK_ROUTE_OVERRIDE_PENDING
+} from '../utils/RestockRouteOverrideOfflineQueue.js';
+import { RestockerRouteMapModal } from './RestockerRouteMapModal.js';
 import { LEVEL1_ISSUE_TYPES } from '../utils/IncidentStatusPermissions.js';
 
 const HYGIENE_ITEMS = [
@@ -129,6 +135,44 @@ const blankVisitForm = () => ({
   items: []
 });
 
+const ROUTE_BLOCKS = Object.freeze([
+  { key: 'FEFO_SANITARY', order: 1, label: 'Riesgo sanitario FEFO' },
+  { key: 'DEMAND_L1_STOCKOUT', order: 2, label: 'Demanda L1 / stockout' },
+  { key: 'SCHEDULED_CADENCE', order: 3, label: 'Cadencia programada' }
+]);
+
+const ROUTE_TIME_WINDOW_LABELS = Object.freeze({
+  MORNING: 'Mañana',
+  MIDDAY: 'Mediodía',
+  AFTERNOON: 'Tarde',
+  ANY: 'Cualquier franja'
+});
+
+const ROUTE_TRIGGER_LABELS = Object.freeze({
+  FEFO_ALERT: 'FEFO',
+  L1_INCIDENT: 'Aviso L1',
+  EMPTY_SLOT: 'qty=0',
+  SCHEDULED: 'Cadencia',
+  INCOMING_REASSIGNMENT: 'Desvío entrante'
+});
+
+const ROUTE_SKIP_REASON_LABELS = Object.freeze({
+  LOCATION_CLOSED: 'Local cerrado',
+  NO_KEY_OR_ACCESS: 'Sin llave o acceso',
+  LOCAL_HOLIDAY: 'Festivo local',
+  FLEET_CAPACITY_SHORTAGE: 'Falta de capacidad de flota',
+  OTHER_OPERATIONAL: 'Otra causa operativa'
+});
+
+const blankRouteSkipForm = () => ({
+  service_date: '',
+  skip_reason_code: 'LOCATION_CLOSED',
+  reason_text: '',
+  client_mutation_id: ''
+});
+
+const routeTodayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid' }).format(new Date());
+
 const createClientMutationId = () => {
   try {
     if (typeof globalThis !== 'undefined' && typeof globalThis.crypto?.randomUUID === 'function') {
@@ -157,6 +201,7 @@ const hygieneDefaults = (machineType) => {
 
 export const RestockerRouteView = {
   name: 'RestockerRouteView',
+  components: { RestockerRouteMapModal },
   data() {
     return {
       // Autenticación (RF-04.1)
@@ -169,6 +214,23 @@ export const RestockerRouteView = {
       restocker: null,
       zones: { primary_zone: null, backup_zones: [] },
       routeStops: [],
+      routePlan: null,
+      routeServiceDate: '',
+      routeSnapshotRestored: false,
+      showRouteMapModal: false,
+      showSkipRouteModal: false,
+      skipRouteMachine: null,
+      skipRouteStop: null,
+      skipRouteForm: blankRouteSkipForm(),
+      skipRouteError: '',
+      skipRouteSuccess: '',
+      isSkippingRoute: false,
+      pendingRouteOverrides: [],
+      routeOverrideQueueSequence: 0,
+      isSyncingRouteOverrides: false,
+      routeOverrideSyncMessage: '',
+      routeOverrideSyncError: '',
+      routeOverrideQueue: null,
       machines: [],
       isLoading: false,
       loadError: '',
@@ -523,6 +585,65 @@ export const RestockerRouteView = {
     },
     visitCashConfigured() {
       return this.visitCashEnabled && String(this.visitCashForm?.bag_seal_code || '').trim() !== '';
+    },
+
+    // ── Módulo 37 · Hoja de ruta efectiva por bloques (T-RRP-12) ────────
+    routePlanStops() {
+      return Array.isArray(this.routePlan?.stops) ? this.routePlan.stops : [];
+    },
+    routePlanSummary() {
+      return {
+        pending_stops_count: 0,
+        pending_machines_count: 0,
+        completed_machines_count: 0,
+        skipped_machines_count: 0,
+        blocked_machines_count: 0,
+        fefo_alerts_count: 0,
+        total_distance_km: null,
+        unmapped_stops_count: 0,
+        ...(this.routePlan?.summary || {})
+      };
+    },
+    routeBlocks() {
+      return ROUTE_BLOCKS.map((block) => ({
+        ...block,
+        stops: this.routePlanStops.filter((stop) => String(stop.priority_block || 'SCHEDULED_CADENCE') === block.key)
+      }));
+    },
+    routePlanCompleted() {
+      return Array.isArray(this.routePlan?.completed_stops) ? this.routePlan.completed_stops : [];
+    },
+    routePlanSkipped() {
+      return Array.isArray(this.routePlan?.skipped_stops) ? this.routePlan.skipped_stops : [];
+    },
+    routePlanBlocked() {
+      return Array.isArray(this.routePlan?.blocked_stops) ? this.routePlan.blocked_stops : [];
+    },
+    routePlanHasAny() {
+      return this.routePlanStops.length > 0
+        || this.routePlanCompleted.length > 0
+        || this.routePlanSkipped.length > 0
+        || this.routePlanBlocked.length > 0;
+    },
+    routePlanOriginLabel() {
+      const origin = this.routePlan?.origin;
+      if (!origin) return 'Sin origen';
+      if (origin.source === 'GPS') return 'GPS móvil';
+      return origin.address || 'Base Central';
+    },
+    routePlanDistanceLabel() {
+      const distance = this.routePlanSummary.total_distance_km;
+      if (distance === null || distance === undefined) return 'Sin GPS';
+      return `${Number(distance).toFixed(1)} km`;
+    },
+    pendingRouteOverrideCount() {
+      return this.pendingRouteOverrides.filter((item) => item.status === RESTOCK_ROUTE_OVERRIDE_PENDING).length;
+    },
+    routeOverrideConflictCount() {
+      return this.pendingRouteOverrides.filter((item) => item.status === RESTOCK_ROUTE_OVERRIDE_CONFLICT).length;
+    },
+    skipReasonOptions() {
+      return Object.entries(ROUTE_SKIP_REASON_LABELS).map(([value, label]) => ({ value, label }));
     }
   },
   mounted() {
@@ -536,7 +657,9 @@ export const RestockerRouteView = {
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       this.visitOnlineHandler = () => {
         if (!this.navigatorOnline) return;
-        this.syncPendingVisits();
+        // Las omisiones de ruta se drenan después de las visitas M34: una
+        // visita completada puede convertir la omisión en un 409 definitivo.
+        this.syncPendingVisits().then(() => this.syncPendingRouteOverrides());
         this.syncPendingCashCollections();
         this.syncPendingIncidentMutations();
       };
@@ -595,6 +718,9 @@ export const RestockerRouteView = {
           backup_zones: Array.isArray(data.zones?.backup_zones) ? data.zones.backup_zones : []
         };
         this.routeStops = Array.isArray(data.route_stops) ? data.route_stops : [];
+        this.routePlan = data.route_plan && typeof data.route_plan === 'object' ? data.route_plan : null;
+        this.routeServiceDate = String(data.service_date || this.routeToday()).slice(0, 10);
+        this.routeSnapshotRestored = false;
         this.machines = Array.isArray(data.machines) ? data.machines : [];
         this.assignedL1Incidents = Array.isArray(data.assigned_l1_incidents) ? data.assigned_l1_incidents : [];
         this.l1TaxonomyCatalog = Array.isArray(data.l1_taxonomy_catalog) ? data.l1_taxonomy_catalog : [];
@@ -622,11 +748,396 @@ export const RestockerRouteView = {
         this.applyShiftResponse(data.shift || {}, 'OFF_SHIFT');
         await this.loadPendingVisitQueue();
         await this.loadPendingCashQueue();
+        await this.loadPendingRouteOverrides();
+        if (this.routePlan) {
+          await this.persistRouteSnapshot();
+        }
       } catch (err) {
-        this.loadError = err?.message || 'No se pudo cargar tu ruta de reposición.';
+        const offline = this.isNetworkFailure(err);
+        const snapshot = await this.restoreRouteSnapshot();
+        if (snapshot) {
+          this.routePlan = snapshot.route_plan;
+          this.routeServiceDate = String(snapshot.service_date || '').slice(0, 10);
+          this.routeSnapshotRestored = true;
+          this.loadError = offline
+            ? 'Sin conexión: mostrando la última ruta guardada para hoy.'
+            : 'No se pudo actualizar la ruta. Mostrando la copia guardada de hoy.';
+        } else {
+          this.loadError = err?.message || 'No se pudo cargar tu ruta de reposición.';
+        }
       } finally {
         this.isLoading = false;
       }
+    },
+
+    /** Fecha civil de la ruta en la zona operativa de VendGuard. */
+    routeToday() {
+      return routeTodayIso();
+    },
+
+    ensureRouteOverrideQueue() {
+      if (!this.routeOverrideQueue) {
+        this.routeOverrideQueue = new RestockRouteOverrideOfflineQueue();
+      }
+      return this.routeOverrideQueue;
+    },
+
+    async loadPendingRouteOverrides() {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId) {
+        this.pendingRouteOverrides = [];
+        return;
+      }
+      try {
+        this.pendingRouteOverrides = await this.ensureRouteOverrideQueue().list(restockerId);
+      } catch (error) {
+        this.pendingRouteOverrides = [];
+        this.routeOverrideSyncError = error?.message || 'No se pudo leer la cola local de omisiones.';
+      }
+    },
+
+    async persistRouteSnapshot() {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId || !this.routePlan) return;
+      try {
+        await this.ensureRouteOverrideQueue().saveSnapshot(
+          restockerId,
+          this.routeServiceDate || this.routeToday(),
+          this.routePlan
+        );
+      } catch (error) {
+        this.routeOverrideSyncError = error?.message || 'No se pudo guardar la copia local de la ruta.';
+      }
+    },
+
+    async restoreRouteSnapshot() {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId) return null;
+      try {
+        return await this.ensureRouteOverrideQueue().loadSnapshot(restockerId, this.routeToday());
+      } catch (error) {
+        return null;
+      }
+    },
+
+    routeMachineHasFefo(machine) {
+      return machine?.has_fefo_alert === true || machine?.has_expired_cold_batch === true;
+    },
+
+    routeStopHasFefo(stop) {
+      return (stop?.machines || []).some((machine) => this.routeMachineHasFefo(machine));
+    },
+
+    routeMachineHasL1(machine) {
+      return Boolean(machine?.active_l1_incident)
+        || (machine?.triggers || []).includes('L1_INCIDENT');
+    },
+
+    routeMachineHasEmptySlots(machine) {
+      return Number(machine?.empty_slots_count || 0) > 0;
+    },
+
+    routeMachineIsReassigned(machine) {
+      return machine?.is_temporary_reassignment === true;
+    },
+
+    routeStopHasGps(stop) {
+      return stop?.has_valid_coordinates !== false
+        && Number.isFinite(Number(stop?.latitude))
+        && Number.isFinite(Number(stop?.longitude));
+    },
+
+    routeTimeWindowLabel(value) {
+      return ROUTE_TIME_WINDOW_LABELS[String(value || '').toUpperCase()] || 'Sin franja';
+    },
+
+    routeTriggerLabel(value) {
+      return ROUTE_TRIGGER_LABELS[String(value || '').toUpperCase()] || String(value || '—');
+    },
+
+    routeBlockLabel(key) {
+      const block = ROUTE_BLOCKS.find((row) => row.key === key);
+      return block ? `Bloque ${block.order} · ${block.label}` : 'Bloque · Cadencia programada';
+    },
+
+    routeBlockBadgeClass(key) {
+      if (key === 'FEFO_SANITARY') return 'vg-badge vg-badge-danger';
+      if (key === 'DEMAND_L1_STOCKOUT') return 'vg-badge vg-badge-warning';
+      return 'vg-badge vg-badge-neutral';
+    },
+
+    routeFormatDate(value) {
+      if (!value) return '';
+      return this.formatShiftDate(String(value).slice(0, 10));
+    },
+
+    routeMachineAsMachine(machine, stop) {
+      return {
+        id: machine?.machine_id,
+        code: machine?.machine_code,
+        machine_code: machine?.machine_code,
+        machine_type: machine?.machine_type,
+        location_id: stop?.location_id,
+        location_name: stop?.location_name,
+        address: stop?.address,
+        zone_name: null,
+        sanitary_status: 'OK',
+        can_restock: true,
+        ...machine
+      };
+    },
+
+    openRouteMap() {
+      if (!this.routePlan) return;
+      this.showRouteMapModal = true;
+    },
+
+    openSkipRouteModal(machine, stop) {
+      if (!machine?.machine_id || !stop) return;
+      this.skipRouteMachine = machine;
+      this.skipRouteStop = stop;
+      this.skipRouteForm = {
+        ...blankRouteSkipForm(),
+        service_date: this.routeServiceDate || this.routeToday(),
+        client_mutation_id: createClientMutationId()
+      };
+      this.skipRouteError = '';
+      this.skipRouteSuccess = '';
+      this.showSkipRouteModal = true;
+    },
+
+    closeSkipRouteModal() {
+      if (this.isSkippingRoute) return;
+      this.showSkipRouteModal = false;
+      this.skipRouteMachine = null;
+      this.skipRouteStop = null;
+      this.skipRouteError = '';
+      this.skipRouteSuccess = '';
+    },
+
+    routeReasonText() {
+      return String(this.skipRouteForm?.reason_text || '').replace(/\s+/g, ' ').trim();
+    },
+
+    routeReasonBlockCount() {
+      const text = this.routeReasonText();
+      return text === '' ? 0 : text.split(' ').filter(Boolean).length;
+    },
+
+    validateSkipRoute() {
+      this.skipRouteError = '';
+      const reason = this.routeReasonText();
+      if (!this.skipRouteMachine?.machine_id) {
+        this.skipRouteError = 'Selecciona una máquina de la ruta antes de omitir la parada.';
+        return false;
+      }
+      if (reason.length < 20) {
+        this.skipRouteError = `El motivo debe tener al menos 20 caracteres reales (llevas ${reason.length}).`;
+        return false;
+      }
+      if (reason.length > 500) {
+        this.skipRouteError = `El motivo no puede superar 500 caracteres reales (llevas ${reason.length}).`;
+        return false;
+      }
+      if (this.routeReasonBlockCount() < 3) {
+        this.skipRouteError = 'El motivo debe contener al menos 3 bloques de texto para quedar auditado.';
+        return false;
+      }
+      return true;
+    },
+
+    buildSkipRoutePayload() {
+      return {
+        service_date: this.routeServiceDate || this.routeToday(),
+        skip_reason_code: this.skipRouteForm.skip_reason_code,
+        reason_text: this.routeReasonText(),
+        client_mutation_id: this.skipRouteForm.client_mutation_id,
+        client_occurred_at: new Date().toISOString()
+      };
+    },
+
+    async submitSkipRoute() {
+      if (this.isSkippingRoute || !this.validateSkipRoute()) return;
+      const machine = this.skipRouteMachine;
+      const stop = this.skipRouteStop;
+      const payload = this.buildSkipRoutePayload();
+      this.isSkippingRoute = true;
+      try {
+        if (!this.navigatorOnline) {
+          await this.queueOfflineRouteSkip(machine, stop, payload);
+          return;
+        }
+        await api.restocker.skipRestockStop(machine.machine_id, payload);
+        this.showSkipRouteModal = false;
+        this.skipRouteSuccess = 'Parada omitida hoy y registrada para auditoría.';
+        await this.loadMyRoute();
+      } catch (error) {
+        if (this.isNetworkFailure(error)) {
+          await this.queueOfflineRouteSkip(machine, stop, payload);
+        } else {
+          this.skipRouteError = error?.message || 'No se pudo omitir la parada.';
+        }
+      } finally {
+        this.isSkippingRoute = false;
+      }
+    },
+
+    async queueOfflineRouteSkip(machine, stop, payload) {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId) {
+        throw new Error('Inicia sesión como reponedor para guardar la omisión.');
+      }
+      this.routeOverrideQueueSequence += 1;
+      await this.ensureRouteOverrideQueue().enqueue({
+        client_mutation_id: payload.client_mutation_id,
+        restocker_id: restockerId,
+        machine_id: machine.machine_id,
+        machine_code: machine.machine_code,
+        payload,
+        created_at: payload.client_occurred_at,
+        sequence_order: Date.now() + this.routeOverrideQueueSequence
+      });
+      await this.loadPendingRouteOverrides();
+      await this.applyOptimisticRouteSkip(machine, stop);
+      this.showSkipRouteModal = false;
+      this.skipRouteSuccess = 'Omisión guardada en la cola offline. Se sincronizará al recuperar cobertura.';
+    },
+
+    async applyOptimisticRouteSkip(machine, stop) {
+      if (!this.routePlan) return;
+      const machineId = Number(machine.machine_id);
+      const stops = this.routePlanStops
+        .map((row) => ({
+          ...row,
+          machines: (row.machines || []).filter((item) => Number(item.machine_id) !== machineId)
+        }))
+        .filter((row) => row.machines.length > 0);
+      const alreadySkipped = this.routePlanSkipped.some((row) => Number(row.machine_id) === machineId);
+      const skipped = alreadySkipped
+        ? this.routePlanSkipped
+        : [
+            ...this.routePlanSkipped,
+            {
+              machine_id: machineId,
+              machine_code: machine.machine_code,
+              location_id: stop.location_id,
+              location_name: stop.location_name,
+              skip_reason_label: ROUTE_SKIP_REASON_LABELS[this.skipRouteForm.skip_reason_code] || 'Omisión operativa',
+              had_active_fefo_alert: this.routeMachineHasFefo(machine)
+            }
+          ];
+      const pendingMachines = stops.reduce((total, row) => total + (row.machines?.length || 0), 0);
+      this.routePlan = {
+        ...this.routePlan,
+        stops,
+        skipped_stops: skipped,
+        summary: {
+          ...this.routePlanSummary,
+          pending_stops_count: stops.length,
+          pending_machines_count: pendingMachines,
+          skipped_machines_count: skipped.length
+        }
+      };
+      await this.persistRouteSnapshot();
+    },
+
+    async syncPendingRouteOverrides() {
+      const restockerId = this.visitRestockerId;
+      if (!restockerId) {
+        this.routeOverrideSyncError = 'Inicia sesión como reponedor para sincronizar omisiones.';
+        return;
+      }
+      if (!this.navigatorOnline) {
+        this.routeOverrideSyncError = 'Sin conexión. Las omisiones seguirán guardadas en la cola offline.';
+        return;
+      }
+      if (this.isSyncingRouteOverrides) return;
+
+      this.isSyncingRouteOverrides = true;
+      this.routeOverrideSyncError = '';
+      this.routeOverrideSyncMessage = '';
+      let synced = 0;
+      let conflicts = 0;
+      try {
+        const queue = this.ensureRouteOverrideQueue();
+        const pending = await queue.list(restockerId, [RESTOCK_ROUTE_OVERRIDE_PENDING]);
+        for (const item of pending) {
+          try {
+            await api.restocker.skipRestockStop(item.machine_id, item.payload);
+            await queue.remove(item.client_mutation_id);
+            synced += 1;
+          } catch (error) {
+            if (this.isRetryableSyncFailure(error)) {
+              this.routeOverrideSyncError = this.syncRetryMessage(error, 'omisiones de ruta');
+              break;
+            }
+            try {
+              await api.restocker.dumpRestockOverrideConflict({
+                machine_id: item.machine_id,
+                client_mutation_id: item.client_mutation_id,
+                http_status: Number(error?.status || 409),
+                error_code: String(error?.code || 'RESTOCK_OVERRIDE_REJECTED'),
+                message: String(error?.message || 'La omisión offline fue rechazada por el servidor.'),
+                client_occurred_at: item.payload?.client_occurred_at || item.created_at,
+                override_id: error?.details?.override_id ?? null
+              });
+              await queue.remove(item.client_mutation_id);
+              conflicts += 1;
+            } catch (dumpError) {
+              await queue.markConflict(
+                item.client_mutation_id,
+                error?.message || 'La omisión offline fue rechazada por el servidor.'
+              );
+              conflicts += 1;
+            }
+          }
+        }
+
+        await this.loadPendingRouteOverrides();
+        if (synced > 0) await this.loadMyRoute();
+        if (synced > 0 || conflicts > 0) {
+          this.routeOverrideSyncMessage = `${synced} omisión(es) sincronizada(s).${conflicts > 0 ? ` ${conflicts} conflicto(s) archivado(s) en auditoría.` : ''}`;
+        } else if (!this.routeOverrideSyncError) {
+          this.routeOverrideSyncMessage = 'No hay omisiones de ruta pendientes de sincronizar.';
+        }
+      } catch (error) {
+        this.routeOverrideSyncError = error?.message || 'No se pudo sincronizar la cola offline de omisiones.';
+      } finally {
+        this.isSyncingRouteOverrides = false;
+      }
+    },
+
+    async archiveRouteOverrideConflict(item) {
+      if (!item?.client_mutation_id || this.isSyncingRouteOverrides) return;
+      this.isSyncingRouteOverrides = true;
+      this.routeOverrideSyncError = '';
+      this.routeOverrideSyncMessage = '';
+      try {
+        await api.restocker.dumpRestockOverrideConflict({
+          machine_id: item.machine_id,
+          client_mutation_id: item.client_mutation_id,
+          http_status: 409,
+          error_code: 'RESTOCK_ROUTE_OVERRIDE_CONFLICT',
+          message: item.conflict_reason || 'La omisión offline ya no puede aplicarse.',
+          client_occurred_at: item.payload?.client_occurred_at || item.created_at,
+          override_id: null
+        });
+        await this.ensureRouteOverrideQueue().remove(item.client_mutation_id);
+        await this.loadPendingRouteOverrides();
+        this.routeOverrideSyncMessage = 'Conflicto archivado en auditoría. La cola local queda limpia.';
+      } catch (error) {
+        this.routeOverrideSyncError = error?.message || 'No se pudo archivar el conflicto de la omisión.';
+      } finally {
+        this.isSyncingRouteOverrides = false;
+      }
+    },
+
+    routeOverrideIsConflict(item) {
+      return item?.status === RESTOCK_ROUTE_OVERRIDE_CONFLICT;
+    },
+
+    routeOverrideStatusLabel(item) {
+      return this.routeOverrideIsConflict(item) ? 'Conflicto' : 'Pendiente';
     },
 
     /**
@@ -1983,6 +2494,9 @@ export const RestockerRouteView = {
 
         await this.loadPendingVisitQueue();
         if (synced > 0) await this.loadMyRoute();
+        // El drenaje de omisiones va después de M34: una visita recién
+        // sincronizada puede invalidar la omisión y forzar su volcado.
+        await this.syncPendingRouteOverrides();
         if (synced > 0 || conflicts > 0) {
           this.visitSyncMessage = `${synced} visita(s) sincronizada(s).${conflicts > 0 ? ` ${conflicts} conflicto(s) pendientes de archivar.` : ''}`;
         } else if (!this.visitSyncError) {
@@ -2692,11 +3206,32 @@ export const RestockerRouteView = {
       return { backgroundColor: 'var(--color-warning-bg)', color: 'var(--color-warning-text)' };
     },
 
-    handleLogout() {
+    async handleLogout() {
+      const restockerId = this.visitRestockerId;
+      if (restockerId) {
+        try {
+          await this.ensureRouteOverrideQueue().clear(restockerId);
+        } catch (error) {
+          // La sesión se cierra igualmente: la limpieza local es best-effort.
+        }
+      }
       store.clearSession();
       this.restocker = null;
       this.zones = { primary_zone: null, backup_zones: [] };
       this.routeStops = [];
+      this.routePlan = null;
+      this.routeServiceDate = '';
+      this.routeSnapshotRestored = false;
+      this.showRouteMapModal = false;
+      this.showSkipRouteModal = false;
+      this.skipRouteMachine = null;
+      this.skipRouteStop = null;
+      this.skipRouteForm = blankRouteSkipForm();
+      this.skipRouteError = '';
+      this.skipRouteSuccess = '';
+      this.pendingRouteOverrides = [];
+      this.routeOverrideSyncMessage = '';
+      this.routeOverrideSyncError = '';
       this.machines = [];
       this.activeLoadingOrder = null;
       this.lastReconciledOrder = null;
@@ -3161,30 +3696,176 @@ export const RestockerRouteView = {
           </p>
         </section>
 
-        <!-- Estado de la ruta de abastecimiento (paradas asignadas por coordinación) -->
+        <!-- Hoja de ruta efectiva por bloques (Módulo 37, T-RRP-12) -->
         <section
           data-testid="restocker-route-base"
-          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px;"
+          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 16px 14px; margin-top: 12px; min-width: 0;"
         >
-          <h2 style="font-family: var(--font-display); font-size: 16px; margin: 0 0 6px 0;">Ruta de abastecimiento</h2>
-          <div v-if="isLoading" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-ink-muted); margin: 6px 0;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div style="min-width: 0;">
+              <h2 style="font-family: var(--font-display); font-size: 16px; margin: 0 0 4px 0;">Ruta de abastecimiento</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
+                Bloques priorizados por el optimizador · {{ routePlanOriginLabel }} · {{ routePlanDistanceLabel }}
+              </p>
+            </div>
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary vg-btn-sm"
+              data-testid="btn-open-restocker-route-map"
+              :disabled="!routePlan"
+              @click="openRouteMap"
+            >🗺️ Mapa</button>
+          </div>
+
+          <div v-if="isLoading" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-ink-muted); margin: 10px 0 0 0;">
             <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; border-width: 2px;"></span>
             <span>Sincronizando paradas y zonas de abastecimiento…</span>
           </div>
-          <p v-else-if="loadError" data-testid="restocker-route-error" style="font-size: 13px; color: var(--color-urgency-critical); margin: 0;">{{ loadError }}</p>
-          <p v-else-if="routeStops.length === 0" style="font-size: 13px; color: var(--color-ink-muted); margin: 0;">
+          <p v-else-if="loadError" data-testid="restocker-route-error" style="font-size: 13px; color: var(--color-urgency-critical); margin: 10px 0 0 0;">{{ loadError }}</p>
+          <p v-else-if="!routePlanHasAny" style="font-size: 13px; color: var(--color-ink-muted); margin: 10px 0 0 0;">
             Sin paradas asignadas por ahora. Las órdenes de carga y las visitas a máquinas
             aparecerán aquí cuando coordinación las asigne.
           </p>
-          <ul v-else style="margin: 8px 0 0 0; padding: 0; list-style: none; display: grid; gap: 8px;">
-            <li
-              v-for="stop in routeStops"
-              :key="stop.id"
-              style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 8px 10px; font-size: 13px;"
+
+          <template v-else>
+            <div
+              v-if="routeSnapshotRestored"
+              data-testid="restocker-route-snapshot-notice"
+              style="font-size: 11px; background-color: var(--color-warning-bg); color: var(--color-warning-text); border-radius: var(--radius-interactive); padding: 6px 8px; margin-top: 10px;"
             >
-              {{ stop.label || stop.machine_code || stop.location_name || ('Parada #' + stop.id) }}
-            </li>
-          </ul>
+              📴 Estás viendo la copia local de la ruta de hoy. Se actualizará al recuperar cobertura.
+            </div>
+
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;">
+              <span class="vg-badge vg-badge-neutral" data-testid="route-summary-stops">{{ routePlanSummary.pending_stops_count }} paradas</span>
+              <span class="vg-badge vg-badge-neutral">{{ routePlanSummary.pending_machines_count }} máquinas</span>
+              <span v-if="routePlanSummary.fefo_alerts_count > 0" class="vg-badge vg-badge-danger">⚠️ {{ routePlanSummary.fefo_alerts_count }} FEFO</span>
+              <span v-if="routePlanSummary.unmapped_stops_count > 0" class="vg-badge vg-badge-warning">{{ routePlanSummary.unmapped_stops_count }} sin GPS</span>
+              <span class="vg-badge vg-badge-neutral">{{ routePlanDistanceLabel }}</span>
+            </div>
+
+            <div
+              v-for="block in routeBlocks"
+              :key="block.key"
+              data-testid="restocker-route-block"
+              :data-block="block.key"
+              style="margin-top: 12px; min-width: 0;"
+            >
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
+                <h3 style="font-family: var(--font-display); font-size: 13px; font-weight: 600; margin: 0; min-width: 0;">{{ routeBlockLabel(block.key) }}</h3>
+                <span :class="routeBlockBadgeClass(block.key)">{{ block.stops.length }}</span>
+              </div>
+              <p v-if="block.stops.length === 0" style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">Sin paradas en este bloque.</p>
+
+              <article
+                v-for="stop in block.stops"
+                :key="'route-stop-' + stop.stop_order"
+                data-testid="restocker-route-stop"
+                :data-stop-order="stop.stop_order"
+                style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 9px 10px; margin-bottom: 7px; min-width: 0;"
+              >
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                  <div style="min-width: 0;">
+                    <strong style="display: block; font-family: var(--font-display); font-size: 13px; font-weight: 600;">{{ stop.location_name }}</strong>
+                    <span style="display: block; font-size: 11px; color: var(--color-ink-muted); overflow-wrap: anywhere;">{{ stop.address }}</span>
+                  </div>
+                  <span class="vg-badge vg-badge-neutral" style="white-space: nowrap;">{{ stop.distance_km !== null && stop.distance_km !== undefined ? Number(stop.distance_km).toFixed(1) + ' km' : 'Sin GPS' }}</span>
+                </div>
+
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;">
+                  <span v-if="routeStopHasFefo(stop)" class="vg-badge vg-badge-danger">FEFO {{ routeFormatDate(stop.earliest_fefo_expiration_date) }}</span>
+                  <span v-if="!routeStopHasGps(stop)" class="vg-badge vg-badge-warning">Sin GPS</span>
+                  <span class="vg-badge vg-badge-neutral">Franja {{ routeTimeWindowLabel(stop.preferred_time_window) }}</span>
+                  <span v-if="stop.sla_tier === 'CRITICAL_INFRASTRUCTURE_24_7'" class="vg-badge vg-badge-warning">SLA 24/7</span>
+                </div>
+
+                <div style="display: grid; gap: 6px; margin-top: 7px;">
+                  <div
+                    v-for="machine in stop.machines"
+                    :key="'route-machine-' + machine.machine_id"
+                    data-testid="restocker-route-machine"
+                    :data-machine-id="machine.machine_id"
+                    style="background-color: var(--color-surface-1); border-radius: var(--radius-interactive); padding: 7px 8px; min-width: 0;"
+                  >
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px;">
+                      <strong style="font-size: 12px; overflow-wrap: anywhere;">{{ machine.machine_code }}</strong>
+                      <span style="font-size: 10px; color: var(--color-ink-muted); white-space: nowrap;">{{ machineTypeLabel(machine.machine_type) }}</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+                      <span v-if="routeMachineHasFefo(machine)" class="vg-badge vg-badge-danger">FEFO</span>
+                      <span v-if="machine.has_expired_cold_batch" class="vg-badge vg-badge-danger">Lote vencido</span>
+                      <span v-if="routeMachineHasL1(machine)" class="vg-badge vg-badge-warning">L1</span>
+                      <span v-if="routeMachineHasEmptySlots(machine)" class="vg-badge vg-badge-warning">qty=0 · {{ machine.empty_slots_count }}</span>
+                      <span v-if="routeMachineIsReassigned(machine)" class="vg-badge vg-badge-info">Desvío</span>
+                      <span v-for="trigger in machine.triggers" :key="'trigger-' + machine.machine_id + '-' + trigger" class="vg-badge vg-badge-neutral">{{ routeTriggerLabel(trigger) }}</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px;">
+                      <button
+                        type="button"
+                        class="vg-btn vg-btn-primary vg-btn-sm"
+                        data-testid="btn-route-start-visit"
+                        :data-machine-id="machine.machine_id"
+                        @click="openVisitAssistant(routeMachineAsMachine(machine, stop))"
+                      >📋 Visitar</button>
+                      <button
+                        type="button"
+                        class="vg-btn vg-btn-secondary vg-btn-sm"
+                        data-testid="btn-route-skip-stop"
+                        :data-machine-id="machine.machine_id"
+                        @click="openSkipRouteModal(machine, stop)"
+                      >⏭️ Omitir parada hoy</button>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <div
+              v-if="pendingRouteOverrides.length > 0"
+              data-testid="restocker-route-overrides-queue"
+              style="margin-top: 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 8px 10px; min-width: 0;"
+            >
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px;">
+                <strong style="font-size: 12px;">Omisiones pendientes ({{ pendingRouteOverrideCount }})</strong>
+                <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm" data-testid="btn-sync-route-overrides" :disabled="isSyncingRouteOverrides" @click="syncPendingRouteOverrides">Sincronizar</button>
+              </div>
+              <p v-if="routeOverrideConflictCount > 0" style="font-size: 11px; color: var(--color-warning-text); margin: 4px 0 0 0;">{{ routeOverrideConflictCount }} conflicto(s) esperan archivo en auditoría.</p>
+              <ul style="margin: 6px 0 0 0; padding: 0; list-style: none; display: grid; gap: 5px;">
+                <li v-for="item in pendingRouteOverrides" :key="item.client_mutation_id" style="font-size: 11px; min-width: 0;">
+                  <span style="font-weight: 600;">{{ item.machine_code || ('Máquina #' + item.machine_id) }}</span>
+                  · {{ routeOverrideStatusLabel(item) }}
+                  <button v-if="routeOverrideIsConflict(item)" type="button" class="vg-btn vg-btn-secondary vg-btn-sm" style="margin-left: 4px;" @click="archiveRouteOverrideConflict(item)">Archivar</button>
+                </li>
+              </ul>
+            </div>
+
+            <p v-if="routeOverrideSyncMessage" style="font-size: 11px; color: var(--color-success-text); margin: 8px 0 0 0;">{{ routeOverrideSyncMessage }}</p>
+            <p v-if="routeOverrideSyncError" style="font-size: 11px; color: var(--color-warning-text); margin: 8px 0 0 0;">{{ routeOverrideSyncError }}</p>
+
+            <details data-testid="restocker-route-completed" style="margin-top: 12px; border-top: 1px solid var(--color-hairline); padding-top: 8px;">
+              <summary style="font-size: 12px; font-weight: 600; cursor: pointer;">Completadas hoy ({{ routePlanCompleted.length }})</summary>
+              <ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 11px; color: var(--color-ink-muted);">
+                <li v-for="stop in routePlanCompleted" :key="'completed-' + stop.machine_id">{{ stop.machine_code }} · {{ stop.location_name }}</li>
+                <li v-if="routePlanCompleted.length === 0">Sin paradas completadas todavía.</li>
+              </ul>
+            </details>
+
+            <details data-testid="restocker-route-skipped" style="margin-top: 8px; border-top: 1px solid var(--color-hairline); padding-top: 8px;">
+              <summary style="font-size: 12px; font-weight: 600; cursor: pointer;">Omitidas hoy ({{ routePlanSkipped.length }})</summary>
+              <ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 11px; color: var(--color-ink-muted);">
+                <li v-for="stop in routePlanSkipped" :key="'skipped-' + stop.machine_id">{{ stop.machine_code }} · {{ stop.location_name }}<template v-if="stop.skip_reason_label"> · {{ stop.skip_reason_label }}</template></li>
+                <li v-if="routePlanSkipped.length === 0">Sin paradas omitidas.</li>
+              </ul>
+            </details>
+
+            <details data-testid="restocker-route-blocked" style="margin-top: 8px; border-top: 1px solid var(--color-hairline); padding-top: 8px;">
+              <summary style="font-size: 12px; font-weight: 600; cursor: pointer;">Bloqueadas ({{ routePlanBlocked.length }})</summary>
+              <ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 11px; color: var(--color-ink-muted);">
+                <li v-for="stop in routePlanBlocked" :key="'blocked-' + stop.machine_id">{{ stop.machine_code }} · {{ stop.location_name }}<template v-if="stop.block_reason_label"> · {{ stop.block_reason_label }}</template></li>
+                <li v-if="routePlanBlocked.length === 0">Sin paradas bloqueadas.</li>
+              </ul>
+            </details>
+          </template>
         </section>
 
         <!-- Máquinas de las zonas vivas y planograma de solo lectura (T-PLN-13, D2, QA 2, Art. V.4) -->
@@ -4630,6 +5311,62 @@ export const RestockerRouteView = {
           </div>
         </div>
       </div>
+
+      <!-- MODAL OMISIÓN: motivo real de 20..500 caracteres y cola offline (M37, RF-05.1) -->
+      <div
+        v-if="showSkipRouteModal"
+        data-testid="restocker-route-skip-modal"
+        style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 88; padding: 0;"
+        @click.self="closeSkipRouteModal"
+      >
+        <div style="background-color: var(--color-surface-card); width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; border-radius: var(--radius-card) var(--radius-card) 0 0; padding: 18px 16px; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); box-sizing: border-box;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div style="min-width: 0;">
+              <h2 style="font-family: var(--font-display); font-size: 17px; margin: 0 0 4px 0;">⏭️ Omitir parada hoy</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
+                {{ skipRouteMachine?.machine_code || 'Máquina' }} · {{ skipRouteStop?.location_name || 'Sede' }}
+              </p>
+            </div>
+            <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-route-skip" :disabled="isSkippingRoute" @click="closeSkipRouteModal">Cerrar</button>
+          </div>
+
+          <label style="display: block; font-size: 12px; font-weight: 600; margin: 14px 0 4px 0;">Causa de la omisión</label>
+          <select v-model="skipRouteForm.skip_reason_code" class="vg-select" data-testid="route-skip-reason-code">
+            <option v-for="option in skipReasonOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+
+          <label style="display: block; font-size: 12px; font-weight: 600; margin: 12px 0 4px 0;">
+            Motivo operativo ({{ realLength(skipRouteForm.reason_text) }}/500 · {{ routeReasonBlockCount() }} bloques)
+          </label>
+          <textarea
+            v-model="skipRouteForm.reason_text"
+            class="vg-textarea"
+            rows="4"
+            maxlength="500"
+            data-testid="route-skip-reason"
+            placeholder="Explica qué impide reponer hoy: acceso, cierre, festivo o capacidad de flota…"
+          ></textarea>
+          <p style="font-size: 11px; color: var(--color-ink-muted); margin: 4px 0 0 0;">
+            Mínimo 20 caracteres reales y 3 bloques de texto. La omisión queda auditada y no cuenta como visita completada.
+          </p>
+
+          <p v-if="skipRouteError" role="alert" data-testid="route-skip-error" style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); padding: 8px; border-radius: var(--radius-interactive); margin-top: 10px;">⚠️ {{ skipRouteError }}</p>
+          <p v-if="skipRouteSuccess" data-testid="route-skip-success" style="font-size: 12px; color: var(--color-success-text); background-color: var(--color-success-bg); padding: 8px; border-radius: var(--radius-interactive); margin-top: 10px;">✓ {{ skipRouteSuccess }}</p>
+
+          <div style="display: flex; gap: 8px; margin-top: 14px;">
+            <button type="button" class="vg-btn vg-btn-secondary" :disabled="isSkippingRoute" @click="closeSkipRouteModal">Cancelar</button>
+            <button type="button" class="vg-btn vg-btn-primary" data-testid="btn-confirm-route-skip" :disabled="isSkippingRoute" @click="submitSkipRoute">
+              {{ isSkippingRoute ? 'Guardando…' : 'Confirmar omisión' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <RestockerRouteMapModal
+        v-model="showRouteMapModal"
+        :route-plan="routePlan"
+        :service-date="routeServiceDate"
+      />
     </div>
   `
 };
