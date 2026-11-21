@@ -100,16 +100,19 @@ try {
     );
 
     assertProductLoadingCondition(
-        ProductLoadingDemandMode::values() === ['ALERTS_ONLY', 'ALL_GAPS']
+        ProductLoadingDemandMode::values() === ['ALERTS_ONLY', 'ALL_GAPS', 'TODAY_ROUTE']
             && ProductLoadingDemandMode::ALL_GAPS->label() === 'Ruta completa'
-            && ProductLoadingDemandMode::ALERTS_ONLY->label() === 'Solo alertas',
-        'ProductLoadingDemandMode exposes the two demand modes with labels'
+            && ProductLoadingDemandMode::ALERTS_ONLY->label() === 'Solo alertas'
+            && ProductLoadingDemandMode::TODAY_ROUTE->label() === 'Ruta efectiva de hoy',
+        'ProductLoadingDemandMode exposes the three demand modes with labels'
     );
     assertProductLoadingCondition(
         ProductLoadingDemandMode::ALL_GAPS->includesAllGaps()
             && !ProductLoadingDemandMode::ALERTS_ONLY->includesAllGaps()
+            && !ProductLoadingDemandMode::TODAY_ROUTE->includesAllGaps()
+            && ProductLoadingDemandMode::TODAY_ROUTE->isTodayRoute()
             && ProductLoadingDemandMode::ALERTS_ONLY->isAlertsOnly(),
-        'ProductLoadingDemandMode distinguishes the two proposal scopes'
+        'ProductLoadingDemandMode distinguishes the proposal scopes'
     );
     assertProductLoadingCondition(
         ProductLoadingDemandMode::fromString('all_gaps') === ProductLoadingDemandMode::ALL_GAPS,

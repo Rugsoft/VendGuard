@@ -2,7 +2,7 @@
 
 **Módulo:** `37-restock-route-planner` (Feature 27 de `docs/features_pendientes.md`)  
 **Versión:** 1.0 (Alineado con `spec.md` v1.1, `restock_route_planner_contracts.md` y `plan.md` v1.0; `D1`–`D7`, `C1`–`C3` y `QA-1`–`QA-6`)  
-**Estado:** Aprobado · Puerta SDD Fase 2 superada · Ejecución SDD en curso (`2/13` tareas)  
+**Estado:** Aprobado · Puerta SDD Fase 2 superada · Ejecución SDD en curso (`3/13` tareas)  
 **Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño  
 **Ley Suprema:** [`constitution.md`](../../constitution.md), [`AGENTS.md`](../../AGENTS.md) y [`docs/design.md`](../../docs/design.md)
 
@@ -44,9 +44,10 @@ flowchart LR
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresRestockRoutePlannerSchemaTest.php`
   - **Cierre (2026-11-21):** Comando exacto en verde con **288 aserciones** —`PostgresSchemaTest` **159/159**, `PostgresConstitutionalTest` **88/88** y `PostgresRestockRoutePlannerSchemaTest` **41/41**, las tres con `exit=0`—. Contratos de esquema a **51 tablas / 50 tipos `ENUM` / 56 columnas `ENUM`** (`database_schema.md` y `schema_correspondence_contract.md`, con las Tablas 50/51, los seis tipos nuevos y el bullet del Módulo 37); `PostgresFixtureBuilder` documenta 51 tablas y siembra las dos nuevas con `notes`/`skip_reason_code`+`reason_text`. La suite nueva destapó un hueco real: `chk_mrs_cadence_coherence` aceptaba `WEEKLY` con `day_of_week` nulo porque un `CHECK` que evalúa a `NULL` se satisface; corregido con la migración `034_restock_schedule_cadence_guard.sql` (libro a **34 migraciones**) y convergido en `supabase_init.sql` y en `restock_route_planner_contracts.md`. Regresiones directas: `SchemaConvergenceParityTest` **42/42**, `PostgresRestockerSatSynergySchemaTest` **30/30** y `NewEngineChannelDocumentationTest` **9/9**, todas `exit=0`; **residuo 0** de esquemas `t_*` y `contract_convergence_check*`.
 
-- [ ] **T-RRP-03 · Crear los 6 backed enums `#45`–`#50`, añadir `TODAY_ROUTE` a `ProductLoadingDemandMode`, e implementar `MachineRestockSchedule` y `RestockRouteDailyOverride` + suite unitaria**
+- [x] **T-RRP-03 · Crear los 6 backed enums `#45`–`#50`, añadir `TODAY_ROUTE` a `ProductLoadingDemandMode`, e implementar `MachineRestockSchedule` y `RestockRouteDailyOverride` + suite unitaria**
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-04.1`, `D1`, `D5`, `D6`, `QA-2`, `QA-4`, `QA-5`.
   - **Verificación:** `php tests/unit/RestockRoutePlannerDomainModelsTest.php`
+  - **Cierre (2026-11-21):** `RestockRoutePlannerDomainModelsTest.php` **67/67 aserciones · `exit=0`**. Creados los seis backed enums `#45`–`#50` (`RestockCadenceType`, `RestockTimeWindow`, `RestockOverrideType`, `RestockOverrideStatus`, `RestockSkipReasonCode`, `RestockReassignmentReasonCode`) con etiquetas en castellano, `windowOrder()` 1–4 y predicados estructurales, y las entidades inmutables `MachineRestockSchedule` (coherencia `WEEKLY`/`BIWEEKLY`/`include_weekends` con prueba de nulidad explícita, nota `1..500`, baja todo-o-nada y `deactivate()` sin mutar la versión vigente) y `RestockRouteDailyOverride` (ramas `SKIPPED` de `20..500` caracteres reales y `REASSIGNED` con destino y causa, `client_mutation_id` `8..64` con patrón, ciclo `ACTIVE`/`SUPERSEDED`/`REVOKED` con `revoke()`/`supersede()`, `fromDatabaseRow()` y `toArray()`). `ProductLoadingDemandMode` suma `TODAY_ROUTE` («Ruta efectiva de hoy») sin alterar el alcance de flota de `includesAllGaps()`, cuya restricción a la ruta efectiva llega con T-RRP-08. Regresiones directas del Módulo 33: `ProductLoadingDomainModelsTest` **97/97**, `ProductLoadingOrderServiceTest` **53/53** y `ProductLoadingValidatorTest` **57/57**, las tres `exit=0`.
 
 - [ ] **T-RRP-04 · Implementar `RestockCadenceEvaluator` (aritmética civil `Europe/Madrid` DST-safe, `DAILY × SlaTier`, `machines.is_seasonal_pause`, `nextScheduledDate`) y `RestockRoutePlannerValidator` + `RestockRoutePlannerValidationException`**
   - **Requisitos:** `RF-01.2`, `RF-02.2`, `RF-02.3`, `RNF-02`, `RNF-03`, `D4`, `D6`, `QA-4`, `QA-6`, `Art. V.1`.
