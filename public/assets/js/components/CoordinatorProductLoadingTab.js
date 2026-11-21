@@ -35,6 +35,7 @@
 import { api } from '../api.js';
 import { formatDateTime } from '../utils/DateTimeFormat.js';
 import { ModalDialog } from './ModalDialog.js';
+import { CoordinatorRestockRoutePlannerSubTab } from './CoordinatorRestockRoutePlannerSubTab.js';
 
 const unwrap = (response) => (response && response.data !== undefined ? response.data : response);
 
@@ -96,7 +97,7 @@ const blankStockForm = () => ({
 
 export const CoordinatorProductLoadingTab = {
   name: 'CoordinatorProductLoadingTab',
-  components: { ModalDialog },
+  components: { ModalDialog, CoordinatorRestockRoutePlannerSubTab },
   emits: ['open-incident-detail'],
   data() {
     return {
@@ -113,14 +114,14 @@ export const CoordinatorProductLoadingTab = {
       orderSuccess: '',
 
       showProposalModal: false,
-      proposalForm: { restocker_id: '', demand_mode: 'ALERTS_ONLY', safety_buffer_pct: 10 },
+      proposalForm: { restocker_id: '', demand_mode: 'ALERTS_ONLY', safety_buffer_pct: 10, service_date: '' },
       proposal: null,
       proposalError: '',
       isLoadingProposal: false,
       isCreatingOrder: false,
 
       showBatchModal: false,
-      batchForm: { demand_mode: 'ALERTS_ONLY', safety_buffer_pct: 10 },
+      batchForm: { demand_mode: 'ALERTS_ONLY', safety_buffer_pct: 10, service_date: '' },
       batchResult: null,
       batchError: '',
       isGeneratingBatch: false,
@@ -738,11 +739,15 @@ export const CoordinatorProductLoadingTab = {
       }
       this.isLoadingProposal = true;
       try {
-        const data = unwrap(await api.coordinator.getProductLoadingProposal({
+        const params = {
           restocker_id: this.proposalForm.restocker_id,
           demand_mode: this.proposalForm.demand_mode,
           safety_buffer_pct: Number(this.proposalForm.safety_buffer_pct)
-        }));
+        };
+        if (this.proposalForm.demand_mode === 'TODAY_ROUTE' && this.proposalForm.service_date) {
+          params.service_date = this.proposalForm.service_date;
+        }
+        const data = unwrap(await api.coordinator.getProductLoadingProposal(params));
         this.proposal = data || null;
       } catch (error) {
         this.proposal = null;
@@ -771,12 +776,16 @@ export const CoordinatorProductLoadingTab = {
       }
       this.isCreatingOrder = true;
       try {
-        const created = unwrap(await api.coordinator.createProductLoadingOrder({
+        const payload = {
           restocker_id: Number(this.proposalForm.restocker_id),
           demand_mode: this.proposalForm.demand_mode,
           safety_buffer_pct: Number(this.proposalForm.safety_buffer_pct),
           items
-        }));
+        };
+        if (this.proposalForm.demand_mode === 'TODAY_ROUTE' && this.proposalForm.service_date) {
+          payload.service_date = this.proposalForm.service_date;
+        }
+        const created = unwrap(await api.coordinator.createProductLoadingOrder(payload));
         this.showProposalModal = false;
         this.orderSuccess = `Orden ${created?.order?.order_code || ''} emitida en preparación.`.trim();
         await this.loadOrders();
@@ -797,10 +806,14 @@ export const CoordinatorProductLoadingTab = {
       this.batchError = '';
       this.isGeneratingBatch = true;
       try {
-        this.batchResult = unwrap(await api.coordinator.generateProductLoadingBatch({
+        const payload = {
           demand_mode: this.batchForm.demand_mode,
           safety_buffer_pct: Number(this.batchForm.safety_buffer_pct)
-        }));
+        };
+        if (this.batchForm.demand_mode === 'TODAY_ROUTE' && this.batchForm.service_date) {
+          payload.service_date = this.batchForm.service_date;
+        }
+        this.batchResult = unwrap(await api.coordinator.generateProductLoadingBatch(payload));
         await this.loadOrders();
       } catch (error) {
         this.batchResult = null;
@@ -1223,6 +1236,15 @@ export const CoordinatorProductLoadingTab = {
             @click="activeSection = 'cash'"
           >
             🪙 Recaudación y Arqueo
+          </button>
+          <button
+            type="button"
+            class="vg-btn"
+            :class="activeSection === 'route-planner' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            data-testid="product-loading-route-planner-section-button"
+            @click="activeSection = 'route-planner'"
+          >
+            🗺️ Ruta del día y Agendas
           </button>
         </div>
       </div>
@@ -1678,6 +1700,11 @@ export const CoordinatorProductLoadingTab = {
         </div>
       </section>
 
+      <!-- Sub-vista 5: planificador de rutas periódicas -->
+      <section v-else-if="activeSection === 'route-planner'" data-testid="product-loading-route-planner-section">
+        <CoordinatorRestockRoutePlannerSubTab />
+      </section>
+
       <!-- Expediente de visita in situ -->
       <ModalDialog v-model="showVisitDetailModal" :title="visitDetailVisit ? visitDetailVisit.visit_code : 'Expediente de visita'" subtitle="Trazabilidad carril a carril, FEFO y triple cerrojo sanitario." size="xl">
         <div v-if="isLoadingVisitDetail" data-testid="product-loading-visit-detail-loading" style="padding: 24px; text-align: center; color: var(--color-ink-muted);">
@@ -1965,7 +1992,12 @@ export const CoordinatorProductLoadingTab = {
             <select id="proposal-mode" v-model="proposalForm.demand_mode" class="vg-input">
               <option value="ALERTS_ONLY">Solo alertas</option>
               <option value="ALL_GAPS">Ruta completa</option>
+              <option value="TODAY_ROUTE">Ruta del día</option>
             </select>
+          </div>
+          <div v-if="proposalForm.demand_mode === 'TODAY_ROUTE'">
+            <label class="vg-label" for="proposal-service-date">Fecha de ruta</label>
+            <input id="proposal-service-date" v-model="proposalForm.service_date" class="vg-input" type="date" />
           </div>
           <div>
             <label class="vg-label" for="proposal-buffer">Colchón (%)</label>
@@ -2041,7 +2073,12 @@ export const CoordinatorProductLoadingTab = {
             <select id="batch-mode" v-model="batchForm.demand_mode" class="vg-input">
               <option value="ALERTS_ONLY">Solo alertas</option>
               <option value="ALL_GAPS">Ruta completa</option>
+              <option value="TODAY_ROUTE">Ruta del día</option>
             </select>
+          </div>
+          <div v-if="batchForm.demand_mode === 'TODAY_ROUTE'">
+            <label class="vg-label" for="batch-service-date">Fecha de ruta</label>
+            <input id="batch-service-date" v-model="batchForm.service_date" class="vg-input" type="date" />
           </div>
           <div>
             <label class="vg-label" for="batch-buffer">Colchón (%)</label>
@@ -2124,6 +2161,7 @@ export const CoordinatorProductLoadingTab = {
             <select id="edit-mode" v-model="editForm.demand_mode" class="vg-input">
               <option value="ALERTS_ONLY">Solo alertas</option>
               <option value="ALL_GAPS">Ruta completa</option>
+              <option value="TODAY_ROUTE">Ruta del día</option>
             </select>
           </div>
           <div>
