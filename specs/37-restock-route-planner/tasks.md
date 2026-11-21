@@ -2,7 +2,7 @@
 
 **Módulo:** `37-restock-route-planner` (Feature 27 de `docs/features_pendientes.md`)  
 **Versión:** 1.0 (Alineado con `spec.md` v1.1, `restock_route_planner_contracts.md` y `plan.md` v1.0; `D1`–`D7`, `C1`–`C3` y `QA-1`–`QA-6`)  
-**Estado:** Aprobado · Puerta SDD Fase 2 superada · Ejecución SDD en curso (`1/13` tareas)  
+**Estado:** Aprobado · Puerta SDD Fase 2 superada · Ejecución SDD en curso (`2/13` tareas)  
 **Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño  
 **Ley Suprema:** [`constitution.md`](../../constitution.md), [`AGENTS.md`](../../AGENTS.md) y [`docs/design.md`](../../docs/design.md)
 
@@ -39,9 +39,10 @@ flowchart LR
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
   - **Cierre (2026-11-21):** `SchemaConvergenceParityTest.php` · **42/42 aserciones · `exit=0`**. Inventario convergido de **49 a 51 tablas**, de **44 a 50 tipos `ENUM`** y de **50 a 56 columnas `ENUM`**; libro de migraciones de **32 a 33**. Upgrade real verificado sobre un esquema preexistente de 49 tablas (convergencia a 51 + libro `A-5`) y semillas idempotentes: **5 agendas** (las cinco cadencias) y **1 excepción `SKIPPED`**, con **0 altas** en la segunda pasada y **residuo 0** de esquemas temporales.
 
-- [ ] **T-RRP-02 · Actualizar contratos de esquema (`database_schema.md`, `schema_correspondence_contract.md` a 51 tablas, 50 enums y 56 columnas `ENUM`), ampliar `PostgresFixtureBuilder` y crear `PostgresRestockRoutePlannerSchemaTest.php`**
+- [x] **T-RRP-02 · Actualizar contratos de esquema (`database_schema.md`, `schema_correspondence_contract.md` a 51 tablas, 50 enums y 56 columnas `ENUM`), ampliar `PostgresFixtureBuilder` y crear `PostgresRestockRoutePlannerSchemaTest.php`**
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-05.1`, `RNF-01`, `RNF-03`, `QA-2`, `QA-4`, `QA-6`, `Art. III.1`, `Art. III.3`.
   - **Verificación:** `php tests/integration/PostgresSchemaTest.php && php tests/integration/PostgresConstitutionalTest.php && php tests/integration/PostgresRestockRoutePlannerSchemaTest.php`
+  - **Cierre (2026-11-21):** Comando exacto en verde con **288 aserciones** —`PostgresSchemaTest` **159/159**, `PostgresConstitutionalTest` **88/88** y `PostgresRestockRoutePlannerSchemaTest` **41/41**, las tres con `exit=0`—. Contratos de esquema a **51 tablas / 50 tipos `ENUM` / 56 columnas `ENUM`** (`database_schema.md` y `schema_correspondence_contract.md`, con las Tablas 50/51, los seis tipos nuevos y el bullet del Módulo 37); `PostgresFixtureBuilder` documenta 51 tablas y siembra las dos nuevas con `notes`/`skip_reason_code`+`reason_text`. La suite nueva destapó un hueco real: `chk_mrs_cadence_coherence` aceptaba `WEEKLY` con `day_of_week` nulo porque un `CHECK` que evalúa a `NULL` se satisface; corregido con la migración `034_restock_schedule_cadence_guard.sql` (libro a **34 migraciones**) y convergido en `supabase_init.sql` y en `restock_route_planner_contracts.md`. Regresiones directas: `SchemaConvergenceParityTest` **42/42**, `PostgresRestockerSatSynergySchemaTest` **30/30** y `NewEngineChannelDocumentationTest` **9/9**, todas `exit=0`; **residuo 0** de esquemas `t_*` y `contract_convergence_check*`.
 
 - [ ] **T-RRP-03 · Crear los 6 backed enums `#45`–`#50`, añadir `TODAY_ROUTE` a `ProductLoadingDemandMode`, e implementar `MachineRestockSchedule` y `RestockRouteDailyOverride` + suite unitaria**
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-04.1`, `D1`, `D5`, `D6`, `QA-2`, `QA-4`, `QA-5`.

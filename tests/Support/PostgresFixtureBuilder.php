@@ -11,7 +11,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
  * Las suites de la categoría `new_engine` necesitan lo mismo antes de certificar nada: una
  * conexión al motor nuevo por su contrato de entorno (`PG_TEST_DSN`, sin valor por defecto), un
  * esquema aislado con el DDL del repositorio aplicado y la capacidad de escribir **una fila
- * válida en cada una de las 49 tablas** respetando el grafo de claves foráneas.
+ * válida en cada una de las 51 tablas** respetando el grafo de claves foráneas.
  *
  * Lo último no se puede improvisar tabla por tabla: serían veinte fixtures escritos a mano que
  * se desincronizarían del DDL a la primera columna nueva, y el día que dejaran de insertar
@@ -71,6 +71,18 @@ final class PostgresFixtureBuilder
         // nace sobre una máquina `COMBO`, así que sin declararla el alta se
         // convertiría en un rechazo legítimo del Art. II y no en el CRUD.
         'machine_restock_visits' => ['cabin_temp_celsius'],
+        // Agenda del Módulo 37: `notes` no participa en ningún `CHECK` de rama y
+        // es la única columna textual que el `UPDATE` genérico puede tocar sin
+        // romper `chk_mrs_cadence_coherence`. Cambiar `cadence_type` por la
+        // última etiqueta del enumerado (`BIWEEKLY`) exigiría un `anchor_date`
+        // que la fila mínima no declara, y el arnés mediría un rechazo legítimo
+        // del motor en lugar del CRUD.
+        'machine_restock_schedules' => ['notes'],
+        // Excepción diaria del Módulo 37: la rama `SKIPPED` exige causa
+        // tipificada y motivo de 20 a 500 caracteres reales (Art. V.1). Sin
+        // declararlos, el alta mínima mediría un rechazo legítimo de
+        // `chk_rrdo_type_fields_coherence` en lugar del CRUD.
+        'restock_route_daily_overrides' => ['skip_reason_code', 'reason_text'],
     ];
 
     /**

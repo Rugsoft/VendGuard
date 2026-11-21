@@ -340,6 +340,7 @@ try {
             '031_cash_collection_vault_audit.sql',
             '032_restocker_sat_synergy.sql',
             '033_restock_route_planner.sql',
+            '034_restock_schedule_cadence_guard.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -387,6 +388,7 @@ try {
         '031_cash_collection_vault_audit.sql',
         '032_restocker_sat_synergy.sql',
         '033_restock_route_planner.sql',
+        '034_restock_schedule_cadence_guard.sql',
     ];
     $ledgerFiles = array_map(static fn (array $row): string => (string)$row['filename'], $ledgerRows);
     $ledgerChecksumsOk = true;
@@ -394,7 +396,7 @@ try {
         $ledgerChecksumsOk = $ledgerChecksumsOk && strlen((string)$ledgerRow['checksum']) === 64;
     }
     $assert(
-        'El libro registra las 33 migraciones, en orden, con su huella de 64 caracteres',
+        'El libro registra las 34 migraciones, en orden, con su huella de 64 caracteres',
         $ledgerFiles === $expectedLedgerFiles && $ledgerChecksumsOk,
         'registradas: ' . count($ledgerRows)
     );

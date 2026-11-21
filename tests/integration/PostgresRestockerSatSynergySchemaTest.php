@@ -29,7 +29,8 @@ declare(strict_types=1);
  *      tres operaciones nuevas, y sigue rechazando lo que no declara el catálogo.
  *   6. **Semillas de taxonomía (RF-01.3, QA-AMB-01).** Las cuatro parejas `RC-L1-*` / `SS-L1-*`
  *      existen con la categoría y la solución predeterminada que exige el mapeo determinista.
- *   7. **Sin deriva estructural (Art. IV).** El esquema sigue en 49 tablas y `incidents` conserva
+ *   7. **Sin deriva estructural (Art. IV).** El Módulo 36 no añade tablas: el esquema declara hoy
+ *      51 tablas de dominio (las 49 del Módulo 36 más las dos del Módulo 37) y `incidents` conserva
  *      su disparador constitucional `prevent_hard_delete()`.
  *
  * CATEGORÍA: `new_engine`
@@ -568,8 +569,8 @@ try {
 
     $tables = PostgresFixtureBuilder::tables($pgPdo);
     $assert(
-        'El Módulo 36 no añade tablas: el esquema sigue en 49 tablas de dominio (Art. IV)',
-        count($tables) === 49,
+        'El Módulo 36 no añade tablas: el esquema declara hoy 51 tablas de dominio (Art. IV)',
+        count($tables) === 51,
         'tablas: ' . count($tables)
     );
 

@@ -154,9 +154,16 @@ CREATE TABLE IF NOT EXISTS machine_restock_schedules (
         REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT fk_mrs_deactivated_by FOREIGN KEY (deactivated_by)
         REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    -- Un `CHECK` que evalúa a NULL se satisface: la rama `WEEKLY` exige la
+    -- prueba de nulidad explícita o una agenda semanal sin día ISO se persiste.
     CONSTRAINT chk_mrs_cadence_coherence CHECK (
         (
-            (cadence_type = 'WEEKLY' AND day_of_week BETWEEN 1 AND 7 AND anchor_date IS NULL)
+            (
+                cadence_type = 'WEEKLY'
+                AND day_of_week IS NOT NULL
+                AND day_of_week BETWEEN 1 AND 7
+                AND anchor_date IS NULL
+            )
             OR (cadence_type = 'BIWEEKLY' AND anchor_date IS NOT NULL AND day_of_week IS NULL)
             OR (cadence_type IN ('DAILY', 'MON_WED_FRI', 'TUE_THU') AND day_of_week IS NULL AND anchor_date IS NULL)
         )
