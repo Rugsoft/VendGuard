@@ -403,14 +403,16 @@ try {
     }
 
     $assert(
-        'Las cuatro claves foráneas referencian máquina, reponedor, orden de carga y avería con RESTRICT y CASCADE',
-        count($visitForeignKeys) === 4
+        'Las cinco claves foráneas referencian máquina, reponedor, orden de carga, agenda y avería con RESTRICT y CASCADE',
+        count($visitForeignKeys) === 5
             && str_contains($visitForeignKeys['fk_machine_restock_visits_machine'] ?? '', 'machines(id)')
             && str_contains($visitForeignKeys['fk_machine_restock_visits_machine'] ?? '', 'ON DELETE RESTRICT')
             && str_contains($visitForeignKeys['fk_machine_restock_visits_restocker'] ?? '', 'users(id)')
             && str_contains($visitForeignKeys['fk_machine_restock_visits_loading_order'] ?? '', 'product_loading_orders(id)')
+            && str_contains($visitForeignKeys['fk_machine_restock_visits_route_schedule'] ?? '', 'machine_restock_schedules(id)')
+            && str_contains($visitForeignKeys['fk_machine_restock_visits_route_schedule'] ?? '', 'ON DELETE RESTRICT')
             && str_contains($visitForeignKeys['fk_machine_restock_visits_triggered_incident'] ?? '', 'incidents(id)')
-            && substr_count(implode(' ', $visitForeignKeys), 'ON UPDATE CASCADE') === 4,
+            && substr_count(implode(' ', $visitForeignKeys), 'ON UPDATE CASCADE') === 5,
         implode(' | ', array_keys($visitForeignKeys))
     );
 

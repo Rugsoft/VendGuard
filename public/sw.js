@@ -94,6 +94,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/components/CoordinatorFleetTab.js',
   '/assets/js/components/CoordinatorPlanogramTab.js',
   '/assets/js/components/CoordinatorProductLoadingTab.js',
+  '/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js',
   '/assets/js/components/CoordinatorIncidentDetailModal.js?v=26',
   '/assets/js/components/CoordinatorNotificationCenterModal.js',
   '/assets/js/components/CoordinatorPreventiveDashboard.js',

@@ -8,7 +8,6 @@ use Closure;
 use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
-use LogicException;
 use PDO;
 use Throwable;
 use VendGuard\Core\Domain\Enum\ProductLoadingDemandMode;
@@ -994,7 +993,7 @@ final class ProductLoadingOrderService
         }
 
         if ($this->routePlanner === null) {
-            throw new LogicException(
+            throw new \LogicException(
                 'El modo TODAY_ROUTE exige el planificador de rutas del Módulo 37.'
             );
         }

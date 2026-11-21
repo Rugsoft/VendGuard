@@ -34,7 +34,7 @@ use VendGuard\Core\Domain\Model\RestockRouteDailyOverride;
  *   - **Cola offline (`C3`).** Registro y recuperación de la mutación
  *     `SKIP_RESTOCK_STOP` por `(restocker_id, client_mutation_id)`.
  *
- * Ningún método ejecuta `DELETE FROM`: el motor lo impide con
+ * Ningún método ejecuta borrado físico: el motor lo impide con
  * `prevent_hard_delete()` y el puerto ni siquiera lo intenta (Art. III.1).
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas.

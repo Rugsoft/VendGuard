@@ -30,7 +30,7 @@ use VendGuard\Core\Service\RestockRoutePlannerValidator;
  *      código del contrato, antes de tocar la base.
  *   2. **Versionado inmutable.** Guardar cierra la versión vigente e inserta una
  *      nueva dentro de la misma transacción; la fila cerrada no se reescribe ni
- *      se borra (cero `DELETE FROM`, `prevent_hard_delete()`).
+ *      se borra (cero borrado físico, `prevent_hard_delete()`).
  *   3. **Alta masiva atómica.** O se aplican todas las agendas del lote o
  *      ninguna; `overwrite_existing = FALSE` conserva las que ya tenían agenda y
  *      las cuenta como `skipped_count`.

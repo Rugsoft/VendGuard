@@ -3834,7 +3834,7 @@ export const RestockerRouteView = {
                 <li v-for="item in pendingRouteOverrides" :key="item.client_mutation_id" style="font-size: 11px; min-width: 0;">
                   <span style="font-weight: 600;">{{ item.machine_code || ('Máquina #' + item.machine_id) }}</span>
                   · {{ routeOverrideStatusLabel(item) }}
-                  <button v-if="routeOverrideIsConflict(item)" type="button" class="vg-btn vg-btn-secondary vg-btn-sm" style="margin-left: 4px;" @click="archiveRouteOverrideConflict(item)">Archivar</button>
+                  <button v-if="routeOverrideIsConflict(item)" type="button" class="vg-btn vg-btn-secondary vg-btn-sm" @click="archiveRouteOverrideConflict(item)">Archivar</button>
                 </li>
               </ul>
             </div>

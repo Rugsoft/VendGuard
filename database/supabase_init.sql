@@ -5169,6 +5169,7 @@ BEGIN
             REFERENCES machine_restock_schedules (id)
             ON DELETE RESTRICT ON UPDATE CASCADE;
     END IF;
+EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
 CREATE INDEX IF NOT EXISTS idx_machine_restock_visits_schedule
