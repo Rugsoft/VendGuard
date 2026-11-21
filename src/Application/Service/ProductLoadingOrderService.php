@@ -121,15 +121,17 @@ final class ProductLoadingOrderService
         int $restockerId,
         string $demandMode = 'ALERTS_ONLY',
         int $safetyBufferPct = 10,
-        ?DateTimeImmutable $reference = null
+        ?DateTimeImmutable $reference = null,
+        ?string $serviceDate = null
     ): array {
         $mode = ProductLoadingDemandMode::fromString($demandMode);
         $this->assertSafetyBuffer($safetyBufferPct);
+        $scope = $this->routeScope($restockerId, $mode, $reference, $serviceDate);
 
         $inputs = $this->orderRepository->fetchProposalInputs(
             $restockerId,
             $reference,
-            $this->routeMachineIds($restockerId, $mode, $reference)
+            $scope['pending'] ?? null
         );
         $restocker = $inputs['restocker'];
 
@@ -140,7 +142,14 @@ final class ProductLoadingOrderService
             );
         }
 
-        return $this->buildProposalFromInputs($restocker, $inputs, $mode, $safetyBufferPct, $reference);
+        $proposal = $this->buildProposalFromInputs($restocker, $inputs, $mode, $safetyBufferPct, $reference);
+        if ($scope !== null) {
+            $proposal['service_date'] = $scope['service_date'];
+            $proposal['route_machine_ids'] = $scope['pending'];
+            $proposal['excluded_blocked_machine_ids'] = $scope['blocked'];
+        }
+
+        return $proposal;
     }
 
     /**
@@ -173,7 +182,13 @@ final class ProductLoadingOrderService
             }
             $drafts = $this->normalizeDraftItems($payload['items']);
         } else {
-            $proposal = $this->buildProposal($restockerId, $mode->value, $buffer);
+            $proposal = $this->buildProposal(
+                $restockerId,
+                $mode->value,
+                $buffer,
+                null,
+                $this->optionalServiceDate($payload['service_date'] ?? null)
+            );
             $drafts = $this->proposalDrafts($proposal);
         }
 
@@ -235,6 +250,7 @@ final class ProductLoadingOrderService
         $this->actorId($actor);
         $mode = ProductLoadingDemandMode::fromString((string)($payload['demand_mode'] ?? 'ALERTS_ONLY'));
         $buffer = $this->readInteger($payload['safety_buffer_pct'] ?? 10, 'safety_buffer_pct', 0, 50);
+        $serviceDate = $this->optionalServiceDate($payload['service_date'] ?? null);
 
         $created = [];
         $skipped = [];
@@ -249,10 +265,11 @@ final class ProductLoadingOrderService
                 continue;
             }
 
+            $scope = $this->routeScope($restockerId, $mode, null, $serviceDate);
             $inputs = $this->orderRepository->fetchProposalInputs(
                 $restockerId,
                 null,
-                $this->routeMachineIds($restockerId, $mode, null)
+                $scope['pending'] ?? null
             );
             $restocker = $inputs['restocker'];
 
@@ -957,19 +974,20 @@ final class ProductLoadingOrderService
     }
 
     /**
-     * Máquinas `PENDING` de la ruta efectiva del reponedor (Módulo 37, `D5`).
+     * Alcance de la ruta efectiva del reponedor (Módulo 37, `D5`).
      *
-     * `TODAY_ROUTE` limita la foto de huecos a las paradas que el planificador
-     * entrega para la fecha civil: quedan fuera las completadas, omitidas y
-     * bloqueadas. En los demás modos devuelve `null` y la consulta conserva el
-     * alcance de flota histórico.
+     * `TODAY_ROUTE` limita la foto de huecos a las paradas pendientes que el
+     * planificador entrega para la fecha civil y publica, por separado, las
+     * máquinas bloqueadas que quedan fuera. En los demás modos devuelve `null`
+     * y la consulta conserva el alcance de flota histórico.
      *
-     * @return list<int>|null
+     * @return array{pending: list<int>, blocked: list<int>, service_date: string}|null
      */
-    private function routeMachineIds(
+    private function routeScope(
         int $restockerId,
         ProductLoadingDemandMode $mode,
-        ?DateTimeImmutable $reference
+        ?DateTimeImmutable $reference,
+        ?string $serviceDate = null
     ): ?array {
         if (!$mode->isTodayRoute()) {
             return null;
@@ -982,19 +1000,21 @@ final class ProductLoadingOrderService
         }
 
         $now = $reference ?? new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'));
-        $serviceDate = RestockCadenceEvaluator::today($now);
+        $date = $serviceDate !== null && trim($serviceDate) !== ''
+            ? RestockCadenceEvaluator::normalizeServiceDate($serviceDate)
+            : RestockCadenceEvaluator::today($now);
 
         try {
-            $route = $this->routePlanner->buildRestockerRoute($restockerId, $serviceDate, null, $now);
+            $route = $this->routePlanner->buildRestockerRoute($restockerId, $date, null, $now);
         } catch (RestockRoutePlannerValidationException $exception) {
             if ($exception->getErrorCode() === RestockRoutePlannerValidationException::RESTOCKER_NOT_FOUND) {
-                return [];
+                return ['pending' => [], 'blocked' => [], 'service_date' => $date];
             }
 
             throw $exception;
         }
 
-        $machineIds = [];
+        $pending = [];
         foreach ($route['route_plan']['stops'] ?? [] as $stop) {
             if (!is_array($stop)) {
                 continue;
@@ -1003,12 +1023,33 @@ final class ProductLoadingOrderService
             foreach ($stop['machines'] ?? [] as $machine) {
                 $machineId = (int)($machine['machine_id'] ?? 0);
                 if ($machineId > 0) {
-                    $machineIds[$machineId] = $machineId;
+                    $pending[$machineId] = $machineId;
                 }
             }
         }
 
-        return array_values($machineIds);
+        $blocked = [];
+        foreach ($route['route_plan']['blocked_stops'] ?? [] as $stop) {
+            $machineId = is_array($stop) ? (int)($stop['machine_id'] ?? 0) : 0;
+            if ($machineId > 0) {
+                $blocked[$machineId] = $machineId;
+            }
+        }
+
+        return [
+            'pending' => array_values($pending),
+            'blocked' => array_values($blocked),
+            'service_date' => $date,
+        ];
+    }
+
+    private function optionalServiceDate(mixed $value): ?string
+    {
+        if ($value === null || trim((string)$value) === '') {
+            return null;
+        }
+
+        return RestockCadenceEvaluator::normalizeServiceDate((string)$value);
     }
 
     /**

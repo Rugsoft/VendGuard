@@ -10,6 +10,7 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Presentation\Controller\CoordinatorPlanogramController;
 use VendGuard\Presentation\Controller\CoordinatorProductLoadingController;
 use VendGuard\Presentation\Controller\CoordinatorRefundController;
+use VendGuard\Presentation\Controller\CoordinatorRestockRoutePlannerController;
 use VendGuard\Presentation\Controller\CoordinatorRootCauseController;
 use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
 use VendGuard\Presentation\Controller\CoordinatorVanRestockOrderController;
@@ -385,6 +386,19 @@ class AppRouter
         $router->get('/api/coordinator/spare-parts/{id}', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'getPart'], [$coordinatorAuth]);
         $router->delete('/api/coordinator/spare-parts/{id}', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'deletePart'], [$coordinatorAuth]);
 
+        // Planificador de Rutas Periódicas de Carga (Módulo 37: T-RRP-09,
+        // RF-01 a RF-03, RF-05.3, D1–D7, QA-1–QA-6, Art. II, Art. III.1,
+        // Art. III.3, Art. V.1, Art. V.4 y Art. VI). Las rutas estáticas se
+        // registran antes de `{id}` y las agendas se versionan, nunca se borran.
+        $router->get('/api/coordinator/restock-schedules', [CoordinatorRestockRoutePlannerController::class, 'listSchedules'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/restock-schedules', [CoordinatorRestockRoutePlannerController::class, 'createSchedule'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/restock-schedules/bulk', [CoordinatorRestockRoutePlannerController::class, 'bulkSchedules'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/restock-schedules/machine/{machineId}', [CoordinatorRestockRoutePlannerController::class, 'updateSchedule'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/restock-schedules/{id}/deactivate', [CoordinatorRestockRoutePlannerController::class, 'deactivateSchedule'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/restock-route/day', [CoordinatorRestockRoutePlannerController::class, 'getDay'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/restock-route/overrides', [CoordinatorRestockRoutePlannerController::class, 'createOverride'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/restock-route/overrides/{id}/revoke', [CoordinatorRestockRoutePlannerController::class, 'revokeOverride'], [$coordinatorAuth]);
+
         // Stock de repuestos de las furgonetas (Módulo 18, RF-03 / RF-04.2)
         $router->get('/api/coordinator/van-stocks', [\VendGuard\Presentation\Controller\CoordinatorVanStockController::class, 'getInventory'], [$coordinatorAuth]);
         $router->put('/api/coordinator/van-stocks', [\VendGuard\Presentation\Controller\CoordinatorVanStockController::class, 'upsertStock'], [$coordinatorAuth]);
@@ -583,6 +597,12 @@ class AppRouter
             \VendGuard\Core\Domain\Model\UserRole::RESTOCKER
         );
         $router->get('/api/restocker/my-route', [RestockerRouteController::class, 'myRoute'], [$restockerAuth]);
+        // Ruta periódica del día y excepciones in situ (Módulo 37: T-RRP-09,
+        // RF-02.2, RF-03, RF-05.1, D4, D7, C1–C3, Art. II, Art. V.1 y
+        // Art. V.4). La ruta estática de volcado se registra antes del
+        // segmento dinámico `{machineId}`. El reponedor sale siempre del token.
+        $router->post('/api/restocker/route/override-conflict-dump', [RestockerRouteController::class, 'dumpOverrideConflict'], [$restockerAuth]);
+        $router->post('/api/restocker/route/stops/{machineId}/skip', [RestockerRouteController::class, 'skipStop'], [$restockerAuth]);
         // Parque de máquinas y planograma de solo lectura del reponedor (Módulo 32,
         // QA 2, Art. V.4). El servicio acota por las zonas vivas del token y nunca
         // selecciona unit_cost_eur ni margen; fuera de ellas responde 403.

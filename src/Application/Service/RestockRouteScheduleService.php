@@ -105,9 +105,15 @@ final class RestockRouteScheduleService
         $search = isset($filters['search']) && $filters['search'] !== null
             ? mb_strtolower(trim((string)$filters['search']), 'UTF-8')
             : null;
+        $hasSchedule = array_key_exists('has_schedule', $filters) && $filters['has_schedule'] !== null
+            ? (bool)$filters['has_schedule']
+            : null;
 
         $items = [];
         foreach ($snapshot['machines'] as $machine) {
+            if (!$machine['is_active'] || !$machine['location_active']) {
+                continue;
+            }
             if ($machineId !== null && (int)$machine['id'] !== $machineId) {
                 continue;
             }
@@ -120,12 +126,31 @@ final class RestockRouteScheduleService
 
             $schedule = $machine['schedule'] ?? null;
             if (!is_array($schedule)) {
+                if ($cadenceType !== null || $hasSchedule === true) {
+                    continue;
+                }
+
+                $items[] = [
+                    'machine_id' => (int)$machine['id'],
+                    'machine_code' => (string)$machine['machine_code'],
+                    'machine_type' => (string)$machine['machine_type'],
+                    'location_id' => (int)$machine['location_id'],
+                    'location_name' => (string)$machine['location_name'],
+                    'zone_id' => $machine['zone_id'],
+                    'zone_name' => $machine['zone_name'],
+                    'has_schedule' => false,
+                    'schedule' => null,
+                    'next_scheduled_date' => null,
+                ];
                 continue;
             }
             if (!$includeInactive && ($schedule['is_active'] ?? true) !== true) {
                 continue;
             }
             if ($cadenceType !== null && (string)$schedule['cadence_type'] !== $cadenceType) {
+                continue;
+            }
+            if ($hasSchedule === false) {
                 continue;
             }
 
@@ -148,6 +173,7 @@ final class RestockRouteScheduleService
                 'location_name' => (string)$machine['location_name'],
                 'zone_id' => $machine['zone_id'],
                 'zone_name' => $machine['zone_name'],
+                'has_schedule' => true,
                 'schedule' => $entity->toArray(),
                 'next_scheduled_date' => $this->nextScheduledDate($entity, $today, $machine),
             ];
