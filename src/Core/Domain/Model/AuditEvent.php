@@ -192,6 +192,25 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_PRODUCT_LOADING_ORDER = 'PRODUCT_LOADING_ORDER';
 
     /**
+     * Agenda periódica de reposición (Módulo 37, Tabla 50).
+     *
+     * El versionado cierra e inserta filas con espacio de identificadores
+     * propio; auditarlo como `MACHINE` apuntaría a la máquina y no a la versión
+     * concreta (QA-2, Art. III.3). El valor existe en el enum desde la
+     * migración 033.
+     */
+    public const ENTITY_MACHINE_RESTOCK_SCHEDULE = 'MACHINE_RESTOCK_SCHEDULE';
+
+    /**
+     * Excepción diaria de ruta (Módulo 37, Tabla 51).
+     *
+     * `SKIPPED`/`REASSIGNED` y sus revocaciones tienen identificador propio; el
+     * visor debe poder reconstruir el ciclo sin confundirlo con la visita o la
+     * agenda (C1, Art. III.3). El valor existe en el enum desde la migración 033.
+     */
+    public const ENTITY_RESTOCK_ROUTE_DAILY_OVERRIDE = 'RESTOCK_ROUTE_DAILY_OVERRIDE';
+
+    /**
      * Whitelist completa de tipos de entidad admitidos por el dominio.
      *
      * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
@@ -226,6 +245,8 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_MACHINE_PLANOGRAM,
         self::ENTITY_RESTOCKER_VAN_STOCK,
         self::ENTITY_PRODUCT_LOADING_ORDER,
+        self::ENTITY_MACHINE_RESTOCK_SCHEDULE,
+        self::ENTITY_RESTOCK_ROUTE_DAILY_OVERRIDE,
     ];
 
     /**

@@ -57,6 +57,15 @@ final class RestockRoutePlannerValidationException extends DomainException
     public const SKIP_FUTURE_DATE_FORBIDDEN_FOR_RESTOCKER = 'SKIP_FUTURE_DATE_FORBIDDEN_FOR_RESTOCKER';
     public const INVALID_CLIENT_MUTATION_ID = 'INVALID_CLIENT_MUTATION_ID';
 
+    // ── 404 · recursos del módulo ──────────────────────────────────────────
+    public const MACHINE_NOT_FOUND = 'MACHINE_NOT_FOUND';
+    public const RESTOCKER_NOT_FOUND = 'RESTOCKER_NOT_FOUND';
+    public const SCHEDULE_NOT_FOUND = 'SCHEDULE_NOT_FOUND';
+    public const OVERRIDE_NOT_FOUND = 'OVERRIDE_NOT_FOUND';
+
+    // ── 422 · máquina no operativa ─────────────────────────────────────────
+    public const MACHINE_INACTIVE_OR_DELETED = 'MACHINE_INACTIVE_OR_DELETED';
+
     private string $errorCode;
 
     private int $httpStatusCode;
@@ -295,6 +304,64 @@ final class RestockRoutePlannerValidationException extends DomainException
             422,
             'service_date',
             ['service_date' => $serviceDate, 'today' => $today]
+        );
+    }
+
+    public static function machineNotFound(int $machineId): self
+    {
+        return new self(
+            self::MACHINE_NOT_FOUND,
+            sprintf('La máquina %d no existe o está dada de baja (RF-01.3).', $machineId),
+            404,
+            'machine_id',
+            ['machine_id' => $machineId]
+        );
+    }
+
+    public static function restockerNotFound(int $restockerId): self
+    {
+        return new self(
+            self::RESTOCKER_NOT_FOUND,
+            sprintf('El reponedor %d no existe o no está activo (RF-03.1).', $restockerId),
+            404,
+            'restocker_id',
+            ['restocker_id' => $restockerId]
+        );
+    }
+
+    public static function scheduleNotFound(int $scheduleId): self
+    {
+        return new self(
+            self::SCHEDULE_NOT_FOUND,
+            sprintf('La agenda %d no existe o ya está cerrada (RF-01.3, QA-2).', $scheduleId),
+            404,
+            'schedule_id',
+            ['schedule_id' => $scheduleId]
+        );
+    }
+
+    public static function overrideNotFound(int $overrideId): self
+    {
+        return new self(
+            self::OVERRIDE_NOT_FOUND,
+            sprintf('La excepción diaria %d no existe (RF-02.3).', $overrideId),
+            404,
+            'override_id',
+            ['override_id' => $overrideId]
+        );
+    }
+
+    public static function machineInactiveOrDeleted(int $machineId): self
+    {
+        return new self(
+            self::MACHINE_INACTIVE_OR_DELETED,
+            sprintf(
+                'La máquina %d está inactiva, eliminada o pertenece a una sede inactiva (RF-01.3, QA-6).',
+                $machineId
+            ),
+            422,
+            'machine_id',
+            ['machine_id' => $machineId]
         );
     }
 

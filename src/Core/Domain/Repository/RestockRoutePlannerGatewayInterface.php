@@ -166,6 +166,13 @@ interface RestockRoutePlannerGatewayInterface
     ): int;
 
     /**
+     * Vincula el aviso encolado a la excepción que lo disparó.
+     *
+     * @return bool `false` si la excepción no existe o ya no está viva.
+     */
+    public function attachNotificationToOverride(int $overrideId, int $notificationId): bool;
+
+    /**
      * Mutación offline ya registrada, o `null` si es la primera vez.
      *
      * @return array{id: int, http_status: int, payload: array<string, mixed>}|null

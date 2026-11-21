@@ -509,6 +509,29 @@ final class PdoRestockRoutePlannerGateway implements RestockRoutePlannerGatewayI
     /**
      * {@inheritdoc}
      */
+    public function attachNotificationToOverride(int $overrideId, int $notificationId): bool
+    {
+        if ($overrideId <= 0 || $notificationId <= 0) {
+            return false;
+        }
+
+        $stmt = $this->pdo->prepare(
+            "UPDATE restock_route_daily_overrides
+                SET triggered_notification_id = :notification_id,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id = :override_id
+                AND status = 'ACTIVE'"
+        );
+        $stmt->bindValue(':notification_id', $notificationId, PDO::PARAM_INT);
+        $stmt->bindValue(':override_id', $overrideId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function findOfflineMutation(int $restockerId, string $clientMutationId): ?array
     {
         if ($restockerId <= 0 || trim($clientMutationId) === '') {
@@ -615,7 +638,11 @@ final class PdoRestockRoutePlannerGateway implements RestockRoutePlannerGatewayI
         $depth = $this->transactionDepth;
         $savepoint = 'rrp_gateway_' . $depth;
 
-        if ($depth === 0) {
+        // Una transacción exterior (`PdoTransactionManager`) ya está abierta:
+        // el gateway participa con un `SAVEPOINT` y no vuelve a abrir el motor.
+        $external = $depth === 0 && $this->pdo->inTransaction();
+
+        if ($depth === 0 && !$external) {
             $this->pdo->beginTransaction();
         } else {
             $this->pdo->exec('SAVEPOINT ' . $savepoint);
@@ -627,7 +654,7 @@ final class PdoRestockRoutePlannerGateway implements RestockRoutePlannerGatewayI
             $result = $work();
             $this->transactionDepth--;
 
-            if ($this->transactionDepth === 0) {
+            if ($this->transactionDepth === 0 && !$external) {
                 $this->pdo->commit();
             } else {
                 $this->pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
@@ -637,7 +664,7 @@ final class PdoRestockRoutePlannerGateway implements RestockRoutePlannerGatewayI
         } catch (Throwable $exception) {
             $this->transactionDepth--;
 
-            if ($this->transactionDepth === 0) {
+            if ($this->transactionDepth === 0 && !$external) {
                 if ($this->pdo->inTransaction()) {
                     $this->pdo->rollBack();
                 }
