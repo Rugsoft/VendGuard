@@ -19,7 +19,7 @@ S5 — **Superficies Frontend Vue 3 ESM y Certificación Global (`RF-05.2`, `RF-
 
 | ID | Specs | Ruta | Commit | Estado |
 | :--- | :--- | :--- | :--- | :--- |
-| **WU-1 / T-RRP-01** | S1 | inline | — | ⏳ pendiente |
+| **WU-1 / T-RRP-01** | S1 | inline | — | ✅ completada (2026-11-21) |
 | **WU-1 / T-RRP-02** | S1 | inline | — | ⏳ pendiente |
 | **WU-2 / T-RRP-03** | S1, S2, S4 | inline | — | ⏳ pendiente |
 | **WU-2 / T-RRP-04** | S2 | inline | — | ⏳ pendiente |
@@ -37,3 +37,4 @@ S5 — **Superficies Frontend Vue 3 ESM y Certificación Global (`RF-05.2`, `RF-
 
 * **L1 (2026-11-21):** Petición original del usuario: `"antes de empezar con el mecanismo sdd y escribir la spec, vamos a definir un poco esta feature de docs/features_pendientes-md: 27. 🗺️ Planificador de Rutas Periódicas de Carga y Priorización Dinámica por Demanda (Recurring Restock Schedules & Dynamic Route Cadence)"`.
 * **L2 (2026-11-21):** Consensuadas con el Product Owner las 7 decisiones de diseño (`D1`–`D7`), los 3 casos límite (`C1`–`C3`) y las 6 resoluciones de auditoría QA (`QA-1`–`QA-6`). Aprobada formalmente la Puerta SDD de Fase 2 (`specs/37-restock-route-planner/spec.md` v1.1, `specs/functional/restock_route_planner_spec.md`, `specs/technical/restock_route_planner_contracts.md`, `specs/37-restock-route-planner/plan.md` y `specs/37-restock-route-planner/tasks.md`) e instruido el arranque del seguimiento ODD, la creación de rama y el primer commit sin iniciar ninguna tarea: `"crea el documento odd de seguimiento, crea la nueva rama  y haz el primer commit de rama con los archivos pendientes. Pero no hagas ninguna tarea"`.
+* **L3 (2026-11-21):** T-RRP-01 completada: migración `033_restock_route_planner.sql` con los tipos `#45`–`#50`, `TODAY_ROUTE`, las entidades de auditoría `MACHINE_RESTOCK_SCHEDULE`/`RESTOCK_ROUTE_DAILY_OVERRIDE`, la plantilla `RESTOCK_FEFO_STOP_SKIPPED_ALERT`, las Tablas 50/51 con sus índices únicos parciales y disparadores `prevent_hard_delete()`/`touch_updated_at()`, la FK `fk_machine_restock_visits_route_schedule` y `SKIP_RESTOCK_STOP` en la cola offline; convergencia 1:1 en `supabase_init.sql` (**51 tablas / 50 tipos `ENUM` / 56 columnas `ENUM`**) y siembra idempotente de **5 agendas** (las cinco cadencias) y **1 excepción `SKIPPED`** en `supabase_seeds.sql` y `SeedRunner`. Verificación real: `SchemaConvergenceParityTest.php` **42/42 aserciones · `exit=0`**; upgrade desde el esquema de 49 tablas del Módulo 36 certificado en esquema aislado (convergencia a 51 + libro `A-5`, índice único y `prevent_hard_delete()` mordiendo) con **residuo 0**. Siguiente tarea pendiente: **T-RRP-02**.

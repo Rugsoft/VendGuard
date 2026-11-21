@@ -212,7 +212,9 @@ DO $do$
 BEGIN
     CREATE TYPE product_loading_demand_mode AS ENUM (
         'ALERTS_ONLY',
-        'ALL_GAPS'
+        'ALL_GAPS',
+        -- Módulo 37 · la propuesta se ciñe a la ruta efectiva del día (D5, QA-5).
+        'TODAY_ROUTE'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -238,6 +240,75 @@ BEGIN
         'DELIVERED_TO_VAULT',
         'RECONCILED_OK',
         'DISCREPANCY_FLAGGED'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+-- Módulo 37 · tipos nativos #45 a #50 del planificador de rutas de carga
+-- (RF-01.1, RF-02.1, D6, QA-4): la cadencia periódica, la franja de acceso, la
+-- naturaleza y el ciclo de vida de la excepción diaria y sus dos catálogos de
+-- causas tipificadas (omisión y desvío puntual).
+DO $do$
+BEGIN
+    CREATE TYPE restock_cadence_type AS ENUM (
+        'DAILY',
+        'MON_WED_FRI',
+        'TUE_THU',
+        'WEEKLY',
+        'BIWEEKLY'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE restock_time_window AS ENUM (
+        'MORNING',
+        'MIDDAY',
+        'AFTERNOON',
+        'ANY'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE restock_override_type AS ENUM (
+        'SKIPPED',
+        'REASSIGNED'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE restock_override_status AS ENUM (
+        'ACTIVE',
+        'SUPERSEDED',
+        'REVOKED'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE restock_skip_reason_code AS ENUM (
+        'LOCATION_CLOSED',
+        'NO_KEY_OR_ACCESS',
+        'LOCAL_HOLIDAY',
+        'FLEET_CAPACITY_SHORTAGE',
+        'OTHER_OPERATIONAL'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE restock_reassignment_reason_code AS ENUM (
+        'ZONE_UNCOVERED',
+        'LOAD_BALANCING',
+        'FEFO_RESCUE',
+        'OTHER_REASSIGNMENT'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -400,7 +471,11 @@ BEGIN
         -- Recaudación, cambio y arqueo de caja del Módulo 35 (Art. III.3): el
         -- corte de bolsa, la entrega en conserjería y el dictamen de Caja
         -- Central se auditan contra esta entidad, no contra la máquina.
-        'MACHINE_CASH_COLLECTION'
+        'MACHINE_CASH_COLLECTION',
+        -- Planificador de rutas de carga del Módulo 37 (Art. III.3, QA-2, C1):
+        -- el versionado de la agenda y el ciclo de la excepción diaria se auditan
+        -- contra su propia entidad, no contra la máquina ni contra el reponedor.
+        'MACHINE_RESTOCK_SCHEDULE', 'RESTOCK_ROUTE_DAILY_OVERRIDE'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -483,7 +558,11 @@ BEGIN
         'OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT',
         'INCIDENT_REOPENED_IN_SITU_SITE',
         -- Módulo 21: aviso propio y prioritario al técnico receptor de un relevo.
-        'TELEGRAM_INCIDENT_ASSIGNMENT'
+        'TELEGRAM_INCIDENT_ASSIGNMENT',
+        -- Módulo 37 · alerta crítica interna de Coordinación cuando se omite una
+        -- parada con FEFO viva; jamás se dirige a canales de sede ni públicos
+        -- (RF-02.2, QA-1, Art. II, Art. V.4).
+        'RESTOCK_FEFO_STOP_SKIPPED_ALERT'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -2946,7 +3025,9 @@ CREATE TABLE IF NOT EXISTS offline_sync_mutations (
             -- Mutaciones móviles del reponedor (Módulo 36, C2).
             'START_L1_INCIDENT',
             'RESOLVE_L1_INCIDENT',
-            'ESCALATE_INCIDENT_TO_SAT'
+            'ESCALATE_INCIDENT_TO_SAT',
+            -- Omisión de parada desde la cola Offline PWA (Módulo 37, C3).
+            'SKIP_RESTOCK_STOP'
         )
     ),
     CONSTRAINT chk_offline_sync_outcome_status CHECK (
@@ -4899,9 +4980,197 @@ CREATE OR REPLACE TRIGGER trg_enforce_cash_collection_sanitary_guard
     FOR EACH ROW EXECUTE FUNCTION enforce_cash_collection_sanitary_guard();
 
 
+-- =============================================================================
+-- Módulo 37 · Planificador de Rutas Periódicas de Carga y Priorización
+--             Dinámica por Demanda (Módulo 37)
+-- -----------------------------------------------------------------------------
+-- Tabla 50 · machine_restock_schedules — agenda periódica versionada por fila
+-- -----------------------------------------------------------------------------
+-- `day_of_week` usa ISO-8601 (1 = lunes, 7 = domingo) y solo se admite en
+-- `WEEKLY`; `anchor_date` solo en `BIWEEKLY`; `include_weekends` solo en
+-- `DAILY`. La zona y el titular no se guardan aquí: se heredan de
+-- `locations.zone_id` y de `RestockerZoneCoverageService` (D2). Toda edición
+-- cierra lógicamente la fila vigente e inserta una nueva versión activa; el
+-- índice único parcial garantiza una sola agenda viva por máquina (QA-2).
+CREATE TABLE IF NOT EXISTS machine_restock_schedules (
+    id                     BIGINT GENERATED ALWAYS AS IDENTITY,
+    machine_id             BIGINT NOT NULL,
+    cadence_type           restock_cadence_type NOT NULL,
+    day_of_week            SMALLINT,
+    anchor_date            DATE,
+    preferred_time_window  restock_time_window NOT NULL DEFAULT 'ANY',
+    include_weekends       BOOLEAN NOT NULL DEFAULT FALSE,
+    notes                  VARCHAR(500),
+    is_active              BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by             BIGINT NOT NULL,
+    updated_by             BIGINT NOT NULL,
+    deactivated_by         BIGINT,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deactivated_at         TIMESTAMPTZ,
+    CONSTRAINT pk_machine_restock_schedules PRIMARY KEY (id),
+    CONSTRAINT fk_mrs_machine FOREIGN KEY (machine_id)
+        REFERENCES machines (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_mrs_created_by FOREIGN KEY (created_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_mrs_updated_by FOREIGN KEY (updated_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_mrs_deactivated_by FOREIGN KEY (deactivated_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_mrs_cadence_coherence CHECK (
+        (
+            (cadence_type = 'WEEKLY' AND day_of_week BETWEEN 1 AND 7 AND anchor_date IS NULL)
+            OR (cadence_type = 'BIWEEKLY' AND anchor_date IS NOT NULL AND day_of_week IS NULL)
+            OR (cadence_type IN ('DAILY', 'MON_WED_FRI', 'TUE_THU') AND day_of_week IS NULL AND anchor_date IS NULL)
+        )
+        AND (include_weekends = FALSE OR cadence_type = 'DAILY')
+    ),
+    CONSTRAINT chk_mrs_deactivation_coherence CHECK (
+        (is_active = TRUE AND deactivated_at IS NULL AND deactivated_by IS NULL)
+        OR (is_active = FALSE AND deactivated_at IS NOT NULL)
+    ),
+    CONSTRAINT chk_mrs_notes_length CHECK (
+        notes IS NULL OR char_length(btrim(notes)) BETWEEN 1 AND 500
+    )
+);
+
+-- Como máximo una agenda activa por máquina; las versiones cerradas permanecen
+-- inmutables y siguen siendo válidas para el enlace histórico de visitas.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_machine_restock_schedule_active
+    ON machine_restock_schedules (machine_id)
+    WHERE is_active = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_mrs_machine_history
+    ON machine_restock_schedules (machine_id, is_active, created_at DESC);
+
+-- Prohibición de borrado físico (Art. III.1) y marca temporal de actualización.
+CREATE OR REPLACE TRIGGER trg_no_delete_machine_restock_schedules
+    BEFORE DELETE ON machine_restock_schedules
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_machine_restock_schedules
+    BEFORE UPDATE ON machine_restock_schedules
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 51 · restock_route_daily_overrides — excepción diaria trazable
+-- -----------------------------------------------------------------------------
+-- `SKIPPED` exige causa tipificada y motivo de 20 a 500 caracteres reales
+-- (Art. V.1); `REASSIGNED` exige destino y causa tipificada, con nota opcional.
+-- `SUPERSEDED` solo nace de una visita física real y `REVOKED` deja siempre
+-- rastro de quién y cuándo resolvió (C1). El índice único parcial impide dos
+-- excepciones vivas para la misma máquina y día civil.
+CREATE TABLE IF NOT EXISTS restock_route_daily_overrides (
+    id                        BIGINT GENERATED ALWAYS AS IDENTITY,
+    machine_id                BIGINT NOT NULL,
+    service_date              DATE NOT NULL,
+    override_type             restock_override_type NOT NULL,
+    status                    restock_override_status NOT NULL DEFAULT 'ACTIVE',
+    original_restocker_id     BIGINT,
+    target_restocker_id       BIGINT,
+    skip_reason_code          restock_skip_reason_code,
+    reassignment_reason_code  restock_reassignment_reason_code,
+    reason_text               VARCHAR(500),
+    had_active_fefo_alert     BOOLEAN NOT NULL DEFAULT FALSE,
+    triggered_notification_id BIGINT,
+    client_mutation_id        VARCHAR(64),
+    superseded_by_visit_id    BIGINT,
+    created_by                BIGINT NOT NULL,
+    resolved_by               BIGINT,
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at               TIMESTAMPTZ,
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_restock_route_daily_overrides PRIMARY KEY (id),
+    CONSTRAINT fk_rrdo_machine FOREIGN KEY (machine_id)
+        REFERENCES machines (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_rrdo_original_restocker FOREIGN KEY (original_restocker_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_rrdo_target_restocker FOREIGN KEY (target_restocker_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_rrdo_notification FOREIGN KEY (triggered_notification_id)
+        REFERENCES notification_outbox (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_rrdo_superseded_visit FOREIGN KEY (superseded_by_visit_id)
+        REFERENCES machine_restock_visits (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_rrdo_created_by FOREIGN KEY (created_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_rrdo_resolved_by FOREIGN KEY (resolved_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_rrdo_type_fields_coherence CHECK (
+        (
+            override_type = 'SKIPPED'
+            AND skip_reason_code IS NOT NULL
+            AND reassignment_reason_code IS NULL
+            AND target_restocker_id IS NULL
+            AND reason_text IS NOT NULL
+            AND char_length(btrim(reason_text)) BETWEEN 20 AND 500
+        )
+        OR (
+            override_type = 'REASSIGNED'
+            AND target_restocker_id IS NOT NULL
+            AND reassignment_reason_code IS NOT NULL
+            AND skip_reason_code IS NULL
+            AND (reason_text IS NULL OR char_length(btrim(reason_text)) <= 500)
+        )
+    ),
+    CONSTRAINT chk_rrdo_status_resolution_coherence CHECK (
+        (status = 'ACTIVE' AND resolved_at IS NULL AND superseded_by_visit_id IS NULL)
+        OR (status = 'SUPERSEDED' AND resolved_at IS NOT NULL AND superseded_by_visit_id IS NOT NULL AND override_type = 'SKIPPED')
+        OR (status = 'REVOKED' AND resolved_at IS NOT NULL)
+    ),
+    CONSTRAINT chk_rrdo_client_mutation_format CHECK (
+        client_mutation_id IS NULL
+        OR (char_length(btrim(client_mutation_id)) BETWEEN 8 AND 64 AND client_mutation_id ~ '^[A-Za-z0-9_.:-]+$')
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_restock_override_active_machine_day
+    ON restock_route_daily_overrides (machine_id, service_date)
+    WHERE status = 'ACTIVE';
+
+CREATE INDEX IF NOT EXISTS idx_rrdo_service_date_target
+    ON restock_route_daily_overrides (service_date, target_restocker_id)
+    WHERE status = 'ACTIVE' AND override_type = 'REASSIGNED';
+
+-- Prohibición de borrado físico (Art. III.1) y marca temporal de actualización.
+CREATE OR REPLACE TRIGGER trg_no_delete_restock_route_daily_overrides
+    BEFORE DELETE ON restock_route_daily_overrides
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_restock_route_daily_overrides
+    BEFORE UPDATE ON restock_route_daily_overrides
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- Evolución de Tabla 47 · enlace histórico con la agenda (RF-01.1.4, RF-04.2)
+-- -----------------------------------------------------------------------------
+-- La clave foránea se declara aquí y no en el `CREATE TABLE` de la visita
+-- porque la Tabla 50 se define después. `ON DELETE RESTRICT` protege el
+-- histórico: una agenda referenciada por una visita no puede desaparecer.
+DO $do$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conname = 'fk_machine_restock_visits_route_schedule'
+           AND conrelid = 'machine_restock_visits'::regclass
+    ) THEN
+        ALTER TABLE machine_restock_visits
+            ADD CONSTRAINT fk_machine_restock_visits_route_schedule
+            FOREIGN KEY (route_schedule_id)
+            REFERENCES machine_restock_schedules (id)
+            ON DELETE RESTRICT ON UPDATE CASCADE;
+    END IF;
+END $do$;
+
+CREATE INDEX IF NOT EXISTS idx_machine_restock_visits_schedule
+    ON machine_restock_visits (route_schedule_id)
+    WHERE route_schedule_id IS NOT NULL;
+
+
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 49 tablas (las 49 del contrato de correspondencia) · 48 columnas `ENUM` · 19
+-- 51 tablas (las 51 del contrato de correspondencia) · 56 columnas `ENUM` · 19
 -- funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
 -- `prevent_satisfaction_survey_rewrite()`, `prevent_service_sheet_update()`
@@ -4919,7 +5188,7 @@ CREATE OR REPLACE TRIGGER trg_enforce_cash_collection_sanitary_guard
 -- y las dos del blindaje de la recaudación del Módulo 35
 -- (`enforce_machine_cash_collections_immutability()` y
 -- `enforce_cash_collection_sanitary_guard()`)
--- 97 disparadores: 49 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 29
+-- 104 disparadores: 51 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 31
 -- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2), 14 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
@@ -4939,9 +5208,9 @@ CREATE OR REPLACE TRIGGER trg_enforce_cash_collection_sanitary_guard
 -- `trg_enforce_restock_visit_item_guard`, `BEFORE INSERT`) y 1 del cerrojo
 -- sanitario de la recaudación del Módulo 35
 -- (`trg_enforce_cash_collection_sanitary_guard`, `BEFORE INSERT`)
--- 86 restricciones nombradas: 49 claves primarias (la del mapeo de códigos postales
+-- 88 restricciones nombradas: 51 claves primarias (la del mapeo de códigos postales
 -- es el propio CP, no un identificador sintético) y 37 únicas
--- 124 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- 129 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
 -- en la bitácora), las 12 del Módulo 23 (5 en órdenes y 7 en líneas) y las 4 del
 -- Módulo 24 (formato del identificador, tipo de parada, operación y resultado) y
@@ -4960,14 +5229,15 @@ CREATE OR REPLACE TRIGGER trg_enforce_cash_collection_sanitary_guard
 -- formato del lote vigente del carril) y las 8 del Módulo 35 (formato del código y
 -- del precinto, idempotencia, snapshots, cotas económicas, coherencia del contador
 -- con y sin reseteo, coherencia de la entrega en conserjería y ciclo de vida del
--- arqueo con la tolerancia de ±1,00 €)
--- · 120 claves foráneas con las reglas declaradas en el contrato §2.4
--- 122 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- arqueo con la tolerancia de ±1,00 €) y las 6 del Módulo 37 (3 de la agenda
+-- periódica y 3 de la excepción diaria)
+-- · 133 claves foráneas con las reglas declaradas en el contrato §2.4
+-- 141 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
 -- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2), el Módulo 23 (5) y el
 -- Módulo 24 (2), el Módulo 26 (3), el Módulo 27 (6), el Módulo 28 (3) y el
 -- Módulo 29 (4), el Módulo 31 (2) y el Módulo 32 (3), el Módulo 33 (3) y el
--- Módulo 34 (5) y el Módulo 35 (3)— y catorce
+-- Módulo 34 (5), el Módulo 35 (3) y el Módulo 37 (2)— y dieciséis
 -- índices únicos parciales:
 -- `uq_incident_assignments_active_custody` (M26, Art. V.3), `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
@@ -4977,7 +5247,8 @@ CREATE OR REPLACE TRIGGER trg_enforce_cash_collection_sanitary_guard
 -- `uq_restocker_primary_zone` (M31, RF-02.1 y QA 1) y
 -- `uq_product_loading_orders_active_restocker` (M33, D3, RF-02.3),
 -- `uq_machine_cash_collections_visit` y `uq_machine_cash_collections_refund`
--- (M35, D1 y D3). La identidad
+-- (M35, D1 y D3) y `uq_machine_restock_schedule_active` y
+-- `uq_restock_override_active_machine_day` (M37, QA-2 y C1). La identidad
 -- de la visita in situ (`uq_machine_restock_visits_code`) y la idempotencia del
 -- móvil (`uq_machine_restock_visits_mutation`, M34, D4) son restricciones únicas
 -- plenas, no parciales: rigen sobre toda la tabla histórica.

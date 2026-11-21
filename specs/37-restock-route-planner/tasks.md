@@ -2,7 +2,7 @@
 
 **Módulo:** `37-restock-route-planner` (Feature 27 de `docs/features_pendientes.md`)  
 **Versión:** 1.0 (Alineado con `spec.md` v1.1, `restock_route_planner_contracts.md` y `plan.md` v1.0; `D1`–`D7`, `C1`–`C3` y `QA-1`–`QA-6`)  
-**Estado:** Aprobado · Puerta SDD Fase 2 superada · Pendiente de Ejecución SDD (`0/13` tareas)  
+**Estado:** Aprobado · Puerta SDD Fase 2 superada · Ejecución SDD en curso (`1/13` tareas)  
 **Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño  
 **Ley Suprema:** [`constitution.md`](../../constitution.md), [`AGENTS.md`](../../AGENTS.md) y [`docs/design.md`](../../docs/design.md)
 
@@ -34,9 +34,10 @@ flowchart LR
 
 ## Detalle de Tareas
 
-- [ ] **T-RRP-01 · Crear migración `033_restock_route_planner.sql`, converger `supabase_init.sql` y sembrar agendas/excepción de demostración en `supabase_seeds.sql` y `SeedRunner`**
+- [x] **T-RRP-01 · Crear migración `033_restock_route_planner.sql`, converger `supabase_init.sql` y sembrar agendas/excepción de demostración en `supabase_seeds.sql` y `SeedRunner`**
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-04.1`, `RF-04.2`, `RF-05.1`, `RNF-01`, `D1`, `D5`, `D6`, `QA-2`, `QA-4`, `QA-6`, `Art. II`, `Art. III.1`, `Art. III.3`, `Art. IV`.
   - **Verificación:** `php tests/integration/SchemaConvergenceParityTest.php`
+  - **Cierre (2026-11-21):** `SchemaConvergenceParityTest.php` · **42/42 aserciones · `exit=0`**. Inventario convergido de **49 a 51 tablas**, de **44 a 50 tipos `ENUM`** y de **50 a 56 columnas `ENUM`**; libro de migraciones de **32 a 33**. Upgrade real verificado sobre un esquema preexistente de 49 tablas (convergencia a 51 + libro `A-5`) y semillas idempotentes: **5 agendas** (las cinco cadencias) y **1 excepción `SKIPPED`**, con **0 altas** en la segunda pasada y **residuo 0** de esquemas temporales.
 
 - [ ] **T-RRP-02 · Actualizar contratos de esquema (`database_schema.md`, `schema_correspondence_contract.md` a 51 tablas, 50 enums y 56 columnas `ENUM`), ampliar `PostgresFixtureBuilder` y crear `PostgresRestockRoutePlannerSchemaTest.php`**
   - **Requisitos:** `RF-01.1`, `RF-02.1`, `RF-05.1`, `RNF-01`, `RNF-03`, `QA-2`, `QA-4`, `QA-6`, `Art. III.1`, `Art. III.3`.

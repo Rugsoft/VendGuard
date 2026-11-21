@@ -3263,6 +3263,192 @@ class SeedRunner
     }
 
     /**
+     * Agendas periódicas versionadas del planificador de rutas (Módulo 37 · D1, D6, QA-2).
+     *
+     * Siembra una agenda por cada cadencia aprobada —diaria con fin de semana,
+     * lunes-miércoles-viernes, martes-jueves, semanal y quincenal con fecha
+     * ancla— sobre máquinas activas de sedes activas. La zona y el titular no se
+     * escriben aquí: se heredan de `locations.zone_id` y del cuadrante del
+     * Módulo 31 (D2), de modo que un traslado de máquina o una ausencia no dejan
+     * una segunda verdad en la agenda.
+     *
+     * Se inserta **solo si la máquina no tiene ya una agenda activa**: el
+     * versionado es por fila y una resemilla no puede crear una segunda versión
+     * ni pisar una edición hecha por Coordinación (QA-2, Art. III.3).
+     *
+     * @return int Agendas activas creadas en esta pasada.
+     */
+    public function seedMachineRestockSchedules(): int
+    {
+        $sqlTemplate = 'INSERT INTO machine_restock_schedules (
+                machine_id, cadence_type, day_of_week, anchor_date, preferred_time_window,
+                include_weekends, notes, is_active, created_by, updated_by
+            )
+            SELECT m.id,
+                   CAST(:cadence_type AS restock_cadence_type),
+                   :day_of_week,
+                   :anchor_date,
+                   CAST(:preferred_time_window AS restock_time_window),
+                   %s,
+                   :notes,
+                   %s,
+                   c.id,
+                   c.id
+              FROM machines m
+             INNER JOIN locations l ON l.id = m.location_id AND l.is_active = %s
+             INNER JOIN users c ON c.email_key = :coordinator_email
+             WHERE m.code = :machine_code
+               AND m.is_active = %s
+               AND m.deleted_at IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM machine_restock_schedules existing
+                    WHERE existing.machine_id = m.id
+                      AND existing.is_active = %s
+               )';
+
+        // El booleano va como literal y no como parámetro: PDO convierte `false`
+        // en cadena vacía al ejecutar un array de valores y PostgreSQL la rechaza
+        // como booleano (22P02). Se preparan las dos formas una sola vez.
+        $statements = [];
+        foreach ([true, false] as $includeWeekends) {
+            $statements[$includeWeekends ? 1 : 0] = $this->pdo->prepare(sprintf(
+                $sqlTemplate,
+                $this->dialect->booleanLiteral($includeWeekends),
+                $this->dialect->booleanLiteral(true),
+                $this->dialect->booleanLiteral(true),
+                $this->dialect->booleanLiteral(true),
+                $this->dialect->booleanLiteral(true)
+            ));
+        }
+
+        $schedules = [
+            [
+                'machine_code' => 'VEND-0101',
+                'cadence_type' => 'DAILY',
+                'day_of_week' => null,
+                'anchor_date' => null,
+                'preferred_time_window' => 'MORNING',
+                'include_weekends' => true,
+                'notes' => 'Reposición diaria de sándwiches y lácteos: el hospital abre también sábados y domingos.',
+            ],
+            [
+                'machine_code' => 'VEND-0201',
+                'cadence_type' => 'MON_WED_FRI',
+                'day_of_week' => null,
+                'anchor_date' => null,
+                'preferred_time_window' => 'MORNING',
+                'include_weekends' => false,
+                'notes' => 'Carga en lunes, miércoles y viernes antes de la apertura del office.',
+            ],
+            [
+                'machine_code' => 'VEND-0301',
+                'cadence_type' => 'TUE_THU',
+                'day_of_week' => null,
+                'anchor_date' => null,
+                'preferred_time_window' => 'MIDDAY',
+                'include_weekends' => false,
+                'notes' => 'Reposición de frescos en martes y jueves coincidiendo con el cambio de turno de consultas.',
+            ],
+            [
+                'machine_code' => 'VEND-0601',
+                'cadence_type' => 'WEEKLY',
+                'day_of_week' => 3,
+                'anchor_date' => null,
+                'preferred_time_window' => 'AFTERNOON',
+                'include_weekends' => false,
+                'notes' => 'Carga semanal de aguas y zumos los miércoles por la tarde, tras el cierre del coworking.',
+            ],
+            [
+                'machine_code' => 'VEND-0701',
+                'cadence_type' => 'BIWEEKLY',
+                'day_of_week' => null,
+                'anchor_date' => '2026-01-05',
+                'preferred_time_window' => 'ANY',
+                'include_weekends' => false,
+                'notes' => 'Reposición quincenal de sándwiches y yogures con acceso por el muelle de visitantes.',
+            ],
+        ];
+
+        $count = 0;
+        foreach ($schedules as $schedule) {
+            $statement = $statements[$schedule['include_weekends'] ? 1 : 0];
+            $statement->bindValue(':cadence_type', $schedule['cadence_type'], PDO::PARAM_STR);
+            $statement->bindValue(
+                ':day_of_week',
+                $schedule['day_of_week'],
+                $schedule['day_of_week'] === null ? PDO::PARAM_NULL : PDO::PARAM_INT
+            );
+            $statement->bindValue(
+                ':anchor_date',
+                $schedule['anchor_date'],
+                $schedule['anchor_date'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $statement->bindValue(':preferred_time_window', $schedule['preferred_time_window'], PDO::PARAM_STR);
+            $statement->bindValue(':notes', $schedule['notes'], PDO::PARAM_STR);
+            $statement->bindValue(':coordinator_email', 'coordinacion@vendguard.internal', PDO::PARAM_STR);
+            $statement->bindValue(':machine_code', $schedule['machine_code'], PDO::PARAM_STR);
+            $statement->execute();
+            $count += $statement->rowCount();
+        }
+
+        return $count;
+    }
+
+    /**
+     * Excepción diaria de demostración del planificador de rutas (Módulo 37 · Art. V.1).
+     *
+     * Siembra una omisión `SKIPPED` con causa tipificada y motivo justificado
+     * sobre una fecha civil fija y pasada: el arranque es idempotente en
+     * cualquier día y la ruta de hoy no queda perturbada por un hecho histórico.
+     * La fecha y la máquina identifican la fila, de modo que una resemilla no
+     * duplica la excepción ni reabre una ya revocada o superada.
+     *
+     * @return int Excepciones creadas en esta pasada.
+     */
+    public function seedRestockRouteDailyOverrides(): int
+    {
+        $insert = $this->pdo->prepare(sprintf(
+            'INSERT INTO restock_route_daily_overrides (
+                machine_id, service_date, override_type, status, original_restocker_id,
+                skip_reason_code, reason_text, had_active_fefo_alert, created_by
+            )
+            SELECT m.id,
+                   :service_date,
+                   CAST(:override_type AS restock_override_type),
+                   CAST(:status AS restock_override_status),
+                   u.id,
+                   CAST(:skip_reason_code AS restock_skip_reason_code),
+                   :reason_text,
+                   %s,
+                   c.id
+              FROM machines m
+             INNER JOIN users u ON u.email_key = :original_email
+             INNER JOIN users c ON c.email_key = :coordinator_email
+             WHERE m.code = :machine_code
+               AND NOT EXISTS (
+                   SELECT 1 FROM restock_route_daily_overrides existing
+                    WHERE existing.machine_id = m.id
+                      AND existing.service_date = :service_date_guard
+               )',
+            $this->dialect->booleanLiteral(false)
+        ));
+
+        $insert->execute([
+            ':service_date' => '2026-11-14',
+            ':service_date_guard' => '2026-11-14',
+            ':override_type' => 'SKIPPED',
+            ':status' => 'ACTIVE',
+            ':skip_reason_code' => 'NO_KEY_OR_ACCESS',
+            ':reason_text' => 'La conserjería del campus no pudo entregar la llave de la sala de profesores durante toda la jornada.',
+            ':original_email' => 'lucia.repostaje@vendguard.internal',
+            ':coordinator_email' => 'coordinacion@vendguard.internal',
+            ':machine_code' => 'VEND-0502',
+        ]);
+
+        return $insert->rowCount();
+    }
+
+    /**
      * Recaudaciones de efectivo y arqueos demo (Módulo 35 · RF-01 a RF-04).
      *
      * Siembra cuatro cortes de bolsa que cubren los cuatro estados del ciclo de
@@ -4193,6 +4379,11 @@ class SeedRunner
             // cuando las tres existen. Son hechos históricos inmutables que una
             // resemilla no reescribe ni duplica (Art. III.3).
             $cashCollectionCount = $this->seedMachineCashCollections();
+            // El planificador de rutas (Módulo 37) cuelga de la máquina y del
+            // coordinador ya sembrados: agendas versionadas por cadencia y una
+            // excepción diaria histórica que no perturba la ruta de hoy.
+            $restockScheduleCount = $this->seedMachineRestockSchedules();
+            $restockOverrideCount = $this->seedRestockRouteDailyOverrides();
             // Las guías de diagnóstico (Módulo 28) resuelven repuesto y causa por sus
             // códigos: entran cuando ambas maestras ya están sembradas. `Fas Perla`
             // queda sin guía a propósito para el indicador de cobertura (QA 1).
@@ -4244,6 +4435,8 @@ class SeedRunner
                 'product_loading_orders' => $productLoadingOrderCount,
                 'machine_restock_visits' => $restockVisitCount,
                 'machine_cash_collections' => $cashCollectionCount,
+                'machine_restock_schedules' => $restockScheduleCount,
+                'restock_route_daily_overrides' => $restockOverrideCount,
                 'troubleshooting_guides' => $troubleshootingGuideCount,
                 'technician_van_stocks' => $vanStockCount,
                 'van_restock_orders' => $vanRestockOrderCount,

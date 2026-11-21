@@ -2277,6 +2277,98 @@ WHERE NOT EXISTS (
 );
 
 
+-- =============================================================================
+-- SECCIÓN 23 · machine_restock_schedules — agendas periódicas versionadas (M37)
+-- =============================================================================
+-- Cinco agendas cubren las cinco cadencias aprobadas (D6): diaria con fin de
+-- semana, lunes-miércoles-viernes, martes-jueves, semanal y quincenal con fecha
+-- ancla. La agenda no guarda zona ni reponedor (D2): la zona se hereda de la
+-- sede y el titular efectivo lo resuelve el Módulo 31. El alta solo se ejecuta
+-- si la máquina no tiene ya una agenda activa, de modo que resembrar no crea una
+-- segunda versión ni pisa una edición hecha por Coordinación (QA-2).
+
+INSERT INTO machine_restock_schedules (
+    machine_id, cadence_type, day_of_week, anchor_date, preferred_time_window,
+    include_weekends, notes, is_active, created_by, updated_by
+)
+SELECT
+    m.id,
+    v.cadence_type::restock_cadence_type,
+    v.day_of_week,
+    v.anchor_date,
+    v.preferred_time_window::restock_time_window,
+    v.include_weekends,
+    v.notes,
+    TRUE,
+    c.id,
+    c.id
+FROM (VALUES
+    ('VEND-0101', 'DAILY',       NULL::SMALLINT, NULL::DATE, 'MORNING', TRUE,
+     'Reposición diaria de sándwiches y lácteos: el hospital abre también sábados y domingos.'),
+    ('VEND-0201', 'MON_WED_FRI', NULL::SMALLINT, NULL::DATE, 'MORNING', FALSE,
+     'Carga en lunes, miércoles y viernes antes de la apertura del office.'),
+    ('VEND-0301', 'TUE_THU',     NULL::SMALLINT, NULL::DATE, 'MIDDAY',  FALSE,
+     'Reposición de frescos en martes y jueves coincidiendo con el cambio de turno de consultas.'),
+    ('VEND-0601', 'WEEKLY',      3::SMALLINT,    NULL::DATE, 'AFTERNOON', FALSE,
+     'Carga semanal de aguas y zumos los miércoles por la tarde, tras el cierre del coworking.'),
+    ('VEND-0701', 'BIWEEKLY',    NULL::SMALLINT, DATE '2026-01-05', 'ANY', FALSE,
+     'Reposición quincenal de sándwiches y yogures con acceso por el muelle de visitantes.')
+) AS v(machine_code, cadence_type, day_of_week, anchor_date, preferred_time_window, include_weekends, notes)
+INNER JOIN machines m
+        ON m.code = v.machine_code
+       AND m.is_active = TRUE
+       AND m.deleted_at IS NULL
+INNER JOIN locations l
+        ON l.id = m.location_id
+       AND l.is_active = TRUE
+INNER JOIN users c ON c.email_key = 'coordinacion@vendguard.internal'
+WHERE NOT EXISTS (
+    SELECT 1 FROM machine_restock_schedules existing
+     WHERE existing.machine_id = m.id
+       AND existing.is_active = TRUE
+);
+
+
+-- =============================================================================
+-- SECCIÓN 24 · restock_route_daily_overrides — excepción diaria demo (M37)
+-- =============================================================================
+-- Una omisión `SKIPPED` con causa tipificada y motivo justificado (Art. V.1).
+-- Se siembra sobre una fecha civil fija y pasada a propósito: el arranque es
+-- idempotente en cualquier día y la ruta de hoy no queda perturbada por un
+-- hecho histórico. La fecha y la máquina identifican la fila, así que resembrar
+-- no duplica la excepción.
+
+INSERT INTO restock_route_daily_overrides (
+    machine_id, service_date, override_type, status, original_restocker_id,
+    skip_reason_code, reason_text, had_active_fefo_alert, created_by
+)
+SELECT
+    m.id,
+    v.service_date,
+    'SKIPPED'::restock_override_type,
+    'ACTIVE'::restock_override_status,
+    u.id,
+    'NO_KEY_OR_ACCESS'::restock_skip_reason_code,
+    v.reason_text,
+    FALSE,
+    c.id
+FROM (VALUES
+    ('VEND-0502', DATE '2026-11-14',
+     'La conserjería del campus no pudo entregar la llave de la sala de profesores durante toda la jornada.')
+) AS v(machine_code, service_date, reason_text)
+INNER JOIN machines m
+        ON m.code = v.machine_code
+       AND m.is_active = TRUE
+       AND m.deleted_at IS NULL
+INNER JOIN users u ON u.email_key = 'lucia.repostaje@vendguard.internal'
+INNER JOIN users c ON c.email_key = 'coordinacion@vendguard.internal'
+WHERE NOT EXISTS (
+    SELECT 1 FROM restock_route_daily_overrides existing
+     WHERE existing.machine_id = m.id
+       AND existing.service_date = v.service_date
+);
+
+
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante técnico · 3 vinculaciones de cuadrante de carga (M31) ·
 --       5 saldos de stock de furgoneta · 1 configuración de ruta ·
@@ -2318,4 +2410,9 @@ WHERE NOT EXISTS (
 --       conforme dentro de ±1,00 € y un descuadre de -5,50 € justificado; la
 --       primera ejercita además la base inicial del contador y una de ellas
 --       declara la entrega de 2,50 € en conserjería.
+--       5 agendas periódicas versionadas (Módulo 37) que cubren las cinco
+--       cadencias aprobadas —diaria con fin de semana, lunes-miércoles-viernes,
+--       martes-jueves, semanal y quincenal con fecha ancla— y 1 excepción diaria
+--       `SKIPPED` con causa tipificada y motivo justificado sobre una fecha
+--       civil pasada, para no perturbar la ruta del día.
 -- =============================================================================
