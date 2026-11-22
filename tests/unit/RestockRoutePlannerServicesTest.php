@@ -573,7 +573,7 @@ function rrpHarness(): array
 }
 
 try {
-    echo "[1/10] Auditoría y versionado de agendas\n";
+    echo "[1/11] Auditoría y versionado de agendas\n";
 
     assertRrpCondition(
         AuditEvent::isValidEntityType(AuditEvent::ENTITY_MACHINE_RESTOCK_SCHEDULE),
@@ -659,7 +659,7 @@ try {
 
     echo "  [OK]   Versionado inmutable, cadencia, rol y baja lógica\n";
 
-    echo "[2/10] Alta masiva atómica\n";
+    echo "[2/11] Alta masiva atómica\n";
 
     $harness = rrpHarness();
     $harness['gateway']->machines[1] = rrpMachine(1);
@@ -705,7 +705,7 @@ try {
 
     echo "  [OK]   Lote por zona, overwrite=false y una sola transacción\n";
 
-    echo "[3/10] Propiedad efectiva y composición de la ruta\n";
+    echo "[3/11] Propiedad efectiva y composición de la ruta\n";
 
     $harness = rrpHarness();
     $harness['readModel']->restockers = [
@@ -811,7 +811,7 @@ try {
 
     echo "  [OK]   REASSIGNED > L1 > zona, turno y ausencia\n";
 
-    echo "[4/10] Tablero de Coordinación y opacidad\n";
+    echo "[4/11] Tablero de Coordinación y opacidad\n";
 
     $day = $planner->buildCoordinatorDay('2026-11-21', [], $now);
 
@@ -837,7 +837,7 @@ try {
 
     echo "  [OK]   Contadores instantáneos, bandeja UNCOVERED y opacidad\n";
 
-    echo "[5/10] Omisión SKIPPED, FEFO y sello EXPIRED\n";
+    echo "[5/11] Omisión SKIPPED, FEFO y sello EXPIRED\n";
 
     $harness = rrpHarness();
     $harness['gateway']->machines[1] = rrpMachine(1, ['sanitary_status' => 'OK']);
@@ -921,7 +921,7 @@ try {
 
     echo "  [OK]   SKIPPED, aviso FEFO, EXPIRED e idempotencia\n";
 
-    echo "[6/10] Perímetro del reponedor y verdad del día\n";
+    echo "[6/11] Perímetro del reponedor y verdad del día\n";
 
     $harness = rrpHarness();
     $harness['gateway']->machines[1] = rrpMachine(1);
@@ -984,7 +984,7 @@ try {
 
     echo "  [OK]   403 de perímetro, 409 de visita/cuarentena y fecha pasada\n";
 
-    echo "[7/10] Desvío REASSIGNED y revocación\n";
+    echo "[7/11] Desvío REASSIGNED y revocación\n";
 
     $harness = rrpHarness();
     $harness['gateway']->machines[1] = rrpMachine(1);
@@ -1049,7 +1049,7 @@ try {
 
     echo "  [OK]   REASSIGNED, auto-desvío, rol y revocación\n";
 
-    echo "[8/10] Revocación de la excepción anterior y volcado offline\n";
+    echo "[8/11] Revocación de la excepción anterior y volcado offline\n";
 
     $harness = rrpHarness();
     $harness['gateway']->machines[1] = rrpMachine(1);
@@ -1114,7 +1114,7 @@ try {
 
     echo "  [OK]   Una sola excepción viva y archivo de conflictos\n";
 
-    echo "[9/10] Regresión de los contratos ya certificados\n";
+    echo "[9/11] Regresión de los contratos ya certificados\n";
 
     assertRrpCondition(
         count(AuditEvent::ENTITY_TYPES) === count(array_unique(AuditEvent::ENTITY_TYPES)),
@@ -1156,7 +1156,7 @@ try {
 
     echo "  [OK]   Whitelist, cadencia y próxima parada\n";
 
-    echo "[10/10] Pausa estacional: solo FEFO reactiva la parada\n";
+    echo "[10/11] Pausa estacional: solo FEFO reactiva la parada\n";
 
     $harness = rrpHarness();
     $harness['readModel']->restockers = [rrpRestocker(7)];
@@ -1230,6 +1230,47 @@ try {
     );
 
     echo "  [OK]   C1 prevalece: solo FEFO reactiva la pausa\n";
+
+    echo "[11/11] Bandeja sin cobertura: orden determinista del EARS 03.3.1\n";
+
+    $harness = rrpHarness();
+    $harness['readModel']->restockers = [];
+    $harness['readModel']->machines = [
+        rrpMachine(10, [
+            'earliest_fefo_expiration_date' => '2026-11-22',
+            'empty_slots_count' => 1,
+        ]),
+        rrpMachine(20, [
+            'earliest_fefo_expiration_date' => '2026-11-21',
+            'empty_slots_count' => 1,
+        ]),
+        rrpMachine(30, ['sla_tier' => 'STANDARD', 'empty_slots_count' => 1]),
+        rrpMachine(31, [
+            'sla_tier' => 'STANDARD',
+            'active_l1_incident' => ['id' => 51, 'assigned_restocker_id' => 999],
+            'empty_slots_count' => 1,
+        ]),
+        rrpMachine(32, [
+            'sla_tier' => 'CRITICAL_INFRASTRUCTURE_24_7',
+            'empty_slots_count' => 1,
+        ]),
+        rrpMachine(40, ['schedule' => rrpScheduleRow(40, ['preferred_time_window' => 'AFTERNOON'])]),
+        rrpMachine(41, ['schedule' => rrpScheduleRow(41, ['preferred_time_window' => 'MORNING'])]),
+        rrpMachine(42, ['schedule' => rrpScheduleRow(42, ['preferred_time_window' => 'MIDDAY'])]),
+        rrpMachine(43, ['schedule' => rrpScheduleRow(43, ['preferred_time_window' => 'ANY'])]),
+    ];
+
+    $planner = new RestockRoutePlannerService($harness['readModel'], new RestockRouteOptimizer(new GeoDistanceService()));
+    $day = $planner->buildCoordinatorDay('2026-11-21', [], $now);
+
+    assertRrpSame(9, $day['kpis']['uncovered_count'], 'Todas las máquinas sin cobertura entran en la bandeja');
+    assertRrpSame(
+        [20, 10, 32, 31, 30, 41, 42, 40, 43],
+        array_column($day['uncovered_stops'], 'machine_id'),
+        'La bandeja ordena FEFO por fecha, demanda por SlaTier y L1, y calendario por franja'
+    );
+
+    echo "  [OK]   FEFO, SlaTier/L1 y franja ordenan la bandeja\n";
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[FAIL] " . $exception->getMessage() . "\n");
     exit(1);

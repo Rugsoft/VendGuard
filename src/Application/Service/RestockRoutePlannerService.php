@@ -12,6 +12,7 @@ use VendGuard\Core\Domain\Repository\RestockRouteReadModelInterface;
 use VendGuard\Core\Domain\ValueObject\SlaTier;
 use VendGuard\Core\Service\RestockCadenceEvaluator;
 use VendGuard\Core\Service\RestockRouteOptimizer;
+use VendGuard\Core\Service\UncoveredStopComparator;
 
 /**
  * RestockRoutePlannerService
@@ -362,16 +363,7 @@ final class RestockRoutePlannerService
 
         usort($routes, static fn (array $a, array $b): int => $a['restocker_name'] <=> $b['restocker_name']);
 
-        usort($uncovered, static function (array $a, array $b): int {
-            $rank = [
-                RestockRouteOptimizer::BLOCK_FEFO_SANITARY => 0,
-                RestockRouteOptimizer::BLOCK_DEMAND_L1_STOCKOUT => 1,
-                RestockRouteOptimizer::BLOCK_SCHEDULED_CADENCE => 2,
-            ];
-
-            return ($rank[$a['priority_block']] ?? 9) <=> ($rank[$b['priority_block']] ?? 9)
-                ?: $a['machine_id'] <=> $b['machine_id'];
-        });
+        usort($uncovered, [UncoveredStopComparator::class, 'compare']);
 
         return [
             'service_date' => $date,
@@ -767,6 +759,11 @@ final class RestockRoutePlannerService
             $block = RestockRouteOptimizer::BLOCK_DEMAND_L1_STOCKOUT;
         }
 
+        $schedule = $machine['schedule'] ?? null;
+        $preferredTimeWindow = is_array($schedule)
+            ? (string)($schedule['preferred_time_window'] ?? 'ANY')
+            : 'ANY';
+
         return [
             'machine_id' => (int)$machine['id'],
             'machine_code' => (string)$machine['machine_code'],
@@ -774,6 +771,7 @@ final class RestockRoutePlannerService
             'location_id' => (int)$machine['location_id'],
             'location_name' => (string)$machine['location_name'],
             'sla_tier' => (string)$machine['sla_tier'],
+            'preferred_time_window' => $preferredTimeWindow,
             'zone_id' => $machine['zone_id'],
             'zone_name' => $machine['zone_name'],
             'coverage_status' => 'UNCOVERED',
