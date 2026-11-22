@@ -3425,12 +3425,15 @@ class SeedRunner
              INNER JOIN users u ON u.email_key = :original_email
              INNER JOIN users c ON c.email_key = :coordinator_email
              WHERE m.code = :machine_code
+               AND m.is_active = %s
+               AND m.deleted_at IS NULL
                AND NOT EXISTS (
                    SELECT 1 FROM restock_route_daily_overrides existing
                     WHERE existing.machine_id = m.id
                       AND existing.service_date = :service_date_guard
                )',
-            $this->dialect->booleanLiteral(false)
+            $this->dialect->booleanLiteral(false),
+            $this->dialect->booleanLiteral(true)
         ));
 
         $insert->execute([

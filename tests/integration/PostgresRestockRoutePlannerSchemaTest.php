@@ -34,6 +34,11 @@ declare(strict_types=1);
  *   8. **Sin deriva estructural (Art. IV).** El esquema declara exactamente 51 tablas y
  *      `locations` conserva sus 23 columnas: el DDL de la sede no se toca.
  *   9. **Art. III.1.** El borrado físico de ambas tablas se rechaza con `45000`.
+ *  10. **Semillas 1:1 e idempotencia (RNF-01, DoD 1).** Las secciones 23 y 24 de
+ *      `database/supabase_seeds.sql` y `SeedRunner::seedMachineRestockSchedules()` /
+ *      `seedRestockRouteDailyOverrides()` insertan exactamente las 5 agendas (las
+ *      5 cadencias) y 1 excepción `SKIPPED` con filas equivalentes 1:1 e
+ *      idempotencia cruzada (0 filas al reejecutar SQL o PHP).
  *
  * CATEGORÍA: `new_engine`
  *   Exige un PostgreSQL disponible (el motor de `deploy/local/postgres/`). NO pertenece a la
@@ -56,6 +61,8 @@ require_once __DIR__ . '/../Support/PostgresFixtureBuilder.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/PostgresMigrationRunner.php';
 
 use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
+use VendGuard\Infrastructure\Database\SeedRunner;
+use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
@@ -784,10 +791,194 @@ try {
             && count($locationColumns) === 23,
         sprintf('tablas=%d · columnas de locations=%d', count($tables), count($locationColumns))
     );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 11. Semillas 1:1 e idempotencia: supabase_seeds.sql (§23–§24) vs. SeedRunner
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- Semillas 1:1 e idempotencia (RNF-01, DoD 1) ---\n";
+
+    $seedsContent = (string)file_get_contents($projectRoot . '/database/supabase_seeds.sql');
+    $sqlSchedulesStmt = null;
+    $sqlOverridesStmt = null;
+    foreach (SqlScriptSplitter::split($seedsContent) as $seedSqlStmt) {
+        $trimmed = ltrim($seedSqlStmt);
+        if (str_starts_with($trimmed, 'INSERT INTO machine_restock_schedules')) {
+            $sqlSchedulesStmt = $seedSqlStmt;
+        } elseif (str_starts_with($trimmed, 'INSERT INTO restock_route_daily_overrides')) {
+            $sqlOverridesStmt = $seedSqlStmt;
+        }
+    }
+
+    $assert(
+        'database/supabase_seeds.sql declara las sentencias de agenda (§23) y excepción diaria (§24)',
+        $sqlSchedulesStmt !== null && $sqlOverridesStmt !== null
+    );
+
+    $insertDemoUser = $pgPdo->prepare(
+        'INSERT INTO users (name, email, email_key, password_hash, role, is_active)
+         VALUES (:name, :email, :email_key, :password_hash, :role, TRUE)
+         RETURNING id'
+    );
+    $insertDemoUser->execute([
+        ':name' => 'Coordinación Demo M37',
+        ':email' => 'coordinacion@vendguard.internal',
+        ':email_key' => 'coordinacion@vendguard.internal',
+        ':password_hash' => password_hash('Password123!', PASSWORD_BCRYPT, ['cost' => 4]),
+        ':role' => 'COORDINATOR',
+    ]);
+    $insertDemoUser->execute([
+        ':name' => 'Lucía Repostaje Demo M37',
+        ':email' => 'lucia.repostaje@vendguard.internal',
+        ':email_key' => 'lucia.repostaje@vendguard.internal',
+        ':password_hash' => password_hash('Password123!', PASSWORD_BCRYPT, ['cost' => 4]),
+        ':role' => 'RESTOCKER',
+    ]);
+
+    $seedLocationId = $createLocation($pgPdo, 'SEEDS-37');
+    foreach (['VEND-0101', 'VEND-0201', 'VEND-0301', 'VEND-0502', 'VEND-0601', 'VEND-0701'] as $demoCode) {
+        $createMachine($pgPdo, $seedLocationId, $demoCode);
+    }
+
+    $fetchSeededSchedules = static function (PDO $pdo): array {
+        $stmt = $pdo->query(
+            "SELECT m.code AS machine_code,
+                    s.cadence_type::text AS cadence_type,
+                    s.day_of_week,
+                    s.anchor_date::text AS anchor_date,
+                    s.preferred_time_window::text AS preferred_time_window,
+                    s.include_weekends,
+                    s.notes
+               FROM machine_restock_schedules s
+               INNER JOIN machines m ON m.id = s.machine_id
+              WHERE m.code IN ('VEND-0101', 'VEND-0201', 'VEND-0301', 'VEND-0601', 'VEND-0701')
+                AND s.is_active = TRUE
+              ORDER BY m.code ASC"
+        );
+        $rows = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['day_of_week'] = $row['day_of_week'] !== null ? (int)$row['day_of_week'] : null;
+            $row['include_weekends'] = filter_var($row['include_weekends'], FILTER_VALIDATE_BOOL);
+            $rows[] = $row;
+        }
+
+        return $rows;
+    };
+
+    $fetchSeededOverrides = static function (PDO $pdo): array {
+        $stmt = $pdo->query(
+            "SELECT m.code AS machine_code,
+                    o.service_date::text AS service_date,
+                    o.override_type::text AS override_type,
+                    o.status::text AS status,
+                    u.email_key AS original_restocker_email,
+                    o.skip_reason_code::text AS skip_reason_code,
+                    o.reason_text,
+                    o.had_active_fefo_alert,
+                    c.email_key AS created_by_email
+               FROM restock_route_daily_overrides o
+               INNER JOIN machines m ON m.id = o.machine_id
+               INNER JOIN users u ON u.id = o.original_restocker_id
+               INNER JOIN users c ON c.id = o.created_by
+              WHERE m.code = 'VEND-0502'
+              ORDER BY o.service_date ASC, o.id ASC"
+        );
+        $rows = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['had_active_fefo_alert'] = filter_var($row['had_active_fefo_alert'], FILTER_VALIDATE_BOOL);
+            $rows[] = $row;
+        }
+
+        return $rows;
+    };
+
+    $seedRunner = new SeedRunner($pgPdo);
+
+    // Rama SQL dentro de transacción revertible para comparar 1:1 sin borrar filas Art. III.1.
+    $pgPdo->beginTransaction();
+    $sqlSchedulesPass1 = $pgPdo->exec((string)$sqlSchedulesStmt);
+    $sqlOverridesPass1 = $pgPdo->exec((string)$sqlOverridesStmt);
+    $sqlScheduleRows = $fetchSeededSchedules($pgPdo);
+    $sqlOverrideRows = $fetchSeededOverrides($pgPdo);
+    $sqlSchedulesPass2 = $pgPdo->exec((string)$sqlSchedulesStmt);
+    $sqlOverridesPass2 = $pgPdo->exec((string)$sqlOverridesStmt);
+    $crossPhpSchedulesAfterSql = $seedRunner->seedMachineRestockSchedules();
+    $crossPhpOverridesAfterSql = $seedRunner->seedRestockRouteDailyOverrides();
+    $pgPdo->rollBack();
+
+    $assert(
+        'supabase_seeds.sql inserta exactamente 5 agendas y 1 excepción SKIPPED y es idempotente (2ª pasada = 0)',
+        $sqlSchedulesPass1 === 5
+            && $sqlOverridesPass1 === 1
+            && $sqlSchedulesPass2 === 0
+            && $sqlOverridesPass2 === 0
+            && $crossPhpSchedulesAfterSql === 0
+            && $crossPhpOverridesAfterSql === 0,
+        sprintf(
+            'sql1=%d/%d · sql2=%d/%d · crossPhp=%d/%d',
+            (int)$sqlSchedulesPass1,
+            (int)$sqlOverridesPass1,
+            (int)$sqlSchedulesPass2,
+            (int)$sqlOverridesPass2,
+            $crossPhpSchedulesAfterSql,
+            $crossPhpOverridesAfterSql
+        )
+    );
+
+    // Rama PHP (SeedRunner) sobre el mismo estado limpio tras el rollback anterior.
+    $phpSchedulesPass1 = $seedRunner->seedMachineRestockSchedules();
+    $phpOverridesPass1 = $seedRunner->seedRestockRouteDailyOverrides();
+    $phpScheduleRows = $fetchSeededSchedules($pgPdo);
+    $phpOverrideRows = $fetchSeededOverrides($pgPdo);
+    $phpSchedulesPass2 = $seedRunner->seedMachineRestockSchedules();
+    $phpOverridesPass2 = $seedRunner->seedRestockRouteDailyOverrides();
+    $crossSqlSchedulesAfterPhp = $pgPdo->exec((string)$sqlSchedulesStmt);
+    $crossSqlOverridesAfterPhp = $pgPdo->exec((string)$sqlOverridesStmt);
+
+    $assert(
+        'SeedRunner inserta 5 agendas y 1 excepción SKIPPED con idempotencia propia y cruzada ante supabase_seeds.sql',
+        $phpSchedulesPass1 === 5
+            && $phpOverridesPass1 === 1
+            && $phpSchedulesPass2 === 0
+            && $phpOverridesPass2 === 0
+            && $crossSqlSchedulesAfterPhp === 0
+            && $crossSqlOverridesAfterPhp === 0,
+        sprintf(
+            'php1=%d/%d · php2=%d/%d · crossSql=%d/%d',
+            $phpSchedulesPass1,
+            $phpOverridesPass1,
+            $phpSchedulesPass2,
+            $phpOverridesPass2,
+            (int)$crossSqlSchedulesAfterPhp,
+            (int)$crossSqlOverridesAfterPhp
+        )
+    );
+
+    $seededCadences = array_column($phpScheduleRows, 'cadence_type');
+    sort($seededCadences);
+    $expectedCadences = ['DAILY', 'MON_WED_FRI', 'TUE_THU', 'WEEKLY', 'BIWEEKLY'];
+    sort($expectedCadences);
+
+    $assert(
+        'supabase_seeds.sql y SeedRunner convergen 1:1 en las 5 agendas (5 cadencias) y la excepción SKIPPED',
+        count($phpScheduleRows) === 5
+            && $seededCadences === $expectedCadences
+            && $sqlScheduleRows === $phpScheduleRows
+            && count($phpOverrideRows) === 1
+            && $phpOverrideRows[0]['machine_code'] === 'VEND-0502'
+            && $phpOverrideRows[0]['service_date'] === '2026-11-14'
+            && $phpOverrideRows[0]['override_type'] === 'SKIPPED'
+            && $phpOverrideRows[0]['status'] === 'ACTIVE'
+            && $phpOverrideRows[0]['skip_reason_code'] === 'NO_KEY_OR_ACCESS'
+            && $sqlOverrideRows === $phpOverrideRows,
+        sprintf('cadencias=%s · filas=%d/%d', implode(',', $seededCadences), count($phpScheduleRows), count($phpOverrideRows))
+    );
 } catch (Throwable $exception) {
     $crash = $exception;
 } finally {
     try {
+        if ($pgPdo->inTransaction()) {
+            $pgPdo->rollBack();
+        }
         PostgresFixtureBuilder::dropIsolationSchema($pgPdo, PLANNER_TEST_SCHEMA);
     } catch (Throwable $cleanupFailure) {
         $crash ??= $cleanupFailure;

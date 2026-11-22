@@ -29,6 +29,9 @@ declare(strict_types=1);
  *      en la Coincidencia en Sede M36, sin asignarle la zona entera.
  *   7. **Cero borrados (Art. III.1).** El disparador `prevent_hard_delete()`
  *      rechaza cualquier `DELETE` sobre agendas y excepciones.
+ *   8. **Ausencia de N+1 (RNF-02).** `PdoRestockRouteReadModel::loadParkSnapshot()`
+ *      y `RestockRoutePlannerService` componen la hoja móvil y el tablero diario
+ *      con exactamente 3 sentencias SQL tanto con 4 máquinas como con 12 máquinas.
  *
  * CATEGORÍA: `new_engine`. Exige PostgreSQL; sin `PG_TEST_DSN` sale con 2.
  * LIMPIEZA: esquema aislado `t_rrp06_gateway` borrado con `CASCADE`, incluso si
@@ -43,6 +46,7 @@ require_once __DIR__ . '/../Support/PostgresFixtureBuilder.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SqlScriptSplitter.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/PostgresMigrationRunner.php';
 
+use VendGuard\Application\Service\RestockRoutePlannerService;
 use VendGuard\Core\Domain\Enum\RestockCadenceType;
 use VendGuard\Core\Domain\Enum\RestockOverrideStatus;
 use VendGuard\Core\Domain\Enum\RestockOverrideType;
@@ -55,6 +59,7 @@ use VendGuard\Infrastructure\Repository\PdoInSituRestockVisitGateway;
 use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionGateway;
 use VendGuard\Infrastructure\Repository\PdoMachinePlanogramRepository;
 use VendGuard\Infrastructure\Repository\PdoRestockRoutePlannerGateway;
+use VendGuard\Infrastructure\Repository\PdoRestockRouteReadModel;
 use VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway;
 
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
@@ -89,12 +94,35 @@ $expectSqlState = static function (callable $operation, string $sqlState): bool 
     return false;
 };
 
+/**
+ * PDO con contador de sentencias para certificar ausencia de N+1 (RNF-02).
+ */
+final class RrpCountingPdo extends PDO
+{
+    public int $statements = 0;
+
+    public function prepare(string $query, array $options = []): PDOStatement|false
+    {
+        $this->statements++;
+
+        return parent::prepare($query, $options);
+    }
+
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): PDOStatement|false
+    {
+        $this->statements++;
+
+        return parent::query($query, $fetchMode, ...$fetchModeArgs);
+    }
+}
+
 echo "======================================================================\n";
 echo " VENDGUARD · T-RRP-06 · Gateway del planificador y perímetro REASSIGNED\n";
 echo " Categoría: new_engine (canal propio, fuera de la batería hermética)\n";
 echo "======================================================================\n";
 
 $pdo = PostgresFixtureBuilder::gateOrExit();
+$countingPdo = null;
 
 try {
     PostgresFixtureBuilder::createIsolationSchema($pdo, RRP06_SCHEMA);
@@ -637,11 +665,152 @@ try {
         '6.8 El desvío no amplía el perímetro a la zona entera',
         $planograms->findMachineForRestocker($machineIds[2], $receiverId) === null
     );
+
+    // =================================================================
+    // 7. RNF-02 · Ausencia de N+1 en PdoRestockRouteReadModel y composición diaria
+    // =================================================================
+    echo "\n--- 7. RNF-02 · Ausencia de consultas N+1 ---\n";
+
+    $pdo->exec(
+        "INSERT INTO technician_shifts (technician_id, shift_date, status, started_at)
+         VALUES ({$ownerId}, '{$today}', 'ON_SHIFT', CURRENT_TIMESTAMP - INTERVAL '1 hour')"
+    );
+
+    $dsn = (string)getenv('PG_TEST_DSN');
+    $countingPdo = new RrpCountingPdo($dsn, null, null, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => true,
+    ]);
+    $countingPdo->exec('SET search_path TO ' . RRP06_SCHEMA . ', public');
+
+    $countingReadModel = new PdoRestockRouteReadModel($countingPdo);
+    $countingPlanner = new RestockRoutePlannerService($countingReadModel);
+
+    $countingPdo->statements = 0;
+    $snapBefore = $countingReadModel->loadParkSnapshot($today);
+    $snapBeforeQueries = $countingPdo->statements;
+
+    $countingPdo->statements = 0;
+    $routeBefore = $countingPlanner->buildRestockerRoute($ownerId, $today);
+    $routeBeforeQueries = $countingPdo->statements;
+
+    $countingPdo->statements = 0;
+    $dayBefore = $countingPlanner->buildCoordinatorDay($today);
+    $dayBeforeQueries = $countingPdo->statements;
+
+    $assert(
+        '7.1 Con 4 máquinas, loadParkSnapshot y la composición diaria ejecutan exactamente 3 sentencias SQL',
+        count($snapBefore['machines']) === 4
+            && $snapBeforeQueries === 3
+            && $routeBeforeQueries === 3
+            && $dayBeforeQueries === 3,
+        sprintf(
+            'machines=%d · snap=%d · route=%d · day=%d',
+            count($snapBefore['machines']),
+            $snapBeforeQueries,
+            $routeBeforeQueries,
+            $dayBeforeQueries
+        )
+    );
+
+    // Ampliamos el parque de 4 a 12 máquinas (+8 máquinas en 2 sedes adicionales, agendas, producto frío y carriles).
+    $location2Id = (int)$scalar(
+        $pdo,
+        "INSERT INTO locations (site_code, site_code_key, name, address, zone_id, latitude, longitude, sla_tier)
+         VALUES ('RRP-06-L2', 'rrp-06-l2', 'Sede Planificador L2', 'Av. Paral·lel 120', :zone, 41.375200, 2.164100, 'PRIORITY_CORPORATE')
+         RETURNING id",
+        [':zone' => $zoneId]
+    );
+    $location3Id = (int)$scalar(
+        $pdo,
+        "INSERT INTO locations (site_code, site_code_key, name, address, zone_id, latitude, longitude, sla_tier)
+         VALUES ('RRP-06-L3', 'rrp-06-l3', 'Sede Planificador L3', 'Carrer Aragó 300', :zone, 41.392400, 2.168200, 'STANDARD')
+         RETURNING id",
+        [':zone' => $zoneId]
+    );
+
+    $coldProductId = (int)$scalar(
+        $pdo,
+        "INSERT INTO vending_products
+             (sku, name, category, unit_type, requires_cold_chain, max_shelf_life_days, unit_cost_eur, sale_price_eur)
+         VALUES ('RRP06-COLD-01', 'Bocadillo Frío RRP06', 'PERISHABLE_FOOD', 'UNIT', TRUE, 14, 1.10, 3.20)
+         RETURNING id"
+    );
+
+    $extraMachineStmt = $pdo->prepare(
+        "INSERT INTO machines (location_id, code, model, machine_type, floor_wing)
+         VALUES (:location, :code, 'Modelo RRP N+1', 'PERISHABLE_FOOD', 'Planta 1')
+         RETURNING id"
+    );
+    $extraScheduleStmt = $pdo->prepare(
+        "INSERT INTO machine_restock_schedules
+             (machine_id, cadence_type, preferred_time_window, include_weekends, is_active, created_by, updated_by)
+         VALUES (:machine_id, 'DAILY', 'MORNING', TRUE, TRUE, :actor, :actor)"
+    );
+    $extraSlotStmt = $pdo->prepare(
+        'INSERT INTO machine_planogram_slots
+             (machine_id, slot_code, product_id, max_capacity, current_estimated_qty, min_threshold, current_expiration_date, is_active)
+         VALUES (:machine_id, :slot_code, :product_id, 10, :qty, 2, :expiration, TRUE)'
+    );
+
+    for ($idx = 5; $idx <= 12; $idx++) {
+        $targetLocation = $idx <= 8 ? $location2Id : $location3Id;
+        $extraMachineStmt->execute([
+            ':location' => $targetLocation,
+            ':code' => sprintf('VEND-RRP-%03d', 700 + $idx),
+        ]);
+        $extraMachineId = (int)$extraMachineStmt->fetchColumn();
+        $extraScheduleStmt->execute([
+            ':machine_id' => $extraMachineId,
+            ':actor' => $coordinatorId,
+        ]);
+        $extraSlotStmt->execute([
+            ':machine_id' => $extraMachineId,
+            ':slot_code' => 'C' . $idx,
+            ':product_id' => $coldProductId,
+            ':qty' => $idx % 2 === 0 ? 0 : 4,
+            ':expiration' => $idx <= 6 ? $today : $tomorrow,
+        ]);
+    }
+
+    $countingPdo->statements = 0;
+    $snapAfter = $countingReadModel->loadParkSnapshot($today);
+    $snapAfterQueries = $countingPdo->statements;
+
+    $countingPdo->statements = 0;
+    $routeAfter = $countingPlanner->buildRestockerRoute($ownerId, $today);
+    $routeAfterQueries = $countingPdo->statements;
+
+    $countingPdo->statements = 0;
+    $dayAfter = $countingPlanner->buildCoordinatorDay($today);
+    $dayAfterQueries = $countingPdo->statements;
+
+    $assert(
+        '7.2 Al triplicar el parque (4 → 12 máquinas en 3 sedes), las sentencias SQL siguen siendo constantes (3 = O(1), cero N+1)',
+        count($snapAfter['machines']) === 12
+            && count($routeAfter['route_plan']['stops']) >= 2
+            && $snapAfterQueries === 3
+            && $routeAfterQueries === 3
+            && $dayAfterQueries === 3
+            && $snapAfterQueries === $snapBeforeQueries
+            && $routeAfterQueries === $routeBeforeQueries
+            && $dayAfterQueries === $dayBeforeQueries,
+        sprintf(
+            'machines=%d · stops=%d · snap=%d · route=%d · day=%d',
+            count($snapAfter['machines']),
+            count($routeAfter['route_plan']['stops']),
+            $snapAfterQueries,
+            $routeAfterQueries,
+            $dayAfterQueries
+        )
+    );
 } catch (Throwable $exception) {
     $failures++;
     fwrite(STDERR, "\n[FAIL] Excepción inesperada: " . $exception->getMessage() . "\n");
     fwrite(STDERR, $exception->getTraceAsString() . "\n");
 } finally {
+    $countingPdo = null;
     try {
         PostgresFixtureBuilder::dropIsolationSchema($pdo, RRP06_SCHEMA);
     } catch (Throwable $exception) {

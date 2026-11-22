@@ -445,8 +445,13 @@ final class FakeRestockRouteReadModel implements RestockRouteReadModelInterface
 
     public ?FakeRestockRouteGateway $gateway = null;
 
+    public int $parkSnapshotCalls = 0;
+
+    public int $machineFactsCalls = 0;
+
     public function loadParkSnapshot(string $serviceDate): array
     {
+        $this->parkSnapshotCalls++;
         $overrides = [];
         if ($this->gateway !== null) {
             foreach ($this->gateway->overrides as $override) {
@@ -471,6 +476,7 @@ final class FakeRestockRouteReadModel implements RestockRouteReadModelInterface
 
     public function loadMachineFacts(int $machineId, string $serviceDate): ?array
     {
+        $this->machineFactsCalls++;
         foreach ($this->machines as $machine) {
             if ((int)$machine['id'] === $machineId) {
                 return $machine;
@@ -1452,6 +1458,38 @@ try {
     );
 
     echo "  [OK]   Criterios AUD-37-08 certificados\n";
+
+    // [AUD-37-09] RNF-02: la composición diaria invoca loadParkSnapshot() una vez y loadMachineFacts() 0 veces
+    $batchHarness = rrpHarness();
+    $batchHarness['readModel']->restockers = [rrpRestocker(7, ['zone_ids' => [1], 'is_primary' => true])];
+    for ($mIdx = 1; $mIdx <= 10; $mIdx++) {
+        $batchHarness['readModel']->machines[] = rrpMachine($mIdx, [
+            'location_id' => 100 + ($mIdx % 3),
+            'location_name' => 'Sede Lote ' . ($mIdx % 3),
+            'schedule' => rrpScheduleRow($mIdx),
+            'empty_slots_count' => $mIdx % 2,
+        ]);
+    }
+    $batchPlanner = new RestockRoutePlannerService($batchHarness['readModel'], new RestockRouteOptimizer(new GeoDistanceService()));
+    $batchHarness['readModel']->parkSnapshotCalls = 0;
+    $batchHarness['readModel']->machineFactsCalls = 0;
+    $batchRoute = $batchPlanner->buildRestockerRoute(7, '2026-11-21', null, $now);
+    assertRrpCondition(
+        $batchHarness['readModel']->parkSnapshotCalls === 1
+            && $batchHarness['readModel']->machineFactsCalls === 0
+            && count($batchRoute['route_plan']['stops']) === 3,
+        'RNF-02 (AUD-37-09): buildRestockerRoute carga 1 snapshot único con 0 consultas por parada para 10 máquinas en 3 sedes'
+    );
+    $batchHarness['readModel']->parkSnapshotCalls = 0;
+    $batchHarness['readModel']->machineFactsCalls = 0;
+    $batchDay = $batchPlanner->buildCoordinatorDay('2026-11-21', [], $now);
+    assertRrpCondition(
+        $batchHarness['readModel']->parkSnapshotCalls === 1
+            && $batchHarness['readModel']->machineFactsCalls === 0
+            && ($batchDay['kpis']['scheduled_machines_count'] ?? 0) === 10,
+        'RNF-02 (AUD-37-09): buildCoordinatorDay carga 1 snapshot único con 0 consultas por parada para 10 máquinas'
+    );
+    echo "  [OK]   Criterios AUD-37-09 (ausencia de N+1 en composición) certificados\n";
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[FAIL] " . $exception->getMessage() . "\n");
     exit(1);
