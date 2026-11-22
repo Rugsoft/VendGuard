@@ -409,6 +409,70 @@ try {
             && $withoutItems[0]['has_schedule'] === false
     );
 
+    $missingMachineSchedule = $call('POST', '/api/coordinator/restock-schedules', [
+        'machine_id' => 999999,
+        'cadence_type' => 'DAILY',
+        'preferred_time_window' => 'MORNING',
+        'include_weekends' => true,
+    ], $coordinatorToken);
+    $assert(
+        '2.8 Configurar agenda sobre máquina inexistente responde 404 MACHINE_NOT_FOUND',
+        $missingMachineSchedule->getStatusCode() === 404
+            && $errorCode($missingMachineSchedule) === 'MACHINE_NOT_FOUND'
+    );
+
+    $inactiveMachineStmt = $pdo->prepare(
+        "INSERT INTO machines (location_id, code, model, machine_type, floor_wing, sanitary_status, is_active)
+         VALUES (:location_id, 'RRP9-SNACK-OFF-SCHED', 'Modelo T-RRP-09', 'SNACKS', 'Planta baja', 'OK', FALSE)
+         RETURNING id"
+    );
+    $inactiveMachineStmt->execute([':location_id' => $locationA]);
+    $inactiveMachineForSchedule = (int)$inactiveMachineStmt->fetchColumn();
+
+    $inactiveMachineSchedule = $call('POST', '/api/coordinator/restock-schedules', [
+        'machine_id' => $inactiveMachineForSchedule,
+        'cadence_type' => 'DAILY',
+        'preferred_time_window' => 'MORNING',
+        'include_weekends' => true,
+    ], $coordinatorToken);
+    $assert(
+        '2.9 Configurar agenda sobre máquina inactiva responde 422 MACHINE_INACTIVE_OR_DELETED',
+        $inactiveMachineSchedule->getStatusCode() === 422
+            && $errorCode($inactiveMachineSchedule) === 'MACHINE_INACTIVE_OR_DELETED'
+    );
+
+    $bulkMissing = $call('POST', '/api/coordinator/restock-schedules/bulk', [
+        'machine_ids' => [$machineA, 999999],
+        'cadence_type' => 'MON_WED_FRI',
+        'preferred_time_window' => 'AFTERNOON',
+        'overwrite_existing' => true,
+    ], $coordinatorToken);
+    $machineACadenceAfterMissingBulk = (string)$pdo->query(
+        'SELECT cadence_type FROM machine_restock_schedules WHERE machine_id = ' . $machineA . ' AND is_active = TRUE'
+    )->fetchColumn();
+    $assert(
+        '2.10 Lote explícito con máquina inexistente revierte todo con 404 sin alterar agendas',
+        $bulkMissing->getStatusCode() === 404
+            && $errorCode($bulkMissing) === 'MACHINE_NOT_FOUND'
+            && $machineACadenceAfterMissingBulk === 'DAILY'
+    );
+
+    $bulkInactive = $call('POST', '/api/coordinator/restock-schedules/bulk', [
+        'machine_ids' => [$machineA, $inactiveMachineForSchedule],
+        'cadence_type' => 'MON_WED_FRI',
+        'preferred_time_window' => 'AFTERNOON',
+        'overwrite_existing' => true,
+    ], $coordinatorToken);
+    $machineACadenceAfterInactiveBulk = (string)$pdo->query(
+        'SELECT cadence_type FROM machine_restock_schedules WHERE machine_id = ' . $machineA . ' AND is_active = TRUE'
+    )->fetchColumn();
+    $assert(
+        '2.11 Lote explícito con máquina inactiva revierte todo con 422 sin alterar agendas',
+        $bulkInactive->getStatusCode() === 422
+            && $errorCode($bulkInactive) === 'MACHINE_INACTIVE_OR_DELETED'
+            && $machineACadenceAfterInactiveBulk === 'DAILY'
+    );
+
     // ─────────────────────────────────────────────────────────────────────
     // 3. Tablero «Ruta del Día»
     // ─────────────────────────────────────────────────────────────────────
@@ -530,6 +594,88 @@ try {
     $assert(
         '4.5 El auto-desvío se rechaza con 422 SELF_REASSIGNMENT_FORBIDDEN',
         $self->getStatusCode() === 422 && $errorCode($self) === 'SELF_REASSIGNMENT_FORBIDDEN'
+    );
+
+    $l1Stmt = $pdo->prepare(
+        "INSERT INTO incidents (
+            ticket_code, machine_id, location_id, category, description, urgency, status,
+            dispatch_level, level1_issue_type, assigned_technician_id, assigned_at,
+            sla_tier_snapshot, sla_target_minutes, cycle_started_at
+         ) VALUES (
+            'INC-RRP9-L1-01', :machine, :location, 'PRODUCT_JAM', 'Espiral A1 atascada para prueba L1',
+            'MEDIUM', 'ASSIGNED', 'L1_RESTOCKER', 'MINOR_SPIRAL_JAM', :restocker, CURRENT_TIMESTAMP,
+            'STANDARD', 1440, CURRENT_TIMESTAMP
+         ) RETURNING id"
+    );
+    $l1Stmt->execute([':machine' => $machineA, ':location' => $locationA, ':restocker' => $ownerId]);
+    $l1IncidentId = (int)$l1Stmt->fetchColumn();
+    $pdo->prepare(
+        "INSERT INTO incident_assignments (
+            incident_id, technician_id, technician_name_snapshot, technician_code_snapshot,
+            assignment_source, assigned_at
+         ) VALUES (
+            :incident, :restocker, 'Reposición Titular T-RRP-09', 'RRP9-OWNER', 'COORDINATOR_ASSIGN', CURRENT_TIMESTAMP
+         )"
+    )->execute([':incident' => $l1IncidentId, ':restocker' => $ownerId]);
+
+    $reassignWithL1 = $call('POST', '/api/coordinator/restock-route/overrides', [
+        'machine_id' => $machineA,
+        'service_date' => $tomorrow,
+        'override_type' => 'REASSIGNED',
+        'target_restocker_id' => $targetId,
+        'reassignment_reason_code' => 'LOAD_BALANCING',
+    ], $coordinatorToken);
+    $reassignWithL1Id = (int)($data($reassignWithL1)['override']['id'] ?? 0);
+    $l1OwnerAfter = (int)$pdo->query(
+        'SELECT assigned_technician_id FROM incidents WHERE id = ' . $l1IncidentId
+    )->fetchColumn();
+    $activeCustodyCount = (int)$pdo->query(
+        'SELECT COUNT(*) FROM incident_assignments WHERE incident_id = ' . $l1IncidentId . ' AND technician_id = ' . $ownerId . ' AND unassigned_at IS NULL'
+    )->fetchColumn();
+    $assert(
+        '4.6 El desvío REASSIGNED no muta la custodia L1 en incidents ni incident_assignments',
+        $reassignWithL1->getStatusCode() === 201
+            && $l1OwnerAfter === $ownerId
+            && $activeCustodyCount === 1
+    );
+    if ($reassignWithL1Id > 0) {
+        $call('POST', '/api/coordinator/restock-route/overrides/' . $reassignWithL1Id . '/revoke', [], $coordinatorToken);
+    }
+    $pdo->exec(
+        "UPDATE incident_assignments
+            SET unassigned_at = CURRENT_TIMESTAMP,
+                unassignment_reason_type = 'CANCELLED',
+                unassigned_by_name_snapshot = 'Coordinación T-RRP-09',
+                reassignment_reason = 'Cierre de fixture temporal T-RRP-09'
+          WHERE incident_id = " . $l1IncidentId
+    );
+    $pdo->exec("UPDATE incidents SET status = 'CLOSED', resolved_at = CURRENT_TIMESTAMP, closed_at = CURRENT_TIMESTAMP WHERE id = " . $l1IncidentId);
+
+    $machineRevokeAfterVisit = $createMachine($locationA, 'RRP9-SNACK-A-REV');
+    $skipBeforeVisit = $call('POST', '/api/coordinator/restock-route/overrides', [
+        'machine_id' => $machineRevokeAfterVisit,
+        'service_date' => $today,
+        'override_type' => 'SKIPPED',
+        'skip_reason_code' => 'LOCAL_HOLIDAY',
+        'reason_text' => 'Acceso temporalmente bloqueado antes de confirmar visita posterior en la misma jornada.',
+    ], $coordinatorToken);
+    $skipBeforeVisitId = (int)($data($skipBeforeVisit)['override']['id'] ?? 0);
+    $pdo->prepare(
+        "INSERT INTO machine_restock_visits
+             (visit_code, machine_id, restocker_id, status, cabin_temp_celsius, client_mutation_id, started_at, completed_at)
+         VALUES ('MRV-2026-9201', :machine, :restocker, 'COMPLETED', 4.0, 'visit-rrp09-rev-01',
+                 CURRENT_TIMESTAMP - INTERVAL '1 hour', CURRENT_TIMESTAMP)"
+    )->execute([':machine' => $machineRevokeAfterVisit, ':restocker' => $ownerId]);
+    $revokeCompleted = $call(
+        'POST',
+        '/api/coordinator/restock-route/overrides/' . $skipBeforeVisitId . '/revoke',
+        [],
+        $coordinatorToken
+    );
+    $assert(
+        '4.7 Revocar una excepción cuando ya existe visita COMPLETED responde 409 RESTOCK_STOP_ALREADY_COMPLETED_TODAY',
+        $revokeCompleted->getStatusCode() === 409
+            && $errorCode($revokeCompleted) === 'RESTOCK_STOP_ALREADY_COMPLETED_TODAY'
     );
 
     // ─────────────────────────────────────────────────────────────────────
@@ -661,6 +807,103 @@ try {
             && ($data($conflict)['archived'] ?? false) === true
             && $dumped === 1
     );
+
+    $openShiftStmt = $pdo->prepare(
+        "INSERT INTO technician_shifts (technician_id, shift_date, status, started_at)
+         VALUES (:id, :date, 'ON_SHIFT', CURRENT_TIMESTAMP - INTERVAL '2 hours')"
+    );
+    $openShiftStmt->execute([':id' => $targetId, ':date' => $today]);
+    $openShiftStmt->execute([':id' => $technicianId, ':date' => $today]);
+
+    $satIncidentStmt = $pdo->prepare(
+        "INSERT INTO incidents (
+            ticket_code, machine_id, location_id, category, description, urgency, status,
+            dispatch_level, level1_issue_type, assigned_technician_id, assigned_at,
+            sla_tier_snapshot, sla_target_minutes, cycle_started_at
+         ) VALUES (
+            'INC-RRP9-SAT-01', :machine, :location, 'PAYMENT_SYSTEM', 'Avería SAT en validador de monedas',
+            'HIGH', 'IN_PROGRESS', 'L2_SAT', NULL, :tech, CURRENT_TIMESTAMP,
+            'STANDARD', 480, CURRENT_TIMESTAMP
+         ) RETURNING id"
+    );
+    $satIncidentStmt->execute([':machine' => $machineC, ':location' => $locationC, ':tech' => $technicianId]);
+    $satIncidentId = (int)$satIncidentStmt->fetchColumn();
+    $pdo->prepare(
+        "INSERT INTO incident_assignments (
+            incident_id, technician_id, technician_name_snapshot, technician_code_snapshot,
+            assignment_source, assigned_at
+         ) VALUES (
+            :incident, :tech, 'Técnico SAT T-RRP-09', 'RRP9-SAT', 'COORDINATOR_ASSIGN', CURRENT_TIMESTAMP
+         )"
+    )->execute([':incident' => $satIncidentId, ':tech' => $technicianId]);
+
+    $reassignForCoincidence = $call('POST', '/api/coordinator/restock-route/overrides', [
+        'machine_id' => $machineC,
+        'service_date' => $today,
+        'override_type' => 'REASSIGNED',
+        'target_restocker_id' => $targetId,
+        'reassignment_reason_code' => 'ZONE_UNCOVERED',
+    ], $coordinatorToken);
+    $reassignCoincidenceId = (int)($data($reassignForCoincidence)['override']['id'] ?? 0);
+
+    $targetRoute = $call('GET', '/api/restocker/my-route', [], $targetToken);
+    $targetRouteData = $data($targetRoute);
+    $locationCStopCoincidence = null;
+    foreach ($targetRouteData['route_plan']['stops'] ?? [] as $stopRow) {
+        if ((int)($stopRow['location_id'] ?? 0) === $locationC) {
+            $locationCStopCoincidence = $stopRow['site_coincidence'] ?? null;
+            break;
+        }
+    }
+    $targetStopTechIds = array_map(
+        static fn (array $entry): int => (int)($entry['user_id'] ?? 0),
+        is_array($locationCStopCoincidence) ? $locationCStopCoincidence : []
+    );
+    $planMapTechIds = array_map(
+        static fn (array $entry): int => (int)($entry['user_id'] ?? 0),
+        $targetRouteData['route_plan']['site_coincidence'][$locationC]
+            ?? $targetRouteData['route_plan']['site_coincidence'][(string)$locationC]
+            ?? []
+    );
+    $assert(
+        '5.9 La hoja móvil publica site_coincidence dentro del route_plan para paradas desviadas con REASSIGNED',
+        $reassignForCoincidence->getStatusCode() === 201
+            && $targetRoute->getStatusCode() === 200
+            && in_array($technicianId, $targetStopTechIds, true)
+            && in_array($technicianId, $planMapTechIds, true)
+    );
+
+    $techRoute = $call('GET', '/api/technician/my-route', [], $technicianToken);
+    $techStops = $data($techRoute);
+    $techLocCCoincidence = [];
+    foreach (is_array($techStops) ? $techStops : [] as $techStop) {
+        if ((int)($techStop['location']['id'] ?? ($techStop['location_id'] ?? 0)) === $locationC) {
+            $techLocCCoincidence = $techStop['site_coincidence'] ?? [];
+            break;
+        }
+    }
+    $techCoincidenceUserIds = array_map(
+        static fn (array $entry): int => (int)($entry['user_id'] ?? 0),
+        is_array($techLocCCoincidence) ? $techLocCCoincidence : []
+    );
+    $assert(
+        '5.10 La ruta SAT detecta en site_coincidence al reponedor receptor del desvío puntual REASSIGNED',
+        $techRoute->getStatusCode() === 200
+            && in_array($targetId, $techCoincidenceUserIds, true)
+    );
+
+    if ($reassignCoincidenceId > 0) {
+        $call('POST', '/api/coordinator/restock-route/overrides/' . $reassignCoincidenceId . '/revoke', [], $coordinatorToken);
+    }
+    $pdo->exec(
+        "UPDATE incident_assignments
+            SET unassigned_at = CURRENT_TIMESTAMP,
+                unassignment_reason_type = 'CANCELLED',
+                unassigned_by_name_snapshot = 'Coordinación T-RRP-09',
+                reassignment_reason = 'Cierre de fixture temporal T-RRP-09'
+          WHERE incident_id = " . $satIncidentId
+    );
+    $pdo->exec("UPDATE incidents SET status = 'CLOSED', resolved_at = CURRENT_TIMESTAMP, closed_at = CURRENT_TIMESTAMP WHERE id = " . $satIncidentId);
 
     // ─────────────────────────────────────────────────────────────────────
     // 6. Propuesta M33 con TODAY_ROUTE

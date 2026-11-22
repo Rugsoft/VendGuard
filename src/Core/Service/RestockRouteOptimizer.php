@@ -308,6 +308,7 @@ final class RestockRouteOptimizer
         $stop['distance_km'] = null;
         $stop['navigation_url'] = null;
         $stop['sla_tier'] = $stop['sla_tier']->value;
+        $stop['site_coincidence'] = $stop['site_coincidence'] ?? null;
 
         return $stop;
     }

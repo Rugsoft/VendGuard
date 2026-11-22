@@ -442,6 +442,16 @@ final class RestockerRouteController
                 return $machine;
             }, $cashRoute['machines']);
 
+            $serviceDate = RestockCadenceEvaluator::today(
+                new \DateTimeImmutable('now', new \DateTimeZone('Europe/Madrid'))
+            );
+            $route = $this->routePlanner->buildRestockerRoute(
+                $restockerId,
+                $serviceDate,
+                $this->routeOrigin()
+            );
+            $routePlan = $route['route_plan'];
+
             $locationIds = [];
             foreach ($machinesWithLevels as $machine) {
                 $locationId = (int)($machine['location_id'] ?? 0);
@@ -455,9 +465,24 @@ final class RestockerRouteController
                     $locationIds[$locationId] = $locationId;
                 }
             }
+            foreach ($routePlan['stops'] ?? [] as $stop) {
+                $locationId = (int)($stop['location_id'] ?? 0);
+                if ($locationId > 0) {
+                    $locationIds[$locationId] = $locationId;
+                }
+            }
             $siteCoincidence = $locationIds !== []
                 ? $this->synergy()->siteCoincidence('RESTOCKER', $restockerId, array_values($locationIds))
                 : [];
+
+            foreach ($routePlan['stops'] as $stopIndex => $stop) {
+                $stopLocationId = (int)($stop['location_id'] ?? 0);
+                $entries = $siteCoincidence[$stopLocationId] ?? $siteCoincidence[(string)$stopLocationId] ?? [];
+                $routePlan['stops'][$stopIndex]['site_coincidence'] = is_array($entries) && $entries !== []
+                    ? $entries
+                    : null;
+            }
+            $routePlan['site_coincidence'] = $siteCoincidence;
 
             $level1Taxonomy = [];
             foreach ((new \VendGuard\Infrastructure\Repository\PdoRootCauseRepository($this->pdo))
@@ -467,17 +492,6 @@ final class RestockerRouteController
                 }
                 $level1Taxonomy[] = $cause->toArray();
             }
-
-            $serviceDate = RestockCadenceEvaluator::today(
-                new \DateTimeImmutable('now', new \DateTimeZone('Europe/Madrid'))
-            );
-            $route = $this->routePlanner->buildRestockerRoute(
-                $restockerId,
-                $serviceDate,
-                $this->routeOrigin()
-            );
-            $routePlan = $route['route_plan'];
-            $routePlan['site_coincidence'] = $siteCoincidence;
 
             return Response::json([
                 'restocker' => [

@@ -222,7 +222,7 @@ final class RestockRouteScheduleService
         if ($machine === null) {
             throw RestockRoutePlannerValidationException::machineNotFound($machineId);
         }
-        if (!$machine['is_active']) {
+        if (!$machine['is_active'] || !($machine['location_active'] ?? true)) {
             throw RestockRoutePlannerValidationException::machineInactiveOrDeleted($machineId);
         }
 

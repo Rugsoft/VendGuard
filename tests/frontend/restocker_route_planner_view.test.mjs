@@ -259,6 +259,27 @@ async function run() {
   assert('2.7 El bloque y los disparadores tienen etiquetas canónicas', vm.routeBlockLabel('FEFO_SANITARY').includes('Bloque 1') && vm.routeTriggerLabel('FEFO_ALERT') === 'FEFO');
   assert('2.8 El resumen inferior conserva completadas, omitidas y bloqueadas', vm.routePlanCompleted.length === 1 && vm.routePlanSkipped.length === 1 && vm.routePlanBlocked.length === 1);
 
+  const coincidencePlan = routePlanFixture();
+  coincidencePlan.stops[0].site_coincidence = [{
+    user_id: 77,
+    name: 'Jordi SAT',
+    operator_code: 'SAT-07',
+    role: 'TECHNICIAN',
+    activity_summary: '1 avería SAT activa en esta sede'
+  }];
+  const coincidenceVm = buildView({
+    restocker: { id: 12, name: 'Lucía Gómez' },
+    currentUser: { id: 12 },
+    routePlan: coincidencePlan,
+    routeServiceDate: '2026-11-21',
+    routeToday: () => '2026-11-21'
+  });
+  assert(
+    '2.9 La vista lee site_coincidence desde las paradas de route_plan',
+    coincidenceVm.siteCoincidenceForLocation(1).length === 1
+      && coincidenceVm.siteCoincidenceSummary(1).includes('Jordi SAT (SAT-07)')
+  );
+
   // ─────────────────────────────────────────────────────────────────────
   // 3. Omisión online, offline y drenaje
   // ─────────────────────────────────────────────────────────────────────
@@ -343,6 +364,47 @@ async function run() {
       && (await syncVm.ensureRouteOverrideQueue().list(12)).length === 0
   );
 
+  const originalCreateVisit = api.restocker.createRestockVisit;
+  const drainOrder = [];
+  api.restocker.createRestockVisit = async (machineId) => {
+    drainOrder.push(`VISIT:${machineId}`);
+    return { data: { id: 9001 } };
+  };
+  api.restocker.skipRestockStop = async (machineId) => {
+    drainOrder.push(`SKIP:${machineId}`);
+    return { data: { override: { id: 33, machine_id: machineId } } };
+  };
+  const orderedDrainVm = buildView({
+    restocker: { id: 12 },
+    currentUser: { id: 12 },
+    routePlan: routePlanFixture(),
+    routeServiceDate: '2026-11-21',
+    routeToday: () => '2026-11-21'
+  });
+  orderedDrainVm.loadMyRoute = async () => {};
+  await orderedDrainVm.ensureVisitQueue().clear(12);
+  await orderedDrainVm.ensureRouteOverrideQueue().clear(12);
+  await orderedDrainVm.ensureVisitQueue().enqueue({
+    client_mutation_id: 'mut-visit-drain-0001',
+    restocker_id: 12,
+    machine_id: 8,
+    machine_code: 'VEND-MAD-008',
+    payload: { status: 'COMPLETED', client_mutation_id: 'mut-visit-drain-0001', items: [] }
+  });
+  await orderedDrainVm.ensureRouteOverrideQueue().enqueue({
+    client_mutation_id: 'mut-skip-drain-0001',
+    restocker_id: 12,
+    machine_id: 8,
+    machine_code: 'VEND-MAD-008',
+    payload: { service_date: '2026-11-21', skip_reason_code: 'LOCATION_CLOSED', reason_text: 'La conserjería permanece cerrada con persiana metálica bajada.' }
+  });
+  await orderedDrainVm.syncPendingVisits();
+  assert(
+    '3.9 El drenaje sincroniza visitas M34 antes que omisiones SKIP sobre la misma máquina',
+    drainOrder.join('->') === 'VISIT:8->SKIP:8'
+  );
+  api.restocker.createRestockVisit = originalCreateVisit;
+
   Object.defineProperty(globalThis, 'navigator', { value: previousNavigator, configurable: true });
   api.restocker.skipRestockStop = originalSkip;
   api.restocker.dumpRestockOverrideConflict = originalDump;
@@ -365,10 +427,23 @@ async function run() {
   api.get = originalGet;
 
   const logoutVm = buildView({ restocker: { id: 12 }, currentUser: { id: 12 } });
+  const logoutDumpCalls = [];
+  api.restocker.dumpRestockOverrideConflict = async (payload) => {
+    logoutDumpCalls.push(payload);
+    return { data: { archived: true } };
+  };
   await logoutVm.ensureRouteOverrideQueue().enqueue({ client_mutation_id: 'mut-logout-1', restocker_id: 12, machine_id: 5, payload: {} });
   await logoutVm.ensureRouteOverrideQueue().saveSnapshot(12, '2026-11-21', routePlanFixture());
   await logoutVm.handleLogout();
-  assert('4.3 La baja limpia la cola y el snapshot del reponedor', (await logoutVm.ensureRouteOverrideQueue().list(12)).length === 0 && (await logoutVm.ensureRouteOverrideQueue().loadSnapshot(12, '2026-11-21')) === null);
+  api.restocker.dumpRestockOverrideConflict = originalDump;
+  assert(
+    '4.3 La baja vuelca los pendientes a auditoría antes de limpiar la cola y el snapshot',
+    logoutDumpCalls.length === 1
+      && logoutDumpCalls[0].client_mutation_id === 'mut-logout-1'
+      && logoutDumpCalls[0].error_code === 'ACCOUNT_DEACTIVATED_DUMP'
+      && (await logoutVm.ensureRouteOverrideQueue().list(12)).length === 0
+      && (await logoutVm.ensureRouteOverrideQueue().loadSnapshot(12, '2026-11-21')) === null
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // 5. Mapa, API y contrato de diseño
@@ -404,6 +479,7 @@ async function run() {
   assert(
     '5.8 La vista declara los tres bloques, los badges y los acordeones',
     viewSource.includes('restocker-route-block')
+      && viewSource.includes('restocker-route-stop-coincidence')
       && viewSource.includes('qty=0')
       && viewSource.includes('Sin GPS')
       && viewSource.includes('<details')

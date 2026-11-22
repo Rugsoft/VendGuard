@@ -83,6 +83,7 @@ final class PdoRestockRoutePlannerGateway implements RestockRoutePlannerGatewayI
                 m.is_seasonal_pause,
                 m.seasonal_pause_until,
                 m.is_active,
+                l.is_active AS location_active,
                 l.name AS location_name,
                 l.site_code,
                 l.zone_id,
@@ -123,6 +124,7 @@ final class PdoRestockRoutePlannerGateway implements RestockRoutePlannerGatewayI
                 ? (string)$row['seasonal_pause_until']
                 : null,
             'is_active' => self::toBool($row['is_active']),
+            'location_active' => self::toBool($row['location_active']),
         ];
     }
 

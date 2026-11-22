@@ -1909,8 +1909,17 @@ export const RestockerRouteView = {
     },
 
     siteCoincidenceForLocation(locationId) {
-      const rows = this.siteCoincidence?.[String(locationId)] ?? this.siteCoincidence?.[locationId];
-      return Array.isArray(rows) ? rows : [];
+      const key = String(locationId ?? '');
+      const topRows = this.siteCoincidence?.[key] ?? this.siteCoincidence?.[locationId];
+      if (Array.isArray(topRows) && topRows.length > 0) {
+        return topRows;
+      }
+      const planRows = this.routePlan?.site_coincidence?.[key] ?? this.routePlan?.site_coincidence?.[locationId];
+      if (Array.isArray(planRows) && planRows.length > 0) {
+        return planRows;
+      }
+      const matchingStop = this.routePlanStops.find((stop) => String(stop?.location_id ?? '') === key);
+      return Array.isArray(matchingStop?.site_coincidence) ? matchingStop.site_coincidence : [];
     },
 
     siteCoincidenceLabel(entry) {
@@ -3210,7 +3219,26 @@ export const RestockerRouteView = {
       const restockerId = this.visitRestockerId;
       if (restockerId) {
         try {
-          await this.ensureRouteOverrideQueue().clear(restockerId);
+          const queue = this.ensureRouteOverrideQueue();
+          const remaining = await queue.list(restockerId);
+          for (const item of remaining) {
+            try {
+              await api.restocker.dumpRestockOverrideConflict({
+                machine_id: item.machine_id,
+                client_mutation_id: item.client_mutation_id,
+                http_status: 409,
+                error_code: item.status === RESTOCK_ROUTE_OVERRIDE_CONFLICT
+                  ? 'RESTOCK_ROUTE_OVERRIDE_CONFLICT'
+                  : 'ACCOUNT_DEACTIVATED_DUMP',
+                message: item.conflict_reason || 'Volcado automático por baja o cierre de sesión del reponedor.',
+                client_occurred_at: item.payload?.client_occurred_at || item.created_at,
+                override_id: null
+              });
+            } catch (dumpError) {
+              // El volcado automático no bloquea el cierre de sesión ni la limpieza local.
+            }
+          }
+          await queue.clear(restockerId);
         } catch (error) {
           // La sesión se cierra igualmente: la limpieza local es best-effort.
         }
@@ -3777,6 +3805,22 @@ export const RestockerRouteView = {
                   <span v-if="!routeStopHasGps(stop)" class="vg-badge vg-badge-warning">Sin GPS</span>
                   <span class="vg-badge vg-badge-neutral">Franja {{ routeTimeWindowLabel(stop.preferred_time_window) }}</span>
                   <span v-if="stop.sla_tier === 'CRITICAL_INFRASTRUCTURE_24_7'" class="vg-badge vg-badge-warning">SLA 24/7</span>
+                </div>
+
+                <div
+                  v-if="siteCoincidenceForLocation(stop.location_id).length > 0"
+                  data-testid="restocker-route-stop-coincidence"
+                  style="font-size: 11px; background-color: var(--color-info-bg); color: var(--color-info-text); border-radius: var(--radius-interactive); padding: 6px 8px; margin-top: 6px;"
+                >
+                  <div style="font-weight: 600; margin-bottom: 2px;">🤝 Coincidencia en Sede</div>
+                  <div
+                    v-for="entry in siteCoincidenceForLocation(stop.location_id)"
+                    :key="'stop-coinc-' + stop.location_id + '-' + (entry.user_id || entry.operator_code || entry.name)"
+                    style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;"
+                  >
+                    <span>{{ siteCoincidenceLabel(entry) }}</span>
+                    <span v-if="entry.activity_summary">· {{ entry.activity_summary }}</span>
+                  </div>
                 </div>
 
                 <div style="display: grid; gap: 6px; margin-top: 7px;">

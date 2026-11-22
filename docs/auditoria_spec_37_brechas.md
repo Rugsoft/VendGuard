@@ -8,9 +8,9 @@
 - **Plan y tareas:** [`specs/37-restock-route-planner/plan.md`](../specs/37-restock-route-planner/plan.md) · [`specs/37-restock-route-planner/tasks.md`](../specs/37-restock-route-planner/tasks.md)
 - **Matriz de trazabilidad:** [`specs/37-restock-route-planner/traceability-matrix.md`](../specs/37-restock-route-planner/traceability-matrix.md)
 - **Fecha de auditoría:** 2026-11-22
-- **Última actualización:** 2026-11-22 · AUD-37-01, AUD-37-02, AUD-37-03, AUD-37-04, AUD-37-05, AUD-37-06 y AUD-37-07 cerradas; batería global **448/17.375/0**, `new_engine` **76/76 · 2.592 aserciones** y **residuo 0** de esquemas temporales
+- **Última actualización:** 2026-11-22 · AUD-37-01 a AUD-37-08 cerradas; batería global **448/17.392/0**, `new_engine` **76/76 · 2.600 aserciones** y **residuo 0** de esquemas temporales
 - **Rama:** `feat/restock-route-planner`
-- **Base auditada:** `32904325c6f8bcf064f1c37ff5269d4c1121fc2a` (auditoría original) · `b7094ca` (cierre de AUD-37-03) · cambios de AUD-37-04 en el árbol de trabajo · `83f64ed` (cierre de AUD-37-06) · cierre de AUD-37-07
+- **Base auditada:** `32904325c6f8bcf064f1c37ff5269d4c1121fc2a` (auditoría original) · `b7094ca` (cierre de AUD-37-03) · cambios de AUD-37-04 en el árbol de trabajo · `83f64ed` (cierre de AUD-37-06) · `ac45a08` (cierre de AUD-37-07) · cierre de AUD-37-08
 - **Alcance:** revisión de `RF-01`–`RF-05` y sus criterios EARS, `RNF-01`–`RNF-04`, `D1`–`D7`, `C1`–`C3`, `QA-1`–`QA-6`, §6, los 5 criterios de Definition of Done y las 13 tareas `T-RRP-01`–`T-RRP-13`, con ejecución real de las suites en los dos canales.
 
 > Este documento nació como acta de hallazgos. Las secciones marcadas como cerradas documentan las correcciones posteriores y su evidencia reproducible; las que siguen abiertas no se consideran cumplidas.
@@ -19,15 +19,15 @@
 
 ## 1. Veredicto ejecutivo
 
-**La Spec 37 no está cumplida al 100 % en la fecha de la auditoría.** La implementación cubre la mayor parte del alcance y, tras cerrar AUD-37-01, AUD-37-02, AUD-37-03, AUD-37-04, AUD-37-06 y AUD-37-07, la certificación global vuelve a estar en verde, el layout M37 está medido en Chromium real, ambas bases quedan con **residuo 0** de esquemas temporales y el EARS 02.2.1 queda alineado y probado en HTTP; siguen abiertas las dos brechas P3 (`AUD-37-08` y `AUD-37-09`).
+**La Spec 37 no está cumplida al 100 % en la fecha de la auditoría.** La implementación cubre la mayor parte del alcance y, tras cerrar AUD-37-01 a AUD-37-08, la certificación global vuelve a estar en verde (**448/17.392/0**), el layout M37 está medido en Chromium real, ambas bases quedan con **residuo 0** de esquemas temporales, EARS 02.2.1 queda alineado y los criterios de AUD-37-08 tienen aserción directa; sigue abierta únicamente la brecha P3 `AUD-37-09`.
 
-Resultado real de la batería global tras las correcciones de AUD-37-01, AUD-37-02, AUD-37-03, AUD-37-04 y AUD-37-06:
+Resultado real de la batería global tras cerrar AUD-37-08:
 
 ```text
 source deploy/local/postgres/.env.battery && php tests/run_all.php
 
 Total Suites Ejecutadas    : 448
-Total Aserciones Evaluadas : 17.375
+Total Aserciones Evaluadas : 17.392
 Fallos Detectados          : 0
 Cifras documentadas        : COHERENTES
 Base de datos restablecida : SÍ (Semillas intactas)
@@ -35,7 +35,7 @@ RESULTADO: 100% EN VERDE. (0 errors, 0 failures)
 exit=0
 ```
 
-Resultado real del canal `new_engine` tras cerrar AUD-37-07:
+Resultado real del canal `new_engine` tras cerrar AUD-37-08:
 
 ```text
 source deploy/local/postgres/.env.docker-tls && php tests/run_new_engine.php
@@ -43,13 +43,13 @@ source deploy/local/postgres/.env.docker-tls && php tests/run_new_engine.php
 Suites evaluadas : 76
 Suites en verde  : 76
 No ejecutables   : 0
-Aserciones       : 2.592
+Aserciones       : 2.600
 Fallos           : 0
 RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 exit=0
 ```
 
-**Conclusión corta:** esquema, API, RBAC, opacidad, perímetro M32–M36, `TODAY_ROUTE` y las superficies M37 están sólidos; la batería global y `new_engine` están en verde y ambas bases quedan libres de esquemas temporales (`0` filas). Tras cerrar AUD-37-02 (C1), AUD-37-03 (orden de `uncovered_stops`), AUD-37-04 (layout real `360 × 800`), AUD-37-06 (limpieza `finally`) y AUD-37-07 (`403`/`409`/`422` en omisión), solo siguen abiertas las dos brechas P3 de cobertura y verificación (`AUD-37-08` y `AUD-37-09`).
+**Conclusión corta:** esquema, API, RBAC, opacidad, perímetro M32–M36, `TODAY_ROUTE` y las superficies M37 están sólidos; la batería global y `new_engine` están en verde y ambas bases quedan libres de esquemas temporales (`0` filas). Tras cerrar AUD-37-01 a AUD-37-08, solo sigue abierta la brecha P3 de verificación automatizada de semillas 1:1 y ausencia de N+1 (`AUD-37-09`).
 
 ---
 
@@ -64,7 +64,7 @@ exit=0
 | **5** | **AUD-37-05** | **P2 · Documental** | La matriz de trazabilidad y el cierre de `T-RRP-13` declaraban cifras que no eran reproducibles | DoD 5, `tasks.md`, matriz | **Cerrada (2026-11-22)** |
 | **6** | **AUD-37-06** | **P2 · Limpieza** | Quedan 3 esquemas temporales residuales tras corridas limpias | DoD 5 | **Cerrada (2026-11-22)** |
 | **7** | **AUD-37-07** | **P3 · Contradicción normativa** | El EARS 02.2.1 pide `403` para máquina bloqueada; el contrato y el código devuelven `409` | `RF-02.2.1`, contrato §4 | **Cerrada (2026-11-22)** |
-| **8** | **AUD-37-08** | **P3 · Cobertura** | Varios criterios EARS no tienen aserción directa | `RF-01.3`, `RF-02.3.1`, `RF-03.1.1`, `RF-03.2.4`, `RF-05.1.3` | **Abierta** |
+| **8** | **AUD-37-08** | **P3 · Cobertura** | Varios criterios EARS no tienen aserción directa | `RF-01.3`, `RF-02.3.1`, `RF-03.1.1`, `RF-03.2.4`, `RF-05.1.3` | **Cerrada (2026-11-22)** |
 | **9** | **AUD-37-09** | **P3 · Verificación** | La convergencia 1:1 de semillas y la ausencia de N+1 no se comprueban de forma automatizada | `RNF-01`, `RNF-02`, DoD 1 | **Abierta** |
 
 ---
@@ -238,26 +238,21 @@ Total: **3 esquemas**. La batería declaraba “Base de datos restablecida: SÍ�
 
 ---
 
-### AUD-37-08 · Criterios sin aserción directa
+### AUD-37-08 · Criterios sin aserción directa (cerrada)
 
-| Criterio | Qué falta | Evidencia actual |
+**Estado:** **Cerrada el 2026-11-22.** Añadidas aserciones directas para las 7 filas junto con los ajustes mínimos de producción necesarios (`lockMachine` + `RestockRouteScheduleService::save` para `location_active`, `RestockerRouteController` + `RestockRouteOptimizer` + `RestockerRouteView` para `site_coincidence` dentro de `route_plan.stops`, y volcado best-effort previo a `clear()` en `RestockerRouteView::handleLogout()`):
+
+| Criterio | Cobertura añadida | Evidencia verificada |
 |---|---|---|
-| `RF-01.3.1` | `404 MACHINE_NOT_FOUND` y `422 MACHINE_INACTIVE_OR_DELETED` al configurar agenda | API 29/29 solo prueba `422` de cadencia y el camino feliz |
-| `RF-01.3.2` | Rollback atómico del alta masiva con `machine_ids` inexistentes/inactivos | Services 105/105 prueba `overwrite` y `failed_count = 0`, no el fallo |
-| `RF-01.3.3` | Baja lógica a mitad de jornada: deja de generar `SCHEDULED`, conserva inyecciones/excepciones y enlaza visitas offline | Solo se prueba que `deactivate()` responde y que la segunda baja falla |
-| `RF-02.3.1` | Revocación tras visita completada y no alteración de la custodia L1 en `incident_assignments` | No hay aserción de ninguno de los dos |
-| `RF-03.1.1` | Exclusión de máquina o sede inactiva de la ruta y de las bandejas | `isOperable()` existe, pero ninguna suite M37 monta una máquina inactiva en la foto |
-| `RF-03.2.4` | `site_coincidence` dentro del `route_plan` de M37, incluyendo receptores de `REASSIGNED` | M36 lo cubre en su propia ruta; M37 no lo afirma |
-| `RF-05.1.3` | Orden de drenaje “visitas M34 antes que omisiones” y volcado automático por baja de cuenta | El código lo hace (`RestockerRouteView.js:662`), pero el test 3.7 solo vacía la cola de omisiones |
+| `RF-01.3.1` | `404 MACHINE_NOT_FOUND` (máquina inexistente) y `422 MACHINE_INACTIVE_OR_DELETED` (máquina inactiva y sede inactiva) al configurar agenda | [`RestockRoutePlannerServicesTest.php`](../tests/unit/RestockRoutePlannerServicesTest.php) (`[12/12]`) · [`RestockRoutePlannerApiTest.php`](../tests/integration/RestockRoutePlannerApiTest.php) (`2.8`–`2.9`) |
+| `RF-01.3.2` | Rechazo y rollback atómico de `bulk` con `machine_ids` explícitos inexistentes (`404`) o inactivos (`422`) sin mutar agendas ni auditoría | [`RestockRoutePlannerServicesTest.php`](../tests/unit/RestockRoutePlannerServicesTest.php) (`[12/12]`) · [`RestockRoutePlannerApiTest.php`](../tests/integration/RestockRoutePlannerApiTest.php) (`2.10`–`2.11`) |
+| `RF-01.3.3` | Baja lógica a mitad de jornada: suprime `SCHEDULED`, conserva `EMPTY_SLOT` / `REASSIGNED` vigentes y enlaza visita offline con `route_schedule_id` cerrado | [`RestockRoutePlannerServicesTest.php`](../tests/unit/RestockRoutePlannerServicesTest.php) (`[12/12]`) · [`RestockRoutePlannerIntegrationsTest.php`](../tests/unit/RestockRoutePlannerIntegrationsTest.php) (`2.7`–`2.8`) |
+| `RF-02.3.1` | `REASSIGNED` deja intacta la custodia L1 (`incidents` + `incident_assignments`); `revoke()` tras visita `COMPLETED` rechaza con `409 RESTOCK_STOP_ALREADY_COMPLETED_TODAY` | [`RestockRoutePlannerServicesTest.php`](../tests/unit/RestockRoutePlannerServicesTest.php) (`[12/12]`) · [`RestockRoutePlannerApiTest.php`](../tests/integration/RestockRoutePlannerApiTest.php) (`4.6`–`4.7`) |
+| `RF-03.1.1` | Máquinas con `is_active = FALSE` o en sedes con `location_active = FALSE` excluidas de `stops`, bandejas (`blocked`/`uncovered`/`completed`/`skipped`) y KPIs | [`RestockRoutePlannerServicesTest.php`](../tests/unit/RestockRoutePlannerServicesTest.php) (`[12/12]`) |
+| `RF-03.2.4` | `site_coincidence` dentro de `route_plan.stops` y `route_plan.site_coincidence` (incluyendo paradas recibidas por `REASSIGNED` y visibilidad SAT↔reponedor) + render móvil | [`RestockRoutePlannerApiTest.php`](../tests/integration/RestockRoutePlannerApiTest.php) (`5.9`–`5.10`) · [`restocker_route_planner_view.test.mjs`](../tests/frontend/restocker_route_planner_view.test.mjs) (`2.9`, `5.8`) |
+| `RF-05.1.3` | Orden de drenaje determinista (`VISIT:8->SKIP:8`) y volcado automático de pendientes vía `dumpRestockOverrideConflict` (`ACCOUNT_DEACTIVATED_DUMP`) antes de `clear()` | [`restocker_route_planner_view.test.mjs`](../tests/frontend/restocker_route_planner_view.test.mjs) (`3.9`, `4.3`) |
 
-**Impacto.** Son criterios implementados o parcialmente implementados, pero no certificados. La matriz los presenta como cubiertos por suites que no los ejercitan.
-
-**Corrección propuesta.** Añadir una aserción por fila, preferiblemente en las suites ya existentes:
-
-- API: `404`/`422` de agenda y rollback de lote.
-- Services: baja en jornada y exclusión de inactivas.
-- Integrations/API: `site_coincidence` en `route_plan` con desvío entrante.
-- Frontend: orden de drenaje con una visita y una omisión pendientes en la misma máquina; volcado al desactivar la cuenta.
+**Evidencia final.** Suites focalizadas y guardas: `RestockRoutePlannerServicesTest.php` **118/118**, `RestockRoutePlannerIntegrationsTest.php` **23/23**, `RestockRoutePlannerApiTest.php` **39/39**, `restocker_route_planner_view.test.mjs` **42/42**, `restocker_route_view.test.mjs` **245/245**, `CoordinatorButtonVariantsGuardTest.mjs` **23/23**, `FrontendTemplateCompileTest.mjs` **15/15**, `DesignTokenDebtRatchetTest.mjs` **3/3**. Batería global: **448 suites · 17.392 aserciones · 0 fallos · `DocMetricsGuard` coherente · `exit=0`**; canal `new_engine`: **76/76 suites · 2.600 aserciones · 0 fallos · `exit=0`**; **residuo 0** de esquemas temporales.
 
 ---
 
@@ -278,10 +273,10 @@ Total: **3 esquemas**. La batería declaraba “Base de datos restablecida: SÍ�
 | DoD | Evidencia real | Veredicto |
 |---|---|---|
 | **1.** Migración `033`/`034`, 51 tablas, 50 enums, índices, FK, auditoría y guardas | Schema M37 **41/41**; `PostgresSchemaTest` **159/159**; `PostgresConstitutionalTest` **88/88**; `SchemaConvergenceParityTest` **42/42**; `CloudDeploySchemaParityTest` **55/55** | **Cumplido en esquema**; semillas 1:1 sin aserción (AUD-37-09) |
-| **2.** Dominio, cadencias, optimizador, servicios, excepciones y perímetro | Dominio **67/67**; Cadence **60/60**; Optimizer **30/30**; Services **105/105**; Integrations **21/21**; Gateway **34/34** | **Cumplido** |
-| **3.** API REST, RBAC, idempotencia y opacidad | API **31/31**; Constitucional **45/45** | **Cumplido** |
-| **4.** Superficies móvil y de Coordinación, mapa, Offline y `TODAY_ROUTE` | Móvil **40/40**; vista **245/245**; Coordinación **32/32**; M33 **80/80**; layout M37 **38/38** en Chromium real | **Cumplido** |
-| **5.** Batería global y canal `new_engine` al 100 % | Global **448/17.375/0/`DocMetricsGuard` coherente/exit=0**; `new_engine` **76/76/2.592/0/exit=0** | **Cumplido** |
+| **2.** Dominio, cadencias, optimizador, servicios, excepciones y perímetro | Dominio **67/67**; Cadence **60/60**; Optimizer **30/30**; Services **118/118**; Integrations **23/23**; Gateway **34/34** | **Cumplido** |
+| **3.** API REST, RBAC, idempotencia y opacidad | API **39/39**; Constitucional **45/45** | **Cumplido** |
+| **4.** Superficies móvil y de Coordinación, mapa, Offline y `TODAY_ROUTE` | Móvil **42/42**; vista **245/245**; Coordinación **32/32**; M33 **80/80**; layout M37 **38/38** en Chromium real | **Cumplido** |
+| **5.** Batería global y canal `new_engine` al 100 % | Global **448/17.392/0/`DocMetricsGuard` coherente/exit=0**; `new_engine` **76/76/2.600/0/exit=0** | **Cumplido** |
 
 ---
 
@@ -289,7 +284,7 @@ Total: **3 esquemas**. La batería declaraba “Base de datos restablecida: SÍ�
 
 [`specs/37-restock-route-planner/tasks.md`](../specs/37-restock-route-planner/tasks.md): **13 marcadas `[x]`, 0 pendientes**.
 
-Las 13 tareas existen y están cerradas administrativamente. El cierre de **T-RRP-13** declara “448 suites · 17.375 aserciones · 0 fallos”; tras corregir AUD-37-01, AUD-37-02, AUD-37-03, AUD-37-04, AUD-37-06 y AUD-37-07, esa evidencia vuelve a ser reproducible (`448/17.375/0`, `exit=0`), y el canal `new_engine` queda en **76/76 suites · 2.592 aserciones · 0 fallos**.
+Las 13 tareas existen y están cerradas administrativamente. El cierre de **T-RRP-13** declara “448 suites · 17.392 aserciones · 0 fallos”; tras corregir AUD-37-01 a AUD-37-08, esa evidencia vuelve a ser reproducible (`448/17.392/0`, `exit=0`), y el canal `new_engine` queda en **76/76 suites · 2.600 aserciones · 0 fallos**.
 
 ---
 
@@ -302,14 +297,14 @@ Estas suites se ejecutaron y pasaron; se conservan aquí para no perder el conte
 | `RestockRoutePlannerDomainModelsTest` | 67/67 | local |
 | `RestockCadenceAndValidatorTest` | 60/60 | local |
 | `RestockRouteOptimizerTest` | 30/30 | local |
-| `RestockRoutePlannerServicesTest` | 105/105 | local |
-| `RestockRoutePlannerIntegrationsTest` | 21/21 | local |
+| `RestockRoutePlannerServicesTest` | 118/118 | local |
+| `RestockRoutePlannerIntegrationsTest` | 23/23 | local |
 | `PostgresRestockRoutePlannerSchemaTest` | 41/41 | `new_engine` |
 | `PdoRestockRoutePlannerGatewayTest` | 34/34 | `new_engine` |
-| `RestockRoutePlannerApiTest` | 31/31 | `new_engine` |
+| `RestockRoutePlannerApiTest` | 39/39 | `new_engine` |
 | `RestockRoutePlannerConstitutionalTest` | 45/45 | local |
 | `coordinator_restock_route_planner.test.mjs` | 32/32 | local |
-| `restocker_route_planner_view.test.mjs` | 40/40 | local |
+| `restocker_route_planner_view.test.mjs` | 42/42 | local |
 | `restocker_route_view.test.mjs` | 245/245 | local |
 | `coordinator_product_loading_tab.test.mjs` | 80/80 | local |
 | `RestockRoutePlannerLayoutBrowserTest` | 38/38 · Chromium real `360 × 800` | `new_engine` |
@@ -347,7 +342,7 @@ Estas suites se ejecutaron y pasaron; se conservan aquí para no perder el conte
 3. **AUD-37-03 (cerrada el 2026-11-22).** Comparador puro `UncoveredStopComparator` y test `[11/11]` con nueve máquinas desordenadas; suite 105/105.
 4. **AUD-37-01 (cerrada el 2026-11-22).** Test de fechas convertido en dinámico y batería global revalidada.
 5. **AUD-37-04 (cerrada el 2026-11-22).** Suite de navegador `RestockRoutePlannerLayoutBrowserTest` **38/38** en Chromium real a `360 × 800`; hoja móvil, mapa con y sin GPS, estado vacío, modal de omisión y consola de Coordinación.
-6. **AUD-37-08 y AUD-37-09.** Añadir las aserciones que faltan.
+6. **AUD-37-08 (cerrada el 2026-11-22) y AUD-37-09 (abierta).** Añadidas aserciones directas para `RF-01.3.1`–`RF-01.3.3`, `RF-02.3.1`, `RF-03.1.1`, `RF-03.2.4` y `RF-05.1.3` (17 aserciones globales + 8 en `RestockRoutePlannerApiTest`); queda únicamente `AUD-37-09`.
 7. **AUD-37-06 (cerrada el 2026-11-22).** Limpieza garantizada en `finally` (sin `exit()` dentro de `try`) en las tres suites (`WorkshopRefurbishmentServiceIntegrationTest`, `OperationalZoneRepositoryTest`, `ZonePostalCodeTransferTest`); **0** esquemas residuales en `vendguard_battery` y `vendguard_pg_test`.
 8. **AUD-37-05 (cerrada el 2026-11-22).** Ambos canales reejecutados; cifras y `DocMetricsGuard` coherentes. Queda la atribución `360 × 800` de AUD-37-04.
 9. **AUD-37-07 (cerrada el 2026-11-22).** Spec y espejo 1:1 alineados con el catálogo §4 (`403` perímetro, `409` bloqueada en `blocked_stops`, `422` inactiva/eliminada); añadidas las aserciones HTTP 5.6 (`409` cuarentena) y 5.7 (`422` inactiva) en `RestockRoutePlannerApiTest.php` (**31/31**; `new_engine` **76/76 · 2.592 aserciones**).
@@ -363,10 +358,10 @@ La Spec 37 podrá declararse al 100 % cuando se cumplan, con evidencia reproduci
 - [x] La pausa estacional cumple C1 (solo FEFO la reactiva) y los contadores no cuentan bloqueadas como demanda.
 - [x] `uncovered_stops` respeta el orden FEFO → L1/`SlaTier` → franja.
 - [x] Existe una prueba de navegador real `360 × 800` de la hoja móvil, el mapa y la consola de Coordinación.
-- [ ] Los criterios de AUD-37-08 tienen aserción directa.
+- [x] Los criterios de AUD-37-08 tienen aserción directa.
 - [x] No quedan esquemas `t_*` ni `contract_convergence_check*` en ninguna de las dos bases.
 - [x] La matriz de trazabilidad, `tasks.md`, `README.md` y `docs/features_pendientes.md` declaran las cifras de la última corrida verde.
-- [ ] `locations` y `CoordinatorTerritorialMapTab.js` siguen intactos.
+- [x] `locations` y `CoordinatorTerritorialMapTab.js` siguen intactos.
 
 ---
 
@@ -374,4 +369,4 @@ La Spec 37 podrá declararse al 100 % cuando se cumplan, con evidencia reproduci
 
 Esta acta se actualizará al cerrar cada brecha, con la misma disciplina que las auditorías de los módulos 33–36: el estado de cada fila pasará de **Abierta** a **Cerrada (fecha)** y se añadirá la evidencia focalizada que lo demuestre. No se declarará el cierre del módulo mientras quede una fila P1 abierta o la batería global no esté en verde.
 
-**Estado del árbol:** HEAD de partida `83f64ed` (más los cambios locales de AUD-37-04). El cierre de AUD-37-07 modifica `specs/37-restock-route-planner/spec.md`, `specs/functional/restock_route_planner_spec.md`, `tests/integration/RestockRoutePlannerApiTest.php` y esta acta (`docs/auditoria_spec_37_brechas.md`); `locations` y `CoordinatorTerritorialMapTab.js` permanecen intactos. `git diff --check` no reporta errores.
+**Estado del árbol:** HEAD de partida `ac45a08` (más los cambios locales de AUD-37-04). El cierre de AUD-37-08 modifica `PdoRestockRoutePlannerGateway.php`, `RestockRouteScheduleService.php`, `RestockRouteOptimizer.php`, `RestockerRouteController.php`, `RestockerRouteView.js`, las cuatro suites actualizadas (`RestockRoutePlannerServicesTest.php`, `RestockRoutePlannerIntegrationsTest.php`, `RestockRoutePlannerApiTest.php`, `restocker_route_planner_view.test.mjs`), las cifras documentadas (`README.md`, `docs/features_pendientes.md`, `tasks.md`, `traceability-matrix.md`) y esta acta (`docs/auditoria_spec_37_brechas.md`); `locations` y `CoordinatorTerritorialMapTab.js` permanecen intactos. `git diff --check` no reporta errores.

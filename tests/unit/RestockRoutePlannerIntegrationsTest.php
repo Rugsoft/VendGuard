@@ -30,6 +30,7 @@ use VendGuard\Application\Service\MachineRestockVisitService;
 use VendGuard\Application\Service\ProductLoadingOrderService;
 use VendGuard\Application\Service\RestockRoutePlannerService;
 use VendGuard\Application\Service\RestockRouteReassignmentRevoker;
+use VendGuard\Application\Service\RestockRouteScheduleService;
 use VendGuard\Application\Service\ShiftLifecycleService;
 use VendGuard\Application\Service\TechnicianAbsenceService;
 use VendGuard\Core\Domain\Enum\RestockOverrideStatus;
@@ -213,6 +214,9 @@ final class RrpIntRouteGateway implements RestockRoutePlannerGatewayInterface
     /** @var array<int, MachineRestockSchedule> */
     public array $activeSchedules = [];
 
+    /** @var array<int, MachineRestockSchedule> */
+    public array $schedulesById = [];
+
     /** @var list<RestockRouteDailyOverride> */
     public array $reassignments = [];
 
@@ -251,7 +255,15 @@ final class RrpIntRouteGateway implements RestockRoutePlannerGatewayInterface
 
     public function deactivateSchedule(int $scheduleId, int $actorId, string $deactivatedAt): bool
     {
-        return false;
+        if (!isset($this->schedulesById[$scheduleId]) || !$this->schedulesById[$scheduleId]->isActive()) {
+            return false;
+        }
+
+        $closed = $this->schedulesById[$scheduleId]->deactivate($actorId, $deactivatedAt);
+        $this->schedulesById[$scheduleId] = $closed;
+        unset($this->activeSchedules[$closed->getMachineId()]);
+
+        return true;
     }
 
     public function findActiveOverride(int $machineId, string $serviceDate): ?RestockRouteDailyOverride
@@ -1596,6 +1608,59 @@ rrpIntExpectVisitFailure(
     MachineRestockVisitValidationException::INVALID_ROUTE_SCHEDULE
 );
 $assert('2.6 La agenda de otra máquina se rechaza con INVALID_ROUTE_SCHEDULE', true);
+
+$midDaySchedule = MachineRestockSchedule::fromDatabaseRow(rrpIntScheduleRow(88, 1, true));
+$midDayScheduleGateway = new RrpIntRouteGateway();
+$midDayScheduleGateway->schedulesById[88] = $midDaySchedule;
+$midDayScheduleGateway->activeSchedules[1] = $midDaySchedule;
+$midDayReadModel = new RrpIntRouteReadModel();
+$midDayReadModel->restockers = [rrpIntRestockerRow()];
+$midDayReadModel->schedules[88] = $midDaySchedule;
+$midDayScheduleService = new RestockRouteScheduleService(
+    $midDayScheduleGateway,
+    $midDayReadModel,
+    new AuditLogger(new RrpIntAuditRepository()),
+    new RrpIntTransactions()
+);
+$midDayScheduleService->deactivate(88, ['id' => 3, 'role' => 'COORDINATOR', 'name' => 'Coordinación'], $reference);
+$midDayReadModel->schedules[88] = $midDayScheduleGateway->schedulesById[88];
+$midDayReadModel->machines = [rrpIntMachineRow(1, 'VEND-01', null, 2)];
+$midDayRoute = (new RestockRoutePlannerService($midDayReadModel))->buildRestockerRoute(7, $serviceDate, null, $reference);
+$midDayTriggers = $midDayRoute['route_plan']['stops'][0]['machines'][0]['triggers'] ?? [];
+$assert(
+    '2.7 Tras la baja lógica de la agenda, la ruta elimina SCHEDULED pero conserva EMPTY_SLOT',
+    in_array('EMPTY_SLOT', $midDayTriggers, true) && !in_array('SCHEDULED', $midDayTriggers, true),
+    json_encode($midDayTriggers)
+);
+
+$midDayVisits = new RrpIntVisitRepository();
+$midDayVisitService = new MachineRestockVisitService(
+    $midDayVisits,
+    new RrpIntPlanogramRepository(),
+    new RrpIntVanStock(),
+    $inSitu,
+    new RrpIntTransactions(),
+    new AuditLogger(new RrpIntAuditRepository()),
+    null,
+    null,
+    $midDayScheduleGateway,
+    $midDayReadModel
+);
+$midDayVisitService->registerVisit(1, [
+    'status' => 'COMPLETED',
+    'client_mutation_id' => 'rrp-int-midday-offline-01',
+    'cabin_temp_celsius' => 3.5,
+    'route_schedule_id' => 88,
+    'hygiene_checklist_json' => [
+        'dispensing_tray_and_glass_cleaned' => true,
+        'cabin_spills_checked' => true,
+    ],
+    'items' => [],
+], ['id' => 7, 'role' => 'RESTOCKER', 'name' => 'Lucía']);
+$assert(
+    '2.8 La visita offline capturada antes de la baja enlaza la versión cerrada recién desactivada',
+    $midDayVisits->visits[1]->getRouteScheduleId() === 88
+);
 
 // =====================================================================
 // 3 · M21/M31 · revocación automática de REASSIGNED

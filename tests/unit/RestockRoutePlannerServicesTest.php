@@ -1271,6 +1271,187 @@ try {
     );
 
     echo "  [OK]   FEFO, SlaTier/L1 y franja ordenan la bandeja\n";
+
+    echo "[12/12] Criterios AUD-37-08: 404/422 de agenda, rollback bulk, baja en jornada, custodia/revocación y máquinas inactivas\n";
+
+    $harness = rrpHarness();
+    $harness['gateway']->machines[1] = rrpMachine(1, ['is_active' => true, 'location_active' => true]);
+    $harness['gateway']->machines[2] = rrpMachine(2, ['is_active' => false, 'location_active' => true]);
+    $harness['gateway']->machines[3] = rrpMachine(3, ['is_active' => true, 'location_active' => false]);
+    $harness['gateway']->saveScheduleVersion(new MachineRestockSchedule(
+        null,
+        1,
+        VendGuard\Core\Domain\Enum\RestockCadenceType::DAILY,
+        null,
+        null,
+        VendGuard\Core\Domain\Enum\RestockTimeWindow::MORNING,
+        true,
+        null,
+        true,
+        99,
+        99
+    ));
+    $harness['readModel']->machines = [
+        $harness['gateway']->machines[1],
+        $harness['gateway']->machines[2],
+        $harness['gateway']->machines[3],
+    ];
+    $harness['readModel']->restockers = [
+        rrpRestocker(7, ['zone_ids' => [1], 'is_primary' => true]),
+        rrpRestocker(9, ['zone_ids' => [2], 'is_primary' => true]),
+    ];
+    $harness['readModel']->gateway = $harness['gateway'];
+
+    $scheduleService = new RestockRouteScheduleService(
+        $harness['gateway'],
+        $harness['readModel'],
+        new AuditLogger($harness['audit']),
+        $harness['transactions']
+    );
+
+    assertRrpThrows(
+        static fn () => $scheduleService->save(999, ['cadence_type' => 'DAILY', 'include_weekends' => true], $coordinator, $now),
+        RestockRoutePlannerValidationException::MACHINE_NOT_FOUND,
+        'RF-01.3.1: guardar agenda sobre máquina inexistente devuelve MACHINE_NOT_FOUND'
+    );
+    assertRrpThrows(
+        static fn () => $scheduleService->save(2, ['cadence_type' => 'DAILY', 'include_weekends' => true], $coordinator, $now),
+        RestockRoutePlannerValidationException::MACHINE_INACTIVE_OR_DELETED,
+        'RF-01.3.1: guardar agenda sobre máquina inactiva devuelve MACHINE_INACTIVE_OR_DELETED'
+    );
+    assertRrpThrows(
+        static fn () => $scheduleService->save(3, ['cadence_type' => 'DAILY', 'include_weekends' => true], $coordinator, $now),
+        RestockRoutePlannerValidationException::MACHINE_INACTIVE_OR_DELETED,
+        'RF-01.3.1: guardar agenda sobre máquina de sede inactiva devuelve MACHINE_INACTIVE_OR_DELETED'
+    );
+
+    $txCallsBeforeBulk = $harness['transactions']->calls;
+    $auditCountBeforeBulk = count($harness['audit']->events);
+    assertRrpThrows(
+        static fn () => $scheduleService->bulk([
+            'machine_ids' => [1, 999],
+            'cadence_type' => 'MON_WED_FRI',
+            'overwrite_existing' => true,
+        ], $coordinator, $now),
+        RestockRoutePlannerValidationException::MACHINE_NOT_FOUND,
+        'RF-01.3.2: bulk explícito con máquina inexistente falla antes de abrir transacción'
+    );
+    assertRrpThrows(
+        static fn () => $scheduleService->bulk([
+            'machine_ids' => [1, 2],
+            'cadence_type' => 'MON_WED_FRI',
+            'overwrite_existing' => true,
+        ], $coordinator, $now),
+        RestockRoutePlannerValidationException::MACHINE_INACTIVE_OR_DELETED,
+        'RF-01.3.2: bulk explícito con máquina inactiva falla sin modificar el lote'
+    );
+    assertRrpSame(
+        $txCallsBeforeBulk,
+        $harness['transactions']->calls,
+        'RF-01.3.2: el rechazo previo del lote no inicia escrituras ni altera las agendas vigentes'
+    );
+    assertRrpSame(
+        $auditCountBeforeBulk,
+        count($harness['audit']->events),
+        'RF-01.3.2: el lote rechazado no registra auditoría'
+    );
+
+    $deactivatedMidDay = $scheduleService->deactivate(1, $coordinator, $now);
+    assertRrpCondition($deactivatedMidDay['deactivated'] === true, 'RF-01.3.3: baja lógica a mitad de jornada se registra');
+    $harness['readModel']->machines = [
+        rrpMachine(1, [
+            'schedule' => null,
+            'empty_slots_count' => 1,
+            'active_override' => ['id' => 91, 'override_type' => 'REASSIGNED', 'target_restocker_id' => 9],
+        ]),
+        rrpMachine(2, [
+            'is_active' => false,
+            'location_active' => true,
+            'empty_slots_count' => 2,
+            'schedule' => rrpScheduleRow(2),
+            'active_l1_incident' => ['id' => 70, 'assigned_restocker_id' => 7],
+            'sanitary_status' => 'QUARANTINE',
+        ]),
+        rrpMachine(3, [
+            'is_active' => true,
+            'location_active' => false,
+            'earliest_fefo_expiration_date' => '2026-11-21',
+            'schedule' => rrpScheduleRow(3),
+        ]),
+    ];
+    $planner = new RestockRoutePlannerService($harness['readModel'], new RestockRouteOptimizer(new GeoDistanceService()));
+    $midDayDay = $planner->buildCoordinatorDay('2026-11-21', [], $now);
+    $midDayRoute = $planner->buildRestockerRoute(9, '2026-11-21', null, $now);
+    $midDayTriggers = $midDayRoute['route_plan']['stops'][0]['machines'][0]['triggers'] ?? [];
+    assertRrpCondition(
+        $midDayDay['kpis']['scheduled_machines_count'] === 0
+            && !in_array(RestockRouteOptimizer::TRIGGER_SCHEDULED, $midDayTriggers, true)
+            && in_array(RestockRouteOptimizer::TRIGGER_EMPTY_SLOT, $midDayTriggers, true)
+            && in_array(RestockRouteOptimizer::TRIGGER_INCOMING_REASSIGNMENT, $midDayTriggers, true),
+        'RF-01.3.3: la baja en jornada retira SCHEDULED y conserva inyecciones y desvíos vigentes'
+    );
+    assertRrpCondition(
+        $midDayDay['kpis']['blocked_count'] === 0
+            && $midDayDay['kpis']['uncovered_count'] === 0
+            && $midDayDay['kpis']['injected_fefo_count'] === 0
+            && count($midDayDay['restocker_routes']) === 1
+            && (int)$midDayDay['restocker_routes'][0]['restocker_id'] === 9,
+        'RF-03.1.1: máquinas y sedes inactivas quedan excluidas de KPIs, rutas y bandejas'
+    );
+    $routeForExcludedOwner = $planner->buildRestockerRoute(7, '2026-11-21', null, $now);
+    assertRrpCondition(
+        $routeForExcludedOwner['route_plan']['stops'] === []
+            && $routeForExcludedOwner['route_plan']['blocked_stops'] === []
+            && $routeForExcludedOwner['route_plan']['completed_stops'] === []
+            && $routeForExcludedOwner['route_plan']['skipped_stops'] === [],
+        'RF-03.1.1: la hoja del reponedor excluye máquinas y sedes inactivas de todas sus secciones'
+    );
+
+    $custodyHarness = rrpHarness();
+    $custodyL1 = ['id' => 501, 'assigned_restocker_id' => 7];
+    $custodyHarness['gateway']->machines[1] = rrpMachine(1);
+    $custodyHarness['readModel']->machines = [
+        rrpMachine(1, [
+            'empty_slots_count' => 1,
+            'active_l1_incident' => $custodyL1,
+        ]),
+    ];
+    $custodyHarness['readModel']->restockers = [
+        rrpRestocker(7, ['zone_ids' => [1], 'is_primary' => true]),
+        rrpRestocker(9, ['zone_ids' => [2], 'is_primary' => true]),
+    ];
+    $custodyHarness['readModel']->gateway = $custodyHarness['gateway'];
+    $custodyPlanner = new RestockRoutePlannerService($custodyHarness['readModel'], new RestockRouteOptimizer(new GeoDistanceService()));
+    $custodyOverrides = new RestockRouteOverrideService(
+        $custodyHarness['gateway'],
+        $custodyHarness['readModel'],
+        $custodyPlanner,
+        new AuditLogger($custodyHarness['audit']),
+        $custodyHarness['transactions']
+    );
+    $reassignedL1 = $custodyOverrides->reassign([
+        'machine_id' => 1,
+        'service_date' => '2026-11-21',
+        'target_restocker_id' => 9,
+        'reassignment_reason_code' => 'LOAD_BALANCING',
+    ], $coordinator, $now);
+    assertRrpSame(
+        7,
+        $custodyHarness['readModel']->machines[0]['active_l1_incident']['assigned_restocker_id'],
+        'RF-02.3.1: el desvío REASSIGNED no altera el técnico L1 asignado'
+    );
+    $custodyHarness['readModel']->machines[0]['visit_today'] = [
+        'id' => 880,
+        'status' => 'COMPLETED',
+        'restocker_id' => 9,
+    ];
+    assertRrpThrows(
+        static fn () => $custodyOverrides->revoke((int)$reassignedL1['override']['id'], $coordinator, $now),
+        RestockRoutePlannerValidationException::RESTOCK_STOP_ALREADY_COMPLETED_TODAY,
+        'RF-02.3.1: revocar un desvío cuando ya existe visita COMPLETED devuelve 409 RESTOCK_STOP_ALREADY_COMPLETED_TODAY'
+    );
+
+    echo "  [OK]   Criterios AUD-37-08 certificados\n";
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[FAIL] " . $exception->getMessage() . "\n");
     exit(1);
