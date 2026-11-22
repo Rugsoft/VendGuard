@@ -141,7 +141,7 @@ final class RestockRoutePlannerService
             }
 
             if ($classification['status'] === 'BLOCKED') {
-                $blocked[] = $this->buildBlockedStop($machine, $classification['block_reasons']);
+                $blocked[] = $this->buildBlockedStop($machine, $classification);
                 continue;
             }
 
@@ -299,7 +299,7 @@ final class RestockRoutePlannerService
 
             if ($classification['status'] === 'BLOCKED') {
                 $kpis['blocked_count']++;
-                $blocked = $this->buildBlockedStop($machine, $classification['block_reasons']);
+                $blocked = $this->buildBlockedStop($machine, $classification);
                 $blockedStops[] = $blocked;
                 if ($ownerId !== null) {
                     $byRestocker[$ownerId]['blocked'][] = $blocked;
@@ -539,6 +539,7 @@ final class RestockRoutePlannerService
      *     status: string,
      *     triggers: list<string>,
      *     block_reasons: list<string>,
+     *     suppressed_triggers: list<string>,
      *     has_schedule: bool,
      *     has_fefo_alert: bool,
      *     has_demand: bool,
@@ -555,6 +556,8 @@ final class RestockRoutePlannerService
             $serviceDate
         );
 
+        $scheduleWouldApply = $schedule !== null
+            && RestockCadenceEvaluator::appliesOnDate($schedule, $serviceDate, $slaTier, false);
         $hasSchedule = $schedule !== null
             && RestockCadenceEvaluator::appliesOnDate($schedule, $serviceDate, $slaTier, $paused);
 
@@ -564,21 +567,39 @@ final class RestockRoutePlannerService
         $reassigned = is_array($machine['active_override'] ?? null)
             && ($machine['active_override']['override_type'] ?? null) === 'REASSIGNED';
 
+        $suppressedTriggers = [];
+        if ($paused) {
+            if ($l1) {
+                $suppressedTriggers[] = RestockRouteOptimizer::TRIGGER_L1_INCIDENT;
+            }
+            if ($empty) {
+                $suppressedTriggers[] = RestockRouteOptimizer::TRIGGER_EMPTY_SLOT;
+            }
+            if ($scheduleWouldApply) {
+                $suppressedTriggers[] = RestockRouteOptimizer::TRIGGER_SCHEDULED;
+            }
+            if ($reassigned) {
+                $suppressedTriggers[] = RestockRouteOptimizer::TRIGGER_INCOMING_REASSIGNMENT;
+            }
+        }
+
         $triggers = [];
         if ($fefo) {
             $triggers[] = RestockRouteOptimizer::TRIGGER_FEFO_ALERT;
         }
-        if ($l1) {
-            $triggers[] = RestockRouteOptimizer::TRIGGER_L1_INCIDENT;
-        }
-        if ($empty) {
-            $triggers[] = RestockRouteOptimizer::TRIGGER_EMPTY_SLOT;
-        }
-        if ($hasSchedule) {
-            $triggers[] = RestockRouteOptimizer::TRIGGER_SCHEDULED;
-        }
-        if ($reassigned) {
-            $triggers[] = RestockRouteOptimizer::TRIGGER_INCOMING_REASSIGNMENT;
+        if (!$paused) {
+            if ($l1) {
+                $triggers[] = RestockRouteOptimizer::TRIGGER_L1_INCIDENT;
+            }
+            if ($empty) {
+                $triggers[] = RestockRouteOptimizer::TRIGGER_EMPTY_SLOT;
+            }
+            if ($hasSchedule) {
+                $triggers[] = RestockRouteOptimizer::TRIGGER_SCHEDULED;
+            }
+            if ($reassigned) {
+                $triggers[] = RestockRouteOptimizer::TRIGGER_INCOMING_REASSIGNMENT;
+            }
         }
 
         $blockReasons = $this->blockedReasons($machine, $serviceDate);
@@ -603,9 +624,10 @@ final class RestockRoutePlannerService
             'status' => $status,
             'triggers' => $triggers,
             'block_reasons' => $blockReasons,
+            'suppressed_triggers' => $suppressedTriggers,
             'has_schedule' => $hasSchedule,
             'has_fefo_alert' => $fefo,
-            'has_demand' => $l1 || $empty,
+            'has_demand' => $status !== 'BLOCKED' && !$paused && ($l1 || $empty),
             'has_work' => $triggers !== [],
         ];
     }
@@ -708,12 +730,13 @@ final class RestockRoutePlannerService
 
     /**
      * @param array<string, mixed> $machine
-     * @param list<string> $reasons
+     * @param array<string, mixed> $classification
      *
      * @return array<string, mixed>
      */
-    private function buildBlockedStop(array $machine, array $reasons): array
+    private function buildBlockedStop(array $machine, array $classification): array
     {
+        $reasons = $classification['block_reasons'];
         $primary = $reasons[0] ?? 'MACHINE_INACTIVE';
 
         return [
@@ -725,6 +748,7 @@ final class RestockRoutePlannerService
             'block_reason' => $primary,
             'block_reason_label' => self::BLOCK_REASON_LABELS[$primary] ?? $primary,
             'block_reasons' => $reasons,
+            'suppressed_triggers' => $classification['suppressed_triggers'],
         ];
     }
 

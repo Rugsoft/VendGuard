@@ -573,7 +573,7 @@ function rrpHarness(): array
 }
 
 try {
-    echo "[1/9] Auditoría y versionado de agendas\n";
+    echo "[1/10] Auditoría y versionado de agendas\n";
 
     assertRrpCondition(
         AuditEvent::isValidEntityType(AuditEvent::ENTITY_MACHINE_RESTOCK_SCHEDULE),
@@ -659,7 +659,7 @@ try {
 
     echo "  [OK]   Versionado inmutable, cadencia, rol y baja lógica\n";
 
-    echo "[2/9] Alta masiva atómica\n";
+    echo "[2/10] Alta masiva atómica\n";
 
     $harness = rrpHarness();
     $harness['gateway']->machines[1] = rrpMachine(1);
@@ -705,7 +705,7 @@ try {
 
     echo "  [OK]   Lote por zona, overwrite=false y una sola transacción\n";
 
-    echo "[3/9] Propiedad efectiva y composición de la ruta\n";
+    echo "[3/10] Propiedad efectiva y composición de la ruta\n";
 
     $harness = rrpHarness();
     $harness['readModel']->restockers = [
@@ -811,7 +811,7 @@ try {
 
     echo "  [OK]   REASSIGNED > L1 > zona, turno y ausencia\n";
 
-    echo "[4/9] Tablero de Coordinación y opacidad\n";
+    echo "[4/10] Tablero de Coordinación y opacidad\n";
 
     $day = $planner->buildCoordinatorDay('2026-11-21', [], $now);
 
@@ -837,7 +837,7 @@ try {
 
     echo "  [OK]   Contadores instantáneos, bandeja UNCOVERED y opacidad\n";
 
-    echo "[5/9] Omisión SKIPPED, FEFO y sello EXPIRED\n";
+    echo "[5/10] Omisión SKIPPED, FEFO y sello EXPIRED\n";
 
     $harness = rrpHarness();
     $harness['gateway']->machines[1] = rrpMachine(1, ['sanitary_status' => 'OK']);
@@ -921,7 +921,7 @@ try {
 
     echo "  [OK]   SKIPPED, aviso FEFO, EXPIRED e idempotencia\n";
 
-    echo "[6/9] Perímetro del reponedor y verdad del día\n";
+    echo "[6/10] Perímetro del reponedor y verdad del día\n";
 
     $harness = rrpHarness();
     $harness['gateway']->machines[1] = rrpMachine(1);
@@ -984,7 +984,7 @@ try {
 
     echo "  [OK]   403 de perímetro, 409 de visita/cuarentena y fecha pasada\n";
 
-    echo "[7/9] Desvío REASSIGNED y revocación\n";
+    echo "[7/10] Desvío REASSIGNED y revocación\n";
 
     $harness = rrpHarness();
     $harness['gateway']->machines[1] = rrpMachine(1);
@@ -1049,7 +1049,7 @@ try {
 
     echo "  [OK]   REASSIGNED, auto-desvío, rol y revocación\n";
 
-    echo "[8/9] Revocación de la excepción anterior y volcado offline\n";
+    echo "[8/10] Revocación de la excepción anterior y volcado offline\n";
 
     $harness = rrpHarness();
     $harness['gateway']->machines[1] = rrpMachine(1);
@@ -1114,7 +1114,7 @@ try {
 
     echo "  [OK]   Una sola excepción viva y archivo de conflictos\n";
 
-    echo "[9/9] Regresión de los contratos ya certificados\n";
+    echo "[9/10] Regresión de los contratos ya certificados\n";
 
     assertRrpCondition(
         count(AuditEvent::ENTITY_TYPES) === count(array_unique(AuditEvent::ENTITY_TYPES)),
@@ -1155,6 +1155,81 @@ try {
     );
 
     echo "  [OK]   Whitelist, cadencia y próxima parada\n";
+
+    echo "[10/10] Pausa estacional: solo FEFO reactiva la parada\n";
+
+    $harness = rrpHarness();
+    $harness['readModel']->restockers = [rrpRestocker(7)];
+    $harness['readModel']->machines = [
+        rrpMachine(1, [
+            'is_seasonal_pause' => true,
+            'active_l1_incident' => ['id' => 50, 'assigned_restocker_id' => 7],
+            'empty_slots_count' => 2,
+        ]),
+        rrpMachine(2, [
+            'is_seasonal_pause' => true,
+            'earliest_fefo_expiration_date' => '2026-11-21',
+            'active_l1_incident' => ['id' => 51, 'assigned_restocker_id' => 7],
+            'empty_slots_count' => 2,
+        ]),
+        rrpMachine(3, [
+            'is_seasonal_pause' => true,
+            'schedule' => rrpScheduleRow(3),
+            'empty_slots_count' => 1,
+        ]),
+        rrpMachine(4, [
+            'sanitary_status' => 'QUARANTINE',
+            'empty_slots_count' => 1,
+        ]),
+    ];
+
+    $planner = new RestockRoutePlannerService($harness['readModel'], new RestockRouteOptimizer(new GeoDistanceService()));
+    $day = $planner->buildCoordinatorDay('2026-11-21', [], $now);
+
+    assertRrpSame(3, $day['kpis']['blocked_count'], 'Las pausas sin FEFO y la cuarentena se segregan');
+    assertRrpSame(1, $day['kpis']['injected_fefo_count'], 'Solo la pausa con FEFO se inyecta');
+    assertRrpSame(0, $day['kpis']['injected_demand_count'], 'Una parada bloqueada no cuenta como demanda');
+    assertRrpSame(0, $day['kpis']['scheduled_machines_count'], 'La pausa suprime la cadencia');
+
+    $blockedByMachine = [];
+    foreach ($day['blocked_stops'] as $stop) {
+        $blockedByMachine[(int)$stop['machine_id']] = $stop;
+    }
+
+    assertRrpSame(['SEASONAL_PAUSE'], $blockedByMachine[1]['block_reasons'], 'El L1 no rescata la pausa');
+    assertRrpCondition(
+        in_array(RestockRouteOptimizer::TRIGGER_L1_INCIDENT, $blockedByMachine[1]['suppressed_triggers'], true),
+        'El L1 suprimido queda visible para Coordinación'
+    );
+    assertRrpCondition(
+        in_array(RestockRouteOptimizer::TRIGGER_EMPTY_SLOT, $blockedByMachine[1]['suppressed_triggers'], true),
+        'El carril vacío suprimido queda visible'
+    );
+    assertRrpSame(['SEASONAL_PAUSE'], $blockedByMachine[3]['block_reasons'], 'La agenda no rescata la pausa');
+    assertRrpCondition(
+        in_array(RestockRouteOptimizer::TRIGGER_SCHEDULED, $blockedByMachine[3]['suppressed_triggers'], true),
+        'La cadencia suprimida queda visible'
+    );
+    assertRrpSame([], $blockedByMachine[4]['suppressed_triggers'], 'La cuarentena no publica disparadores suprimidos');
+
+    $route = $planner->buildRestockerRoute(7, '2026-11-21', [
+        'source' => 'BASE_CENTRAL',
+        'latitude' => 41.385064,
+        'longitude' => 2.1734035,
+    ], $now);
+
+    assertRrpSame(1, $route['route_plan']['summary']['pending_machines_count'], 'Solo la pausa con FEFO entra en ruta');
+    assertRrpSame(3, $route['route_plan']['summary']['blocked_machines_count'], 'Las otras dos pausas y la cuarentena quedan bloqueadas');
+    $pendingMachine = $route['route_plan']['stops'][0]['machines'][0] ?? null;
+    assertRrpSame(2, $pendingMachine['machine_id'], 'La parada activa es la máquina con FEFO');
+    assertRrpSame([RestockRouteOptimizer::TRIGGER_FEFO_ALERT], $pendingMachine['triggers'], 'La pausa con FEFO no publica L1 ni huecos como disparadores');
+    assertRrpSame(
+        false,
+        in_array(RestockRouteOptimizer::TRIGGER_L1_INCIDENT, $pendingMachine['triggers'], true),
+        'El L1 sigue suprimido aunque la parada esté activa por FEFO'
+    );
+
+    echo "  [OK]   C1 prevalece: solo FEFO reactiva la pausa\n";
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[FAIL] " . $exception->getMessage() . "\n");
     exit(1);

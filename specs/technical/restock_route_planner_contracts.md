@@ -3,7 +3,7 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** `37-restock-route-planner` (Feature 27 de `docs/features_pendientes.md`)  
 **Documento Canónico:** `specs/technical/restock_route_planner_contracts.md`  
-**Referencia Funcional:** [`specs/37-restock-route-planner/spec.md`](../37-restock-route-planner/spec.md) y [`specs/functional/restock_route_planner_spec.md`](../functional/restock_route_planner_spec.md) (v1.1 · `RF-01` a `RF-05`, `D1`–`D7`, `C1`–`C3`, `QA-1`–`QA-6`)  
+**Referencia Funcional:** [`specs/37-restock-route-planner/spec.md`](../37-restock-route-planner/spec.md) y [`specs/functional/restock_route_planner_spec.md`](../functional/restock_route_planner_spec.md) (v1.2 · `RF-01` a `RF-05`, `D1`–`D7`, `C1`–`C3`, `QA-1`–`QA-6`)\
 **Motor de Persistencia:** PostgreSQL 16+ (Supabase / Motor Local de Certificación) · Motor Único  
 **Protocolo:** HTTP/1.1 · JSON (`application/json; charset=utf-8`)  
 **Conformidad Constitucional:** Artículos I, II, III (3.1, 3.2, 3.3), IV, V (5.1, 5.4) y VI
@@ -15,7 +15,7 @@
 | Método | Ruta | Rol / Middleware | Propósito Operativo |
 | :--- | :--- | :--- | :--- |
 | **Superficie Móvil del Reponedor (`RF-02`, `RF-03`, `RF-05.1`, `RF-05.2`, `D4`, `D7`, `C1`–`C3`, Art. II, Art. V.1, Art. V.4)** | | | |
-| `GET` | `/api/restocker/my-route` | `InternalAuthMiddleware(RESTOCKER)` | Extiende el bootstrap móvil del reponedor añadiendo `service_date` (`YYYY-MM-DD` en `Europe/Madrid`) y el objeto `route_plan`: `summary`, `stops` agrupadas por sede y ordenadas en 3 bloques (`FEFO_SANITARY` $\rightarrow$ `DEMAND_L1_STOCKOUT` $\rightarrow$ `SCHEDULED_CADENCE`) con Haversine y degradación sin GPS, `completed_stops`, `skipped_stops`, `blocked_stops`, `unmapped_stops_count`, `total_distance_km`, `full_route_navigation_url`, `waypoints_truncated`, `origin`, y `site_coincidence` (incluyendo sedes habilitadas por `REASSIGNED` vigente). Jamás serializa `unit_cost_eur`, `commercial_spoilage_loss_eur` ni `reason_text` internos de Coordinación de excepciones revocadas o ajenas (`Art. V.4`). |
+| `GET` | `/api/restocker/my-route` | `InternalAuthMiddleware(RESTOCKER)` | Extiende el bootstrap móvil del reponedor añadiendo `service_date` (`YYYY-MM-DD` en `Europe/Madrid`) y el objeto `route_plan`: `summary`, `stops` agrupadas por sede y ordenadas en 3 bloques (`FEFO_SANITARY` $\rightarrow$ `DEMAND_L1_STOCKOUT` $\rightarrow$ `SCHEDULED_CADENCE`) con Haversine y degradación sin GPS, `completed_stops`, `skipped_stops`, `blocked_stops`, `unmapped_stops_count`, `total_distance_km`, `full_route_navigation_url`, `waypoints_truncated`, `origin`, y `site_coincidence` (incluyendo sedes habilitadas por `REASSIGNED` vigente). Cada `blocked_stops` expone `block_reasons` y `suppressed_triggers` para que el reponedor y Coordinación vean qué disparadores suprimió una pausa estacional (`L1_INCIDENT`, `EMPTY_SLOT`, `SCHEDULED`, `INCOMING_REASSIGNMENT`). Jamás serializa `unit_cost_eur`, `commercial_spoilage_loss_eur` ni `reason_text` internos de Coordinación de excepciones revocadas o ajenas (`Art. V.4`). |
 | `POST` | `/api/restocker/route/stops/{machineId}/skip` | `InternalAuthMiddleware(RESTOCKER)` | Registra de forma atómica e idempotente (`client_mutation_id`, longitud `8..64`, respaldado por `offline_sync_mutations`) una omisión `SKIPPED` exclusivamente para `service_date = today` (`Europe/Madrid`). Exige `skip_reason_code` y `reason_text` ($\ge 20$ caracteres reales y $\ge 3$ bloques alfanuméricos, `Art. V.1`). Si existe `FEFO_ALERT` (`requires_cold_chain = TRUE`), sella `had_active_fefo_alert = TRUE` y encola `'RESTOCK_FEFO_STOP_SKIPPED_ALERT'` (`CRITICAL_SANITARY`) en canales internos de Coordinación; si además hay lote ya `EXPIRED`, sella `machines.sanitary_status = 'EXPIRED'` (`QA-1`, `Art. II`). |
 | `POST` | `/api/restocker/route/override-conflict-dump` | `InternalAuthMiddleware(RESTOCKER)` | Archiva en `audit_log` (`OFFLINE_RESTOCK_OVERRIDE_CONFLICT_DUMP` bajo `RESTOCK_ROUTE_DAILY_OVERRIDE`, `Art. III.3`) una mutación Offline `SKIP_RESTOCK_STOP` rechazada con `409`/`422` al sincronizar (`RF-05.1.3`, `C3`), conservando el justificante sin alterar la verdad del servidor. |
 | **Superficie de Planificación y Ruta del Día en Coordinación (`RF-01`–`RF-03`, `RF-05.3`, `D1`–`D4`, `D6`, `D7`, `QA-1`–`QA-6`)** | | | |
@@ -23,7 +23,7 @@
 | `POST` / `PUT` | `/api/coordinator/restock-schedules` · `/api/coordinator/restock-schedules/machine/{machineId}` | `InternalAuthMiddleware(COORDINATOR)` | Crea o actualiza de forma versionada la agenda periódica de una máquina activa (`QA-2`, `Art. III.3`): en una transacción cierra lógicamente la fila activa previa (`is_active = FALSE`, `deactivated_at`, `deactivated_by`) e inserta una nueva fila activa en `machine_restock_schedules`, auditando antes/después bajo `MACHINE_RESTOCK_SCHEDULE`. |
 | `POST` | `/api/coordinator/restock-schedules/bulk` | `InternalAuthMiddleware(COORDINATOR)` | Configura en una única transacción atómica todo-o-nada agendas por filtro (`zone_id`, `machine_type`) o lista explícita `machine_ids[]`, respetando la bandera `overwrite_existing` (`RF-01.3.2`, `QA-6`). |
 | `PATCH` | `/api/coordinator/restock-schedules/{id}/deactivate` | `InternalAuthMiddleware(COORDINATOR)` | Da de baja lógica una agenda activa (`is_active = FALSE`, `deactivated_at`, `deactivated_by`, `Art. III.1/III.2`) conservando inmutable la fila para histórico de `machine_restock_visits.route_schedule_id`. |
-| `GET` | `/api/coordinator/restock-route/day` | `InternalAuthMiddleware(COORDINATOR)` | Devuelve la fotografía operativa instantánea del día (`?service_date=YYYY-MM-DD&restocker_id=&zone_id=`): **contadores instantáneos exclusivos de ese `service_date`** (`Art. VI`), bandeja prioritaria `uncovered_stops`, rutas ordenadas por reponedor (con proyección futura de ausencias y titularidad cuando `service_date > today`, `QA-6`), `blocked_stops`, `completed_stops`, `skipped_stops` y `active_overrides`. |
+| `GET` | `/api/coordinator/restock-route/day` | `InternalAuthMiddleware(COORDINATOR)` | Devuelve la fotografía operativa instantánea del día (`?service_date=YYYY-MM-DD&restocker_id=&zone_id=`): **contadores instantáneos exclusivos de ese `service_date`** (`Art. VI`), bandeja prioritaria `uncovered_stops`, rutas ordenadas por reponedor (con proyección futura de ausencias y titularidad cuando `service_date > today`, `QA-6`), `blocked_stops`, `completed_stops`, `skipped_stops` y `active_overrides`. Cada `blocked_stops` expone `block_reasons` y `suppressed_triggers` (pausa estacional) para que Coordinación pueda desviar, escalar o atender el aviso al reabrir la temporada. |
 | `POST` | `/api/coordinator/restock-route/overrides` | `InternalAuthMiddleware(COORDINATOR)` | Registra para `(machine_id, service_date >= today)` un desvío puntual `REASSIGNED` (`target_restocker_id` + `reassignment_reason_code` + `reason_text` opcional; rechaza auto-desvío `422`) o una omisión `SKIPPED` (`skip_reason_code` + `reason_text` $\ge 20$ chars reales). Si existía una excepción previa `ACTIVE` para esa máquina y día, la pasa a `'REVOKED'` dentro de la misma transacción (`RF-02.3`). Rechaza con `409` si existe visita `COMPLETED` o `ABORTED_THERMAL_BREACH` en `service_date`. |
 | `POST` | `/api/coordinator/restock-route/overrides/{id}/revoke` | `InternalAuthMiddleware(COORDINATOR)` | Revoca manualmente una excepción `ACTIVE` (`ACTIVE` $\rightarrow$ `REVOKED`) siempre que no exista visita `COMPLETED` o `ABORTED_THERMAL_BREACH` para esa máquina en `service_date` (`RF-02.3`). |
 | **Integración con Órdenes de Carga M33 (`RF-04.1`, `D5`, `QA-5`)** | | | |
@@ -572,7 +572,19 @@ ALTER TABLE offline_sync_mutations
         "location_id": 3,
         "location_name": "Oficinas Centro",
         "block_reason": "SANITARY_QUARANTINE",
-        "block_reason_label": "Bloqueada por cuarentena sanitaria activa"
+        "block_reason_label": "Bloqueada por cuarentena sanitaria activa",
+        "block_reasons": ["SANITARY_QUARANTINE"],
+        "suppressed_triggers": []
+      },
+      {
+        "machine_id": 12,
+        "machine_code": "VEND-MAD-012",
+        "location_id": 3,
+        "location_name": "Oficinas Centro",
+        "block_reason": "SEASONAL_PAUSE",
+        "block_reason_label": "Pausa estacional vigente sin FEFO que la justifique",
+        "block_reasons": ["SEASONAL_PAUSE"],
+        "suppressed_triggers": ["L1_INCIDENT", "EMPTY_SLOT"]
       }
     ]
   }

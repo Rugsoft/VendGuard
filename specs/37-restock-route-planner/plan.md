@@ -1,10 +1,10 @@
 # Plan de Implementación Técnica: Planificador de Rutas Periódicas de Carga y Priorización Dinámica por Demanda (`37-restock-route-planner`)
 
 **Módulo:** `37-restock-route-planner` (Feature 27 de `docs/features_pendientes.md`)  
-**Versión:** 1.0 (Alineado con `spec.md` v1.1 y `restock_route_planner_contracts.md`, incorporando `D1`–`D7`, `C1`–`C3` y `QA-1`–`QA-6`)  
+**Versión:** 1.0 (Alineado con `spec.md` v1.2 y `restock_route_planner_contracts.md`, incorporando `D1`–`D7`, `C1`–`C3` y `QA-1`–`QA-6`)\
 **Estado:** Plan Técnico Aprobado · Puerta SDD Fase 2 superada · Listo para Ejecución SDD (Fases 3–4)  
 **Marco Normativo:** [`constitution.md`](../../constitution.md) · [`AGENTS.md`](../../AGENTS.md) · [`docs/design.md`](../../docs/design.md)  
-**Especificación Funcional:** [`specs/37-restock-route-planner/spec.md`](./spec.md) (v1.1) · [`specs/functional/restock_route_planner_spec.md`](../functional/restock_route_planner_spec.md)  
+**Especificación Funcional:** [`specs/37-restock-route-planner/spec.md`](./spec.md) (v1.2) · [`specs/functional/restock_route_planner_spec.md`](../functional/restock_route_planner_spec.md)\
 **Contratos Técnicos:** [`specs/technical/restock_route_planner_contracts.md`](../technical/restock_route_planner_contracts.md)
 
 ---
