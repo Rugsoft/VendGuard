@@ -8,9 +8,9 @@
 - **Plan y tareas:** [`specs/37-restock-route-planner/plan.md`](../specs/37-restock-route-planner/plan.md) · [`specs/37-restock-route-planner/tasks.md`](../specs/37-restock-route-planner/tasks.md)
 - **Matriz de trazabilidad:** [`specs/37-restock-route-planner/traceability-matrix.md`](../specs/37-restock-route-planner/traceability-matrix.md)
 - **Fecha de auditoría:** 2026-11-22
-- **Última actualización:** 2026-11-22 · AUD-37-01, AUD-37-02, AUD-37-03, AUD-37-04, AUD-37-05 y AUD-37-06 cerradas; batería global **448/17.375/0**, `new_engine` **76/76** y **residuo 0** de esquemas temporales
+- **Última actualización:** 2026-11-22 · AUD-37-01, AUD-37-02, AUD-37-03, AUD-37-04, AUD-37-05, AUD-37-06 y AUD-37-07 cerradas; batería global **448/17.375/0**, `new_engine` **76/76 · 2.592 aserciones** y **residuo 0** de esquemas temporales
 - **Rama:** `feat/restock-route-planner`
-- **Base auditada:** `32904325c6f8bcf064f1c37ff5269d4c1121fc2a` (auditoría original) · `b7094ca` (cierre de AUD-37-03) · cambios de AUD-37-04 en el árbol de trabajo · cierre de AUD-37-06
+- **Base auditada:** `32904325c6f8bcf064f1c37ff5269d4c1121fc2a` (auditoría original) · `b7094ca` (cierre de AUD-37-03) · cambios de AUD-37-04 en el árbol de trabajo · `83f64ed` (cierre de AUD-37-06) · cierre de AUD-37-07
 - **Alcance:** revisión de `RF-01`–`RF-05` y sus criterios EARS, `RNF-01`–`RNF-04`, `D1`–`D7`, `C1`–`C3`, `QA-1`–`QA-6`, §6, los 5 criterios de Definition of Done y las 13 tareas `T-RRP-01`–`T-RRP-13`, con ejecución real de las suites en los dos canales.
 
 > Este documento nació como acta de hallazgos. Las secciones marcadas como cerradas documentan las correcciones posteriores y su evidencia reproducible; las que siguen abiertas no se consideran cumplidas.
@@ -19,7 +19,7 @@
 
 ## 1. Veredicto ejecutivo
 
-**La Spec 37 no está cumplida al 100 % en la fecha de la auditoría.** La implementación cubre la mayor parte del alcance y, tras cerrar AUD-37-01, AUD-37-02, AUD-37-03, AUD-37-04 y AUD-37-06, la certificación global vuelve a estar en verde, el layout M37 está medido en Chromium real y ambas bases quedan con **residuo 0** de esquemas temporales; siguen abiertas las tres brechas P3 (`AUD-37-07`, `AUD-37-08` y `AUD-37-09`).
+**La Spec 37 no está cumplida al 100 % en la fecha de la auditoría.** La implementación cubre la mayor parte del alcance y, tras cerrar AUD-37-01, AUD-37-02, AUD-37-03, AUD-37-04, AUD-37-06 y AUD-37-07, la certificación global vuelve a estar en verde, el layout M37 está medido en Chromium real, ambas bases quedan con **residuo 0** de esquemas temporales y el EARS 02.2.1 queda alineado y probado en HTTP; siguen abiertas las dos brechas P3 (`AUD-37-08` y `AUD-37-09`).
 
 Resultado real de la batería global tras las correcciones de AUD-37-01, AUD-37-02, AUD-37-03, AUD-37-04 y AUD-37-06:
 
@@ -35,7 +35,7 @@ RESULTADO: 100% EN VERDE. (0 errors, 0 failures)
 exit=0
 ```
 
-Resultado real del canal `new_engine`:
+Resultado real del canal `new_engine` tras cerrar AUD-37-07:
 
 ```text
 source deploy/local/postgres/.env.docker-tls && php tests/run_new_engine.php
@@ -43,13 +43,13 @@ source deploy/local/postgres/.env.docker-tls && php tests/run_new_engine.php
 Suites evaluadas : 76
 Suites en verde  : 76
 No ejecutables   : 0
-Aserciones       : 2.590
+Aserciones       : 2.592
 Fallos           : 0
 RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 exit=0
 ```
 
-**Conclusión corta:** esquema, API, RBAC, opacidad, perímetro M32–M36, `TODAY_ROUTE` y las superficies M37 están sólidos; la batería global y `new_engine` están en verde y ambas bases quedan libres de esquemas temporales (`0` filas). Tras cerrar AUD-37-02 (C1), AUD-37-03 (orden de `uncovered_stops`), AUD-37-04 (layout real `360 × 800`) y AUD-37-06 (limpieza `finally`), solo siguen abiertas las tres brechas P3 de alineación y cobertura (`AUD-37-07`, `AUD-37-08` y `AUD-37-09`).
+**Conclusión corta:** esquema, API, RBAC, opacidad, perímetro M32–M36, `TODAY_ROUTE` y las superficies M37 están sólidos; la batería global y `new_engine` están en verde y ambas bases quedan libres de esquemas temporales (`0` filas). Tras cerrar AUD-37-02 (C1), AUD-37-03 (orden de `uncovered_stops`), AUD-37-04 (layout real `360 × 800`), AUD-37-06 (limpieza `finally`) y AUD-37-07 (`403`/`409`/`422` en omisión), solo siguen abiertas las dos brechas P3 de cobertura y verificación (`AUD-37-08` y `AUD-37-09`).
 
 ---
 
@@ -63,7 +63,7 @@ exit=0
 | **4** | **AUD-37-04** | **P2 · Cobertura** | No existe prueba de navegador `360 × 800` de las superficies M37; la suite citada mide el M36 | `RF-05.2.2`, `RNF-04`, DoD 4 | **Cerrada (2026-11-22)** |
 | **5** | **AUD-37-05** | **P2 · Documental** | La matriz de trazabilidad y el cierre de `T-RRP-13` declaraban cifras que no eran reproducibles | DoD 5, `tasks.md`, matriz | **Cerrada (2026-11-22)** |
 | **6** | **AUD-37-06** | **P2 · Limpieza** | Quedan 3 esquemas temporales residuales tras corridas limpias | DoD 5 | **Cerrada (2026-11-22)** |
-| **7** | **AUD-37-07** | **P3 · Contradicción normativa** | El EARS 02.2.1 pide `403` para máquina bloqueada; el contrato y el código devuelven `409` | `RF-02.2.1`, contrato §4 | **Abierta** |
+| **7** | **AUD-37-07** | **P3 · Contradicción normativa** | El EARS 02.2.1 pide `403` para máquina bloqueada; el contrato y el código devuelven `409` | `RF-02.2.1`, contrato §4 | **Cerrada (2026-11-22)** |
 | **8** | **AUD-37-08** | **P3 · Cobertura** | Varios criterios EARS no tienen aserción directa | `RF-01.3`, `RF-02.3.1`, `RF-03.1.1`, `RF-03.2.4`, `RF-05.1.3` | **Abierta** |
 | **9** | **AUD-37-09** | **P3 · Verificación** | La convergencia 1:1 de semillas y la ausencia de N+1 no se comprueban de forma automatizada | `RNF-01`, `RNF-02`, DoD 1 | **Abierta** |
 
@@ -222,17 +222,19 @@ Total: **3 esquemas**. La batería declaraba “Base de datos restablecida: SÍ�
 
 ---
 
-### AUD-37-07 · Contradicción `403` / `409` para máquina bloqueada
+### AUD-37-07 · Contradicción `403` / `409` para máquina bloqueada (cerrada)
 
-**Especificación.** [`spec.md:150`](../specs/37-restock-route-planner/spec.md) (EARS 02.2.1): un `RESTOCKER` recibe **`403 FORBIDDEN`** si intenta omitir una parada que no es suya **o si la máquina está dada de baja o bloqueada en `blocked_stops`**.
+**Estado:** **Cerrada el 2026-11-22.** Se confirma el criterio del contrato técnico §4 y del dominio (`RestockRouteOverrideService::skip()` + `RestockRoutePlannerValidationException`): la parada ajena al perímetro es un error de autorización (`403 FORBIDDEN`), la máquina segregada en `blocked_stops` es un conflicto de estado operativo/sanitario (`409 Conflict`) y la máquina o sede inactiva o eliminada es una entidad no procesable (`422 Unprocessable Entity`).
 
-**Contrato.** [`restock_route_planner_contracts.md:672`](../specs/technical/restock_route_planner_contracts.md): la máquina bloqueada devuelve **`409 RESTOCK_STOP_BLOCKED_BY_SANITARY_OR_SAT`**.
+1. **Especificación y espejo 1:1:** actualizados [`specs/37-restock-route-planner/spec.md:6,150`](../specs/37-restock-route-planner/spec.md) y su espejo idéntico byte a byte [`specs/functional/restock_route_planner_spec.md:6,150`](../specs/functional/restock_route_planner_spec.md) (SHA-256 coincidente). El criterio EARS 02.2.1 exige ahora:
+   - **`403 FORBIDDEN` (`RESTOCK_STOP_NOT_IN_RESTOCKER_ROUTE`)** si el `RESTOCKER` intenta omitir una parada fuera de su ruta efectiva de hoy;
+   - **`409 Conflict` (`RESTOCK_STOP_BLOCKED_BY_SANITARY_OR_SAT`)** si la máquina está segregada en `blocked_stops` (`QUARANTINE`, `is_blocked_no_access = TRUE`, `TEMPERATURE_COLD` abierta, visita `'ABORTED_THERMAL_BREACH'` hoy o pausa estacional vigente sin inclusión activa);
+   - **`422 Unprocessable Entity` (`MACHINE_INACTIVE_OR_DELETED`)** si la máquina está inactiva o dada de baja (`is_active = FALSE` / `deleted_at IS NOT NULL`) o pertenece a una sede inactiva.
+2. **Aserciones HTTP añadidas:** en [`tests/integration/RestockRoutePlannerApiTest.php:611-640`](../tests/integration/RestockRoutePlannerApiTest.php) se añaden la aserción **5.6** (omisión por `RESTOCKER` sobre máquina en `QUARANTINE` → `409 RESTOCK_STOP_BLOCKED_BY_SANITARY_OR_SAT`) y la aserción **5.7** (omisión sobre máquina con `is_active = FALSE` → `422 MACHINE_INACTIVE_OR_DELETED`), pasando el archivo de 29 a **31 aserciones** (renumerando el volcado offline previo a 5.8).
 
-**Implementación y tests.** [`RestockRoutePlannerValidationException.php:45-47`](../src/Core/Domain/Exception/RestockRoutePlannerValidationException.php) sitúa `RESTOCK_STOP_BLOCKED_BY_SANITARY_OR_SAT` en el grupo `409`. `RestockRoutePlannerServicesTest` 105/105 y la API 29/29 esperan `409`.
+**Evidencia final.** `php tests/unit/FunctionalSpecMirrorParityTest.php` → **24/24 (`exit=0`)**; `RestockRoutePlannerApiTest.php` → **31/31 (`exit=0`)**; `php tests/run_new_engine.php` (`.env.docker-tls`) → **76/76 suites · 2.592 aserciones · 0 fallos · `exit=0`**; residuo **0** de esquemas `t_*` ni `contract_convergence_check*` en `vendguard_pg_test` y `vendguard_battery`.
 
-**Impacto.** Un lector literal del EARS ve incumplido el `403`; un lector del contrato ve correcto el `409`. La ambigüedad impide certificar el criterio sin una decisión expresa.
-
-**Corrección propuesta.** Decidir con el Product Owner si la máquina bloqueada es un conflicto de estado (`409`) o un problema de perímetro (`403`). Alinear spec y contrato, y añadir una aserción HTTP explícita para máquina en cuarentena y para máquina inactiva. No cambiar el código hasta cerrar la decisión.
+**Hallazgo original (antes de la corrección).** [`spec.md:150`](../specs/37-restock-route-planner/spec.md) agrupaba perímetro, máquina dada de baja y máquina en `blocked_stops` bajo `403 FORBIDDEN`, en contradicción con [`restock_route_planner_contracts.md:676-694`](../specs/technical/restock_route_planner_contracts.md) y [`RestockRoutePlannerValidationException.php:42-68`](../src/Core/Domain/Exception/RestockRoutePlannerValidationException.php), y `RestockRoutePlannerApiTest.php` (entonces 29/29) no probaba por HTTP ni la máquina en cuarentena ni la inactiva.
 
 ---
 
@@ -277,9 +279,9 @@ Total: **3 esquemas**. La batería declaraba “Base de datos restablecida: SÍ�
 |---|---|---|
 | **1.** Migración `033`/`034`, 51 tablas, 50 enums, índices, FK, auditoría y guardas | Schema M37 **41/41**; `PostgresSchemaTest` **159/159**; `PostgresConstitutionalTest` **88/88**; `SchemaConvergenceParityTest` **42/42**; `CloudDeploySchemaParityTest` **55/55** | **Cumplido en esquema**; semillas 1:1 sin aserción (AUD-37-09) |
 | **2.** Dominio, cadencias, optimizador, servicios, excepciones y perímetro | Dominio **67/67**; Cadence **60/60**; Optimizer **30/30**; Services **105/105**; Integrations **21/21**; Gateway **34/34** | **Cumplido** |
-| **3.** API REST, RBAC, idempotencia y opacidad | API **29/29**; Constitucional **45/45** | **Cumplido** |
+| **3.** API REST, RBAC, idempotencia y opacidad | API **31/31**; Constitucional **45/45** | **Cumplido** |
 | **4.** Superficies móvil y de Coordinación, mapa, Offline y `TODAY_ROUTE` | Móvil **40/40**; vista **245/245**; Coordinación **32/32**; M33 **80/80**; layout M37 **38/38** en Chromium real | **Cumplido** |
-| **5.** Batería global y canal `new_engine` al 100 % | Global **448/17.375/0/`DocMetricsGuard` coherente/exit=0**; `new_engine` **76/76/2.590/0/exit=0** | **Cumplido** |
+| **5.** Batería global y canal `new_engine` al 100 % | Global **448/17.375/0/`DocMetricsGuard` coherente/exit=0**; `new_engine` **76/76/2.592/0/exit=0** | **Cumplido** |
 
 ---
 
@@ -287,7 +289,7 @@ Total: **3 esquemas**. La batería declaraba “Base de datos restablecida: SÍ�
 
 [`specs/37-restock-route-planner/tasks.md`](../specs/37-restock-route-planner/tasks.md): **13 marcadas `[x]`, 0 pendientes**.
 
-Las 13 tareas existen y están cerradas administrativamente. El cierre de **T-RRP-13** declara “448 suites · 17.375 aserciones · 0 fallos”; tras corregir AUD-37-01, AUD-37-02, AUD-37-03 y AUD-37-04, esa evidencia vuelve a ser reproducible (`448/17.375/0`, `exit=0`), y el canal `new_engine` queda en **76/76 suites · 2.590 aserciones · 0 fallos**.
+Las 13 tareas existen y están cerradas administrativamente. El cierre de **T-RRP-13** declara “448 suites · 17.375 aserciones · 0 fallos”; tras corregir AUD-37-01, AUD-37-02, AUD-37-03, AUD-37-04, AUD-37-06 y AUD-37-07, esa evidencia vuelve a ser reproducible (`448/17.375/0`, `exit=0`), y el canal `new_engine` queda en **76/76 suites · 2.592 aserciones · 0 fallos**.
 
 ---
 
@@ -304,7 +306,7 @@ Estas suites se ejecutaron y pasaron; se conservan aquí para no perder el conte
 | `RestockRoutePlannerIntegrationsTest` | 21/21 | local |
 | `PostgresRestockRoutePlannerSchemaTest` | 41/41 | `new_engine` |
 | `PdoRestockRoutePlannerGatewayTest` | 34/34 | `new_engine` |
-| `RestockRoutePlannerApiTest` | 29/29 | local |
+| `RestockRoutePlannerApiTest` | 31/31 | `new_engine` |
 | `RestockRoutePlannerConstitutionalTest` | 45/45 | local |
 | `coordinator_restock_route_planner.test.mjs` | 32/32 | local |
 | `restocker_route_planner_view.test.mjs` | 40/40 | local |
@@ -348,7 +350,7 @@ Estas suites se ejecutaron y pasaron; se conservan aquí para no perder el conte
 6. **AUD-37-08 y AUD-37-09.** Añadir las aserciones que faltan.
 7. **AUD-37-06 (cerrada el 2026-11-22).** Limpieza garantizada en `finally` (sin `exit()` dentro de `try`) en las tres suites (`WorkshopRefurbishmentServiceIntegrationTest`, `OperationalZoneRepositoryTest`, `ZonePostalCodeTransferTest`); **0** esquemas residuales en `vendguard_battery` y `vendguard_pg_test`.
 8. **AUD-37-05 (cerrada el 2026-11-22).** Ambos canales reejecutados; cifras y `DocMetricsGuard` coherentes. Queda la atribución `360 × 800` de AUD-37-04.
-9. **AUD-37-07.** Alinear spec y contrato sobre `403`/`409` y añadir la aserción HTTP.
+9. **AUD-37-07 (cerrada el 2026-11-22).** Spec y espejo 1:1 alineados con el catálogo §4 (`403` perímetro, `409` bloqueada en `blocked_stops`, `422` inactiva/eliminada); añadidas las aserciones HTTP 5.6 (`409` cuarentena) y 5.7 (`422` inactiva) en `RestockRoutePlannerApiTest.php` (**31/31**; `new_engine` **76/76 · 2.592 aserciones**).
 
 ---
 
@@ -372,4 +374,4 @@ La Spec 37 podrá declararse al 100 % cuando se cumplan, con evidencia reproduci
 
 Esta acta se actualizará al cerrar cada brecha, con la misma disciplina que las auditorías de los módulos 33–36: el estado de cada fila pasará de **Abierta** a **Cerrada (fecha)** y se añadirá la evidencia focalizada que lo demuestre. No se declarará el cierre del módulo mientras quede una fila P1 abierta o la batería global no esté en verde.
 
-**Estado del árbol:** HEAD de partida `b7094ca` (más los cambios locales de AUD-37-04). El cierre de AUD-37-06 modifica `WorkshopRefurbishmentServiceIntegrationTest.php`, `OperationalZoneRepositoryTest.php`, `ZonePostalCodeTransferTest.php` y esta acta (`docs/auditoria_spec_37_brechas.md`); `locations` y `CoordinatorTerritorialMapTab.js` permanecen intactos. `git diff --check` no reporta errores.
+**Estado del árbol:** HEAD de partida `83f64ed` (más los cambios locales de AUD-37-04). El cierre de AUD-37-07 modifica `specs/37-restock-route-planner/spec.md`, `specs/functional/restock_route_planner_spec.md`, `tests/integration/RestockRoutePlannerApiTest.php` y esta acta (`docs/auditoria_spec_37_brechas.md`); `locations` y `CoordinatorTerritorialMapTab.js` permanecen intactos. `git diff --check` no reporta errores.

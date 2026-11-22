@@ -608,6 +608,40 @@ try {
         'status=' . $foreignSkip->getStatusCode() . ' code=' . $errorCode($foreignSkip)
     );
 
+    $blockedSkip = $call(
+        'POST',
+        '/api/restocker/route/stops/' . $machineBlocked . '/skip',
+        array_merge($skipPayload, ['client_mutation_id' => 'rrp09-skip-blocked-0001']),
+        $ownerToken
+    );
+    $assert(
+        '5.6 Una máquina bloqueada en cuarentena responde 409 RESTOCK_STOP_BLOCKED_BY_SANITARY_OR_SAT',
+        $blockedSkip->getStatusCode() === 409
+            && $errorCode($blockedSkip) === 'RESTOCK_STOP_BLOCKED_BY_SANITARY_OR_SAT',
+        'status=' . $blockedSkip->getStatusCode() . ' code=' . $errorCode($blockedSkip)
+    );
+
+    $inactiveStmt = $pdo->prepare(
+        "INSERT INTO machines (location_id, code, model, machine_type, floor_wing, sanitary_status, is_active)
+         VALUES (:location_id, 'RRP9-SNACK-INACTIVE', 'Modelo T-RRP-09', 'SNACKS', 'Planta baja', 'OK', FALSE)
+         RETURNING id"
+    );
+    $inactiveStmt->execute([':location_id' => $locationA]);
+    $machineInactive = (int)$inactiveStmt->fetchColumn();
+
+    $inactiveSkip = $call(
+        'POST',
+        '/api/restocker/route/stops/' . $machineInactive . '/skip',
+        array_merge($skipPayload, ['client_mutation_id' => 'rrp09-skip-inactive-0001']),
+        $ownerToken
+    );
+    $assert(
+        '5.7 Una máquina inactiva responde 422 MACHINE_INACTIVE_OR_DELETED',
+        $inactiveSkip->getStatusCode() === 422
+            && $errorCode($inactiveSkip) === 'MACHINE_INACTIVE_OR_DELETED',
+        'status=' . $inactiveSkip->getStatusCode() . ' code=' . $errorCode($inactiveSkip)
+    );
+
     $conflict = $call('POST', '/api/restocker/route/override-conflict-dump', [
         'machine_id' => $machineA,
         'client_mutation_id' => 'rrp09-conflict-0001',
@@ -622,7 +656,7 @@ try {
             AND action = 'DUMP_RESTOCK_OVERRIDE_CONFLICT'"
     )->fetchColumn();
     $assert(
-        '5.6 El conflicto offline se archiva en auditoría sin tocar la verdad',
+        '5.8 El conflicto offline se archiva en auditoría sin tocar la verdad',
         $conflict->getStatusCode() === 201
             && ($data($conflict)['archived'] ?? false) === true
             && $dumped === 1
