@@ -494,21 +494,30 @@ try {
             && $locationRepo->findInheritedZoneByPostalCode('08003') === $northId
     );
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Resumen
-    // ─────────────────────────────────────────────────────────────────────
-    echo "\n======================================================================\n";
-    echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";
-
-    if ($failures === 0) {
-        echo " RESULTADO: 100% EN VERDE. CONDICIÓN T-ZONE-06 CUMPLIDA CON ÉXITO.\n";
-        echo "======================================================================\n";
-        exit(0);
-    }
-
-    echo " RESULTADO: FALLO EN {$failures} ASERCIONES.\n";
-    echo "======================================================================\n";
-    exit(1);
+} catch (Throwable $exception) {
+    fwrite(STDERR, "\n[EXCEPCIÓN NO CONTROLADA] " . $exception->getMessage() . "\n");
+    fwrite(STDERR, $exception->getFile() . ':' . $exception->getLine() . "\n");
+    fwrite(STDERR, $exception->getTraceAsString() . "\n");
+    $failures++;
 } finally {
+    if ($pgPdo->inTransaction()) {
+        $pgPdo->rollBack();
+    }
     PostgresFixtureBuilder::dropIsolationSchema($pgPdo, TRANSFER_TEST_SCHEMA);
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Resumen
+// ─────────────────────────────────────────────────────────────────────
+echo "\n======================================================================\n";
+echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";
+
+if ($failures === 0) {
+    echo " RESULTADO: 100% EN VERDE. CONDICIÓN T-ZONE-06 CUMPLIDA CON ÉXITO.\n";
+    echo "======================================================================\n";
+    exit(0);
+}
+
+echo " RESULTADO: FALLO EN {$failures} ASERCIONES.\n";
+echo "======================================================================\n";
+exit(1);

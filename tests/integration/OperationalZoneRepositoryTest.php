@@ -145,6 +145,9 @@ $linkPostalCode = static function (PDO $pdo, string $postalCode, int $zoneId): v
     $stmt->execute([':postal_code' => $postalCode, ':zone_id' => $zoneId]);
 };
 
+$countingPdo = null;
+$countingZoneRepo = null;
+
 try {
     // ─────────────────────────────────────────────────────────────────────
     // Escenario: el esquema del repositorio en un esquema aislado
@@ -741,21 +744,32 @@ try {
         $zoneRepo->update(999999, ['name' => 'Zona Fantasma']) === false
     );
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Resumen
-    // ─────────────────────────────────────────────────────────────────────
-    echo "\n======================================================================\n";
-    echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";
-
-    if ($failures === 0) {
-        echo " RESULTADO: 100% EN VERDE. CONDICIÓN T-ZONE-05 CUMPLIDA CON ÉXITO.\n";
-        echo "======================================================================\n";
-        exit(0);
-    }
-
-    echo " RESULTADO: FALLO EN {$failures} ASERCIONES.\n";
-    echo "======================================================================\n";
-    exit(1);
+} catch (Throwable $exception) {
+    fwrite(STDERR, "\n[EXCEPCIÓN NO CONTROLADA] " . $exception->getMessage() . "\n");
+    fwrite(STDERR, $exception->getFile() . ':' . $exception->getLine() . "\n");
+    fwrite(STDERR, $exception->getTraceAsString() . "\n");
+    $failures++;
 } finally {
+    $countingZoneRepo = null;
+    $countingPdo = null;
+    if ($pgPdo->inTransaction()) {
+        $pgPdo->rollBack();
+    }
     PostgresFixtureBuilder::dropIsolationSchema($pgPdo, ZONE_REPO_TEST_SCHEMA);
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Resumen
+// ─────────────────────────────────────────────────────────────────────
+echo "\n======================================================================\n";
+echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";
+
+if ($failures === 0) {
+    echo " RESULTADO: 100% EN VERDE. CONDICIÓN T-ZONE-05 CUMPLIDA CON ÉXITO.\n";
+    echo "======================================================================\n";
+    exit(0);
+}
+
+echo " RESULTADO: FALLO EN {$failures} ASERCIONES.\n";
+echo "======================================================================\n";
+exit(1);
