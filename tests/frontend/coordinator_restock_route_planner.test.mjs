@@ -29,6 +29,16 @@ import { api } from '../../public/assets/js/api.js';
 import { CoordinatorRestockRoutePlannerSubTab } from '../../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js';
 import { CoordinatorProductLoadingTab } from '../../public/assets/js/components/CoordinatorProductLoadingTab.js';
 
+const todayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid' }).format(new Date());
+const tomorrowIso = () => {
+  const noonUtc = new Date(`${todayIso()}T12:00:00Z`);
+  noonUtc.setUTCDate(noonUtc.getUTCDate() + 1);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(noonUtc);
+};
+
+const TODAY = todayIso();
+const TOMORROW = tomorrowIso();
+
 let assertions = 0;
 let failures = 0;
 
@@ -61,7 +71,7 @@ const realPlannerApi = {
 };
 
 const dayFixture = {
-  service_date: '2026-11-21',
+  service_date: TODAY,
   is_future_projection: false,
   kpis: {
     scheduled_machines_count: 5,
@@ -84,7 +94,7 @@ const dayFixture = {
       coverage_status: 'UNCOVERED',
       priority_block: 'FEFO_SANITARY',
       triggers: ['FEFO_ALERT'],
-      earliest_fefo_expiration_date: '2026-11-21'
+      earliest_fefo_expiration_date: TODAY
     }
   ],
   restocker_routes: [
@@ -123,7 +133,7 @@ const dayFixture = {
               has_expired_cold_batch: true,
               empty_slots_count: 0,
               schedule_id: 10,
-              earliest_fefo_expiration_date: '2026-11-21'
+              earliest_fefo_expiration_date: TODAY
             }
           ]
         }
@@ -143,7 +153,7 @@ const dayFixture = {
     {
       id: 55,
       machine_id: 3,
-      service_date: '2026-11-21',
+      service_date: TODAY,
       override_type: 'SKIPPED',
       override_type_label: 'Omitida',
       status: 'ACTIVE',
@@ -153,7 +163,7 @@ const dayFixture = {
       reassignment_reason_code: null,
       reason_text: 'La conserjería permanece cerrada con persiana metálica bajada.',
       created_by: 1,
-      created_at: '2026-11-21 08:00:00+00'
+      created_at: `${TODAY} 08:00:00+00`
     }
   ],
   blocked_stops: [
@@ -181,7 +191,7 @@ const scheduleFixture = {
       zone_id: 2,
       zone_name: 'Zona Norte',
       has_schedule: true,
-      next_scheduled_date: '2026-11-23',
+      next_scheduled_date: TOMORROW,
       schedule: {
         id: 10,
         machine_id: 1,
@@ -268,13 +278,13 @@ async function run() {
   // ─────────────────────────────────────────────────────────────────────
   console.log('--- 1. Tablero «Ruta del Día» ---');
 
-  vm.serviceDate = '2026-11-21';
+  vm.serviceDate = TODAY;
   vm.dayFilters.restocker_id = '7';
   await vm.loadDay();
   const dayCall = calls.filter((call) => call.method === 'getRestockRouteDay').at(-1);
   assert(
     '1.1 El tablero envía service_date y los filtros saneados',
-    dayCall?.params?.service_date === '2026-11-21'
+    dayCall?.params?.service_date === TODAY
       && dayCall?.params?.restocker_id === 7
       && !Object.prototype.hasOwnProperty.call(dayCall.params, 'zone_id')
   );
@@ -290,9 +300,9 @@ async function run() {
   assert('1.3 La bandeja sin cobertura queda visible', vm.uncoveredStops.length === 1 && vm.hasUncovered === true);
   assert('1.4 La ruta del titular se publica con su parada FEFO', vm.routes.length === 1 && vm.routes[0].stops[0].machines[0].has_fefo_alert === true);
   assert('1.5 La fecha futura se marca como proyección', vm.isFuture === false && vm.futureLabel === '');
-  vm.serviceDate = '2026-11-22';
+  vm.serviceDate = TOMORROW;
   assert('1.6 Cambiar a mañana activa la proyección', vm.isFuture === true && vm.futureLabel.includes('proyección'));
-  vm.serviceDate = '2026-11-21';
+  vm.serviceDate = TODAY;
 
   // ─────────────────────────────────────────────────────────────────────
   // 2. Omisión, desvío y revocación
@@ -308,7 +318,7 @@ async function run() {
   assert(
     '2.2 La omisión envía máquina, fecha, causa y motivo',
     skipCall?.payload?.machine_id === 1
-      && skipCall?.payload?.service_date === '2026-11-21'
+      && skipCall?.payload?.service_date === TODAY
       && skipCall?.payload?.override_type === 'SKIPPED'
       && skipCall?.payload?.skip_reason_code === 'LOCATION_CLOSED'
       && skipCall?.payload?.reason_text.length >= 20
@@ -394,21 +404,21 @@ async function run() {
   const product = { ...CoordinatorProductLoadingTab.data(), ...CoordinatorProductLoadingTab.methods };
   product.proposalForm.restocker_id = 7;
   product.proposalForm.demand_mode = 'TODAY_ROUTE';
-  product.proposalForm.service_date = '2026-11-21';
+  product.proposalForm.service_date = TODAY;
   await product.loadProposal();
   const proposalCall = calls.filter((call) => call.method === 'getProductLoadingProposal').at(-1);
   assert(
     '4.1 La propuesta TODAY_ROUTE envía la fecha de ruta',
-    proposalCall?.params?.demand_mode === 'TODAY_ROUTE' && proposalCall?.params?.service_date === '2026-11-21'
+    proposalCall?.params?.demand_mode === 'TODAY_ROUTE' && proposalCall?.params?.service_date === TODAY
   );
 
   product.batchForm.demand_mode = 'TODAY_ROUTE';
-  product.batchForm.service_date = '2026-11-21';
+  product.batchForm.service_date = TODAY;
   await product.generateBatch();
   const batchCall = calls.filter((call) => call.method === 'generateProductLoadingBatch').at(-1);
   assert(
     '4.2 El lote TODAY_ROUTE envía la fecha de ruta',
-    batchCall?.payload?.demand_mode === 'TODAY_ROUTE' && batchCall?.payload?.service_date === '2026-11-21'
+    batchCall?.payload?.demand_mode === 'TODAY_ROUTE' && batchCall?.payload?.service_date === TODAY
   );
 
   assert(
@@ -441,7 +451,7 @@ async function run() {
   await api.coordinator.updateRestockSchedule(1, { cadence_type: 'DAILY' });
   await api.coordinator.bulkRestockSchedules({ machine_ids: [1] });
   await api.coordinator.deactivateRestockSchedule(10);
-  await api.coordinator.getRestockRouteDay({ service_date: '2026-11-21', restocker_id: 7 });
+  await api.coordinator.getRestockRouteDay({ service_date: TODAY, restocker_id: 7 });
   await api.coordinator.createRestockRouteOverride({ machine_id: 1 });
   await api.coordinator.revokeRestockRouteOverride(55);
 
@@ -460,7 +470,7 @@ async function run() {
   );
   assert(
     '5.2 El tablero codifica service_date y restocker_id en la query',
-    paths.some((entry) => entry.path.includes('service_date=2026-11-21') && entry.path.includes('restocker_id=7'))
+    paths.some((entry) => entry.path.includes(`service_date=${TODAY}`) && entry.path.includes('restocker_id=7'))
   );
 
   // ─────────────────────────────────────────────────────────────────────
