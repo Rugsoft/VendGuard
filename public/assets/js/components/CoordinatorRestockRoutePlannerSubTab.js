@@ -678,7 +678,7 @@ export const CoordinatorRestockRoutePlannerSubTab = {
       </div>
       <div v-if="plannerOptionsError" class="vg-alert vg-alert-error" role="alert" data-testid="route-planner-options-error" style="margin-bottom: 14px;">
         ⚠️ {{ plannerOptionsError }}
-        <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm" style="margin-left: 8px;" @click="loadPlannerOptions">Reintentar</button>
+        <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm ms-2" @click="loadPlannerOptions">Reintentar</button>
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px;" data-testid="route-planner-kpis">
