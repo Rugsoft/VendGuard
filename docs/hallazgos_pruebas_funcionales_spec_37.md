@@ -25,7 +25,7 @@ Los siete hallazgos se ordenan así:
 | 2 | **H-37-02** | **P2 · Media** | El tablero de Coordinación muestra `0.0 km` en todas las rutas | `RF-03.2.4`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 3 | **H-37-03** | **P2 · Media** | El modal de omisión móvil no advierte de alerta FEFO ni perecedero caducado | `RF-05.2` (EARS 05.2.1) | **Cerrado (2026-11-23)** |
 | 4 | **H-37-04** | **P3 · Baja** | Los formularios piden IDs internos numéricos en vez de selectores | `RF-01.3`, `RF-02.3`, `RF-05.3` | **Cerrado (2026-11-23)** |
-| 5 | **H-37-05** | **P3 · Baja** | El modal de omisión no declara semántica de diálogo | Hoja móvil (`RF-05.2`) | Abierto |
+| 5 | **H-37-05** | **P3 · Baja** | El modal de omisión no declara semántica de diálogo | Hoja móvil (`RF-05.2`) | **Cerrado (2026-11-23)** |
 | 6 | **H-37-06** | **P3 · Observación** | `service_date` pasada se acepta en propuesta y emisión `TODAY_ROUTE` | Contrato §4 y `TODAY_ROUTE` | Abierto · requiere decisión |
 | 7 | **H-37-07** | **P3 · Observación** | Cambiar la fecha del tablero no recarga hasta pulsar «Actualizar» | `RF-05.3` | Abierto |
 
@@ -137,13 +137,15 @@ Las tablas muestran códigos `VEND-xxxx` y nombres de reponedor, pero no sus IDs
 
 ### H-37-05 · P3 · El modal de omisión no tiene semántica de diálogo
 
-**Qué ocurre.** El contenedor de [`RestockerRouteView.js:5362`](../public/assets/js/components/RestockerRouteView.js) no declara `role="dialog"`, `aria-modal="true"` ni `aria-labelledby`; tampoco hay gestión de foco ni cierre con `Escape`.
+**Qué ocurre.** El contenedor de [`RestockerRouteView.js`](../public/assets/js/components/RestockerRouteView.js) no declara `role="dialog"`, `aria-modal="true"` ni `aria-labelledby`; tampoco hay gestión de foco ni cierre con `Escape`.
 
 **Impacto.** Un lector de pantalla no anuncia el modal como diálogo y el foco puede quedar detrás del contenido. Es una deuda de accesibilidad de la hoja móvil, no un fallo de negocio.
 
-**Corrección propuesta.** Añadir los atributos ARIA, enfocar el primer control al abrir, devolver el foco al botón de origen al cerrar y permitir `Escape`. Verificarlo con la suite de layout existente o una guarda de plantilla.
+**Corrección aplicada (2026-11-23).** El contenedor declara `role="dialog"`, `aria-modal="true"`, `aria-labelledby="route-skip-modal-title"` y `tabindex="-1"`; el título lleva el `id` referenciado. Al abrir se guarda el botón de origen (`event.currentTarget`) y, tras el render, se enfoca el botón «Cerrar». Al cerrar —botón, fondo, Escape o cierre tras guardar— se devuelve el foco al origen si sigue conectado. Un listener global de `keydown` cierra con `Escape` solo cuando el diálogo está visible y no hay una omisión en vuelo; se retira en `beforeUnmount`.
 
-**Estado:** Abierto.
+**Evidencia (2026-11-23).** La línea base de [`restocker_route_planner_view.test.mjs`](../tests/frontend/restocker_route_planner_view.test.mjs) era **45/45**; con las regresiones `3.1d` (foco inicial y origen), `3.1e` (Escape cierra y restaura foco), `3.1f` (Escape no cierra mientras guarda) y la ampliación de `5.8` (ARIA y listener), cierra **48/48**. Las guardas de shell (`coordinator_product_loading_tab`, `restocker_route_view`, `N8nChatScope`, `OfflinePwaAssetsAndUiGuard` y el planificador de Coordinación) siguen en verde con el App Shell en `vendguard-app-shell-v31`. En Chromium, el modal real publicó `role="dialog"`, `aria-modal="true"` y `aria-labelledby` resuelto al título «⏭️ Omitir parada hoy»; el foco inicial quedó en `btn-close-route-skip` («Cerrar»), Escape cerró el diálogo y el foco volvió al botón `btn-route-skip-stop` («Omitir parada hoy»). No se registró ninguna omisión durante la comprobación.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -210,7 +212,7 @@ Estas comprobaciones pasaron durante la misma corrida y se conservan para delimi
 2. **H-37-03 (P2) — corregido el 2026-11-23.** Aviso FEFO y perecedero caducado en el modal de omisión; era la deuda más sensible por Art. II.
 3. **H-37-02 (P2) — corregido el 2026-11-23.** Origen del optimizador en `buildCoordinatorDay()` y aserción de distancia.
 4. **H-37-04 (P3) — corregido el 2026-11-23.** Selectores con nombre/código en Nueva agenda, Alta masiva y Desviar parada.
-5. **H-37-05 (P3).** Semántica ARIA, foco y cierre con `Escape` del modal de omisión.
+5. **H-37-05 (P3) — corregido el 2026-11-23.** Semántica ARIA, foco y cierre con `Escape` del modal de omisión.
 6. **H-37-06.** Decidir contrato antes de implementar; si se rechaza la fecha pasada, añadir `422 PAST_SERVICE_DATE_FORBIDDEN` y su aserción. Si se permite, persistir `service_date`.
 7. **H-37-07 (P3).** Recarga al cambiar la fecha o estado visual de «desactualizado».
 
@@ -222,4 +224,4 @@ Los puntos 2, 4 y 5 son correcciones contra requisitos ya existentes; no requier
 
 Este acta se actualizará cuando cada hallazgo se corrija, con la misma disciplina que las auditorías de los módulos 33–36: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P1 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** árbol limpio tras los commits de corrección de `H-37-01` (`088f66e`), `H-37-02` (`bf7b018`), `H-37-03` y `H-37-04`; sin push. Los scripts de la sonda viven en `scratch/` y no se versionan. El acta recoge la corrida original y las correcciones posteriores.
+**Estado del árbol:** árbol limpio tras los commits de corrección de `H-37-01` (`088f66e`), `H-37-02` (`bf7b018`), `H-37-03`, `H-37-04` y `H-37-05`; sin push. Los scripts de la sonda viven en `scratch/` y no se versionan. El acta recoge la corrida original y las correcciones posteriores.

@@ -335,6 +335,41 @@ async function run() {
   nonFefoVm.openSkipRouteModal(nonFefoVm.routePlanStops[1].machines[0], nonFefoVm.routePlanStops[1]);
   assert('3.1c Una parada sin FEFO no muestra aviso sanitario', nonFefoVm.skipRouteFefoWarning === null);
 
+  let closeFocused = false;
+  let triggerFocused = false;
+  const skipTrigger = { focus: () => { triggerFocused = true; } };
+  const focusVm = buildView({
+    restocker: { id: 12, name: 'Lucía Gómez' },
+    currentUser: { id: 12 },
+    routePlan: routePlanFixture(),
+    routeServiceDate: '2026-11-21',
+    $nextTick: (callback) => callback(),
+    $refs: { skipRouteCloseButton: { focus: () => { closeFocused = true; } } }
+  });
+  focusVm.routeToday = () => '2026-11-21';
+  focusVm.openSkipRouteModal(
+    focusVm.routePlanStops[0].machines[0],
+    focusVm.routePlanStops[0],
+    { currentTarget: skipTrigger }
+  );
+  assert(
+    '3.1d El modal recuerda el origen y enfoca el primer control',
+    focusVm.showSkipRouteModal === true && focusVm.skipRouteTrigger === skipTrigger && closeFocused === true
+  );
+  let escapePrevented = false;
+  focusVm.handleSkipRouteKeydown({ key: 'Escape', preventDefault: () => { escapePrevented = true; } });
+  assert(
+    '3.1e Escape cierra el diálogo y devuelve el foco al origen',
+    focusVm.showSkipRouteModal === false
+      && escapePrevented === true
+      && triggerFocused === true
+      && focusVm.skipRouteTrigger === null
+  );
+  focusVm.openSkipRouteModal(focusVm.routePlanStops[0].machines[0], focusVm.routePlanStops[0]);
+  focusVm.isSkippingRoute = true;
+  focusVm.handleSkipRouteKeydown({ key: 'Escape', preventDefault: () => {} });
+  assert('3.1f Escape no cierra el diálogo mientras guarda', focusVm.showSkipRouteModal === true);
+
   vm.skipRouteForm.reason_text = 'Corto';
   assert('3.2 Un motivo corto se rechaza antes de viajar', vm.validateSkipRoute() === false && vm.skipRouteError.includes('20'));
   vm.skipRouteForm.reason_text = 'La conserjería permanece cerrada con persiana metálica bajada y sin personal de acceso.';
@@ -510,7 +545,7 @@ async function run() {
   assert('5.6 La vista no contiene hexadecimales literales', !/#[0-9a-fA-F]{3,8}\b/.test(viewSource));
   assert('5.7 El mapa no contiene hexadecimales literales', !/#[0-9a-fA-F]{3,8}\b/.test(mapSource));
   assert(
-    '5.8 La vista declara los tres bloques, los badges y los acordeones',
+    '5.8 La vista declara bloques, badges, acordeones y el diálogo accesible',
     viewSource.includes('restocker-route-block')
       && viewSource.includes('restocker-route-stop-coincidence')
       && viewSource.includes('qty=0')
@@ -518,6 +553,12 @@ async function run() {
       && viewSource.includes('<details')
       && viewSource.includes('⏭️ Omitir parada hoy')
       && viewSource.includes('data-testid="route-skip-fefo-warning"')
+      && viewSource.includes('role="dialog"')
+      && viewSource.includes('aria-modal="true"')
+      && viewSource.includes('aria-labelledby="route-skip-modal-title"')
+      && viewSource.includes('ref="skipRouteCloseButton"')
+      && viewSource.includes("document.addEventListener('keydown'")
+      && viewSource.includes("document.removeEventListener('keydown'")
   );
   assert('5.9 El mapa reutiliza Mercator y MapZoomPan', mapSource.includes("from '../utils/Mercator.js'") && mapSource.includes("from '../utils/MapZoomPan.js'"));
   assert('5.10 El Service Worker precachea los módulos y sube la versión', swSource.includes('/assets/js/components/RestockerRouteMapModal.js') && swSource.includes('/assets/js/utils/RestockRouteOverrideOfflineQueue.js') && /vendguard-app-shell-v(\d+)/.exec(swSource)?.[1] >= 27);

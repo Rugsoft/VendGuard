@@ -219,6 +219,8 @@ export const RestockerRouteView = {
       routeSnapshotRestored: false,
       showRouteMapModal: false,
       showSkipRouteModal: false,
+      skipRouteTrigger: null,
+      skipRouteKeydownHandler: null,
       skipRouteMachine: null,
       skipRouteStop: null,
       skipRouteForm: blankRouteSkipForm(),
@@ -689,10 +691,17 @@ export const RestockerRouteView = {
       };
       window.addEventListener('online', this.visitOnlineHandler);
     }
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      this.skipRouteKeydownHandler = (event) => this.handleSkipRouteKeydown(event);
+      document.addEventListener('keydown', this.skipRouteKeydownHandler);
+    }
   },
   beforeUnmount() {
     if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function' && this.visitOnlineHandler) {
       window.removeEventListener('online', this.visitOnlineHandler);
+    }
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function' && this.skipRouteKeydownHandler) {
+      document.removeEventListener('keydown', this.skipRouteKeydownHandler);
     }
   },
   methods: {
@@ -916,8 +925,10 @@ export const RestockerRouteView = {
       this.showRouteMapModal = true;
     },
 
-    openSkipRouteModal(machine, stop) {
+    openSkipRouteModal(machine, stop, event = null) {
       if (!machine?.machine_id || !stop) return;
+      const activeElement = typeof document !== 'undefined' ? document.activeElement : null;
+      this.skipRouteTrigger = event?.currentTarget || activeElement || null;
       this.skipRouteMachine = machine;
       this.skipRouteStop = stop;
       this.skipRouteForm = {
@@ -928,6 +939,35 @@ export const RestockerRouteView = {
       this.skipRouteError = '';
       this.skipRouteSuccess = '';
       this.showSkipRouteModal = true;
+
+      const focusFirstControl = () => this.focusSkipRouteClose();
+      if (typeof this.$nextTick === 'function') this.$nextTick(focusFirstControl);
+      else focusFirstControl();
+    },
+
+    focusSkipRouteClose() {
+      const closeButton = this.$refs?.skipRouteCloseButton;
+      if (closeButton && typeof closeButton.focus === 'function') closeButton.focus();
+    },
+
+    restoreSkipRouteFocus() {
+      const trigger = this.skipRouteTrigger;
+      this.skipRouteTrigger = null;
+      if (!trigger || typeof trigger.focus !== 'function') return;
+
+      const focusTrigger = () => {
+        if (trigger.isConnected === false) return;
+        trigger.focus();
+      };
+      if (typeof this.$nextTick === 'function') this.$nextTick(focusTrigger);
+      else focusTrigger();
+    },
+
+    handleSkipRouteKeydown(event) {
+      if (!this.showSkipRouteModal || event?.key !== 'Escape') return;
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+      if (this.isSkippingRoute) return;
+      this.closeSkipRouteModal();
     },
 
     closeSkipRouteModal() {
@@ -937,6 +977,7 @@ export const RestockerRouteView = {
       this.skipRouteStop = null;
       this.skipRouteError = '';
       this.skipRouteSuccess = '';
+      this.restoreSkipRouteFocus();
     },
 
     routeReasonText() {
@@ -994,6 +1035,7 @@ export const RestockerRouteView = {
         await api.restocker.skipRestockStop(machine.machine_id, payload);
         this.showSkipRouteModal = false;
         this.skipRouteSuccess = 'Parada omitida hoy y registrada para auditoría.';
+        this.restoreSkipRouteFocus();
         await this.loadMyRoute();
       } catch (error) {
         if (this.isNetworkFailure(error)) {
@@ -1025,6 +1067,7 @@ export const RestockerRouteView = {
       await this.applyOptimisticRouteSkip(machine, stop);
       this.showSkipRouteModal = false;
       this.skipRouteSuccess = 'Omisión guardada en la cola offline. Se sincronizará al recuperar cobertura.';
+      this.restoreSkipRouteFocus();
     },
 
     async applyOptimisticRouteSkip(machine, stop) {
@@ -3276,6 +3319,7 @@ export const RestockerRouteView = {
       this.routeSnapshotRestored = false;
       this.showRouteMapModal = false;
       this.showSkipRouteModal = false;
+      this.skipRouteTrigger = null;
       this.skipRouteMachine = null;
       this.skipRouteStop = null;
       this.skipRouteForm = blankRouteSkipForm();
@@ -3880,7 +3924,7 @@ export const RestockerRouteView = {
                         class="vg-btn vg-btn-secondary vg-btn-sm"
                         data-testid="btn-route-skip-stop"
                         :data-machine-id="machine.machine_id"
-                        @click="openSkipRouteModal(machine, stop)"
+                        @click="openSkipRouteModal(machine, stop, $event)"
                       >⏭️ Omitir parada hoy</button>
                     </div>
                   </div>
@@ -5384,18 +5428,22 @@ export const RestockerRouteView = {
       <div
         v-if="showSkipRouteModal"
         data-testid="restocker-route-skip-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="route-skip-modal-title"
+        tabindex="-1"
         style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 88; padding: 0;"
         @click.self="closeSkipRouteModal"
       >
         <div style="background-color: var(--color-surface-card); width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; border-radius: var(--radius-card) var(--radius-card) 0 0; padding: 18px 16px; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); box-sizing: border-box;">
           <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
             <div style="min-width: 0;">
-              <h2 style="font-family: var(--font-display); font-size: 17px; margin: 0 0 4px 0;">⏭️ Omitir parada hoy</h2>
+              <h2 id="route-skip-modal-title" style="font-family: var(--font-display); font-size: 17px; margin: 0 0 4px 0;">⏭️ Omitir parada hoy</h2>
               <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
                 {{ skipRouteMachine?.machine_code || 'Máquina' }} · {{ skipRouteStop?.location_name || 'Sede' }}
               </p>
             </div>
-            <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-route-skip" :disabled="isSkippingRoute" @click="closeSkipRouteModal">Cerrar</button>
+            <button ref="skipRouteCloseButton" type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-route-skip" :disabled="isSkippingRoute" @click="closeSkipRouteModal">Cerrar</button>
           </div>
 
           <div
