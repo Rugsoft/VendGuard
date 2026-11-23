@@ -50,7 +50,8 @@ final class ShiftLifecycleService
         private readonly TransactionManagerInterface $transactions,
         private readonly TechnicianLockRepositoryInterface $lockRepo,
         private readonly ?TechnicianShiftLogRepositoryInterface $shiftLogRepo = null,
-        private readonly ?RestockerSatSynergyService $synergyService = null
+        private readonly ?RestockerSatSynergyService $synergyService = null,
+        private readonly ?RestockRouteReassignmentRevoker $routeRevoker = null
     ) {
     }
 
@@ -314,6 +315,15 @@ final class ShiftLifecycleService
                 effectiveAt: $closed->closedAt() ?? $now,
                 previousState: $activeShift->toArray(),
                 reason: $cleanReason
+            );
+
+            // QA-3: el receptor que cierra turno deja de poder atender sus
+            // desvíos del día; se revocan en la misma transacción.
+            $this->routeRevoker?->revokeForRestocker(
+                $technicianId,
+                RestockRouteReassignmentRevoker::CAUSE_SHIFT_CLOSE,
+                $technicianId,
+                $now
             );
 
             return TechnicianShiftDto::fromEntity(

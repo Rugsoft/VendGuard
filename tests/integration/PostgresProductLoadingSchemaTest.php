@@ -11,7 +11,7 @@ declare(strict_types=1);
  * base de datos impone por sí sola, porque son las que ningún camino de código puede saltarse:
  *
  *   1. **Tipos nativos (QA 4).** `product_loading_order_status` declara los cinco estados del ciclo,
- *      `product_loading_demand_mode` los dos modos de demanda y `product_loading_item_reason` los
+ *      `product_loading_demand_mode` los tres modos de demanda y `product_loading_item_reason` los
  *      cuatro motivos de línea; `RESTOCKER_VAN_STOCK` y `PRODUCT_LOADING_ORDER` se pueden castear
  *      en `audit_entity_type`.
  *   2. **Forma de la Tabla 44.** Ocho columnas en el orden del contrato, identidad
@@ -262,8 +262,8 @@ try {
     );
 
     $assert(
-        'product_loading_demand_mode declara ALERTS_ONLY y ALL_GAPS',
-        $enumLabels($pgPdo, 'product_loading_demand_mode') === ['ALERTS_ONLY', 'ALL_GAPS'],
+        'product_loading_demand_mode declara ALERTS_ONLY, ALL_GAPS y TODAY_ROUTE',
+        $enumLabels($pgPdo, 'product_loading_demand_mode') === ['ALERTS_ONLY', 'ALL_GAPS', 'TODAY_ROUTE'],
         implode(',', $enumLabels($pgPdo, 'product_loading_demand_mode'))
     );
 

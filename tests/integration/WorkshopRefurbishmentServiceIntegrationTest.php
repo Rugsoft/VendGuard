@@ -846,6 +846,11 @@ try {
     fwrite(STDERR, $exception->getFile() . ':' . $exception->getLine() . "\n");
     fwrite(STDERR, $exception->getTraceAsString() . "\n");
     $failures++;
+} finally {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    PostgresFixtureBuilder::dropIsolationSchema($pdo, WORKSHOP_SERVICE_TEST_SCHEMA);
 }
 
 echo "\n======================================================================\n";

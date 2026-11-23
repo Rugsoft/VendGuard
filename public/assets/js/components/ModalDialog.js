@@ -6,7 +6,8 @@
  * 
  * Features:
  * - WAI-ARIA compliance: role="dialog", aria-modal="true", aria-labelledby.
- * - Keyboard accessibility: closes on 'Escape' key press.
+ * - Keyboard accessibility: initial focus, focus trap and 'Escape' close.
+ * - Restores focus to the trigger after closing.
  * - Prevents background page scrolling while modal is active.
  * - 8px card border radius conforming to RNF-06 containers.
  * - Named slots: header, default (body), footer (action buttons).
@@ -61,7 +62,8 @@ export const ModalDialog = {
   emits: ['update:modelValue', 'close'],
   data() {
     return {
-      titleId: `modal-title-${Math.random().toString(36).substr(2, 9)}`
+      titleId: `modal-title-${Math.random().toString(36).substr(2, 9)}`,
+      previousFocus: null
     };
   },
   computed: {
@@ -79,11 +81,18 @@ export const ModalDialog = {
       handler(isOpen) {
         if (typeof document !== 'undefined') {
           if (isOpen) {
+            this.previousFocus = document.activeElement;
             document.body.style.overflow = 'hidden';
-            window.addEventListener('keydown', this.handleKeyDown);
+            if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+              window.addEventListener('keydown', this.handleKeyDown);
+            }
+            this.requestInitialFocus();
           } else {
             document.body.style.overflow = '';
-            window.removeEventListener('keydown', this.handleKeyDown);
+            if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+              window.removeEventListener('keydown', this.handleKeyDown);
+            }
+            this.restoreFocus();
           }
         }
       }
@@ -92,7 +101,9 @@ export const ModalDialog = {
   beforeUnmount() {
     if (typeof document !== 'undefined') {
       document.body.style.overflow = '';
-      window.removeEventListener('keydown', this.handleKeyDown);
+      if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+        window.removeEventListener('keydown', this.handleKeyDown);
+      }
     }
   },
   methods: {
@@ -100,15 +111,74 @@ export const ModalDialog = {
       this.$emit('update:modelValue', false);
       this.$emit('close');
     },
+    requestInitialFocus() {
+      const focusInitial = () => this.focusInitialElement();
+      if (typeof this.$nextTick === 'function') this.$nextTick(focusInitial);
+      else focusInitial();
+    },
+    focusInitialElement() {
+      const target = this.focusableElements()[0] || this.$refs?.modalDialog;
+      if (target && typeof target.focus === 'function') target.focus();
+    },
+    restoreFocus() {
+      const trigger = this.previousFocus;
+      this.previousFocus = null;
+      if (!trigger || trigger.isConnected === false || typeof trigger.focus !== 'function') return;
+      const focusTrigger = () => {
+        if (trigger.isConnected === false) return;
+        trigger.focus();
+      };
+      if (typeof this.$nextTick === 'function') this.$nextTick(focusTrigger);
+      else focusTrigger();
+    },
+    focusableElements() {
+      const dialog = this.$refs?.modalDialog;
+      if (!dialog || typeof dialog.querySelectorAll !== 'function') return [];
+      const selector = [
+        'a[href]',
+        'button:not([disabled])',
+        'input:not([disabled]):not([type="hidden"])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])'
+      ].join(', ');
+      return Array.from(dialog.querySelectorAll(selector))
+        .filter((element) => element && typeof element.focus === 'function')
+        .filter((element) => !element.hidden && (typeof element.getClientRects !== 'function' || element.getClientRects().length > 0));
+    },
+    trapFocus(event) {
+      const dialog = this.$refs?.modalDialog;
+      if (!dialog) return;
+      const focusable = this.focusableElements();
+      if (focusable.length === 0) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof dialog.focus === 'function') dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = typeof document !== 'undefined' ? document.activeElement : null;
+      const inside = !!(active && typeof dialog.contains === 'function' && dialog.contains(active));
+      if (event.shiftKey && (!inside || active === first || active === dialog)) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (!inside || active === last || active === dialog)) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        first.focus();
+      }
+    },
     handleBackdropClick(event) {
       if (this.closeOnBackdrop && event.target === event.currentTarget) {
         this.close();
       }
     },
     handleKeyDown(event) {
-      if (event.key === 'Escape' && this.modelValue) {
+      if (!this.modelValue) return;
+      if (event.key === 'Escape') {
         this.close();
+        return;
       }
+      if (event.key === 'Tab') this.trapFocus(event);
     }
   },
   template: `
@@ -121,6 +191,7 @@ export const ModalDialog = {
         role="presentation"
       >
         <div
+          ref="modalDialog"
           class="vg-modal"
           role="dialog"
           aria-modal="true"

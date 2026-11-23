@@ -246,7 +246,7 @@ api.post = async (url, body) => {
   throw new Error('URL inesperada: ' + url);
 };
 
-const shiftVm = buildVm();
+const shiftVm = buildVm({ loadMyRoute: async () => {} });
 await shiftVm.startShift();
 assert('Iniciar Turno llama al endpoint compartido', posts[0].url === '/technician/shift/start' && shiftVm.shiftStatus === 'ON_SHIFT');
 await shiftVm.pauseMealShift();
@@ -261,6 +261,59 @@ assert('Cerrar Turno desde MEAL_BREAK cierra directamente', closeCall.url === '/
 assert('El cierre directo no envía relevo, receptor ni tickets SAT', closeCall.body && Object.keys(closeCall.body).length === 0);
 assert('El cierre directo limpia el identificador de turno', shiftVm.activeShiftId === null);
 assert('El cierre directo deja un acuse al reponedor', shiftVm.feedbackMessage.includes('Jornada cerrada'));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3b. H-37-08: la ruta móvil se recarga al iniciar y cerrar turno
+// ─────────────────────────────────────────────────────────────────────────────
+const reloadOriginalGet = api.get;
+const reloadOriginalPost = api.post;
+let routeReloadRequests = 0;
+let reloadShiftStatus = 'OFF_SHIFT';
+
+api.get = async (url) => {
+  if (url !== '/restocker/my-route') throw new Error('URL inesperada: ' + url);
+  routeReloadRequests++;
+  return {
+    data: {
+      restocker: bootstrapPayload.data.restocker,
+      zones: bootstrapPayload.data.zones,
+      shift: { status: reloadShiftStatus },
+      route_stops: [],
+      route_plan: null
+    }
+  };
+};
+api.post = async (url) => {
+  if (url === '/technician/shift/start') {
+    reloadShiftStatus = 'ON_SHIFT';
+  } else if (url === '/technician/shift/close') {
+    reloadShiftStatus = 'OFF_SHIFT';
+  } else {
+    throw new Error('URL inesperada: ' + url);
+  }
+  return { data: { status: reloadShiftStatus } };
+};
+
+const reloadVm = buildVm({
+  loadPendingVisitQueue: async () => {},
+  loadPendingCashQueue: async () => {},
+  loadPendingRouteOverrides: async () => {},
+  persistRouteSnapshot: async () => {}
+});
+await reloadVm.startShift();
+assert(
+  'H-37-08: Iniciar Turno recarga /api/restocker/my-route tras el éxito',
+  routeReloadRequests === 1 && reloadVm.shiftStatus === 'ON_SHIFT'
+);
+await reloadVm.closeShift();
+assert(
+  'H-37-08: Cerrar Turno recarga /api/restocker/my-route y deja OFF_SHIFT',
+  routeReloadRequests === 2
+    && reloadVm.shiftStatus === 'OFF_SHIFT'
+    && reloadVm.feedbackMessage.includes('Jornada cerrada')
+);
+api.get = reloadOriginalGet;
+api.post = reloadOriginalPost;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. «⏱️ Mis Horas» de solo lectura y aislamiento (RF-04.3, Art. V.4)
@@ -1696,7 +1749,7 @@ assert(
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/CashCollectionOfflineQueue.js')
     && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
-      .includes('vendguard-app-shell-v26')
+      .includes('vendguard-app-shell-v32')
 );
 assert(
   'La vista completa no expone ninguna de las cinco claves del Arqueo Ciego',
@@ -1849,7 +1902,7 @@ assert(
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/RestockerIncidentOfflineQueue.js')
     && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
-      .includes('vendguard-app-shell-v26')
+      .includes('vendguard-app-shell-v32')
 );
 assert(
   'El cliente API expone inicio, resolución, escalado y volcado de conflicto L1',

@@ -1922,6 +1922,39 @@ export class ApiClient {
       });
     },
 
+    // Planificador de rutas periódicas de carga (Módulo 37).
+    //
+    // La agenda versionada y la excepción diaria son superficies distintas: la
+    // primera se lee/escribe por máquina y la segunda solo vive en un
+    // `service_date`. El tablero es una lectura instantánea de un único día y no
+    // se mezcla con el catálogo de agendas.
+    getRestockSchedules: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/restock-schedules${q ? `?${q}` : ''}`);
+    },
+    createRestockSchedule: (payload) => {
+      return this.post('/coordinator/restock-schedules', payload);
+    },
+    updateRestockSchedule: (machineId, payload) => {
+      return this.put(`/coordinator/restock-schedules/machine/${encodeURIComponent(machineId)}`, payload);
+    },
+    bulkRestockSchedules: (payload) => {
+      return this.post('/coordinator/restock-schedules/bulk', payload);
+    },
+    deactivateRestockSchedule: (scheduleId) => {
+      return this.patch(`/coordinator/restock-schedules/${encodeURIComponent(scheduleId)}/deactivate`);
+    },
+    getRestockRouteDay: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/restock-route/day${q ? `?${q}` : ''}`);
+    },
+    createRestockRouteOverride: (payload) => {
+      return this.post('/coordinator/restock-route/overrides', payload);
+    },
+    revokeRestockRouteOverride: (overrideId) => {
+      return this.post(`/coordinator/restock-route/overrides/${encodeURIComponent(overrideId)}/revoke`);
+    },
+
     // Órdenes de carga de furgoneta (Módulo 23, contrato §5.2 a §5.9).
     //
     // El pre-cálculo y el ciclo del albarán son superficies distintas: la propuesta
@@ -2305,6 +2338,29 @@ export class ApiClient {
      */
     reconcileLoadingOrder: (orderId, payload) => {
       return this.post(`/restocker/product-loading-orders/${encodeURIComponent(orderId)}/reconcile`, payload);
+    },
+
+    /**
+     * Omisión de una parada de la ruta efectiva de hoy (Módulo 37, RF-05.1).
+     * El backend exige motivo de 20..500 caracteres reales y resuelve el
+     * reponedor desde el token; la mutación es idempotente por
+     * `client_mutation_id`.
+     * @param {number|string} machineId
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    skipRestockStop: (machineId, payload) => {
+      return this.post(`/restocker/route/stops/${encodeURIComponent(machineId)}/skip`, payload);
+    },
+
+    /**
+     * Archiva en auditoría una omisión offline rechazada de forma irreversible
+     * (Módulo 37, C3, Art. III.3).
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    dumpRestockOverrideConflict: (payload) => {
+      return this.post('/restocker/route/override-conflict-dump', payload);
     }
   };
 

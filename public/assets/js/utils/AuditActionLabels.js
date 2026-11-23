@@ -102,7 +102,12 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   MACHINE_RESTOCK_VISIT: 'Visita de Reposición In Situ',
   // Entidad del Módulo 35: la recaudación y su arqueo se auditan con tipo
   // propio y el filtro del visor debe cubrir el enumerado completo.
-  MACHINE_CASH_COLLECTION: 'Recaudación de Efectivo'
+  MACHINE_CASH_COLLECTION: 'Recaudación de Efectivo',
+  // Entidades del Módulo 37: la agenda periódica y la excepción diaria se
+  // auditan con tipo propio y el filtro del visor debe cubrir el enumerado
+  // completo (`Art. III.3`).
+  MACHINE_RESTOCK_SCHEDULE: 'Agenda de Reposición Periódica',
+  RESTOCK_ROUTE_DAILY_OVERRIDE: 'Excepción Diaria de Ruta'
 });
 
 /**
@@ -252,6 +257,19 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'RESTOCKER_VAN_STOCK_ADJUSTED', label: 'Ajuste Manual de Lote en Furgoneta', tone: 'warning', group: 'restock' },
   { code: 'RESTOCKER_VAN_STOCK_RECONCILED', label: 'Liquidación de Stock de Furgoneta', tone: 'info', group: 'restock' },
   { code: 'RESTOCK_VISIT_COMPLETED', label: 'Visita de Reposición Completada', tone: 'success', group: 'restock' },
+  // Módulo 37: la revocación automática del desvío por cierre de turno, ausencia
+  // o baja del receptor se audita con acción propia (`QA-3`, `C1`).
+  { code: 'RESTOCK_ROUTE_REASSIGNMENT_AUTO_REVOKED', label: 'Revocación Automática de Desvío de Ruta', tone: 'warning', group: 'restock' },
+  // Módulo 37: agendas versionadas y excepciones diarias. Sin estas entradas el
+  // visor mostraba el código crudo y su filtro no podía localizar las filas
+  // persistidas por el planificador (Art. III.3).
+  { code: 'UPSERT_RESTOCK_SCHEDULE', label: 'Alta o Edición de Agenda de Reposición', tone: 'primary', group: 'restock' },
+  { code: 'BULK_RESTOCK_SCHEDULE', label: 'Alta Masiva de Agendas de Reposición', tone: 'info', group: 'restock' },
+  { code: 'DEACTIVATE_RESTOCK_SCHEDULE', label: 'Baja de Agenda de Reposición', tone: 'warning', group: 'restock' },
+  { code: 'SKIP_RESTOCK_STOP', label: 'Omisión de Parada de Ruta', tone: 'warning', group: 'restock' },
+  { code: 'REASSIGN_RESTOCK_STOP', label: 'Desvío de Parada de Ruta', tone: 'purple', group: 'restock' },
+  { code: 'REVOKE_RESTOCK_ROUTE_OVERRIDE', label: 'Revocación de Excepción de Ruta', tone: 'danger', group: 'restock' },
+  { code: 'DUMP_RESTOCK_OVERRIDE_CONFLICT', label: 'Volcado de Conflicto Offline de Ruta', tone: 'warning', group: 'restock' },
   { code: 'RESTOCK_VISIT_ABORTED_THERMAL_BREACH', label: 'Visita Abortada por Rotura de Cadena de Frío', tone: 'danger', group: 'sanitary' },
   { code: 'OFFLINE_RESTOCK_VISIT_CONFLICT_DUMP', label: 'Conflicto Offline Archivado en Auditoría', tone: 'warning', group: 'restock' },
   { code: 'OFFLINE_CASH_COLLECTION_CONFLICT_DUMP', label: 'Conflicto Offline de Recaudación Archivado', tone: 'warning', group: 'restock' },

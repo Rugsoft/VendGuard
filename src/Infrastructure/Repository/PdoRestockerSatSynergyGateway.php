@@ -726,7 +726,7 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                 return $this->fail('MACHINE_NOT_FOUND', 404, 'La máquina no existe o está dada de baja.');
             }
 
-            if (!$this->isCovered((int)$machine['zone_id'], $this->actorId($actor))) {
+            if (!$this->isCovered((int)$machine['zone_id'], $this->actorId($actor), (int)$machine['id'])) {
                 return $this->fail(
                     'MACHINE_OUTSIDE_RESTOCKER_ZONES',
                     403,
@@ -1016,11 +1016,22 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
                       ON rza.restocker_id = u.id
                      AND rza.zone_id = l.zone_id
                      AND rza.removed_at IS NULL
+               LEFT JOIN restock_route_daily_overrides rrdo
+                      ON rrdo.target_restocker_id = u.id
+                     AND rrdo.service_date = :today
+                     AND rrdo.override_type = \'REASSIGNED\'
+                     AND rrdo.status = \'ACTIVE\'
+                     AND rrdo.machine_id IN (
+                         SELECT rm.id FROM machines rm
+                          WHERE rm.location_id = l.id
+                            AND rm.is_active = TRUE
+                            AND rm.deleted_at IS NULL
+                     )
               WHERE l.id IN (' . implode(', ', $placeholders) . ')
                 AND u.role = \'RESTOCKER\'
                 AND u.is_active = TRUE
                 AND u.deleted_at IS NULL
-                AND (i.id IS NOT NULL OR rza.id IS NOT NULL)
+                AND (i.id IS NOT NULL OR rza.id IS NOT NULL OR rrdo.id IS NOT NULL)
               GROUP BY l.id, u.id, u.name, u.operator_code, u.phone, s.status
               ORDER BY l.id ASC, u.name ASC'
         );
@@ -1891,17 +1902,49 @@ final class PdoRestockerSatSynergyGateway implements RestockerSatSynergyGatewayI
         return is_array($row) ? $row : null;
     }
 
-    private function isCovered(int $zoneId, int $restockerId): bool
+    /**
+     * Perímetro territorial del reponedor para una máquina concreta.
+     *
+     * La asignación de zona viva es la vía ordinaria; un desvío `REASSIGNED`
+     * `ACTIVE` de hoy habilita temporalmente al receptor aunque no cubra la zona
+     * (QA-3). El desvío se evalúa por máquina, nunca por zona, para no ampliar el
+     * perímetro al resto de la sede.
+     */
+    private function isCovered(?int $zoneId, int $restockerId, int $machineId = 0): bool
     {
+        if ($restockerId <= 0 || (($zoneId === null || $zoneId <= 0) && $machineId <= 0)) {
+            return false;
+        }
+
         $stmt = $this->pdo->prepare(
-            'SELECT 1
-               FROM restocker_zone_assignments rza
-               INNER JOIN operational_zones oz ON oz.id = rza.zone_id AND oz.is_active = TRUE
-              WHERE rza.restocker_id = :restocker_id
-                AND rza.zone_id = :zone_id
-                AND rza.removed_at IS NULL'
+            'SELECT 1 WHERE (
+                EXISTS (
+                    SELECT 1
+                      FROM restocker_zone_assignments rza
+                      INNER JOIN operational_zones oz ON oz.id = rza.zone_id AND oz.is_active = TRUE
+                     WHERE rza.restocker_id = :restocker_id
+                       AND rza.zone_id = :zone_id
+                       AND rza.removed_at IS NULL
+                )
+                OR EXISTS (
+                    SELECT 1
+                      FROM restock_route_daily_overrides rrdo
+                     WHERE rrdo.machine_id = :machine_id
+                       AND rrdo.target_restocker_id = :restocker_id
+                       AND rrdo.service_date = (CURRENT_TIMESTAMP AT TIME ZONE \'Europe/Madrid\')::date
+                       AND rrdo.override_type = \'REASSIGNED\'
+                       AND rrdo.status = \'ACTIVE\'
+                )
+            )'
         );
-        $stmt->execute([':restocker_id' => $restockerId, ':zone_id' => $zoneId]);
+        $stmt->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        if ($zoneId === null || $zoneId <= 0) {
+            $stmt->bindValue(':zone_id', null, PDO::PARAM_NULL);
+        } else {
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        }
+        $stmt->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
+        $stmt->execute();
 
         return $stmt->fetchColumn() !== false;
     }

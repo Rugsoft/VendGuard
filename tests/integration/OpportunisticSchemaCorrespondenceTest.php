@@ -94,8 +94,8 @@ const OPPORTUNISTIC_NEW_TEMPLATES = [
     'INCIDENT_REOPENED_IN_SITU_SITE',
 ];
 
-/** Total esperado del catálogo cerrado tras los módulos 14, 16 y 21. */
-const NOTIFICATION_TEMPLATE_TOTAL = 22;
+/** Total esperado del catálogo cerrado tras los módulos 14, 16, 21 y 37. */
+const NOTIFICATION_TEMPLATE_TOTAL = 23;
 
 /** Combinaciones que la restricción debe admitir. */
 const COHERENCE_ACCEPTED = [
@@ -278,10 +278,13 @@ try {
     );
 
     $assert(
-        'Las dos plantillas del módulo 16 conservan su posición y el relevo se anexa después',
-        array_slice($templateLabels, -3, 2) === OPPORTUNISTIC_NEW_TEMPLATES
-            && end($templateLabels) === 'TELEGRAM_INCIDENT_ASSIGNMENT',
-        'últimas: ' . implode('/', array_slice($templateLabels, -2))
+        'Las dos plantillas del módulo 16 conservan su posición y los relevos se anexan después',
+        array_slice($templateLabels, -4, 2) === OPPORTUNISTIC_NEW_TEMPLATES
+            && array_slice($templateLabels, -2) === [
+                'TELEGRAM_INCIDENT_ASSIGNMENT',
+                'RESTOCK_FEFO_STOP_SKIPPED_ALERT',
+            ],
+        'últimas: ' . implode('/', array_slice($templateLabels, -4))
     );
 
     // ─────────────────────────────────────────────────────────────────────

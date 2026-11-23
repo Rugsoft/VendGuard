@@ -666,8 +666,11 @@ final class PdoProductLoadingOrderRepository implements ProductLoadingOrderRepos
     /**
      * {@inheritdoc}
      */
-    public function fetchProposalInputs(int $restockerId, ?DateTimeImmutable $reference = null): array
-    {
+    public function fetchProposalInputs(
+        int $restockerId,
+        ?DateTimeImmutable $reference = null,
+        ?array $machineIds = null
+    ): array {
         if ($restockerId <= 0) {
             throw new InvalidArgumentException('El reponedor de la propuesta debe existir.');
         }
@@ -680,7 +683,7 @@ final class PdoProductLoadingOrderRepository implements ProductLoadingOrderRepos
         return [
             'restocker' => $this->fetchProposalRestocker($restockerId, $dayStart, $dayEnd),
             'zones' => $this->fetchCoveredZones($restockerId, $dayStart, $dayEnd),
-            'slot_demand' => $this->fetchSlotDemand($restockerId, $dayStart, $dayEnd),
+            'slot_demand' => $this->fetchSlotDemand($restockerId, $dayStart, $dayEnd, $machineIds),
             'excluded_unavailable_machines_count' => $this->countUnavailableMachines($restockerId, $dayStart, $dayEnd),
         ];
     }
@@ -849,10 +852,34 @@ final class PdoProductLoadingOrderRepository implements ProductLoadingOrderRepos
     /**
      * Huecos por producto sobre las máquinas operativas cubiertas (D1, QA 1).
      *
+     * `$machineIds` restringe la foto a la ruta efectiva del día (Módulo 37,
+     * `TODAY_ROUTE`, `QA-5`). La lista se normaliza a enteros positivos y se
+     * interpola solo tras esa validación: nunca llega texto del cliente.
+     *
+     * @param list<int>|null $machineIds
+     *
      * @return list<array<string, mixed>>
      */
-    private function fetchSlotDemand(int $restockerId, string $dayStart, string $dayEnd): array
-    {
+    private function fetchSlotDemand(
+        int $restockerId,
+        string $dayStart,
+        string $dayEnd,
+        ?array $machineIds = null
+    ): array {
+        $machineFilter = '';
+        if ($machineIds !== null) {
+            $normalized = array_values(array_unique(array_filter(
+                array_map(static fn (mixed $id): int => (int)$id, $machineIds),
+                static fn (int $id): bool => $id > 0
+            )));
+
+            if ($normalized === []) {
+                return [];
+            }
+
+            $machineFilter = "\n                   AND m.id IN (" . implode(', ', $normalized) . ')';
+        }
+
         $sql = $this->coveredZonesCte() . ",
             active_machines AS (
                 SELECT m.id, m.code, m.sanitary_status, m.is_blocked_no_access, m.is_seasonal_pause
@@ -860,7 +887,7 @@ final class PdoProductLoadingOrderRepository implements ProductLoadingOrderRepos
                   INNER JOIN locations l ON l.zone_id = c.zone_id
                   INNER JOIN machines m ON m.location_id = l.id
                  WHERE m.is_active = TRUE
-                   AND m.deleted_at IS NULL
+                   AND m.deleted_at IS NULL{$machineFilter}
             ),
             operational_machines AS (
                 SELECT id, code FROM active_machines m

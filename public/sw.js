@@ -22,7 +22,7 @@
 'use strict';
 
 /** Nombre de caché versionado (contratos §2.2). Subirlo es lo que invalida el shell. */
-const CACHE_NAME = 'vendguard-app-shell-v26';
+const CACHE_NAME = 'vendguard-app-shell-v32';
 
 /** Prefijo de la superficie HTTP que jamás entra en caché (Art. V.4). */
 const API_PATH_PREFIX = '/api/';
@@ -69,6 +69,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/utils/OpportunisticContext.js',
   '/assets/js/utils/PreventiveLabels.js',
   '/assets/js/utils/RestockVisitOfflineQueue.js',
+  '/assets/js/utils/RestockRouteOverrideOfflineQueue.js',
   '/assets/js/utils/CashCollectionOfflineQueue.js',
   '/assets/js/utils/RestockerIncidentOfflineQueue.js',
   '/assets/js/utils/SuggestionFormat.js',
@@ -93,6 +94,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/components/CoordinatorFleetTab.js',
   '/assets/js/components/CoordinatorPlanogramTab.js',
   '/assets/js/components/CoordinatorProductLoadingTab.js',
+  '/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js',
   '/assets/js/components/CoordinatorIncidentDetailModal.js?v=26',
   '/assets/js/components/CoordinatorNotificationCenterModal.js',
   '/assets/js/components/CoordinatorPreventiveDashboard.js',
@@ -112,6 +114,7 @@ const APP_SHELL_ASSETS = [
   '/assets/js/components/CoordinatorVanStockTab.js',
   '/assets/js/components/CoordinatorWorkHoursTab.js',
   '/assets/js/components/RestockerRouteView.js',
+  '/assets/js/components/RestockerRouteMapModal.js',
   '/assets/js/components/CoordinatorWorkshopTrayTab.js',
   '/assets/js/components/ExecutiveReportModal.js',
   '/assets/js/components/ImagePreview.js',

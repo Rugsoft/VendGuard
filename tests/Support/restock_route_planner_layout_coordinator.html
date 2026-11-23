@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VendGuard · sonda 360 · Consola de rutas M37</title>
+  <link rel="stylesheet" href="/assets/css/design-tokens.css">
+  <link rel="stylesheet" href="/assets/css/styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; min-height: 100%; scrollbar-width: none; }
+    html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; width: 0; height: 0; }
+    body { background: var(--color-canvas, #f9fafb); font-family: var(--font-body, Inter, sans-serif); color: var(--color-slate, #2c333f); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import * as Vue from '/assets/js/vendor/vue.esm-browser.prod.js';
+    window.Vue = Vue;
+    const { api } = await import('/assets/js/api.js');
+    const { CoordinatorRestockRoutePlannerSubTab } = await import('/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js');
+
+    const longReason = 'La conserjería permanece cerrada con persiana metálica bajada y el responsable de sede no puede abrir el cuarto de máquinas. La visita se reprograma para el siguiente turno operativo.';
+
+    const dayFixture = {
+      service_date: '2026-11-22',
+      is_future_projection: false,
+      kpis: {
+        scheduled_machines_count: 9,
+        injected_fefo_count: 2,
+        injected_demand_count: 3,
+        completed_count: 1,
+        skipped_count: 1,
+        blocked_count: 1,
+        uncovered_count: 2
+      },
+      uncovered_stops: [
+        {
+          machine_id: 9,
+          machine_code: 'VEND-MAD-0009',
+          location_id: 3,
+          location_name: 'Hospital Universitario Central · Ala Este',
+          zone_id: 2,
+          zone_name: 'Barcelona Litoral y Norte · Sector 12',
+          sla_tier: 'STANDARD',
+          coverage_status: 'UNCOVERED',
+          priority_block: 'FEFO_SANITARY',
+          triggers: ['FEFO_ALERT', 'SCHEDULED', 'EMPTY_SLOT'],
+          earliest_fefo_expiration_date: '2026-11-22'
+        },
+        {
+          machine_id: 10,
+          machine_code: 'VEND-MAD-0010',
+          location_id: 4,
+          location_name: 'Residencial Norte · Portal B',
+          zone_id: 3,
+          zone_name: 'Barcelona Distrito Centro · Sector 4',
+          sla_tier: 'PRIORITY_CORPORATE',
+          coverage_status: 'UNCOVERED',
+          priority_block: 'DEMAND_L1_STOCKOUT',
+          triggers: ['L1_INCIDENT', 'EMPTY_SLOT'],
+          earliest_fefo_expiration_date: null
+        }
+      ],
+      restocker_routes: [
+        {
+          restocker_id: 7,
+          restocker_name: 'Marta Reponedora de Rutas Periódicas',
+          operator_code: 'OP-07',
+          shift_status: 'ON_SHIFT',
+          summary: {
+            pending_stops_count: 2,
+            pending_machines_count: 3,
+            fefo_alerts_count: 1,
+            completed_machines_count: 1,
+            skipped_machines_count: 1,
+            blocked_machines_count: 1,
+            total_distance_km: 4.2,
+            unmapped_stops_count: 0
+          },
+          stops: [
+            {
+              location_id: 1,
+              location_name: 'Sede Central · Hall principal',
+              address: 'Calle Mayor 1',
+              priority_block: 'FEFO_SANITARY',
+              priority_label: 'Bloque 1 · Riesgo sanitario FEFO',
+              distance_km: 1.2,
+              navigation_url: 'https://maps.google.com/?q=41.4,2.1',
+              machines: [
+                {
+                  machine_id: 1,
+                  machine_code: 'VEND-MAD-0001',
+                  machine_type: 'PERISHABLE_FOOD',
+                  status: 'PENDING',
+                  triggers: ['FEFO_ALERT', 'SCHEDULED'],
+                  has_fefo_alert: true,
+                  has_expired_cold_batch: true,
+                  empty_slots_count: 0,
+                  schedule_id: 10,
+                  earliest_fefo_expiration_date: '2026-11-22'
+                },
+                {
+                  machine_id: 2,
+                  machine_code: 'VEND-MAD-0002',
+                  machine_type: 'COLD_DRINKS',
+                  status: 'PENDING',
+                  triggers: ['SCHEDULED'],
+                  has_fefo_alert: false,
+                  has_expired_cold_batch: false,
+                  empty_slots_count: 1,
+                  schedule_id: 10,
+                  earliest_fefo_expiration_date: null
+                }
+              ]
+            },
+            {
+              location_id: 2,
+              location_name: 'Sede Norte · Oficinas y laboratorio',
+              address: 'Avenida del Puerto 22',
+              priority_block: 'SCHEDULED_CADENCE',
+              priority_label: 'Bloque 3 · Cadencia programada',
+              distance_km: 3.0,
+              navigation_url: 'https://maps.google.com/?q=41.5,2.2',
+              machines: [
+                {
+                  machine_id: 3,
+                  machine_code: 'VEND-MAD-0003',
+                  machine_type: 'SNACKS',
+                  status: 'PENDING',
+                  triggers: ['SCHEDULED'],
+                  has_fefo_alert: false,
+                  has_expired_cold_batch: false,
+                  empty_slots_count: 0,
+                  schedule_id: 11,
+                  earliest_fefo_expiration_date: null
+                }
+              ]
+            }
+          ],
+          completed_stops: [
+            { machine_id: 4, machine_code: 'VEND-MAD-0004', location_name: 'Sede Central · Hall principal', status: 'COMPLETED' }
+          ],
+          skipped_stops: [
+            { machine_id: 5, machine_code: 'VEND-MAD-0005', location_name: 'Sede Norte', skip_reason_code: 'LOCATION_CLOSED', skip_reason_label: 'Local cerrado', had_active_fefo_alert: false }
+          ],
+          blocked_stops: [
+            { machine_id: 6, machine_code: 'VEND-MAD-0006', location_name: 'Sede Este', block_reason: 'SANITARY_QUARANTINE', block_reason_label: 'Cuarentena' }
+          ]
+        },
+        {
+          restocker_id: 8,
+          restocker_name: 'Javier Reponedor de Cobertura',
+          operator_code: 'OP-08',
+          shift_status: 'ON_SHIFT',
+          summary: {
+            pending_stops_count: 1,
+            pending_machines_count: 1,
+            fefo_alerts_count: 0,
+            completed_machines_count: 0,
+            skipped_machines_count: 0,
+            blocked_machines_count: 0,
+            total_distance_km: 2.7,
+            unmapped_stops_count: 1
+          },
+          stops: [
+            {
+              location_id: 5,
+              location_name: 'Centro Comercial Diagonal · Planta -1',
+              address: 'Avenida Diagonal 600',
+              priority_block: 'DEMAND_L1_STOCKOUT',
+              priority_label: 'Bloque 2 · Demanda L1 o stockout',
+              distance_km: null,
+              navigation_url: null,
+              machines: [
+                {
+                  machine_id: 11,
+                  machine_code: 'VEND-MAD-0011',
+                  machine_type: 'COLD_DRINKS',
+                  status: 'PENDING',
+                  triggers: ['L1_INCIDENT', 'EMPTY_SLOT'],
+                  has_fefo_alert: false,
+                  has_expired_cold_batch: false,
+                  empty_slots_count: 4,
+                  schedule_id: null,
+                  earliest_fefo_expiration_date: null
+                }
+              ]
+            }
+          ],
+          completed_stops: [],
+          skipped_stops: [],
+          blocked_stops: []
+        }
+      ],
+      active_overrides: [
+        {
+          id: 55,
+          machine_id: 3,
+          service_date: '2026-11-22',
+          override_type: 'SKIPPED',
+          override_type_label: 'Omitida',
+          status: 'ACTIVE',
+          status_label: 'Vigente',
+          skip_reason_code: 'LOCATION_CLOSED',
+          skip_reason_label: 'Local cerrado',
+          reassignment_reason_code: null,
+          reason_text: longReason,
+          created_by: 1,
+          created_at: '2026-11-22 08:00:00+00'
+        },
+        {
+          id: 56,
+          machine_id: 11,
+          service_date: '2026-11-22',
+          override_type: 'REASSIGNED',
+          override_type_label: 'Desviada',
+          status: 'ACTIVE',
+          status_label: 'Vigente',
+          skip_reason_code: null,
+          skip_reason_label: null,
+          reassignment_reason_code: 'ZONE_UNCOVERED',
+          reason_text: longReason,
+          created_by: 1,
+          created_at: '2026-11-22 08:10:00+00'
+        }
+      ],
+      blocked_stops: [
+        { machine_id: 6, machine_code: 'VEND-MAD-0006', location_name: 'Sede Este', block_reason: 'SANITARY_QUARANTINE', block_reason_label: 'Cuarentena' }
+      ],
+      completed_stops: [
+        { machine_id: 4, machine_code: 'VEND-MAD-0004', location_name: 'Sede Central · Hall principal', status: 'COMPLETED' }
+      ],
+      skipped_stops: [
+        { machine_id: 5, machine_code: 'VEND-MAD-0005', location_name: 'Sede Norte', skip_reason_code: 'LOCATION_CLOSED', skip_reason_label: 'Local cerrado' }
+      ]
+    };
+
+    const scheduleFixture = {
+      total: 3,
+      limit: 100,
+      offset: 0,
+      items: [
+        {
+          machine_id: 1,
+          machine_code: 'VEND-MAD-0001',
+          machine_type: 'PERISHABLE_FOOD',
+          location_id: 1,
+          location_name: 'Sede Central · Hall principal',
+          zone_id: 2,
+          zone_name: 'Barcelona Litoral y Norte · Sector 12',
+          has_schedule: true,
+          next_scheduled_date: '2026-11-23',
+          schedule: {
+            id: 10,
+            machine_id: 1,
+            cadence_type: 'DAILY',
+            cadence_label: 'Diaria',
+            day_of_week: null,
+            anchor_date: null,
+            preferred_time_window: 'MORNING',
+            preferred_time_window_label: 'Mañana',
+            include_weekends: true,
+            notes: 'Acceso por muelle antes de las 11:30.',
+            is_active: true
+          }
+        },
+        {
+          machine_id: 2,
+          machine_code: 'VEND-MAD-0002',
+          machine_type: 'COLD_DRINKS',
+          location_id: 2,
+          location_name: 'Sede Norte · Oficinas y laboratorio',
+          zone_id: 2,
+          zone_name: 'Barcelona Litoral y Norte · Sector 12',
+          has_schedule: true,
+          next_scheduled_date: '2026-11-24',
+          schedule: {
+            id: 11,
+            machine_id: 2,
+            cadence_type: 'MON_WED_FRI',
+            cadence_label: 'Lunes, miércoles y viernes',
+            day_of_week: null,
+            anchor_date: null,
+            preferred_time_window: 'MIDDAY',
+            preferred_time_window_label: 'Mediodía',
+            include_weekends: false,
+            notes: 'Coordinar con recepción.',
+            is_active: true
+          }
+        },
+        {
+          machine_id: 3,
+          machine_code: 'VEND-MAD-0003',
+          machine_type: 'SNACKS',
+          location_id: 3,
+          location_name: 'Centro Comercial Diagonal · Planta -1',
+          zone_id: 3,
+          zone_name: 'Barcelona Distrito Centro · Sector 4',
+          has_schedule: false,
+          next_scheduled_date: null,
+          schedule: null
+        }
+      ]
+    };
+
+    api.coordinator.getRestockRouteDay = async () => ({ data: dayFixture });
+    api.coordinator.getRestockSchedules = async () => ({ data: scheduleFixture });
+
+    const app = Vue.createApp(CoordinatorRestockRoutePlannerSubTab);
+    const vm = app.mount('#app');
+    window.__vm = vm;
+    window.__harness = {
+      async openSkipModal() {
+        const stop = vm.uncoveredStops[0];
+        if (!stop) throw new Error('No hay parada sin cobertura.');
+        vm.openSkipModal(stop.machine_id);
+        vm.overrideForm.reason_text = longReason;
+        await vm.$nextTick();
+      },
+      async closeAll() {
+        vm.showOverrideModal = false;
+        await vm.$nextTick();
+      }
+    };
+
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      if (vm.day && vm.routes.length > 0 && vm.schedules.length > 0) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    await document.fonts.ready;
+    await vm.$nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    window.__harnessState = {
+      uncovered: vm.uncoveredStops.length,
+      routes: vm.routes.length,
+      overrides: vm.activeOverrides.length,
+      schedules: vm.schedules.length,
+      dayError: vm.dayError,
+      scheduleError: vm.scheduleError
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

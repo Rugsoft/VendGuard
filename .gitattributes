@@ -6,3 +6,5 @@
 # y en el índice. El resto de extensiones conservan el comportamiento por defecto: no hay
 # `* text=auto` a propósito, para no renormalizar ficheros que no lo necesitan.
 *.sh text eol=lf
+# Los hooks nativos de Git tampoco llevan extensión .sh y fallan en /bin/sh con CRLF.
+.githooks/* text eol=lf

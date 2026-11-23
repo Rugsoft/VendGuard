@@ -258,8 +258,11 @@ final class FakeProductLoadingOrderRepositoryForServiceTest implements ProductLo
         return $row === null ? null : ProductLoadingOrderItem::fromDatabaseRow($row);
     }
 
-    public function fetchProposalInputs(int $restockerId, ?DateTimeImmutable $reference = null): array
-    {
+    public function fetchProposalInputs(
+        int $restockerId,
+        ?DateTimeImmutable $reference = null,
+        ?array $machineIds = null
+    ): array {
         if ($restockerId === 9) {
             return [
                 'restocker' => null,
@@ -1057,6 +1060,38 @@ $assertValidation(
     static fn () => $service->buildProposal(7, 'ALERTS_ONLY', 51),
     ProductLoadingValidationException::INVALID_LOADING_QUANTITY,
     422
+);
+$assertValidation(
+    '1.8 TODAY_ROUTE rejects a past service_date in the proposal',
+    static fn () => $service->buildProposal(7, 'TODAY_ROUTE', 10, null, $date(-1)),
+    ProductLoadingValidationException::PAST_SERVICE_DATE_FORBIDDEN,
+    422
+);
+$assertValidation(
+    '1.9 TODAY_ROUTE rejects a past service_date in an individual order with explicit items',
+    static fn () => $service->createOrder(7, [
+        'demand_mode' => 'TODAY_ROUTE',
+        'service_date' => $date(-1),
+        'items' => [['product_id' => 102, 'reason' => 'ROUTE_GAP_FILL', 'requested_qty' => 1]],
+    ], $world['actor']),
+    ProductLoadingValidationException::PAST_SERVICE_DATE_FORBIDDEN,
+    422
+);
+$assertValidation(
+    '1.10 TODAY_ROUTE rejects a past service_date in the batch before creating orders',
+    static fn () => $service->createBatchOrders([
+        'demand_mode' => 'TODAY_ROUTE',
+        'service_date' => $date(-1),
+        'safety_buffer_pct' => 10,
+    ], $world['actor']),
+    ProductLoadingValidationException::PAST_SERVICE_DATE_FORBIDDEN,
+    422
+);
+$legacyPast = $service->buildProposal(7, 'ALL_GAPS', 10, null, $date(-1));
+$assert(
+    '1.11 Other demand modes keep ignoring service_date',
+    count($legacyPast['items']) === 2,
+    json_encode($legacyPast['items'])
 );
 
 // =====================================================================

@@ -49,6 +49,7 @@ final class MachineRestockVisitValidationException extends DomainException
     public const SLOT_CAPACITY_OR_WITHDRAWAL_INVALID = 'SLOT_CAPACITY_OR_WITHDRAWAL_INVALID';
     public const INCOMPLETE_DAILY_HYGIENE_CHECKLIST = 'INCOMPLETE_DAILY_HYGIENE_CHECKLIST';
     public const PHOTO_EVIDENCE_REQUIRED = 'PHOTO_EVIDENCE_REQUIRED';
+    public const INVALID_ROUTE_SCHEDULE = 'INVALID_ROUTE_SCHEDULE';
     public const INVALID_JUSTIFICATION_LENGTH = 'INVALID_JUSTIFICATION_LENGTH';
 
     private string $errorCode;
@@ -132,6 +133,20 @@ final class MachineRestockVisitValidationException extends DomainException
             403,
             'machine_id',
             ['machine_id' => $machineId, 'restocker_id' => $restockerId]
+        );
+    }
+
+    /**
+     * La agenda de ruta declarada no existe o pertenece a otra máquina (`QA-2`).
+     */
+    public static function invalidRouteSchedule(int $scheduleId, int $machineId): self
+    {
+        return new self(
+            self::INVALID_ROUTE_SCHEDULE,
+            sprintf('La agenda de ruta %d no existe o no pertenece a la máquina %d (QA-2).', $scheduleId, $machineId),
+            422,
+            'route_schedule_id',
+            ['route_schedule_id' => $scheduleId, 'machine_id' => $machineId]
         );
     }
 

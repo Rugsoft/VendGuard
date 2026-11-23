@@ -13,7 +13,7 @@ declare(strict_types=1);
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
  *   1. **Art. III.1 — el borrado físico se rechaza con la boca abierta.** `DELETE FROM` sobre
- *      cada una de las 49 tablas del contrato lanza `SQLSTATE '45000'` con la marca
+ *      cada una de las 51 tablas del contrato lanza `SQLSTATE '45000'` con la marca
  *      `ART_III_1_VIOLATION`.
  *      Cada tabla se prueba **con una fila dentro**: un disparador `FOR EACH ROW` no ve una tabla
  *      vacía, de modo que certificar el rechazo sin filas no certificaría nada. La fixture se
@@ -87,7 +87,7 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 49 tablas del contrato de correspondencia (§2.1, Módulos 14 y 17–35). */
+/** Las 51 tablas del contrato de correspondencia (§2.1, Módulos 14 y 17–37). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -120,6 +120,9 @@ const CONTRACT_TABLES = [
     // Módulo 35 · la recaudación de efectivo declara `prevent_hard_delete()` y
     // entra en el barrido del Art. III.1.
     'machine_cash_collections',
+    // Módulo 37 · la agenda versionada y la excepción diaria declaran
+    // `prevent_hard_delete()`: el histórico se cierra lógicamente, no se borra.
+    'machine_restock_schedules', 'restock_route_daily_overrides',
 ];
 
 /** Las siete restricciones de longitud mínima del Art. V.1, con la tabla y la columna que vigilan. */

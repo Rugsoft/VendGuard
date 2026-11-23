@@ -756,17 +756,31 @@ final class PdoMachinePlanogramRepository implements MachinePlanogramRepositoryI
                 COALESCE(SUM(s.current_estimated_qty), 0) AS total_estimated_qty
             FROM machines m
             INNER JOIN locations l ON l.id = m.location_id
-            INNER JOIN operational_zones oz ON oz.id = l.zone_id AND oz.is_active = TRUE
+            LEFT JOIN operational_zones oz ON oz.id = l.zone_id AND oz.is_active = TRUE
             LEFT JOIN machine_planogram_slots s ON s.machine_id = m.id AND s.is_active = TRUE
             LEFT JOIN vending_products vp ON vp.id = s.product_id
             WHERE m.is_active = TRUE
               AND m.deleted_at IS NULL
-              AND EXISTS (
-                  SELECT 1
-                  FROM restocker_zone_assignments rza
-                  WHERE rza.restocker_id = :restocker_id
-                    AND rza.zone_id = oz.id
-                    AND rza.removed_at IS NULL
+              AND (
+                  (
+                      oz.id IS NOT NULL
+                      AND EXISTS (
+                          SELECT 1
+                          FROM restocker_zone_assignments rza
+                          WHERE rza.restocker_id = :restocker_id
+                            AND rza.zone_id = oz.id
+                            AND rza.removed_at IS NULL
+                      )
+                  )
+                  OR EXISTS (
+                      SELECT 1
+                      FROM restock_route_daily_overrides rrdo
+                      WHERE rrdo.machine_id = m.id
+                        AND rrdo.target_restocker_id = :restocker_id
+                        AND rrdo.service_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date
+                        AND rrdo.override_type = 'REASSIGNED'
+                        AND rrdo.status = 'ACTIVE'
+                  )
               )
             {$machineFilter}
             GROUP BY

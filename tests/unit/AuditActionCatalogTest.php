@@ -418,8 +418,12 @@ function extractAuditActions(string $source, string $relativePath): array
     // escritores reconocidos por las pasadas anteriores. Sin esta lectura las
     // cuatro acciones del catálogo se leían como filtros fantasma aunque el
     // servicio las persiste con `AuditLogger`.
+    // Módulo 37: los servicios del planificador usan la misma delegación con
+    // constantes `ACTION_*` (`SKIP_RESTOCK_STOP`, `UPSERT_RESTOCK_SCHEDULE`...).
+    // La guarda debe resolver ambas familias o las siete acciones reales vuelven
+    // a leerse como filtros fantasma.
     if (str_contains($source, '->audit(')
-        && preg_match_all("/public const AUDIT_ACTION_[A-Z0-9_]*\s*=\s*'([A-Z][A-Z0-9_]+)'/", $source, $matches)) {
+        && preg_match_all("/public const (?:AUDIT_)?ACTION_[A-Z0-9_]*\s*=\s*'([A-Z][A-Z0-9_]+)'/", $source, $matches)) {
         foreach ($matches[1] as $literal) {
             $literals[$literal] = $literals[$literal] ?? $relativePath . ' (audit action constant)';
         }

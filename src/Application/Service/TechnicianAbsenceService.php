@@ -46,7 +46,8 @@ final class TechnicianAbsenceService
         private readonly TechnicianLockRepositoryInterface $lockRepo,
         private readonly ?SuggestedTechniciansService $suggestions = null,
         private readonly ?OperationalZoneRepositoryInterface $zoneRepo = null,
-        private readonly ?RestockerSatSynergyService $synergyService = null
+        private readonly ?RestockerSatSynergyService $synergyService = null,
+        private readonly ?RestockRouteReassignmentRevoker $routeRevoker = null
     ) {
     }
 
@@ -118,7 +119,8 @@ final class TechnicianAbsenceService
             $tech,
             $creator,
             $isCurrentAbsence,
-            $reason
+            $reason,
+            $now
         ): TechnicianAbsence {
             if (!$this->lockRepo->lockTechnicianForUpdate($technicianId)) {
                 throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
@@ -179,6 +181,17 @@ final class TechnicianAbsenceService
                 ]
             );
             $this->auditRepo->log($event);
+
+            // QA-3: una ausencia vigente del receptor revoca sus desvíos del
+            // día dentro de la misma unidad de trabajo que el alta.
+            if ($isCurrentAbsence && $tech->getRole()->isRestocker()) {
+                $this->routeRevoker?->revokeForRestocker(
+                    $technicianId,
+                    RestockRouteReassignmentRevoker::CAUSE_ABSENCE,
+                    $createdBy,
+                    $now
+                );
+            }
 
             return $absence;
         });

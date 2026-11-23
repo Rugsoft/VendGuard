@@ -19,10 +19,13 @@ use VendGuard\Core\Domain\Repository\CashCollectionRegistrarInterface;
 use VendGuard\Core\Domain\Repository\InSituRestockVisitGatewayInterface;
 use VendGuard\Core\Domain\Repository\MachinePlanogramRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
+use VendGuard\Core\Domain\Repository\RestockRoutePlannerGatewayInterface;
+use VendGuard\Core\Domain\Repository\RestockRouteReadModelInterface;
 use VendGuard\Core\Domain\Repository\RestockerVanStockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Service\MachineCashCollectionValidator;
 use VendGuard\Core\Service\MachineRestockVisitValidator;
+use VendGuard\Core\Service\RestockCadenceEvaluator;
 use VendGuard\Infrastructure\Storage\LocalFileUploader;
 
 /**
@@ -74,6 +77,10 @@ final class MachineRestockVisitService
 
     private ?CashCollectionRegistrarInterface $cashCollections;
 
+    private ?RestockRoutePlannerGatewayInterface $routeGateway;
+
+    private ?RestockRouteReadModelInterface $routeReadModel;
+
     public function __construct(
         MachineRestockVisitRepositoryInterface $visits,
         MachinePlanogramRepositoryInterface $planograms,
@@ -82,7 +89,9 @@ final class MachineRestockVisitService
         TransactionManagerInterface $transactions,
         AuditLogger $audit,
         ?LocalFileUploader $uploader = null,
-        ?CashCollectionRegistrarInterface $cashCollections = null
+        ?CashCollectionRegistrarInterface $cashCollections = null,
+        ?RestockRoutePlannerGatewayInterface $routeGateway = null,
+        ?RestockRouteReadModelInterface $routeReadModel = null
     ) {
         $this->visits = $visits;
         $this->planograms = $planograms;
@@ -92,6 +101,8 @@ final class MachineRestockVisitService
         $this->audit = $audit;
         $this->uploader = $uploader ?? new LocalFileUploader();
         $this->cashCollections = $cashCollections;
+        $this->routeGateway = $routeGateway;
+        $this->routeReadModel = $routeReadModel;
     }
 
     /**
@@ -140,6 +151,8 @@ final class MachineRestockVisitService
             }
 
             $status = RestockVisitStatus::fromString((string)($payload['status'] ?? ''));
+            $routeScheduleId = $this->resolveRouteScheduleId($machineId, $payload);
+            $now = new DateTimeImmutable('now');
             $cashCollectionPayload = $this->cashCollectionPayload($payload);
             if ($cashCollectionPayload !== null) {
                 MachineCashCollectionValidator::assertVisitAllowsCashCollection(
@@ -237,7 +250,7 @@ final class MachineRestockVisitService
                 isset($context['loading_order_id']) && $context['loading_order_id'] !== null
                     ? (int)$context['loading_order_id']
                     : null,
-                null,
+                $routeScheduleId,
                 $this->nullableText($payload['started_at'] ?? null),
                 $this->nullableText($payload['completed_at'] ?? null),
                 $triggeredIncidentId
@@ -257,6 +270,11 @@ final class MachineRestockVisitService
 
                     $this->applyCompletedLine($visitId, $restockerId, $line);
                 }
+            }
+
+            $routeOutcome = ['superseded_overrides_count' => 0, 'sanitary_status_restored' => false];
+            if ($status->isCompleted() || $status->isThermalAbort()) {
+                $routeOutcome = $this->applyRouteOutcome($machineId, $restockerId, $visitId, $context, $now);
             }
 
             $cashCollection = null;
@@ -295,6 +313,9 @@ final class MachineRestockVisitService
                     'units_withdrawn' => $withdrawnTotal,
                     'triggered_incident_id' => $triggeredIncidentId,
                     'loading_order_id' => $persistedVisit->getLoadingOrderId(),
+                    'route_schedule_id' => $routeScheduleId,
+                    'superseded_overrides_count' => $routeOutcome['superseded_overrides_count'],
+                    'sanitary_status_restored' => $routeOutcome['sanitary_status_restored'],
                 ],
                 ['client_mutation_id' => $mutationId]
             );
@@ -403,6 +424,88 @@ final class MachineRestockVisitService
         );
 
         return ['status' => 'ARCHIVED', 'reason' => $reason];
+    }
+
+    /**
+     * Resuelve el enlace histórico de la visita con su agenda de ruta (`QA-2`).
+     *
+     * Si el móvil declara `route_schedule_id`, se acepta cualquier versión de la
+     * agenda —también una cerrada mientras la visita viajaba offline— siempre que
+     * pertenezca a la misma máquina. Si no lo declara, se vincula la agenda viva
+     * del momento; una máquina sin agenda conserva `null`.
+     *
+     * @param array<string, mixed> $payload
+     *
+     * @throws MachineRestockVisitValidationException Si la agenda no existe o es
+     *         de otra máquina.
+     */
+    private function resolveRouteScheduleId(int $machineId, array $payload): ?int
+    {
+        $raw = $payload['route_schedule_id'] ?? null;
+        if ($raw === null || $raw === '') {
+            return $this->routeGateway?->findActiveSchedule($machineId)?->getId();
+        }
+
+        if (!is_numeric($raw) || (int)$raw <= 0) {
+            throw MachineRestockVisitValidationException::invalidRouteSchedule(0, $machineId);
+        }
+
+        $scheduleId = (int)$raw;
+        if ($this->routeReadModel === null) {
+            throw new \LogicException(
+                'La visita declara route_schedule_id y el modelo de lectura del Módulo 37 no está configurado.'
+            );
+        }
+
+        $schedule = $this->routeReadModel->findScheduleById($scheduleId);
+        if ($schedule === null || $schedule->getMachineId() !== $machineId) {
+            throw MachineRestockVisitValidationException::invalidRouteSchedule($scheduleId, $machineId);
+        }
+
+        return $scheduleId;
+    }
+
+    /**
+     * Aplica la prevalencia física de la visita sobre la ruta del día (`C1`, `QA-1`).
+     *
+     * Una visita completada o un aborto térmico superan la omisión viva de la
+     * máquina (`SKIPPED -> SUPERSEDED`). Si la máquina estaba sellada `EXPIRED`
+     * por una omisión con perecederos vencidos, la visita intenta restituir `'OK'`
+     * solo cuando ya no queda ningún lote refrigerado caducado en sus carriles.
+     *
+     * @param array<string, mixed> $context
+     *
+     * @return array{superseded_overrides_count: int, sanitary_status_restored: bool}
+     */
+    private function applyRouteOutcome(
+        int $machineId,
+        int $restockerId,
+        int $visitId,
+        array $context,
+        DateTimeImmutable $now
+    ): array {
+        if ($this->routeGateway === null) {
+            return ['superseded_overrides_count' => 0, 'sanitary_status_restored' => false];
+        }
+
+        $serviceDate = RestockCadenceEvaluator::today($now);
+        $superseded = $this->routeGateway->supersedeSkippedOverrides(
+            $machineId,
+            $serviceDate,
+            $visitId,
+            $restockerId,
+            $now->format(DateTimeImmutable::ATOM)
+        );
+
+        $restored = false;
+        if (($context['sanitary_status'] ?? null) === 'EXPIRED') {
+            $restored = $this->routeGateway->restoreMachineSanitaryOkIfClear($machineId, $serviceDate);
+        }
+
+        return [
+            'superseded_overrides_count' => $superseded,
+            'sanitary_status_restored' => $restored,
+        ];
     }
 
     /**

@@ -10,6 +10,7 @@ use Throwable;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\MachineCashCollectionService;
 use VendGuard\Application\Service\ProductLoadingOrderService;
+use VendGuard\Application\Service\RestockRoutePlannerService;
 use VendGuard\Application\Service\RestockerVanStockService;
 use VendGuard\Core\Domain\Enum\CashCollectionStatus;
 use VendGuard\Core\Domain\Exception\MachineCashCollectionValidationException;
@@ -22,6 +23,7 @@ use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRestockVisitRepository;
 use VendGuard\Infrastructure\Repository\PdoProductLoadingOrderRepository;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
+use VendGuard\Infrastructure\Repository\PdoRestockRouteReadModel;
 use VendGuard\Infrastructure\Repository\PdoRestockerVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Infrastructure\Repository\PdoVendingProductRepository;
@@ -101,7 +103,8 @@ final class CoordinatorProductLoadingController
             new AuditLogger(),
             $pdo,
             null,
-            $this->visitRepository
+            $this->visitRepository,
+            new RestockRoutePlannerService(new PdoRestockRouteReadModel($pdo))
         );
 
         $this->stockService = $stockService ?? new RestockerVanStockService(
@@ -155,9 +158,10 @@ final class CoordinatorProductLoadingController
 
             $demandMode = $this->optionalQuery($request, 'demand_mode') ?? 'ALERTS_ONLY';
             $buffer = $this->optionalNonNegativeQuery($request, 'safety_buffer_pct') ?? 10;
+            $serviceDate = $this->optionalQuery($request, 'service_date');
 
             return Response::json(
-                $this->orderService->buildProposal($restockerId, $demandMode, $buffer),
+                $this->orderService->buildProposal($restockerId, $demandMode, $buffer, null, $serviceDate),
                 200
             );
         });

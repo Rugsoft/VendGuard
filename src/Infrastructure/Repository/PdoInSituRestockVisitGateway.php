@@ -95,14 +95,25 @@ final class PdoInSituRestockVisitGateway implements InSituRestockVisitGatewayInt
                 m.location_id,
                 m.sanitary_status,
                 m.is_blocked_no_access,
-                EXISTS (
-                    SELECT 1
-                    FROM restocker_zone_assignments rza
-                    INNER JOIN operational_zones oz ON oz.id = rza.zone_id
-                    WHERE rza.restocker_id = :restocker_id
-                      AND rza.zone_id = l.zone_id
-                      AND rza.removed_at IS NULL
-                      AND oz.is_active = TRUE
+                (
+                    EXISTS (
+                        SELECT 1
+                        FROM restocker_zone_assignments rza
+                        INNER JOIN operational_zones oz ON oz.id = rza.zone_id
+                        WHERE rza.restocker_id = :restocker_id
+                          AND rza.zone_id = l.zone_id
+                          AND rza.removed_at IS NULL
+                          AND oz.is_active = TRUE
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM restock_route_daily_overrides rrdo
+                        WHERE rrdo.machine_id = m.id
+                          AND rrdo.target_restocker_id = :restocker_id
+                          AND rrdo.service_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date
+                          AND rrdo.override_type = 'REASSIGNED'
+                          AND rrdo.status = 'ACTIVE'
+                    )
                 ) AS is_covered,
                 (
                     SELECT i.id

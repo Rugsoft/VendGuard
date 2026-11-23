@@ -243,10 +243,11 @@ $assert(
 // propia orden: stock por lote, cabecera de carga y sus líneas. El Módulo 34 suma la
 // visita de reposición in situ y su desglose, inmutables y colgados de máquina,
 // reponedor y orden de carga. El Módulo 35 añade el corte de bolsa precintada,
-// colgado de la visita, la máquina y el reponedor.
+// colgado de la visita, la máquina y el reponedor. El Módulo 37 añade la excepción
+// diaria de ruta, colgada de la visita que la supera.
 $assert(
-    '2.7 El plan cubre las 38 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio + 1 de encuestas CSAT + 3 de ausencias/turnos/bitácora M21-M22 + 2 de órdenes de carga M23 + 1 del libro de sincronización M24 + 1 de la cadena de custodia M26 + 1 del bucle de taller M27 + 1 de actas de merma M29 + 1 del cuadrante de carga M31 + 1 de planograma M32 + 3 de stock y órdenes de carga M33 + 2 de visitas in situ M34 + 1 de recaudación de efectivo M35)',
-    count($order) === 38,
+    '2.7 El plan cubre las 39 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio + 1 de encuestas CSAT + 3 de ausencias/turnos/bitácora M21-M22 + 2 de órdenes de carga M23 + 1 del libro de sincronización M24 + 1 de la cadena de custodia M26 + 1 del bucle de taller M27 + 1 de actas de merma M29 + 1 del cuadrante de carga M31 + 1 de planograma M32 + 3 de stock y órdenes de carga M33 + 2 de visitas in situ M34 + 1 de recaudación de efectivo M35 + 1 de excepciones de ruta M37)',
+    count($order) === 39,
     'obtenidas: ' . count($order)
 );
 

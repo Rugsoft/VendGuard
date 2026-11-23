@@ -52,14 +52,25 @@ final class PdoMachineCashCollectionGateway implements MachineCashCollectionGate
                 m.sanitary_status,
                 m.is_blocked_no_access,
                 l.has_physical_reception,
-                EXISTS (
-                    SELECT 1
-                    FROM restocker_zone_assignments rza
-                    INNER JOIN operational_zones oz ON oz.id = rza.zone_id
-                    WHERE rza.restocker_id = :cover_restocker_id
-                      AND rza.zone_id = l.zone_id
-                      AND rza.removed_at IS NULL
-                      AND oz.is_active = TRUE
+                (
+                    EXISTS (
+                        SELECT 1
+                        FROM restocker_zone_assignments rza
+                        INNER JOIN operational_zones oz ON oz.id = rza.zone_id
+                        WHERE rza.restocker_id = :cover_restocker_id
+                          AND rza.zone_id = l.zone_id
+                          AND rza.removed_at IS NULL
+                          AND oz.is_active = TRUE
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM restock_route_daily_overrides rrdo
+                        WHERE rrdo.machine_id = m.id
+                          AND rrdo.target_restocker_id = :cover_restocker_id
+                          AND rrdo.service_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date
+                          AND rrdo.override_type = 'REASSIGNED'
+                          AND rrdo.status = 'ACTIVE'
+                    )
                 ) AS is_covered,
                 EXISTS (
                     SELECT 1
@@ -202,6 +213,30 @@ final class PdoMachineCashCollectionGateway implements MachineCashCollectionGate
             $machines[(int)$row['id']] = self::toBool($row['has_physical_reception']);
         }
 
+        // Perímetro temporal REASSIGNED (QA-3): una máquina desviada hoy al
+        // reponedor entra en su bootstrap aunque la zona no esté asignada o
+        // esté inactiva, sin ampliar el perímetro al resto de la zona.
+        $reassignedFlags = $this->pdo->prepare(
+            "SELECT DISTINCT
+                m.id,
+                l.has_physical_reception
+            FROM restock_route_daily_overrides rrdo
+            INNER JOIN machines m ON m.id = rrdo.machine_id
+            INNER JOIN locations l ON l.id = m.location_id
+            WHERE rrdo.target_restocker_id = :restocker_id
+              AND rrdo.service_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date
+              AND rrdo.override_type = 'REASSIGNED'
+              AND rrdo.status = 'ACTIVE'
+              AND m.is_active = TRUE
+              AND m.deleted_at IS NULL"
+        );
+        $reassignedFlags->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        $reassignedFlags->execute();
+
+        foreach ($reassignedFlags->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $machines[(int)$row['id']] = self::toBool($row['has_physical_reception']);
+        }
+
         $refunds = $this->pdo->prepare("
             SELECT
                 rr.id,
@@ -230,9 +265,55 @@ final class PdoMachineCashCollectionGateway implements MachineCashCollectionGate
         $refunds->execute();
 
         $pending = [];
+        $pendingIds = [];
         foreach ($refunds->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $pending[] = [
                 'id' => (int)$row['id'],
+                'machine_id' => (int)$row['machine_id'],
+                'machine_code' => (string)$row['machine_code'],
+                'claimed_amount' => round((float)$row['claimed_amount'], 2),
+                'created_at' => (string)$row['created_at'],
+            ];
+            $pendingIds[(int)$row['id']] = true;
+        }
+
+        // Los reintegros de las máquinas desviadas hoy también entran en el
+        // bootstrap del receptor (QA-3), una sola vez por expediente.
+        $reassignedRefunds = $this->pdo->prepare(
+            "SELECT
+                rr.id,
+                rr.machine_id,
+                m.code AS machine_code,
+                rr.claimed_amount,
+                rr.created_at
+            FROM restock_route_daily_overrides rrdo
+            INNER JOIN machines m ON m.id = rrdo.machine_id
+            INNER JOIN locations l ON l.id = m.location_id
+            INNER JOIN refund_requests rr ON rr.machine_id = m.id
+            WHERE rrdo.target_restocker_id = :restocker_id
+              AND rrdo.service_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date
+              AND rrdo.override_type = 'REASSIGNED'
+              AND rrdo.status = 'ACTIVE'
+              AND rr.status = 'PENDING_INSPECTION'
+              AND rr.compensation_method = 'EN_MANO_SEDE'
+              AND rr.is_active = TRUE
+              AND rr.deleted_at IS NULL
+              AND l.has_physical_reception = TRUE
+              AND m.is_active = TRUE
+              AND m.deleted_at IS NULL
+            ORDER BY rr.created_at DESC, rr.id DESC"
+        );
+        $reassignedRefunds->bindValue(':restocker_id', $restockerId, PDO::PARAM_INT);
+        $reassignedRefunds->execute();
+
+        foreach ($reassignedRefunds->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $refundId = (int)$row['id'];
+            if (isset($pendingIds[$refundId])) {
+                continue;
+            }
+            $pendingIds[$refundId] = true;
+            $pending[] = [
+                'id' => $refundId,
                 'machine_id' => (int)$row['machine_id'],
                 'machine_code' => (string)$row['machine_code'],
                 'claimed_amount' => round((float)$row['claimed_amount'], 2),

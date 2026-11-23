@@ -155,6 +155,58 @@ emittedEvents = [];
 ModalDialog.methods.handleKeyDown.call(mockModalInstance, { key: 'Enter' });
 assert('2.12 Pressing non-Escape key does not trigger close()', emittedEvents.length === 0);
 
+// Focus lifecycle and focus trap
+const originalDocument = globalThis.document;
+const originalWindow = globalThis.window;
+const focusCalls = [];
+let keydownListener = null;
+const triggerFocus = { focus: () => focusCalls.push('trigger') };
+const closeFocus = { focus: () => focusCalls.push('close') };
+const fieldFocus = { focus: () => focusCalls.push('field') };
+const modalRoot = {
+  querySelectorAll: () => [closeFocus, fieldFocus],
+  contains: (element) => element === closeFocus || element === fieldFocus,
+  focus: () => focusCalls.push('dialog')
+};
+globalThis.document = { body: { style: {} }, activeElement: triggerFocus };
+globalThis.window = {
+  addEventListener: (type, handler) => { if (type === 'keydown') keydownListener = handler; },
+  removeEventListener: (type, handler) => { if (type === 'keydown' && keydownListener === handler) keydownListener = null; }
+};
+const focusModal = {
+  modelValue: true,
+  $refs: { modalDialog: modalRoot },
+  $nextTick: (callback) => callback(),
+  $emit: (name, value) => focusCalls.push(`${name}:${value}`),
+  ...ModalDialog.methods
+};
+
+ModalDialog.watch.modelValue.handler.call(focusModal, true);
+assert(
+  '2.13 Opening stores the trigger and focuses the first control',
+  focusModal.previousFocus === triggerFocus && focusCalls[0] === 'close' && typeof keydownListener === 'function'
+);
+
+let prevented = 0;
+globalThis.document.activeElement = fieldFocus;
+focusModal.handleKeyDown({ key: 'Tab', shiftKey: false, preventDefault: () => { prevented++; } });
+assert('2.14 Tab from the last control wraps to the first', prevented === 1 && focusCalls.at(-1) === 'close');
+
+globalThis.document.activeElement = closeFocus;
+focusModal.handleKeyDown({ key: 'Tab', shiftKey: true, preventDefault: () => { prevented++; } });
+assert('2.15 Shift+Tab from the first control wraps to the last', prevented === 2 && focusCalls.at(-1) === 'field');
+
+ModalDialog.watch.modelValue.handler.call(focusModal, false);
+assert(
+  '2.16 Closing restores the trigger and removes the listener',
+  focusCalls.at(-1) === 'trigger' && focusModal.previousFocus === null && keydownListener === null
+);
+
+if (originalDocument === undefined) delete globalThis.document;
+else globalThis.document = originalDocument;
+if (originalWindow === undefined) delete globalThis.window;
+else globalThis.window = originalWindow;
+
 // ---------------------------------------------------------------------
 // TEST GROUP 3: AppNavbar Brand, Context Badges & Logout
 // ---------------------------------------------------------------------

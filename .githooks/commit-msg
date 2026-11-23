@@ -1,0 +1,76 @@
+#!/bin/sh
+# Strip Co-Authored-By trailers and AI-attribution footers from commit messages.
+
+set -eu
+
+COMMIT_MSG_FILE="${1:-}"
+if [ -z "$COMMIT_MSG_FILE" ] || [ ! -f "$COMMIT_MSG_FILE" ]; then
+    exit 0
+fi
+
+TMP_FILE="${COMMIT_MSG_FILE}.strip-ai-$$"
+trap 'rm -f "$TMP_FILE"' EXIT
+
+status=0
+awk '
+{
+    raw = $0
+    sub(/\r$/, "", raw)
+    low = tolower(raw)
+
+    if (raw !~ /^#/ && ( \
+        low ~ /^[[:space:]]*co-authored-by:[[:space:]]*/ || \
+        low ~ /^[[:space:]]*🤖[[:space:]]*generated[[:space:]]+(with|by)[[:space:]]+/ || \
+        low ~ /^[[:space:]]*generated[[:space:]]+(with|by)[[:space:]]+(\[)?(codebuff|freebuff|claude|cursor|copilot|github[[:space:]]+copilot|gemini|antigravity|codex|openai|windsurf|aider)([[:space:][:punct:]]|$)/ \
+    )) {
+        removed++
+        next
+    }
+
+    lines[++n] = raw
+}
+END {
+    if (removed == 0) {
+        exit 10
+    }
+
+    # Find where the trailing Git comment section (if any) begins.
+    comment_start = n + 1
+    for (i = n; i >= 1; i--) {
+        if (lines[i] ~ /^#/ || lines[i] ~ /^[[:space:]]*$/) {
+            if (lines[i] ~ /^#/) {
+                comment_start = i
+            }
+        } else {
+            break
+        }
+    }
+
+    # Trim trailing blank lines from the commit message body (before comments or EOF).
+    body_end = comment_start - 1
+    while (body_end >= 1 && lines[body_end] ~ /^[[:space:]]*$/) {
+        body_end--
+    }
+
+    for (i = 1; i <= body_end; i++) {
+        print lines[i]
+    }
+    if (comment_start <= n) {
+        if (body_end >= 1) {
+            print ""
+        }
+        for (i = comment_start; i <= n; i++) {
+            print lines[i]
+        }
+    }
+}
+' "$COMMIT_MSG_FILE" > "$TMP_FILE" || status=$?
+
+if [ "$status" -eq 10 ]; then
+    # Nothing matched; leave the original commit message untouched.
+    exit 0
+elif [ "$status" -ne 0 ]; then
+    exit "$status"
+fi
+
+mv "$TMP_FILE" "$COMMIT_MSG_FILE"

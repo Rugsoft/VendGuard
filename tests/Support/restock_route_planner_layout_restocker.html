@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VendGuard · sonda 360 · Planificador de rutas M37</title>
+  <link rel="stylesheet" href="/assets/css/design-tokens.css">
+  <link rel="stylesheet" href="/assets/css/styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; min-height: 100%; scrollbar-width: none; }
+    html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; width: 0; height: 0; }
+    body { background: var(--color-canvas, #f9fafb); font-family: var(--font-body, Inter, sans-serif); color: var(--color-slate, #2c333f); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import * as Vue from '/assets/js/vendor/vue.esm-browser.prod.js';
+    window.Vue = Vue;
+    const { api } = await import('/assets/js/api.js');
+    const { store } = await import('/assets/js/store.js');
+    const { RestockerRouteView } = await import('/assets/js/components/RestockerRouteView.js');
+
+    const machine = (id, code, locationName, type = 'COMBO') => ({
+      id,
+      code,
+      model: 'Jofemar Vision',
+      machine_type: type,
+      location_id: id,
+      location_name: locationName,
+      site_code: 'HOSP-MAR',
+      zone_id: 1,
+      zone_code: 'ZONA-BCN-NORTE',
+      zone_name: 'Barcelona Litoral y Norte',
+      sanitary_status: 'OK',
+      has_physical_reception: true,
+      has_prior_cash_collection: false,
+      can_restock: true,
+      pending_reception_refunds_count: 0,
+      active_slots_count: 6,
+      stockout_slots_count: 1,
+      low_stock_slots_count: 0,
+      ok_slots_count: 5,
+      inactive_product_slots_count: 0,
+      total_capacity: 60,
+      total_estimated_qty: 38,
+      fill_rate_percent: 63.33
+    });
+
+    const routePlanFixture = () => ({
+      origin: {
+        source: 'BASE_CENTRAL',
+        address: 'Base Central · Barcelona',
+        latitude: 41.385064,
+        longitude: 2.1734035
+      },
+      summary: {
+        pending_stops_count: 3,
+        pending_machines_count: 4,
+        completed_machines_count: 1,
+        skipped_machines_count: 1,
+        blocked_machines_count: 1,
+        fefo_alerts_count: 1,
+        total_distance_km: 6.4,
+        unmapped_stops_count: 1
+      },
+      full_route_navigation_url: 'https://www.google.com/maps/dir/?api=1&origin=41.385064,2.1734035&destination=41.412345,2.156789&travelmode=driving',
+      waypoints_truncated: true,
+      stops: [
+        {
+          stop_order: 1,
+          location_id: 1,
+          location_name: 'Hospital Universitario Central',
+          address: 'Av. Diagonal 450, Barcelona',
+          sla_tier: 'CRITICAL_INFRASTRUCTURE_24_7',
+          priority_block: 'FEFO_SANITARY',
+          has_valid_coordinates: true,
+          latitude: 41.4036299,
+          longitude: 2.1743558,
+          distance_km: 6.4,
+          navigation_url: 'https://www.google.com/maps/dir/?api=1&destination=41.4036299,2.1743558&travelmode=driving',
+          earliest_fefo_expiration_date: '2026-11-21',
+          preferred_time_window: 'MORNING',
+          machines: [
+            {
+              machine_id: 5,
+              machine_code: 'VEND-MAD-005',
+              machine_type: 'PERISHABLE_FOOD',
+              schedule_id: 12,
+              triggers: ['FEFO_ALERT', 'SCHEDULED'],
+              has_fefo_alert: true,
+              has_expired_cold_batch: true,
+              empty_slots_count: 2,
+              active_l1_incident: null,
+              is_temporary_reassignment: false,
+              earliest_fefo_expiration_date: '2026-11-21',
+              preferred_time_window: 'MORNING',
+              status: 'PENDING'
+            },
+            {
+              machine_id: 6,
+              machine_code: 'VEND-MAD-006',
+              machine_type: 'COLD_DRINKS',
+              schedule_id: 12,
+              triggers: ['SCHEDULED'],
+              has_fefo_alert: false,
+              has_expired_cold_batch: false,
+              empty_slots_count: 0,
+              active_l1_incident: null,
+              is_temporary_reassignment: false,
+              earliest_fefo_expiration_date: null,
+              preferred_time_window: 'MORNING',
+              status: 'PENDING'
+            }
+          ]
+        },
+        {
+          stop_order: 2,
+          location_id: 2,
+          location_name: 'Oficinas Centro',
+          address: 'Calle Balmes 12, Barcelona',
+          sla_tier: 'PRIORITY_CORPORATE',
+          priority_block: 'DEMAND_L1_STOCKOUT',
+          has_valid_coordinates: false,
+          latitude: null,
+          longitude: null,
+          distance_km: null,
+          navigation_url: null,
+          earliest_fefo_expiration_date: null,
+          preferred_time_window: 'MIDDAY',
+          machines: [
+            {
+              machine_id: 8,
+              machine_code: 'VEND-MAD-008',
+              machine_type: 'SNACKS',
+              schedule_id: null,
+              triggers: ['L1_INCIDENT', 'EMPTY_SLOT'],
+              has_fefo_alert: false,
+              has_expired_cold_batch: false,
+              empty_slots_count: 3,
+              active_l1_incident: { id: 77, assigned_restocker_id: 12 },
+              is_temporary_reassignment: true,
+              earliest_fefo_expiration_date: null,
+              preferred_time_window: 'MIDDAY',
+              status: 'PENDING'
+            }
+          ]
+        },
+        {
+          stop_order: 3,
+          location_id: 3,
+          location_name: 'Residencial Norte',
+          address: 'Av. Vallcarca 88, Barcelona',
+          sla_tier: 'STANDARD',
+          priority_block: 'SCHEDULED_CADENCE',
+          has_valid_coordinates: true,
+          latitude: 41.412345,
+          longitude: 2.156789,
+          distance_km: 3.1,
+          navigation_url: 'https://www.google.com/maps/dir/?api=1&destination=41.412345,2.156789&travelmode=driving',
+          earliest_fefo_expiration_date: null,
+          preferred_time_window: 'AFTERNOON',
+          machines: [
+            {
+              machine_id: 9,
+              machine_code: 'VEND-MAD-009',
+              machine_type: 'COLD_DRINKS',
+              schedule_id: 13,
+              triggers: ['SCHEDULED'],
+              has_fefo_alert: false,
+              has_expired_cold_batch: false,
+              empty_slots_count: 0,
+              active_l1_incident: null,
+              is_temporary_reassignment: false,
+              earliest_fefo_expiration_date: null,
+              preferred_time_window: 'AFTERNOON',
+              status: 'PENDING'
+            }
+          ]
+        }
+      ],
+      completed_stops: [
+        { machine_id: 2, machine_code: 'VEND-MAD-002', location_id: 1, location_name: 'Hospital Universitario Central', visit_status: 'COMPLETED' }
+      ],
+      skipped_stops: [
+        { machine_id: 3, machine_code: 'VEND-MAD-003', location_id: 2, location_name: 'Oficinas Centro', skip_reason_label: 'Local cerrado', had_active_fefo_alert: false }
+      ],
+      blocked_stops: [
+        { machine_id: 4, machine_code: 'VEND-MAD-004', location_id: 3, location_name: 'Residencial Norte', block_reason: 'SANITARY_QUARANTINE', block_reason_label: 'Bloqueada por cuarentena sanitaria activa' }
+      ]
+    });
+
+    const noGpsPlan = () => {
+      const plan = routePlanFixture();
+      plan.origin = null;
+      plan.summary = { ...plan.summary, pending_stops_count: 2, pending_machines_count: 2, total_distance_km: null, unmapped_stops_count: 2 };
+      plan.full_route_navigation_url = '';
+      plan.waypoints_truncated = false;
+      plan.stops = plan.stops.slice(0, 2).map((stop) => ({
+        ...stop,
+        has_valid_coordinates: false,
+        latitude: null,
+        longitude: null,
+        distance_km: null,
+        navigation_url: null
+      }));
+      return plan;
+    };
+
+    const emptyPlan = () => ({
+      origin: null,
+      summary: {
+        pending_stops_count: 0,
+        pending_machines_count: 0,
+        completed_machines_count: 0,
+        skipped_machines_count: 0,
+        blocked_machines_count: 0,
+        fefo_alerts_count: 0,
+        total_distance_km: null,
+        unmapped_stops_count: 0
+      },
+      full_route_navigation_url: '',
+      waypoints_truncated: false,
+      stops: [],
+      completed_stops: [],
+      skipped_stops: [],
+      blocked_stops: []
+    });
+
+    const machines = [
+      machine(5, 'VEND-MAD-005', 'Hospital Universitario Central', 'PERISHABLE_FOOD'),
+      machine(6, 'VEND-MAD-006', 'Hospital Universitario Central', 'COLD_DRINKS'),
+      machine(8, 'VEND-MAD-008', 'Oficinas Centro', 'SNACKS'),
+      machine(9, 'VEND-MAD-009', 'Residencial Norte', 'COLD_DRINKS')
+    ];
+
+    const bootstrap = {
+      data: {
+        restocker: {
+          id: 12,
+          name: 'Lucía Gómez',
+          email: 'lucia.restocker@vendguard.local',
+          operator_code: 'REP-01',
+          role: 'RESTOCKER'
+        },
+        zones: {
+          primary_zone: { id: 1, code: 'ZONA-BCN-NORTE', name: 'Barcelona Litoral y Norte', role_in_zone: 'PRIMARY' },
+          backup_zones: [{ id: 2, code: 'ZONA-BCN-CENTRO', name: 'Barcelona Distrito Centro', role_in_zone: 'BACKUP' }]
+        },
+        shift: { status: 'ACTIVE', active_shift_id: 45, today_effective_seconds: 7200 },
+        service_date: '2026-11-22',
+        route_plan: routePlanFixture(),
+        machines,
+        route_stops: [
+          { machine_id: 5, stop_order: 1, status: 'PENDING' },
+          { machine_id: 6, stop_order: 1, status: 'PENDING' },
+          { machine_id: 8, stop_order: 2, status: 'PENDING' },
+          { machine_id: 9, stop_order: 3, status: 'PENDING' }
+        ],
+        assigned_l1_incidents: [],
+        l1_taxonomy_catalog: [],
+        site_coincidence: {},
+        active_loading_order: null,
+        last_reconciled_order: null,
+        recent_visits: [],
+        pending_reception_refunds: [],
+        recent_cash_collections: [],
+        cash_route_summary: {},
+        van_product_stocks: []
+      }
+    };
+
+    api.get = async (url) => {
+      if (url === '/restocker/my-route') return bootstrap;
+      if (url === '/technician/shift/status') {
+        return { data: { status: 'ACTIVE', active_shift_id: 45, today_effective_seconds: 7200 } };
+      }
+      return { data: [] };
+    };
+    api.post = async (url) => {
+      throw new Error('POST inesperado: ' + url);
+    };
+
+    store.state.user = { id: 12, name: 'Lucía Gómez', role: 'RESTOCKER', operator_code: 'REP-01' };
+
+    const app = Vue.createApp(RestockerRouteView);
+    const vm = app.mount('#app');
+    window.__vm = vm;
+
+    const longReason = 'El centro permanece cerrado por la revisión anual de las instalaciones. La conserjería no puede abrir el cuarto de máquinas hasta mañana. La carga se reprograma para el siguiente turno con capacidad de flota.';
+
+    window.__harness = {
+      async openMap() {
+        vm.routePlan = routePlanFixture();
+        vm.showRouteMapModal = true;
+        await vm.$nextTick();
+      },
+      async openNoGpsMap() {
+        vm.routePlan = noGpsPlan();
+        vm.showRouteMapModal = true;
+        await vm.$nextTick();
+      },
+      async openEmptyMap() {
+        vm.routePlan = emptyPlan();
+        vm.showRouteMapModal = true;
+        await vm.$nextTick();
+      },
+      async openSkip() {
+        const stop = vm.routePlanStops[0];
+        const machine = stop?.machines?.[0];
+        if (!stop || !machine) throw new Error('La ruta no tiene una parada accionable.');
+        vm.openSkipRouteModal(machine, stop);
+        vm.skipRouteForm.skip_reason_code = 'OTHER_OPERATIONAL';
+        vm.skipRouteForm.reason_text = longReason;
+        await vm.$nextTick();
+      },
+      async closeAll() {
+        vm.showRouteMapModal = false;
+        vm.showSkipRouteModal = false;
+        vm.routePlan = routePlanFixture();
+        await vm.$nextTick();
+      }
+    };
+
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      if (!vm.isLoading && vm.routePlan && vm.routeBlocks.length === 3 && vm.machines.length > 0) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    await document.fonts.ready;
+    await vm.$nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    window.__harnessState = {
+      routeStops: vm.routePlanStops.length,
+      routeBlocks: vm.routeBlocks.length,
+      machines: vm.machines.length,
+      loadError: vm.loadError
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

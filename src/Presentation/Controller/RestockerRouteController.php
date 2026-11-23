@@ -12,6 +12,8 @@ use VendGuard\Application\Service\MachinePlanogramService;
 use VendGuard\Application\Service\MachineCashCollectionService;
 use VendGuard\Application\Service\MachineRestockVisitService;
 use VendGuard\Application\Service\ProductLoadingOrderService;
+use VendGuard\Application\Service\RestockRouteOverrideService;
+use VendGuard\Application\Service\RestockRoutePlannerService;
 use VendGuard\Application\Service\RestockerSatSynergyService;
 use VendGuard\Application\Service\RestockerVanStockService;
 use VendGuard\Application\Service\ShiftLifecycleService;
@@ -23,15 +25,18 @@ use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineOutsideRestockerZonesException;
 use VendGuard\Core\Domain\Exception\MachineRestockVisitValidationException;
 use VendGuard\Core\Domain\Exception\ProductLoadingValidationException;
+use VendGuard\Core\Domain\Exception\RestockRoutePlannerValidationException;
 use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
+use VendGuard\Core\Domain\Repository\RouteSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\SlaTier;
+use VendGuard\Core\Service\RestockCadenceEvaluator;
 use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -49,10 +54,13 @@ use VendGuard\Infrastructure\Repository\PdoMachineRestockVisitRepository;
 use VendGuard\Infrastructure\Repository\PdoOperationalZoneRepository;
 use VendGuard\Infrastructure\Repository\PdoProductLoadingOrderRepository;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
+use VendGuard\Infrastructure\Repository\PdoRestockRoutePlannerGateway;
+use VendGuard\Infrastructure\Repository\PdoRestockRouteReadModel;
 use VendGuard\Infrastructure\Repository\PdoRestockerSatSynergyGateway;
 use VendGuard\Infrastructure\Repository\PdoRestockerVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianSuggestionRepository;
+use VendGuard\Infrastructure\Repository\PdoRouteSettingsRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
@@ -103,6 +111,12 @@ final class RestockerRouteController
 
     private ?RestockerSatSynergyService $synergyService;
 
+    private RestockRoutePlannerService $routePlanner;
+
+    private RestockRouteOverrideService $routeOverrides;
+
+    private RouteSettingsRepositoryInterface $routeSettings;
+
     public function __construct(
         ?PDO $pdo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -114,7 +128,10 @@ final class RestockerRouteController
         ?MachineRestockVisitService $visitService = null,
         ?MachineRestockVisitRepositoryInterface $visitRepository = null,
         ?MachineCashCollectionService $cashCollections = null,
-        ?RestockerSatSynergyService $synergyService = null
+        ?RestockerSatSynergyService $synergyService = null,
+        ?RestockRoutePlannerService $routePlanner = null,
+        ?RestockRouteOverrideService $routeOverrides = null,
+        ?RouteSettingsRepositoryInterface $routeSettings = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $this->pdo = $pdo;
@@ -176,6 +193,18 @@ final class RestockerRouteController
 
         $this->synergyService = $synergyService ?? $this->buildSynergyService($pdo);
 
+        $routeGateway = new PdoRestockRoutePlannerGateway($pdo);
+        $routeReadModel = new PdoRestockRouteReadModel($pdo);
+        $this->routePlanner = $routePlanner ?? new RestockRoutePlannerService($routeReadModel);
+        $this->routeOverrides = $routeOverrides ?? new RestockRouteOverrideService(
+            $routeGateway,
+            $routeReadModel,
+            $this->routePlanner,
+            new AuditLogger(),
+            new PdoTransactionManager($pdo)
+        );
+        $this->routeSettings = $routeSettings ?? new PdoRouteSettingsRepository($pdo);
+
         $this->visitService = $visitService ?? new MachineRestockVisitService(
             $this->visitRepository,
             new PdoMachinePlanogramRepository($pdo),
@@ -187,7 +216,9 @@ final class RestockerRouteController
             new PdoTransactionManager($pdo),
             new AuditLogger(),
             null,
-            $this->cashCollections
+            $this->cashCollections,
+            $routeGateway,
+            $routeReadModel
         );
     }
 
@@ -411,6 +442,16 @@ final class RestockerRouteController
                 return $machine;
             }, $cashRoute['machines']);
 
+            $serviceDate = RestockCadenceEvaluator::today(
+                new \DateTimeImmutable('now', new \DateTimeZone('Europe/Madrid'))
+            );
+            $route = $this->routePlanner->buildRestockerRoute(
+                $restockerId,
+                $serviceDate,
+                $this->routeOrigin()
+            );
+            $routePlan = $route['route_plan'];
+
             $locationIds = [];
             foreach ($machinesWithLevels as $machine) {
                 $locationId = (int)($machine['location_id'] ?? 0);
@@ -424,9 +465,24 @@ final class RestockerRouteController
                     $locationIds[$locationId] = $locationId;
                 }
             }
+            foreach ($routePlan['stops'] ?? [] as $stop) {
+                $locationId = (int)($stop['location_id'] ?? 0);
+                if ($locationId > 0) {
+                    $locationIds[$locationId] = $locationId;
+                }
+            }
             $siteCoincidence = $locationIds !== []
                 ? $this->synergy()->siteCoincidence('RESTOCKER', $restockerId, array_values($locationIds))
                 : [];
+
+            foreach ($routePlan['stops'] as $stopIndex => $stop) {
+                $stopLocationId = (int)($stop['location_id'] ?? 0);
+                $entries = $siteCoincidence[$stopLocationId] ?? $siteCoincidence[(string)$stopLocationId] ?? [];
+                $routePlan['stops'][$stopIndex]['site_coincidence'] = is_array($entries) && $entries !== []
+                    ? $entries
+                    : null;
+            }
+            $routePlan['site_coincidence'] = $siteCoincidence;
 
             $level1Taxonomy = [];
             foreach ((new \VendGuard\Infrastructure\Repository\PdoRootCauseRepository($this->pdo))
@@ -455,6 +511,8 @@ final class RestockerRouteController
                     'started_at' => $shift->startedAt,
                     'today_effective_seconds' => (int)($shift->todaySummary['effective_seconds'] ?? 0),
                 ],
+                'service_date' => $route['service_date'],
+                'route_plan' => $routePlan,
                 'machines' => $machinesWithLevels,
                 'assigned_l1_incidents' => $level1Context['assigned_incidents'],
                 'l1_taxonomy_catalog' => $level1Taxonomy,
@@ -470,11 +528,67 @@ final class RestockerRouteController
                 'recent_cash_collections' => $cashRoute['recent_cash_collections'],
                 'cash_route_summary' => $cashRoute['cash_route_summary'],
             ], 200);
+        } catch (RestockRoutePlannerValidationException $exception) {
+            $details = $exception->getField() === null
+                ? null
+                : array_merge(['field' => $exception->getField()], $exception->getContext());
+
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $details
+            );
         } catch (Throwable $exception) {
             error_log('[vendguard] Fallo al construir la ruta de carga del reponedor: ' . $exception);
 
             return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo cargar la ruta de carga.', 500);
         }
+    }
+
+    /**
+     * POST /api/restocker/route/stops/{machineId}/skip
+     *
+     * Omisión de una parada de la ruta efectiva de hoy. El reponedor sale del
+     * token; el servicio valida motivo, rigor textual, perímetro y salvaguarda
+     * FEFO (`RF-02.2`, `QA-1`, `Art. II`, `Art. V.1`, `Art. V.4`).
+     */
+    public function skipStop(Request $request): Response
+    {
+        return $this->executeRoute(function () use ($request): Response {
+            $result = $this->routeOverrides->skip(
+                $this->positiveMachineId($request),
+                $request->getParsedBody(),
+                $this->actor($request)
+            );
+            $status = ($result['idempotent_replay'] ?? false) === true ? 200 : 201;
+
+            return Response::json(
+                $result,
+                $status,
+                'Omisión de parada registrada con trazabilidad.'
+            );
+        });
+    }
+
+    /**
+     * POST /api/restocker/route/override-conflict-dump
+     *
+     * Archiva una mutación offline rechazada sin alterar la verdad del servidor
+     * (`C3`, `Art. III.3`).
+     */
+    public function dumpOverrideConflict(Request $request): Response
+    {
+        return $this->executeRoute(function () use ($request): Response {
+            return Response::json(
+                $this->routeOverrides->dumpOfflineConflict(
+                    $request->getParsedBody(),
+                    $this->actor($request)
+                ),
+                201,
+                'Conflicto offline del planificador archivado en auditoría.'
+            );
+        });
     }
 
     /**
@@ -1092,6 +1206,51 @@ final class RestockerRouteController
         }
 
         return (int)$raw;
+    }
+
+    private function executeRoute(callable $operation): Response
+    {
+        try {
+            return $operation();
+        } catch (RestockRoutePlannerValidationException $exception) {
+            $details = $exception->getField() === null
+                ? null
+                : array_merge(['field' => $exception->getField()], $exception->getContext());
+
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $details
+            );
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('VALIDATION_ERROR', $exception->getMessage(), 400);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo en la ruta periódica del reponedor: ' . $exception);
+
+            return Response::error(
+                'INTERNAL_SERVER_ERROR',
+                'No se pudo completar la operación de la ruta periódica.',
+                500
+            );
+        }
+    }
+
+    /**
+     * @return array{source: string, latitude: float, longitude: float}|null
+     */
+    private function routeOrigin(): ?array
+    {
+        $settings = $this->routeSettings->find();
+        if ($settings === null) {
+            return null;
+        }
+
+        return [
+            'source' => 'BASE_CENTRAL',
+            'latitude' => $settings->getBaseLatitude(),
+            'longitude' => $settings->getBaseLongitude(),
+        ];
     }
 
     private function executeCashCollection(callable $operation): Response
