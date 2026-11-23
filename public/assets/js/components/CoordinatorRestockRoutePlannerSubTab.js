@@ -122,6 +122,7 @@ export const CoordinatorRestockRoutePlannerSubTab = {
       dayFilters: { restocker_id: '', zone_id: '' },
       day: null,
       isLoadingDay: false,
+      dayRequestSeq: 0,
       dayError: '',
 
       plannerMachines: [],
@@ -235,7 +236,17 @@ export const CoordinatorRestockRoutePlannerSubTab = {
     this.loadPlannerOptions();
   },
   methods: {
+    onServiceDateChange(event) {
+      const value = String(event?.target?.value || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return;
+      }
+
+      this.serviceDate = value;
+      return this.loadDay();
+    },
     async loadDay() {
+      const requestSeq = ++this.dayRequestSeq;
       this.isLoadingDay = true;
       this.dayError = '';
       const params = { service_date: this.serviceDate };
@@ -243,11 +254,16 @@ export const CoordinatorRestockRoutePlannerSubTab = {
       if (this.dayFilters.zone_id !== '') params.zone_id = Number(this.dayFilters.zone_id);
 
       try {
-        this.day = unwrap(await api.coordinator.getRestockRouteDay(params)) || null;
+        const nextDay = unwrap(await api.coordinator.getRestockRouteDay(params)) || null;
+        if (requestSeq !== this.dayRequestSeq) return;
+        this.day = nextDay;
       } catch (error) {
+        if (requestSeq !== this.dayRequestSeq) return;
         this.dayError = error?.message || 'No se pudo cargar la ruta del día.';
       } finally {
-        this.isLoadingDay = false;
+        if (requestSeq === this.dayRequestSeq) {
+          this.isLoadingDay = false;
+        }
       }
     },
     async loadSchedules() {
@@ -640,7 +656,7 @@ export const CoordinatorRestockRoutePlannerSubTab = {
             class="vg-input"
             aria-label="Fecha de servicio"
             data-testid="route-planner-service-date"
-            @change="loadDay"
+            @change="onServiceDateChange"
           />
           <button type="button" class="vg-btn vg-btn-secondary" data-testid="route-planner-refresh" @click="refreshAll">
             {{ isLoadingDay ? 'Cargando…' : '↻ Actualizar' }}

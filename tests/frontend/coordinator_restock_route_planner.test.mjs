@@ -212,6 +212,12 @@ const dayFixture = {
   ]
 };
 
+const dayFixtureFor = (serviceDate) => ({
+  ...dayFixture,
+  service_date: serviceDate,
+  is_future_projection: serviceDate > TODAY
+});
+
 const scheduleFixture = {
   total: 2,
   limit: 100,
@@ -270,7 +276,7 @@ api.coordinator.getUsers = async (params) => {
 };
 api.coordinator.getRestockRouteDay = async (params) => {
   calls.push({ method: 'getRestockRouteDay', params });
-  return { data: dayFixture };
+  return { data: dayFixtureFor(params?.service_date || TODAY) };
 };
 api.coordinator.getRestockSchedules = async (params) => {
   calls.push({ method: 'getRestockSchedules', params });
@@ -350,6 +356,40 @@ async function run() {
   vm.serviceDate = TOMORROW;
   assert('1.6 Cambiar a mañana activa la proyección', vm.isFuture === true && vm.futureLabel.includes('proyección'));
   vm.serviceDate = TODAY;
+
+  await vm.onServiceDateChange({ target: { value: TOMORROW } });
+  const dateChangeCall = calls.filter((call) => call.method === 'getRestockRouteDay').at(-1);
+  assert(
+    '1.7 El cambio de fecha dispara la carga con el nuevo service_date',
+    dateChangeCall?.params?.service_date === TOMORROW
+      && vm.serviceDate === TOMORROW
+      && vm.day?.service_date === TOMORROW
+  );
+
+  const originalDayApi = api.coordinator.getRestockRouteDay;
+  const pendingDayCalls = [];
+  api.coordinator.getRestockRouteDay = (params) => new Promise((resolve) => {
+    pendingDayCalls.push({ params, resolve });
+  });
+  vm.serviceDate = TODAY;
+  const firstLoad = vm.loadDay();
+  vm.serviceDate = TOMORROW;
+  const secondLoad = vm.loadDay();
+  pendingDayCalls[1].resolve({ data: dayFixtureFor(TOMORROW) });
+  await secondLoad;
+  pendingDayCalls[0].resolve({ data: dayFixtureFor(TODAY) });
+  await firstLoad;
+  assert(
+    '1.8 Una respuesta obsoleta no pisa la fecha vigente',
+    vm.day?.service_date === TOMORROW && vm.isFuture === true
+  );
+  api.coordinator.getRestockRouteDay = originalDayApi;
+  vm.serviceDate = TODAY;
+  await vm.loadDay();
+  assert(
+    '1.9 El selector usa el manejador explícito de cambio de fecha',
+    CoordinatorRestockRoutePlannerSubTab.template.includes('@change="onServiceDateChange"')
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // 2. Omisión, desvío y revocación

@@ -7,7 +7,7 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD:** `13637b7` · `test(restock-route): certify 360x800 layout of M37 surfaces (AUD-37-04)`
-- **Árbol:** la corrida inicial no modificó código. Las correcciones posteriores de 2026-11-23 (`H-37-01` a `H-37-06`) tocan la cola offline, los servicios y controladores del planificador y de M33, las suites y este acta; `H-37-07` sigue abierto.
+- **Árbol:** la corrida inicial no modificó código. Las correcciones posteriores de 2026-11-23 (`H-37-01` a `H-37-07`) tocan la cola offline, los servicios y controladores del planificador y de M33, las suites y este acta; todos los hallazgos de este documento quedan cerrados.
 - **Entorno:** app local `http://127.0.0.1:8000` levantada con `VENDGUARD_DEV_SITE_KEYS=1 php -S 127.0.0.1:8000 -t public public/index.php`, contra el banco local `vendguard_battery` (PostgreSQL `127.0.0.1:54331`).
 - **Naturaleza:** acta de verificación funcional sobre la aplicación ensamblada. **No sustituye** a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con las suites automatizadas. Los siete hallazgos de este documento son nuevos y aparecieron al recorrer la app real, no en las suites.
 
@@ -27,9 +27,9 @@ Los siete hallazgos se ordenan así:
 | 4 | **H-37-04** | **P3 · Baja** | Los formularios piden IDs internos numéricos en vez de selectores | `RF-01.3`, `RF-02.3`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 5 | **H-37-05** | **P3 · Baja** | El modal de omisión no declara semántica de diálogo | Hoja móvil (`RF-05.2`) | **Cerrado (2026-11-23)** |
 | 6 | **H-37-06** | **P3 · Observación** | `service_date` pasada se acepta en propuesta y emisión `TODAY_ROUTE` | Contrato §4 y `TODAY_ROUTE` | **Cerrado (2026-11-23)** |
-| 7 | **H-37-07** | **P3 · Observación** | Cambiar la fecha del tablero no recarga hasta pulsar «Actualizar» | `RF-05.3` | Abierto |
+| 7 | **H-37-07** | **P3 · Observación** | Cambiar la fecha del tablero no recarga hasta pulsar «Actualizar» | `RF-05.3` | **Cerrado (2026-11-23)** |
 
-> Los identificadores `H-37-01`–`H-37-07` son nuevos para no reutilizar los `AUD-37-01`–`AUD-37-09` ya cerrados. `H-37-06` quedó cerrado al fijar la regla de contrato; `H-37-07` sigue como observación de fricción de uso, no como pérdida de función.
+> Los identificadores `H-37-01`–`H-37-07` son nuevos para no reutilizar los `AUD-37-01`–`AUD-37-09` ya cerrados. `H-37-06` y `H-37-07` quedaron cerrados al fijar la regla de contrato y al corregir la recarga del tablero, respectivamente.
 
 ---
 
@@ -173,9 +173,11 @@ Las tablas muestran códigos `VEND-xxxx` y nombres de reponedor, pero no sus IDs
 
 **Impacto.** El operador puede creer que la fecha ya está aplicada y tomar decisiones con los contadores del día anterior. No hay pérdida de datos ni error de cálculo: el backend responde bien a la segunda petición.
 
-**Corrección propuesta.** Escuchar el cambio del selector y recargar (con cancelación de la petición anterior), o marcar el tablero como «desactualizado» y deshabilitar las acciones hasta pulsar «Actualizar». Añadir una aserción de que cambiar la fecha dispara la petición con el nuevo `service_date`.
+**Corrección aplicada.** El selector usa `onServiceDateChange()`, que lee el valor directamente del evento, actualiza `serviceDate` y recarga el tablero. `loadDay()` incorpora `dayRequestSeq` para descartar respuestas de peticiones anteriores, de modo que una carga antigua no pisa la fecha vigente. `↻ Actualizar` se mantiene como recarga explícita y el App Shell sube a `vendguard-app-shell-v32` para invalidar la caché del componente.
 
-**Estado:** Abierto.
+**Evidencia (2026-11-23).** `node tests/frontend/coordinator_restock_route_planner.test.mjs`: **38/38**, incluidas `1.7` (cambio de fecha), `1.8` (respuesta obsoleta) y `1.9` (manejador del selector). Guardas verdes: `coordinator_product_loading_tab` **80 aserciones**, `restocker_route_view` **245/245**, `restocker_route_planner_view` **48/48**, `N8nChatScopeTest` **33/33** y `OfflinePwaAssetsAndUiGuardTest` **45/45**. No se modificó el backend ni el contrato.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
