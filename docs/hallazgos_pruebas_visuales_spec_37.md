@@ -7,23 +7,23 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD de la corrida:** `cefed9e`
-- **Árbol:** la corrida original no modificó código. La corrección posterior de H-37-08 toca la vista móvil, su suite y este acta; se registra en el mismo commit que este documento.
+- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08 y H-37-09 tocan la vista móvil, el servicio de agendas, sus suites y este acta; se registran en commits separados.
 - **Entorno:** app local `http://127.0.0.1:8000` contra el banco `vendguard_battery` (PostgreSQL `127.0.0.1:54331`), con las credenciales semilla del entorno de batería.
 - **Alcance:** recorrido manual en Chromium como Coordinación y Reponedor, con clics y teclado reales, a `1280 × 932 px` y `360 × 800 px`. Se contrastaron red, DOM, respuestas API, PostgreSQL e IndexedDB.
 - **Naturaleza:** acta de verificación visual y de UI sobre la aplicación ensamblada. **No sustituye** a [`hallazgos_pruebas_funcionales_spec_37.md`](hallazgos_pruebas_funcionales_spec_37.md), que recoge la corrida funcional y los cierres `H-37-01`–`H-37-07`, ni a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con suites automatizadas.
 
-> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Ocho hallazgos siguen **abiertos**; H-37-08 quedó corregido el 2026-11-23 con regresión automatizada y verificación en Chromium.
+> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Siete hallazgos siguen **abiertos**; H-37-08 y H-37-09 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
 
 ---
 
 ## 1. Resumen ejecutivo
 
-No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos). Los dos fallos P2 afectan al flujo principal del reponedor y a la consulta de agendas de Coordinación; el resto son deuda de accesibilidad, presentación o copy. **H-37-08 ya está corregido**; el fallo de agendas de H-37-09 sigue abierto.
+No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos). Los dos fallos P2 afectaban al flujo principal del reponedor y a la consulta de agendas de Coordinación; **ambos están corregidos**. El resto son deuda de accesibilidad, presentación o copy.
 
 | Orden | ID | Prioridad | Hallazgo | Requisito afectado | Estado |
 |---:|---|---|---|---|---|
 | 1 | **H-37-08** | **P2 · Media** | La ruta móvil no se recarga al iniciar o cerrar turno | `RF-05.2`, `RF-03` | **Cerrado (2026-11-23)** |
-| 2 | **H-37-09** | **P2 · Media** | El filtro de agendas ignora la búsqueda en máquinas sin agenda | `RF-01.3`, `RF-05.3` | **Abierto** |
+| 2 | **H-37-09** | **P2 · Media** | El filtro de agendas ignora la búsqueda en máquinas sin agenda | `RF-01.3`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 3 | **H-37-10** | **P3 · Baja-media** | El cierre del mapa tiene contraste 1,72:1 y el modal no recibe foco ni cierra con Escape | `RNF-04`, `RF-05.2` | **Abierto** |
 | 4 | **H-37-11** | **P3 · Baja-media** | El modal de «Nueva agenda» no atrapa el foco | `RNF-04` | **Abierto** |
 | 5 | **H-37-12** | **P3 · Baja** | La tabla de excepciones muestra el ID interno (`#10`) en vez del código de máquina | `RF-05.3`, Art. V.4 | **Abierto** |
@@ -43,7 +43,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 3. Se recorrió la superficie móvil de Lucía: inicio de turno, ruta por bloques, mapa, modal de omisión, validación de motivo, aviso FEFO y snapshot de IndexedDB.
 4. Cada paso se contrastó con la petición de red, el DOM renderizado, la respuesta API, PostgreSQL y el log del servidor.
 5. Se probaron los tamaños `1280 × 932` y `360 × 800`; se midieron `scrollWidth`/`clientWidth` de etiquetas y contenedores para distinguir scroll interno intencional de solapamiento real.
-6. La corrida original no corrigió código ni hizo commit. La corrección posterior de H-37-08 se validó con la suite y Chromium; se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
+6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08 y H-37-09 se validaron con sus suites; H-37-08 también se verificó en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
 
 **Datos utilizados:** `VEND-0101`, `VEND-0102`, `VEND-0401`, `VEND-0501`, `VEND-0502`, `VEND-0701`, `VEND-0801` y `VEND-0901`; agenda de prueba de `VEND-0901` (dada de baja); desvío FEFO de `VEND-0701` a Lucía (revocado).
 
@@ -75,22 +75,26 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 
 ---
 
-### H-37-09 · P2 · El filtro de agendas ignora la búsqueda en máquinas sin agenda
+### H-37-09 · P2 · CORREGIDO · El filtro de agendas ignora la búsqueda en máquinas sin agenda
 
-**Qué ocurre.** En la tabla de «Agendas periódicas», buscar `VEND-0901` y pulsar «Filtrar» devuelve **4 filas**: `VEND-0302`, `VEND-0801`, `VEND-0901` y `VEND-1001`. Solo una coincide con el término; las otras tres son máquinas sin agenda que se cuelan en el resultado. Por API, `GET /api/coordinator/restock-schedules?limit=100&search=VEND-0901` confirma el mismo resultado. Buscar `VEND-0101` devuelve 5 filas: la máquina correcta más las 4 sin agenda.
+**Qué ocurría.** En la tabla de «Agendas periódicas», buscar `VEND-0901` y pulsar «Filtrar» devuelve **4 filas**: `VEND-0302`, `VEND-0801`, `VEND-0901` y `VEND-1001`. Solo una coincide con el término; las otras tres son máquinas sin agenda que se cuelan en el resultado. Por API, `GET /api/coordinator/restock-schedules?limit=100&search=VEND-0901` confirma el mismo resultado. Buscar `VEND-0101` devuelve 5 filas: la máquina correcta más las 4 sin agenda.
 
-**Causa.** En [`RestockRouteScheduleService.php:124-148`](../src/Application/Service/RestockRouteScheduleService.php), las máquinas sin agenda se añaden a `$items` y hacen `continue` antes de llegar al bloque `if ($search !== null)` de [`:157`](../src/Application/Service/RestockRouteScheduleService.php). La búsqueda solo se aplica a las máquinas que sí tienen agenda.
+**Causa.** En [`RestockRouteScheduleService.php`](../src/Application/Service/RestockRouteScheduleService.php), las máquinas sin agenda se añadían a `$items` y hacían `continue` antes de llegar al bloque `if ($search !== null)`. La búsqueda solo se aplicaba a las máquinas que sí tienen agenda.
 
-**Impacto.** El coordinador ve máquinas que no ha buscado y puede editar o crear una agenda sobre la fila equivocada. Es un fallo de datos de la consulta, no un detalle visual.
+**Impacto.** El coordinador veía máquinas que no había buscado y podía editar o crear una agenda sobre la fila equivocada. Era un fallo de datos de la consulta, no un detalle visual.
 
-**Reproducción.**
+**Reproducción original.**
 
 1. Abrir «Agendas periódicas» con Coordinación.
 2. Escribir `VEND-0901` en «Buscar» y pulsar «Filtrar».
 3. Observar las 4 filas y comparar con `VEND-0901` en la tabla.
 4. Repetir con `VEND-0101`: aparece la fila correcta más las 4 sin agenda.
 
-**Estado:** Abierto (2026-11-23).
+**Corrección aplicada (2026-11-23).** La comprobación de `$search` se movió antes de la bifurcación entre máquinas con agenda y sin agenda, después de los filtros de máquina, zona y tipo. Así el término se aplica siempre al `machine_code`, `location_name` y `site_code`; la rama sin agenda ya no puede añadir filas que no coinciden. El filtro `has_schedule` y la cadencia conservan su comportamiento.
+
+**Evidencia (2026-11-23).** `source deploy/local/postgres/.env.battery && php tests/integration/RestockRoutePlannerApiTest.php`: **44/44 · 0 fallos**, incluida la nueva aserción `2.1b`, que antes devolvía `total=3` y ahora devuelve `total=1` con `machine_code=RRP9-SNACK-C` y `has_schedule=false`. `php tests/unit/RestockRoutePlannerServicesTest.php`: **120/120 · 0 fallos**. `php -l` del servicio y de la suite sin errores.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -259,7 +263,7 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 ## 6. Orden de corrección propuesto
 
 1. **H-37-08 (P2) — corregido el 2026-11-23.** Recargar `my-route` tras iniciar y cerrar turno, con una regresión que comprueba que la petición se dispara.
-2. **H-37-09 (P2):** aplicar `search` también en la rama de máquinas sin agenda, antes de añadirlas a `$items`.
+2. **H-37-09 (P2) — corregido el 2026-11-23.** Aplicar `search` antes de la rama de máquinas sin agenda y cubrirlo con una aserción API que exige una única fila.
 3. **H-37-10 y H-37-11 (P3):** usar `vg-btn-ghost-inverse` y dotar a los modales de foco inicial, focus trap y `Escape`; el mapa y `ModalDialog` comparten la deuda.
 4. **H-37-12, H-37-13 y H-37-14 (P3):** publicar `machine_code` en la excepción, adaptar el resumen a 360 px y distinguir los estados vacíos de cobertura.
 5. **H-37-15 (P4):** alternar singular/plural en el contador.
@@ -271,4 +275,4 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 
 Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P2 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. La corrección de H-37-08 añade cambios en `RestockerRouteView.js`, `restocker_route_view.test.mjs` y este acta, en el mismo commit; sin push.
+**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit; sin push.

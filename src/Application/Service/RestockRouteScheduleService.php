@@ -123,6 +123,15 @@ final class RestockRouteScheduleService
             if ($machineType !== null && (string)$machine['machine_type'] !== $machineType) {
                 continue;
             }
+            if ($search !== null) {
+                $haystack = mb_strtolower(
+                    $machine['machine_code'] . ' ' . $machine['location_name'] . ' ' . $machine['site_code'],
+                    'UTF-8'
+                );
+                if (!str_contains($haystack, $search)) {
+                    continue;
+                }
+            }
 
             $schedule = $machine['schedule'] ?? null;
             if (!is_array($schedule)) {
@@ -152,16 +161,6 @@ final class RestockRouteScheduleService
             }
             if ($hasSchedule === false) {
                 continue;
-            }
-
-            if ($search !== null) {
-                $haystack = mb_strtolower(
-                    $machine['machine_code'] . ' ' . $machine['location_name'] . ' ' . $machine['site_code'],
-                    'UTF-8'
-                );
-                if (!str_contains($haystack, $search)) {
-                    continue;
-                }
             }
 
             $entity = MachineRestockSchedule::fromDatabaseRow($schedule);

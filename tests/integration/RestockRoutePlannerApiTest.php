@@ -310,6 +310,21 @@ try {
             && $byMachine[$machineA]['schedule'] === null
     );
 
+    $filtered = $call('GET', '/api/coordinator/restock-schedules', [], $coordinatorToken, [
+        'search' => 'RRP9-SNACK-C',
+    ]);
+    $filteredData = $data($filtered);
+    $filteredItems = $filteredData['items'] ?? [];
+    $assert(
+        '2.1b La búsqueda también filtra las máquinas sin agenda',
+        $filtered->getStatusCode() === 200
+            && ($filteredData['total'] ?? -1) === 1
+            && count($filteredItems) === 1
+            && (int)($filteredItems[0]['machine_id'] ?? 0) === $machineC
+            && ($filteredItems[0]['has_schedule'] ?? null) === false,
+        json_encode($filteredData)
+    );
+
     $create = $call('POST', '/api/coordinator/restock-schedules', [
         'machine_id' => $machineA,
         'cadence_type' => 'DAILY',
