@@ -7,12 +7,12 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD de la corrida:** `cefed9e`
-- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09 y H-37-10 tocan la vista móvil, el servicio de agendas, el modal del mapa, sus suites y este acta; se registran en commits separados.
+- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09, H-37-10 y H-37-11 tocan la vista móvil, el servicio de agendas, los modales del mapa y compartido, sus suites y este acta; se registran en commits separados.
 - **Entorno:** app local `http://127.0.0.1:8000` contra el banco `vendguard_battery` (PostgreSQL `127.0.0.1:54331`), con las credenciales semilla del entorno de batería.
 - **Alcance:** recorrido manual en Chromium como Coordinación y Reponedor, con clics y teclado reales, a `1280 × 932 px` y `360 × 800 px`. Se contrastaron red, DOM, respuestas API, PostgreSQL e IndexedDB.
 - **Naturaleza:** acta de verificación visual y de UI sobre la aplicación ensamblada. **No sustituye** a [`hallazgos_pruebas_funcionales_spec_37.md`](hallazgos_pruebas_funcionales_spec_37.md), que recoge la corrida funcional y los cierres `H-37-01`–`H-37-07`, ni a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con suites automatizadas.
 
-> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Seis hallazgos siguen **abiertos**; H-37-08, H-37-09 y H-37-10 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
+> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Cinco hallazgos siguen **abiertos**; H-37-08, H-37-09, H-37-10 y H-37-11 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
 
 ---
 
@@ -25,7 +25,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 | 1 | **H-37-08** | **P2 · Media** | La ruta móvil no se recarga al iniciar o cerrar turno | `RF-05.2`, `RF-03` | **Cerrado (2026-11-23)** |
 | 2 | **H-37-09** | **P2 · Media** | El filtro de agendas ignora la búsqueda en máquinas sin agenda | `RF-01.3`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 3 | **H-37-10** | **P3 · Baja-media** | El cierre del mapa tenía contraste 1,72:1 y el modal no recibía foco ni cerraba con Escape | `RNF-04`, `RF-05.2` | **Cerrado (2026-11-23)** |
-| 4 | **H-37-11** | **P3 · Baja-media** | El modal de «Nueva agenda» no atrapa el foco | `RNF-04` | **Abierto** |
+| 4 | **H-37-11** | **P3 · Baja-media** | El modal de «Nueva agenda» no atrapaba el foco | `RNF-04` | **Cerrado (2026-11-23)** |
 | 5 | **H-37-12** | **P3 · Baja** | La tabla de excepciones muestra el ID interno (`#10`) en vez del código de máquina | `RF-05.3`, Art. V.4 | **Abierto** |
 | 6 | **H-37-13** | **P3 · Baja** | A 360 px las etiquetas del resumen de ruta se salen de su celda | `RNF-04`, `RF-05.3` | **Abierto** |
 | 7 | **H-37-14** | **P3 · Baja** | El estado vacío de rutas dice «No hay paradas pendientes» aunque haya paradas sin cobertura | `RF-03.3`, `RF-05.3` | **Abierto** |
@@ -43,7 +43,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 3. Se recorrió la superficie móvil de Lucía: inicio de turno, ruta por bloques, mapa, modal de omisión, validación de motivo, aviso FEFO y snapshot de IndexedDB.
 4. Cada paso se contrastó con la petición de red, el DOM renderizado, la respuesta API, PostgreSQL y el log del servidor.
 5. Se probaron los tamaños `1280 × 932` y `360 × 800`; se midieron `scrollWidth`/`clientWidth` de etiquetas y contenedores para distinguir scroll interno intencional de solapamiento real.
-6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09 y H-37-10 se validaron con sus suites; H-37-08 y H-37-10 también se verificaron en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
+6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09, H-37-10 y H-37-11 se validaron con sus suites; H-37-08, H-37-10 y H-37-11 también se verificaron en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
 
 **Datos utilizados:** `VEND-0101`, `VEND-0102`, `VEND-0401`, `VEND-0501`, `VEND-0502`, `VEND-0701`, `VEND-0801` y `VEND-0901`; agenda de prueba de `VEND-0901` (dada de baja); desvío FEFO de `VEND-0701` a Lucía (revocado).
 
@@ -123,22 +123,26 @@ Además, el modal no movía el foco al abrirse y no se cerraba con `Escape`; sol
 
 ---
 
-### H-37-11 · P3 · El modal de «Nueva agenda» no atrapa el foco
+### H-37-11 · P3 · CORREGIDO · El modal de «Nueva agenda» no atrapaba el foco
 
-**Qué ocurre.** Al abrir «＋ Nueva agenda», el foco se queda en el botón que abrió el modal, detrás del overlay. Pulsando `Tab`, el foco pasa a «⚡ Alta masiva», también detrás del diálogo, en lugar de entrar en el formulario. `Escape` sí cierra el modal.
+**Qué ocurría.** Al abrir «＋ Nueva agenda», el foco se quedaba en el botón que abrió el modal, detrás del overlay. Pulsando `Tab`, el foco pasaba a «⚡ Alta masiva», también detrás del diálogo, en lugar de entrar en el formulario. `Escape` sí cerraba el modal.
 
-**Causa.** El modal se construye con [`ModalDialog.js`](../public/assets/js/components/ModalDialog.js), que declara `role="dialog"` y `aria-modal="true"`, pero no mueve el foco al abrir ni implementa un focus trap. El problema afecta también a los modales de alta masiva y de excepción que usan el mismo componente.
+**Causa.** El modal se construye con [`ModalDialog.js`](../public/assets/js/components/ModalDialog.js), que declaraba `role="dialog"` y `aria-modal="true"`, pero no movía el foco al abrir ni implementaba un focus trap. El problema afectaba también a los modales de alta masiva y de excepción que usan el mismo componente.
 
-**Impacto.** Un usuario de teclado o lector de pantalla puede interactuar con la página de fondo sin darse cuenta. Es una deuda de accesibilidad del componente compartido, no del formulario concreto.
+**Impacto.** Un usuario de teclado o lector de pantalla podía interactuar con la página de fondo sin darse cuenta. Era una deuda de accesibilidad del componente compartido, no del formulario concreto.
 
-**Reproducción.**
+**Reproducción original.**
 
 1. Abrir «＋ Nueva agenda» con Coordinación.
 2. Comprobar que `document.activeElement` sigue siendo el botón «＋ Nueva agenda».
 3. Pulsar `Tab`: el foco pasa a «⚡ Alta masiva», fuera del diálogo.
 4. Pulsar `Escape`: el modal se cierra.
 
-**Estado:** Abierto (2026-11-23).
+**Corrección aplicada (2026-11-23).** `ModalDialog` guarda el elemento que abrió el diálogo, enfoca el primer control tras el render, contiene `Tab` y `Shift+Tab` dentro del `.vg-modal`, cierra con `Escape` y devuelve el foco al disparador. La contención se aplica también cuando el foco está fuera del diálogo y deja el foco en el propio diálogo si no hay controles. El listener se retira al cerrar y al desmontar; el diálogo conserva `role="dialog"`, `aria-modal="true"`, `aria-labelledby` y `tabindex="-1"` ([`ModalDialog.js:66`](../public/assets/js/components/ModalDialog.js), [`:114`](../public/assets/js/components/ModalDialog.js), [`:149`](../public/assets/js/components/ModalDialog.js)).
+
+**Evidencia (2026-11-23).** `node tests/unit/UIComponentsTest.mjs`: **45/45 · 0 fallos**, con las aserciones `2.13`–`2.16`, que cubren el foco inicial, el retorno al disparador y los dos sentidos del focus trap. `node tests/frontend/coordinator_restock_route_planner.test.mjs`: **38/38 · 0 fallos**. En Chromium, con la caché y el service worker limpios, «＋ Nueva agenda» abrió con `document.activeElement` en «Cerrar ventana modal»; `Shift+Tab` desde el primer control llevó a `route-planner-schedule-form-save` («Guardar agenda»), `Tab` desde el último volvió al cierre, y `Escape` cerró el diálogo, devolvió el foco a `route-planner-new-schedule` («＋ Nueva agenda») y dejó `document.body.style.overflow` vacío.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -243,6 +247,7 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 |---|---|
 | Cambio de fecha del tablero y aviso de proyección futura | Correcto |
 | Alta, versionado y baja lógica de una agenda semanal | Correcto |
+| Modales compartidos: foco inicial, focus trap y retorno al disparador | Correcto; H-37-11 corregido en `ModalDialog` |
 | Modal de alta masiva, selector de zonas/máquinas y contador | Correcto salvo el copy de H-37-15 |
 | Validación de omisión sin causa o con motivo corto | Correcto |
 | Modal de omisión: `role="dialog"`, `aria-modal`, foco inicial, `Escape` y retorno de foco | Correcto |
@@ -269,7 +274,7 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 1. **H-37-08 (P2) — corregido el 2026-11-23.** Recargar `my-route` tras iniciar y cerrar turno, con una regresión que comprueba que la petición se dispara.
 2. **H-37-09 (P2) — corregido el 2026-11-23.** Aplicar `search` antes de la rama de máquinas sin agenda y cubrirlo con una aserción API que exige una única fila.
 3. **H-37-10 (P3) — corregido el 2026-11-23.** Contraste inverso, foco inicial, focus trap, `Escape` y retorno al disparador en el mapa, con regresión frontend.
-4. **H-37-11 (P3):** dotar a `ModalDialog` de foco inicial y focus trap; el mapa ya no comparte esta deuda.
+4. **H-37-11 (P3) — corregido el 2026-11-23.** `ModalDialog` incorpora foco inicial, focus trap y retorno al disparador; el mapa ya no comparte esta deuda.
 5. **H-37-12, H-37-13 y H-37-14 (P3):** publicar `machine_code` en la excepción, adaptar el resumen a 360 px y distinguir los estados vacíos de cobertura.
 6. **H-37-15 (P4):** alternar singular/plural en el contador.
 7. **H-37-16 (P4):** no requiere cambio en el M37; valorar reducir el `z-index` o el área de impacto del widget de n8n.
@@ -280,4 +285,4 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 
 Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P2 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit; sin push.
+**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit. H-37-11 añade cambios en `ModalDialog.js`, `UIComponentsTest.mjs` y este acta, en su propio commit; sin push.
