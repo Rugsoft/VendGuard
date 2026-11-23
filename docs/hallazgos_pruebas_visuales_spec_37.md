@@ -7,12 +7,12 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD de la corrida:** `cefed9e`
-- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09, H-37-10 y H-37-11 tocan la vista móvil, el servicio de agendas, los modales del mapa y compartido, sus suites y este acta; se registran en commits separados.
+- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11 y H-37-12 tocan la vista móvil, el servicio de agendas, los modales del mapa y compartido, el read model del tablero, sus suites y este acta; se registran en commits separados.
 - **Entorno:** app local `http://127.0.0.1:8000` contra el banco `vendguard_battery` (PostgreSQL `127.0.0.1:54331`), con las credenciales semilla del entorno de batería.
 - **Alcance:** recorrido manual en Chromium como Coordinación y Reponedor, con clics y teclado reales, a `1280 × 932 px` y `360 × 800 px`. Se contrastaron red, DOM, respuestas API, PostgreSQL e IndexedDB.
 - **Naturaleza:** acta de verificación visual y de UI sobre la aplicación ensamblada. **No sustituye** a [`hallazgos_pruebas_funcionales_spec_37.md`](hallazgos_pruebas_funcionales_spec_37.md), que recoge la corrida funcional y los cierres `H-37-01`–`H-37-07`, ni a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con suites automatizadas.
 
-> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Cinco hallazgos siguen **abiertos**; H-37-08, H-37-09, H-37-10 y H-37-11 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
+> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Cuatro hallazgos siguen **abiertos**; H-37-08, H-37-09, H-37-10, H-37-11 y H-37-12 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
 
 ---
 
@@ -26,7 +26,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 | 2 | **H-37-09** | **P2 · Media** | El filtro de agendas ignora la búsqueda en máquinas sin agenda | `RF-01.3`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 3 | **H-37-10** | **P3 · Baja-media** | El cierre del mapa tenía contraste 1,72:1 y el modal no recibía foco ni cerraba con Escape | `RNF-04`, `RF-05.2` | **Cerrado (2026-11-23)** |
 | 4 | **H-37-11** | **P3 · Baja-media** | El modal de «Nueva agenda» no atrapaba el foco | `RNF-04` | **Cerrado (2026-11-23)** |
-| 5 | **H-37-12** | **P3 · Baja** | La tabla de excepciones muestra el ID interno (`#10`) en vez del código de máquina | `RF-05.3`, Art. V.4 | **Abierto** |
+| 5 | **H-37-12** | **P3 · Baja** | La tabla de excepciones mostraba el ID interno (`#10`) en vez del código de máquina | `RF-05.3`, Art. V.4 | **Cerrado (2026-11-23)** |
 | 6 | **H-37-13** | **P3 · Baja** | A 360 px las etiquetas del resumen de ruta se salen de su celda | `RNF-04`, `RF-05.3` | **Abierto** |
 | 7 | **H-37-14** | **P3 · Baja** | El estado vacío de rutas dice «No hay paradas pendientes» aunque haya paradas sin cobertura | `RF-03.3`, `RF-05.3` | **Abierto** |
 | 8 | **H-37-15** | **P4 · Cosmético** | El contador de Alta masiva dice «1 seleccionadas» | `RNF-04` | **Abierto** |
@@ -43,7 +43,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 3. Se recorrió la superficie móvil de Lucía: inicio de turno, ruta por bloques, mapa, modal de omisión, validación de motivo, aviso FEFO y snapshot de IndexedDB.
 4. Cada paso se contrastó con la petición de red, el DOM renderizado, la respuesta API, PostgreSQL y el log del servidor.
 5. Se probaron los tamaños `1280 × 932` y `360 × 800`; se midieron `scrollWidth`/`clientWidth` de etiquetas y contenedores para distinguir scroll interno intencional de solapamiento real.
-6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09, H-37-10 y H-37-11 se validaron con sus suites; H-37-08, H-37-10 y H-37-11 también se verificaron en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
+6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11 y H-37-12 se validaron con sus suites; H-37-08, H-37-10, H-37-11 y H-37-12 también se verificaron en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
 
 **Datos utilizados:** `VEND-0101`, `VEND-0102`, `VEND-0401`, `VEND-0501`, `VEND-0502`, `VEND-0701`, `VEND-0801` y `VEND-0901`; agenda de prueba de `VEND-0901` (dada de baja); desvío FEFO de `VEND-0701` a Lucía (revocado).
 
@@ -146,22 +146,26 @@ Además, el modal no movía el foco al abrirse y no se cerraba con `Escape`; sol
 
 ---
 
-### H-37-12 · P3 · La tabla de excepciones muestra el ID interno de la máquina
+### H-37-12 · P3 · CORREGIDO · La tabla de excepciones mostraba el ID interno de la máquina
 
-**Qué ocurre.** Se creó un desvío FEFO de `VEND-0701` a Lucía desde Coordinación. La sección «Excepciones vivas del día» mostró una fila con la celda **`#10`**, no `VEND-0701`. La API devolvió `machine_id: 10` y el código de máquina solo estaba disponible por otra vía.
+**Qué ocurría.** Se creó un desvío FEFO de `VEND-0701` a Lucía desde Coordinación. La sección «Excepciones vivas del día» mostraba una fila con la celda **`#10`**, no `VEND-0701`. La API devolvía `machine_id: 10` y no publicaba `machine_code` en `active_overrides`.
 
-**Causa.** [`CoordinatorRestockRoutePlannerSubTab.js:831`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js) pinta `<td>#{{ override.machine_id }}</td>` directamente. Es una deuda residual de `H-37-04`, que sustituyó los IDs internos por selectores en los formularios pero no en esta tabla.
+**Causa.** [`CoordinatorRestockRoutePlannerSubTab.js:831`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js) pintaba `<td>#{{ override.machine_id }}</td>` directamente. El read model del tablero construía las excepciones desde `RestockRouteDailyOverride::toArray()`, que no conoce el código de máquina, y el saneador del servicio no lo permitía.
 
-**Impacto.** El coordinador no puede identificar la máquina afectada sin conocer la correspondencia interna. El dato es correcto, pero la presentación incumple el criterio de opacidad de identificadores internos del Art. V.4.
+**Impacto.** El coordinador no podía identificar la máquina afectada sin conocer la correspondencia interna. El dato era correcto, pero la presentación incumplía el criterio de opacidad de identificadores internos del Art. V.4.
 
-**Reproducción.**
+**Reproducción original.**
 
 1. Crear un desvío de `VEND-0701` a una reponedora desde «Rutas por reponedor» o desde «Paradas sin cobertura».
 2. Revisar «Excepciones vivas del día».
 3. Observar `#10` en la columna «Máquina».
 4. Revocar la excepción: la fila desaparece y la ruta vuelve a su estado anterior.
 
-**Estado:** Abierto (2026-11-23). La excepción de prueba se revocó; no queda ninguna activa.
+**Corrección aplicada (2026-11-23).** [`PdoRestockRouteReadModel.php:390`](../src/Infrastructure/Repository/PdoRestockRouteReadModel.php) une `restock_route_daily_overrides` con `machines` y publica `machine_code` en cada excepción; [`RestockRoutePlannerService.php:791`](../src/Application/Service/RestockRoutePlannerService.php) lo conserva en el saneador. La tabla pinta `override.machine_code || '—'`, sin volver a exponer el identificador interno ([`CoordinatorRestockRoutePlannerSubTab.js:831`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js)).
+
+**Evidencia (2026-11-23).** `node tests/frontend/coordinator_restock_route_planner.test.mjs`: **39/39 · 0 fallos**, con la aserción `6.7`. `php tests/integration/RestockRoutePlannerApiTest.php`: **45/45 · 0 fallos**, con la aserción `4.1b`, que exige `machine_code = RRP9-SNACK-A` en `active_overrides`. `php tests/integration/PdoRestockRoutePlannerGatewayTest.php`: **36/36 · 0 fallos**. `php tests/unit/RestockRoutePlannerServicesTest.php`: **120/120 · 0 fallos**. En Chromium, con la caché y el service worker limpios, se creó un desvío de `VEND-0701` a Lucía: la primera celda de «Excepciones vivas del día» fue **`VEND-0701`**, no `#10`. La excepción de prueba se revocó y la sección volvió al estado vacío.
+
+**Estado:** Cerrado (2026-11-23). La excepción de prueba se revocó; no queda ninguna activa.
 
 ---
 
@@ -248,6 +252,7 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 | Cambio de fecha del tablero y aviso de proyección futura | Correcto |
 | Alta, versionado y baja lógica de una agenda semanal | Correcto |
 | Modales compartidos: foco inicial, focus trap y retorno al disparador | Correcto; H-37-11 corregido en `ModalDialog` |
+| Tabla de excepciones: código de máquina en lugar del ID interno | Correcto; H-37-12 corregido |
 | Modal de alta masiva, selector de zonas/máquinas y contador | Correcto salvo el copy de H-37-15 |
 | Validación de omisión sin causa o con motivo corto | Correcto |
 | Modal de omisión: `role="dialog"`, `aria-modal`, foco inicial, `Escape` y retorno de foco | Correcto |
@@ -275,9 +280,10 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 2. **H-37-09 (P2) — corregido el 2026-11-23.** Aplicar `search` antes de la rama de máquinas sin agenda y cubrirlo con una aserción API que exige una única fila.
 3. **H-37-10 (P3) — corregido el 2026-11-23.** Contraste inverso, foco inicial, focus trap, `Escape` y retorno al disparador en el mapa, con regresión frontend.
 4. **H-37-11 (P3) — corregido el 2026-11-23.** `ModalDialog` incorpora foco inicial, focus trap y retorno al disparador; el mapa ya no comparte esta deuda.
-5. **H-37-12, H-37-13 y H-37-14 (P3):** publicar `machine_code` en la excepción, adaptar el resumen a 360 px y distinguir los estados vacíos de cobertura.
-6. **H-37-15 (P4):** alternar singular/plural en el contador.
-7. **H-37-16 (P4):** no requiere cambio en el M37; valorar reducir el `z-index` o el área de impacto del widget de n8n.
+5. **H-37-12 (P3) — corregido el 2026-11-23.** Publicar `machine_code` en las excepciones y pintarlo en la tabla, con regresión API y UI.
+6. **H-37-13 y H-37-14 (P3):** adaptar el resumen a 360 px y distinguir los estados vacíos de cobertura.
+7. **H-37-15 (P4):** alternar singular/plural en el contador.
+8. **H-37-16 (P4):** no requiere cambio en el M37; valorar reducir el `z-index` o el área de impacto del widget de n8n.
 
 ---
 
@@ -285,4 +291,4 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 
 Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P2 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit. H-37-11 añade cambios en `ModalDialog.js`, `UIComponentsTest.mjs` y este acta, en su propio commit; sin push.
+**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit. H-37-11 añade cambios en `ModalDialog.js`, `UIComponentsTest.mjs` y este acta, en su propio commit. H-37-12 añade cambios en `PdoRestockRouteReadModel.php`, `RestockRoutePlannerService.php`, `CoordinatorRestockRoutePlannerSubTab.js`, sus suites API/frontend/gateway y este acta, en su propio commit; sin push.

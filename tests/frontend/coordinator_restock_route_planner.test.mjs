@@ -188,6 +188,7 @@ const dayFixture = {
     {
       id: 55,
       machine_id: 3,
+      machine_code: 'VEND-03',
       service_date: TODAY,
       override_type: 'SKIPPED',
       override_type_label: 'Omitida',
@@ -636,6 +637,10 @@ async function run() {
       && !template.includes('Zona (ID)')
       && !template.includes('IDs separados por coma')
       && !template.includes('Reponedor receptor (ID)')
+  );
+  assert(
+    '6.7 La tabla de excepciones muestra el código de máquina, no el ID interno',
+    template.includes('{{ override.machine_code') && !template.includes('#{{ override.machine_id }}')
   );
 
   console.log('\n======================================================================');

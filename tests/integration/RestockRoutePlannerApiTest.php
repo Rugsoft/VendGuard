@@ -560,6 +560,25 @@ try {
             && ($skipData['fefo_alert'] ?? null) === false
     );
 
+    $dayWithSkip = $call(
+        'GET',
+        '/api/coordinator/restock-route/day',
+        [],
+        $coordinatorToken,
+        ['service_date' => $tomorrow]
+    );
+    $skipInDay = null;
+    foreach (($data($dayWithSkip)['active_overrides'] ?? []) as $override) {
+        if ((int)($override['id'] ?? 0) === $skipOverrideId) {
+            $skipInDay = $override;
+            break;
+        }
+    }
+    $assert(
+        '4.1b El tablero publica el código de máquina de la excepción',
+        $skipInDay !== null && ($skipInDay['machine_code'] ?? null) === 'RRP9-SNACK-A'
+    );
+
     $reassign = $call('POST', '/api/coordinator/restock-route/overrides', [
         'machine_id' => $machineA,
         'service_date' => $tomorrow,

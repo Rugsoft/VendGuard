@@ -828,7 +828,7 @@ export const CoordinatorRestockRoutePlannerSubTab = {
             </thead>
             <tbody>
               <tr v-for="override in activeOverrides" :key="override.id">
-                <td>#{{ override.machine_id }}</td>
+                <td>{{ override.machine_code || '—' }}</td>
                 <td><span :class="overrideTone(override.override_type)">{{ override.override_type_label || override.override_type }}</span></td>
                 <td>{{ override.skip_reason_label || override.reassignment_reason_label || '—' }}</td>
                 <td style="max-width: 320px;">{{ override.reason_text || '—' }}</td>

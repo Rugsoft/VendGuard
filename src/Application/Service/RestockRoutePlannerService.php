@@ -793,6 +793,7 @@ final class RestockRoutePlannerService
         $allowed = [
             'id',
             'machine_id',
+            'machine_code',
             'service_date',
             'override_type',
             'override_type_label',

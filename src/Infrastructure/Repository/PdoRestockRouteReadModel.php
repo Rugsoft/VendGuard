@@ -387,17 +387,23 @@ final class PdoRestockRouteReadModel implements RestockRouteReadModelInterface
     private function fetchActiveOverrides(string $serviceDate): array
     {
         $stmt = $this->pdo->prepare(
-            "SELECT * FROM restock_route_daily_overrides
-              WHERE service_date = :service_date
-                AND status = 'ACTIVE'
-              ORDER BY id ASC"
+            "SELECT o.*, m.code AS machine_code
+              FROM restock_route_daily_overrides o
+              LEFT JOIN machines m ON m.id = o.machine_id
+              WHERE o.service_date = :service_date
+                AND o.status = 'ACTIVE'
+              ORDER BY o.id ASC"
         );
         $stmt->bindValue(':service_date', $serviceDate, PDO::PARAM_STR);
         $stmt->execute();
 
         $overrides = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $overrides[] = RestockRouteDailyOverride::fromDatabaseRow($row)->toArray();
+            $override = RestockRouteDailyOverride::fromDatabaseRow($row)->toArray();
+            $override['machine_code'] = isset($row['machine_code']) && $row['machine_code'] !== null
+                ? (string)$row['machine_code']
+                : null;
+            $overrides[] = $override;
         }
 
         return $overrides;
