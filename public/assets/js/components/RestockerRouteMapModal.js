@@ -37,6 +37,8 @@ export const RestockerRouteMapModal = {
     return {
       mapWindow: null,
       selectedStopOrder: null,
+      previousFocus: null,
+      routeMapKeydownHandler: null,
       ...mapZoomPanState()
     };
   },
@@ -93,14 +95,103 @@ export const RestockerRouteMapModal = {
   watch: {
     modelValue(open) {
       if (open) {
-        this.selectedStopOrder = null;
-        this.mapWindow = this.computeTileWindow();
-        this.resetView();
+        this.activateModal();
+      } else {
+        this.deactivateModal();
       }
     }
   },
+  mounted() {
+    if (this.isVisible) {
+      this.activateModal();
+    }
+  },
+  beforeUnmount() {
+    this.unbindKeydown();
+  },
   methods: {
     ...MapZoomPanMethods,
+    activateModal() {
+      if (typeof document !== 'undefined') {
+        this.previousFocus = document.activeElement;
+      }
+      this.selectedStopOrder = null;
+      this.mapWindow = this.computeTileWindow();
+      this.resetView();
+      this.bindKeydown();
+      const focusClose = () => this.focusCloseButton();
+      if (typeof this.$nextTick === 'function') {
+        this.$nextTick(focusClose);
+      } else {
+        focusClose();
+      }
+    },
+    deactivateModal() {
+      this.unbindKeydown();
+      this.restoreFocus();
+    },
+    bindKeydown() {
+      if (typeof document === 'undefined' || this.routeMapKeydownHandler) return;
+      this.routeMapKeydownHandler = (event) => this.handleKeydown(event);
+      document.addEventListener('keydown', this.routeMapKeydownHandler);
+    },
+    unbindKeydown() {
+      if (
+        typeof document !== 'undefined'
+        && this.routeMapKeydownHandler
+        && typeof document.removeEventListener === 'function'
+      ) {
+        document.removeEventListener('keydown', this.routeMapKeydownHandler);
+      }
+      this.routeMapKeydownHandler = null;
+    },
+    focusCloseButton() {
+      const closeButton = this.$refs?.routeMapCloseButton;
+      if (closeButton && typeof closeButton.focus === 'function') closeButton.focus();
+    },
+    restoreFocus() {
+      const trigger = this.previousFocus;
+      this.previousFocus = null;
+      if (!trigger || trigger.isConnected === false || typeof trigger.focus !== 'function') return;
+      const focusTrigger = () => {
+        if (trigger.isConnected === false) return;
+        trigger.focus();
+      };
+      if (typeof this.$nextTick === 'function') this.$nextTick(focusTrigger);
+      else focusTrigger();
+    },
+    focusableElements() {
+      const root = this.$refs?.routeMapDialog;
+      if (!root || typeof root.querySelectorAll !== 'function') return [];
+      const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+      return Array.from(root.querySelectorAll(selector))
+        .filter((element) => element && typeof element.focus === 'function');
+    },
+    handleKeydown(event) {
+      if (!this.isVisible || !event) return;
+      if (event.key === 'Escape') {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        this.close();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const elements = this.focusableElements();
+      if (elements.length === 0) return;
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      const active = typeof document !== 'undefined' ? document.activeElement : null;
+      const root = this.$refs?.routeMapDialog;
+      const inside = !!(active && root && typeof root.contains === 'function' && root.contains(active));
+
+      if (event.shiftKey && (!inside || active === first)) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (!inside || active === last)) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        first.focus();
+      }
+    },
     getBaseWindow() {
       return this.mapWindow || this.computeTileWindow();
     },
@@ -203,13 +294,13 @@ export const RestockerRouteMapModal = {
   },
   template: `
     <div v-if="isVisible" class="route-map-backdrop" data-testid="restocker-route-map-modal" @click.self="close">
-      <div class="route-map-modal" role="dialog" aria-modal="true" aria-labelledby="restockerRouteMapTitle">
+      <div ref="routeMapDialog" class="route-map-modal" role="dialog" aria-modal="true" aria-labelledby="restockerRouteMapTitle" tabindex="-1">
         <div class="route-map-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
           <div>
             <h2 id="restockerRouteMapTitle" style="font-family: var(--font-display); font-size: 17px; margin: 0;">🗺️ Mapa de mi ruta</h2>
             <p style="font-size: 11px; margin: 2px 0 0 0; opacity: 0.9;">{{ serviceDate || 'Hoy' }} · {{ originLabel }}</p>
           </div>
-          <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-route-map" @click="close">Cerrar</button>
+          <button ref="routeMapCloseButton" type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-sm" data-testid="btn-close-route-map" aria-label="Cerrar mapa" @click="close">Cerrar</button>
         </div>
 
         <div class="route-map-body">

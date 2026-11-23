@@ -565,6 +565,81 @@ async function run() {
   assert('5.11 La vista mantiene el ancho móvil y no fija anchos de escritorio', viewSource.includes('max-width: 480px') && !/min-width:\s*(?:[4-9]\d\d|\d{4,})px/.test(viewSource));
   assert('5.12 La vista registra el modal de mapa', RestockerRouteView.components?.RestockerRouteMapModal === RestockerRouteMapModal);
 
+  assert(
+    '5.13 El cierre del mapa usa el tono inverso y refs de foco',
+    mapSource.includes('vg-btn-ghost vg-btn-ghost-inverse')
+      && mapSource.includes('ref="routeMapCloseButton"')
+      && mapSource.includes('ref="routeMapDialog"')
+      && mapSource.includes('tabindex="-1"')
+  );
+
+  let mapCloseFocused = false;
+  let mapEscapePrevented = false;
+  const mapEvents = [];
+  const mapA11yVm = {
+    ...RestockerRouteMapModal.data(),
+    ...RestockerRouteMapModal.methods,
+    modelValue: true,
+    isVisible: true,
+    $emit: (name, payload) => mapEvents.push({ name, payload }),
+    $refs: { routeMapCloseButton: { focus: () => { mapCloseFocused = true; } } }
+  };
+  mapA11yVm.focusCloseButton();
+  mapA11yVm.handleKeydown({
+    key: 'Escape',
+    preventDefault: () => { mapEscapePrevented = true; }
+  });
+  assert(
+    '5.14 El mapa enfoca «Cerrar» y Escape cierra el diálogo',
+    mapCloseFocused
+      && mapEscapePrevented
+      && mapEvents.some((event) => event.name === 'update:modelValue' && event.payload === false)
+  );
+
+  let mapTriggerFocused = false;
+  mapA11yVm.previousFocus = { focus: () => { mapTriggerFocused = true; } };
+  mapA11yVm.$nextTick = (callback) => callback();
+  mapA11yVm.restoreFocus();
+  assert(
+    '5.15 El cierre devuelve el foco al disparador',
+    mapTriggerFocused && mapA11yVm.previousFocus === null
+  );
+
+  let mapFirstFocused = false;
+  let mapLastFocused = false;
+  const mapFirst = { focus: () => { mapFirstFocused = true; } };
+  const mapLast = { focus: () => { mapLastFocused = true; } };
+  const mapDialogRoot = {
+    querySelectorAll: () => [mapFirst, mapLast],
+    contains: (element) => element === mapFirst || element === mapLast
+  };
+  const mapTrapVm = {
+    ...RestockerRouteMapModal.methods,
+    isVisible: true,
+    $refs: { routeMapDialog: mapDialogRoot }
+  };
+  const originalDocument = globalThis.document;
+  globalThis.document = { activeElement: mapLast };
+  let mapTabPrevented = false;
+  mapTrapVm.handleKeydown({
+    key: 'Tab',
+    shiftKey: false,
+    preventDefault: () => { mapTabPrevented = true; }
+  });
+  globalThis.document.activeElement = mapFirst;
+  let mapShiftTabPrevented = false;
+  mapTrapVm.handleKeydown({
+    key: 'Tab',
+    shiftKey: true,
+    preventDefault: () => { mapShiftTabPrevented = true; }
+  });
+  if (originalDocument === undefined) delete globalThis.document;
+  else globalThis.document = originalDocument;
+  assert(
+    '5.16 Tab y Shift+Tab quedan atrapados dentro del diálogo',
+    mapTabPrevented && mapFirstFocused && mapShiftTabPrevented && mapLastFocused
+  );
+
   console.log('\n======================================================================');
   console.log(` Aserciones: ${assertions} · Fallos: ${failures}`);
   console.log(failures === 0 ? ' RESULTADO: 100% EN VERDE' : ' RESULTADO: EN ROJO');

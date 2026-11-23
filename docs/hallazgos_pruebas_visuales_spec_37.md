@@ -7,12 +7,12 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD de la corrida:** `cefed9e`
-- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08 y H-37-09 tocan la vista móvil, el servicio de agendas, sus suites y este acta; se registran en commits separados.
+- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09 y H-37-10 tocan la vista móvil, el servicio de agendas, el modal del mapa, sus suites y este acta; se registran en commits separados.
 - **Entorno:** app local `http://127.0.0.1:8000` contra el banco `vendguard_battery` (PostgreSQL `127.0.0.1:54331`), con las credenciales semilla del entorno de batería.
 - **Alcance:** recorrido manual en Chromium como Coordinación y Reponedor, con clics y teclado reales, a `1280 × 932 px` y `360 × 800 px`. Se contrastaron red, DOM, respuestas API, PostgreSQL e IndexedDB.
 - **Naturaleza:** acta de verificación visual y de UI sobre la aplicación ensamblada. **No sustituye** a [`hallazgos_pruebas_funcionales_spec_37.md`](hallazgos_pruebas_funcionales_spec_37.md), que recoge la corrida funcional y los cierres `H-37-01`–`H-37-07`, ni a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con suites automatizadas.
 
-> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Siete hallazgos siguen **abiertos**; H-37-08 y H-37-09 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
+> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Seis hallazgos siguen **abiertos**; H-37-08, H-37-09 y H-37-10 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
 
 ---
 
@@ -24,7 +24,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 |---:|---|---|---|---|---|
 | 1 | **H-37-08** | **P2 · Media** | La ruta móvil no se recarga al iniciar o cerrar turno | `RF-05.2`, `RF-03` | **Cerrado (2026-11-23)** |
 | 2 | **H-37-09** | **P2 · Media** | El filtro de agendas ignora la búsqueda en máquinas sin agenda | `RF-01.3`, `RF-05.3` | **Cerrado (2026-11-23)** |
-| 3 | **H-37-10** | **P3 · Baja-media** | El cierre del mapa tiene contraste 1,72:1 y el modal no recibe foco ni cierra con Escape | `RNF-04`, `RF-05.2` | **Abierto** |
+| 3 | **H-37-10** | **P3 · Baja-media** | El cierre del mapa tenía contraste 1,72:1 y el modal no recibía foco ni cerraba con Escape | `RNF-04`, `RF-05.2` | **Cerrado (2026-11-23)** |
 | 4 | **H-37-11** | **P3 · Baja-media** | El modal de «Nueva agenda» no atrapa el foco | `RNF-04` | **Abierto** |
 | 5 | **H-37-12** | **P3 · Baja** | La tabla de excepciones muestra el ID interno (`#10`) en vez del código de máquina | `RF-05.3`, Art. V.4 | **Abierto** |
 | 6 | **H-37-13** | **P3 · Baja** | A 360 px las etiquetas del resumen de ruta se salen de su celda | `RNF-04`, `RF-05.3` | **Abierto** |
@@ -43,7 +43,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 3. Se recorrió la superficie móvil de Lucía: inicio de turno, ruta por bloques, mapa, modal de omisión, validación de motivo, aviso FEFO y snapshot de IndexedDB.
 4. Cada paso se contrastó con la petición de red, el DOM renderizado, la respuesta API, PostgreSQL y el log del servidor.
 5. Se probaron los tamaños `1280 × 932` y `360 × 800`; se midieron `scrollWidth`/`clientWidth` de etiquetas y contenedores para distinguir scroll interno intencional de solapamiento real.
-6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08 y H-37-09 se validaron con sus suites; H-37-08 también se verificó en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
+6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09 y H-37-10 se validaron con sus suites; H-37-08 y H-37-10 también se verificaron en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
 
 **Datos utilizados:** `VEND-0101`, `VEND-0102`, `VEND-0401`, `VEND-0501`, `VEND-0502`, `VEND-0701`, `VEND-0801` y `VEND-0901`; agenda de prueba de `VEND-0901` (dada de baja); desvío FEFO de `VEND-0701` a Lucía (revocado).
 
@@ -98,24 +98,28 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 
 ---
 
-### H-37-10 · P3 · El cierre del mapa tiene mal contraste y el modal no es plenamente accesible
+### H-37-10 · P3 · CORREGIDO · El cierre del mapa tenía mal contraste y el modal no era plenamente accesible
 
-**Qué ocurre.** En el modal «🗺️ Mapa de mi ruta», el botón «Cerrar» se pinta con `vg-btn-ghost`, cuyo color es `--color-ink-secondary` (`#434c5f`), sobre la cabecera azul `--color-primary` (`#2560ff`). El contraste calculado es **1,72:1**, muy por debajo del mínimo WCAG AA de 4,5:1 para texto normal. El botón se ve gris casi invisible en la captura a 360 px.
+**Qué ocurría.** En el modal «🗺️ Mapa de mi ruta», el botón «Cerrar» se pintaba con `vg-btn-ghost`, cuyo color es `--color-ink-secondary` (`#434c5f`), sobre la cabecera azul `--color-primary` (`#2560ff`). El contraste calculado era **1,72:1**, muy por debajo del mínimo WCAG AA de 4,5:1 para texto normal. El botón se veía gris casi invisible en la captura a 360 px.
 
-Además, el modal no mueve el foco al abrirse y no se cierra con `Escape`; solo responde al botón o al clic en el fondo.
+Además, el modal no movía el foco al abrirse y no se cerraba con `Escape`; solo respondía al botón o al clic en el fondo.
 
-**Causa.** [`RestockerRouteMapModal.js:212`](../public/assets/js/components/RestockerRouteMapModal.js) usa `vg-btn-ghost` en vez de `vg-btn-ghost-inverse`, que existe precisamente para superficies oscuras ([`design-tokens.css:422`](../public/assets/css/design-tokens.css)). `openRouteMap()` en [`RestockerRouteView.js:923`](../public/assets/js/components/RestockerRouteView.js) solo cambia `showRouteMapModal`; no hay gestión de foco ni listener de `Escape` para este modal.
+**Causa.** [`RestockerRouteMapModal.js:303`](../public/assets/js/components/RestockerRouteMapModal.js) usaba `vg-btn-ghost` sin el tono inverso que existe para superficies oscuras ([`design-tokens.css:422`](../public/assets/css/design-tokens.css)). `openRouteMap()` en [`RestockerRouteView.js:923`](../public/assets/js/components/RestockerRouteView.js) solo cambiaba `showRouteMapModal`; el modal no tenía gestión de foco ni listener de `Escape`.
 
-**Impacto.** Para baja visión el cierre es difícil de localizar. Para teclado, el modal no recibe el foco y no se puede cerrar con `Escape`, lo que obliga a tabular por una superficie cuyo orden no está controlado.
+**Impacto.** Para baja visión el cierre era difícil de localizar. Para teclado, el modal no recibía el foco y no se podía cerrar con `Escape`, lo que obligaba a tabular por una superficie cuyo orden no estaba controlado.
 
-**Reproducción.**
+**Reproducción original.**
 
 1. Entrar como Lucía con ruta visible.
 2. Abrir «🗺️ Mapa».
 3. Inspeccionar el color de «Cerrar» o calcular el contraste con los tokens indicados.
-4. Pulsar `Escape`: el modal permanece abierto.
+4. Pulsar `Escape`: el modal permanecía abierto.
 
-**Estado:** Abierto (2026-11-23).
+**Corrección aplicada (2026-11-23).** El cierre conserva `vg-btn-ghost` y añade `vg-btn-ghost-inverse`, que pinta el texto en blanco (`#ffffff`) sobre la cabecera azul: **5,0:1**. El modal guarda el elemento que lo abrió, enfoca «Cerrar» tras el render, mantiene `Tab` y `Shift+Tab` dentro del diálogo, cierra con `Escape` y devuelve el foco al botón «Mapa» ([`RestockerRouteMapModal.js:114`](../public/assets/js/components/RestockerRouteMapModal.js), [`:170`](../public/assets/js/components/RestockerRouteMapModal.js), [`:297`](../public/assets/js/components/RestockerRouteMapModal.js)). El listener se retira al cerrar y al desmontar; el diálogo declara `tabindex="-1"`.
+
+**Evidencia (2026-11-23).** `node tests/frontend/restocker_route_planner_view.test.mjs`: **52/52 · 0 fallos**, con las aserciones `5.13`–`5.16`, que cubren la clase inversa y los refs, el foco en «Cerrar», el cierre con `Escape`, el retorno al disparador y el ciclo `Tab`/`Shift+Tab`. En Chromium, con la caché y el service worker limpios, el modal abrió con `document.activeElement` en `btn-close-route-map`, color `rgb(255, 255, 255)` sobre `rgb(37, 96, 255)`; `Shift+Tab` desde el primer control llevó al último (`btn-route-map-full-navigation`), `Tab` desde el último volvió al cierre, y `Escape` cerró el diálogo devolviendo el foco a `btn-open-restocker-route-map` («🗺️ Mapa»).
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -245,7 +249,7 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 | Aviso FEFO real: `role="alert"`, caducidad y máquinas afectadas | Correcto |
 | Desvío y revocación desde Coordinación | Correcto |
 | Mapa: paradas, máquinas, km, leyenda y enlace a Google Maps | Correcto |
-| Mapa a 360 px: cabe con scroll interno y sin desbordamiento de página | Correcto; el defecto es el contraste de H-37-10 |
+| Mapa a 360 px: cabe con scroll interno y sin desbordamiento de página | Correcto; contraste y teclado corregidos en H-37-10 |
 | Snapshot de ruta en IndexedDB | 1 fila, 4 paradas, `saved_at` actualizado |
 | Log del servidor | Sin errores PHP del M37 |
 
@@ -264,10 +268,11 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 
 1. **H-37-08 (P2) — corregido el 2026-11-23.** Recargar `my-route` tras iniciar y cerrar turno, con una regresión que comprueba que la petición se dispara.
 2. **H-37-09 (P2) — corregido el 2026-11-23.** Aplicar `search` antes de la rama de máquinas sin agenda y cubrirlo con una aserción API que exige una única fila.
-3. **H-37-10 y H-37-11 (P3):** usar `vg-btn-ghost-inverse` y dotar a los modales de foco inicial, focus trap y `Escape`; el mapa y `ModalDialog` comparten la deuda.
-4. **H-37-12, H-37-13 y H-37-14 (P3):** publicar `machine_code` en la excepción, adaptar el resumen a 360 px y distinguir los estados vacíos de cobertura.
-5. **H-37-15 (P4):** alternar singular/plural en el contador.
-6. **H-37-16 (P4):** no requiere cambio en el M37; valorar reducir el `z-index` o el área de impacto del widget de n8n.
+3. **H-37-10 (P3) — corregido el 2026-11-23.** Contraste inverso, foco inicial, focus trap, `Escape` y retorno al disparador en el mapa, con regresión frontend.
+4. **H-37-11 (P3):** dotar a `ModalDialog` de foco inicial y focus trap; el mapa ya no comparte esta deuda.
+5. **H-37-12, H-37-13 y H-37-14 (P3):** publicar `machine_code` en la excepción, adaptar el resumen a 360 px y distinguir los estados vacíos de cobertura.
+6. **H-37-15 (P4):** alternar singular/plural en el contador.
+7. **H-37-16 (P4):** no requiere cambio en el M37; valorar reducir el `z-index` o el área de impacto del widget de n8n.
 
 ---
 
@@ -275,4 +280,4 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 
 Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P2 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit; sin push.
+**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit; sin push.
