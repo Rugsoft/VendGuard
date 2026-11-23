@@ -8,7 +8,7 @@
 - **Plan y tareas:** [`specs/37-restock-route-planner/plan.md`](../specs/37-restock-route-planner/plan.md) · [`specs/37-restock-route-planner/tasks.md`](../specs/37-restock-route-planner/tasks.md)
 - **Matriz de trazabilidad:** [`specs/37-restock-route-planner/traceability-matrix.md`](../specs/37-restock-route-planner/traceability-matrix.md)
 - **Fecha de auditoría:** 2026-11-22
-- **Última actualización:** 2026-11-22 · AUD-37-01 a AUD-37-09 cerradas; Spec 37 cumplida al 100 %; batería global **448/17.394/0**, `new_engine` **76/76 · 2.606 aserciones** y **residuo 0** de esquemas temporales
+- **Última actualización:** 2026-11-23 · AUD-37-01 a AUD-37-09 cerradas; Spec 37 cumplida al 100 %; batería global **448/17.428/0**, `new_engine` **76/76 · 2.612 aserciones** y **residuo 0** de esquemas temporales (reejecución sobre el HEAD de la PR #23)
 - **Rama:** `feat/restock-route-planner`
 - **Base auditada:** `32904325c6f8bcf064f1c37ff5269d4c1121fc2a` (auditoría original) · `b7094ca` (cierre de AUD-37-03) · cambios de AUD-37-04 en el árbol de trabajo · `83f64ed` (cierre de AUD-37-06) · `ac45a08` (cierre de AUD-37-07) · `7dda130` (cierre de AUD-37-08) · cierre de AUD-37-09
 - **Alcance:** revisión de `RF-01`–`RF-05` y sus criterios EARS, `RNF-01`–`RNF-04`, `D1`–`D7`, `C1`–`C3`, `QA-1`–`QA-6`, §6, los 5 criterios de Definition of Done y las 13 tareas `T-RRP-01`–`T-RRP-13`, con ejecución real de las suites en los dos canales.
@@ -19,7 +19,7 @@
 
 ## 1. Veredicto ejecutivo
 
-**La Spec 37 queda cumplida al 100 % tras cerrar las nueve brechas (`AUD-37-01` a `AUD-37-09`).** La certificación global termina en verde (**448/17.394/0 · `DocMetricsGuard` coherente**), el canal `new_engine` cierra completo (**76/76 · 2.606 aserciones · 0 fallos**), el layout M37 está medido en Chromium real a `360 × 800`, ambas bases quedan con **residuo 0** de esquemas temporales, EARS 02.2.1 queda alineado, todos los criterios de `AUD-37-08` tienen aserción directa y la convergencia/idempotencia 1:1 de semillas SQL/PHP junto con la ausencia de consultas N+1 (`3` sentencias `O(1)`) quedan verificadas de forma automatizada.
+**La Spec 37 queda cumplida al 100 % tras cerrar las nueve brechas (`AUD-37-01` a `AUD-37-09`).** La certificación global termina en verde (**448/17.428/0 · `DocMetricsGuard` coherente**), el canal `new_engine` cierra completo (**76/76 · 2.612 aserciones · 0 fallos**), el layout M37 está medido en Chromium real a `360 × 800`, ambas bases quedan con **residuo 0** de esquemas temporales, EARS 02.2.1 queda alineado, todos los criterios de `AUD-37-08` tienen aserción directa y la convergencia/idempotencia 1:1 de semillas SQL/PHP junto con la ausencia de consultas N+1 (`3` sentencias `O(1)`) quedan verificadas de forma automatizada.
 
 Resultado real de la batería global tras cerrar AUD-37-09:
 
@@ -48,6 +48,8 @@ Fallos           : 0
 RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 exit=0
 ```
+
+> Reejecución final del 2026-11-23 sobre el HEAD de la PR #23: batería global **448 suites · 17.428 aserciones · 0 fallos** y `new_engine` **76/76 suites · 2.612 aserciones · 0 fallos**; `DocMetricsGuard` coherente.
 
 **Conclusión corta:** esquema, semillas 1:1 e idempotencia, ausencia de consultas N+1 (`O(1)`), API, RBAC, opacidad, perímetro M32–M36, `TODAY_ROUTE` y las superficies M37 están sólidos y certificados al 100 %; ambas baterías cierran en verde sin esquemas residuales (`0` filas) y las 9 brechas (`AUD-37-01`–`AUD-37-09`) quedan cerradas.
 
@@ -273,9 +275,9 @@ Total: **3 esquemas**. La batería declaraba “Base de datos restablecida: SÍ�
 |---|---|---|
 | **1.** Migración `033`/`034`, 51 tablas, 50 enums, índices, FK, semillas 1:1, auditoría y guardas | Schema M37 **45/45**; `PostgresSchemaTest` **159/159**; `PostgresConstitutionalTest` **88/88**; `SchemaConvergenceParityTest` **42/42**; `CloudDeploySchemaParityTest` **55/55** | **Cumplido** |
 | **2.** Dominio, cadencias, optimizador, servicios, excepciones y perímetro | Dominio **67/67**; Cadence **60/60**; Optimizer **30/30**; Services **120/120**; Integrations **23/23**; Gateway **36/36** | **Cumplido** |
-| **3.** API REST, RBAC, idempotencia y opacidad | API **39/39**; Constitucional **45/45** | **Cumplido** |
-| **4.** Superficies móvil y de Coordinación, mapa, Offline y `TODAY_ROUTE` | Móvil **42/42**; vista **245/245**; Coordinación **32/32**; M33 **80/80**; layout M37 **38/38** en Chromium real | **Cumplido** |
-| **5.** Batería global y canal `new_engine` al 100 % | Global **448/17.394/0/`DocMetricsGuard` coherente/exit=0**; `new_engine` **76/76/2.606/0/exit=0** | **Cumplido** |
+| **3.** API REST, RBAC, idempotencia y opacidad | API **45/45**; Constitucional **45/45** | **Cumplido** |
+| **4.** Superficies móvil y de Coordinación, mapa, Offline y `TODAY_ROUTE` | Móvil **52/52**; vista **245/245**; Coordinación **43/43**; M33 **80/80**; layout M37 **38/38** en Chromium real | **Cumplido** |
+| **5.** Batería global y canal `new_engine` al 100 % | Global **448/17.428/0/`DocMetricsGuard` coherente/exit=0**; `new_engine` **76/76/2.612/0/exit=0** | **Cumplido** |
 
 ---
 
@@ -283,7 +285,7 @@ Total: **3 esquemas**. La batería declaraba “Base de datos restablecida: SÍ�
 
 [`specs/37-restock-route-planner/tasks.md`](../specs/37-restock-route-planner/tasks.md): **13 marcadas `[x]`, 0 pendientes**.
 
-Las 13 tareas existen y están cerradas. Tras cerrar `AUD-37-01` a `AUD-37-09`, el cierre de **T-RRP-13** registra la evidencia reproducible actualizada: batería global **448 suites · 17.394 aserciones · 0 fallos · `DocMetricsGuard` coherente · `exit=0`** y canal `new_engine` **76/76 suites · 2.606 aserciones · 0 fallos · `exit=0`**.
+Las 13 tareas existen y están cerradas. Tras cerrar `AUD-37-01` a `AUD-37-09`, el cierre de **T-RRP-13** registra la evidencia reproducible actualizada: batería global **448 suites · 17.428 aserciones · 0 fallos · `DocMetricsGuard` coherente · `exit=0`** y canal `new_engine` **76/76 suites · 2.612 aserciones · 0 fallos · `exit=0`**.
 
 ---
 
