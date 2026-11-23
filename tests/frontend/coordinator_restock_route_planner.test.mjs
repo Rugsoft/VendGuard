@@ -529,6 +529,15 @@ async function run() {
       && bulkCall?.payload?.overwrite_existing === true
       && bulkCall?.payload?.include_weekends === true
   );
+  vm.bulkForm.machine_ids = [1];
+  const singularSelectionLabel = vm.bulkSelectionLabel;
+  vm.bulkForm.machine_ids = [1, 2];
+  assert(
+    '3.7b El contador del alta masiva concuerda en singular y plural',
+    singularSelectionLabel === '1 seleccionada'
+      && vm.bulkSelectionLabel === '2 seleccionadas'
+      && CoordinatorRestockRoutePlannerSubTab.template.includes('{{ bulkSelectionLabel }}')
+  );
   assert('3.8 El lote publica creados, actualizados y omitidos', vm.bulkResult?.created_count === 1 && vm.bulkResult?.updated_count === 1);
 
   await vm.deactivateSchedule(scheduleFixture.items[0]);

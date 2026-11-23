@@ -191,6 +191,10 @@ export const CoordinatorRestockRoutePlannerSubTab = {
     isEditingSchedule() {
       return this.scheduleMode === 'edit';
     },
+    bulkSelectionLabel() {
+      const selected = Array.isArray(this.bulkForm.machine_ids) ? this.bulkForm.machine_ids.length : 0;
+      return `${selected} ${selected === 1 ? 'seleccionada' : 'seleccionadas'}`;
+    },
     overrideTitle() {
       return this.overrideForm.override_type === 'REASSIGNED'
         ? 'Desviar parada por un día'
@@ -1004,7 +1008,7 @@ export const CoordinatorRestockRoutePlannerSubTab = {
             <input id="route-bulk-type" v-model="bulkForm.machine_type" class="vg-input" placeholder="SNACKS" data-testid="route-planner-bulk-type" />
           </div>
           <div style="grid-column: 1 / -1;">
-            <span class="vg-label">Máquinas (opcional · {{ bulkForm.machine_ids.length }} seleccionadas)</span>
+            <span class="vg-label">Máquinas (opcional · {{ bulkSelectionLabel }})</span>
             <div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 8px;" data-testid="route-planner-bulk-machine-list">
               <label v-for="machine in plannerMachines" :key="machine.id" style="display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: var(--font-size-body-sm);">
                 <input type="checkbox" :value="machine.id" v-model="bulkForm.machine_ids" :data-testid="'route-planner-bulk-machine-' + machine.id" />
