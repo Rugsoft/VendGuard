@@ -7,18 +7,18 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD de la corrida:** `cefed9e`
-- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11, H-37-12, H-37-13, H-37-14 y H-37-15 tocan la vista móvil, el servicio de agendas, los modales del mapa y compartido, el read model del tablero, el resumen responsive, el estado vacío de rutas, la concordancia del alta masiva, sus suites y este acta; se registran en commits separados.
+- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11, H-37-12, H-37-13, H-37-14 y H-37-15 tocan la vista móvil, el servicio de agendas, los modales del mapa y compartido, el read model del tablero, el resumen responsive, el estado vacío de rutas, la concordancia del alta masiva, sus suites y este acta; se registran en commits separados. H-37-16 se cierra como externo documentado, sin cambios de código.
 - **Entorno:** app local `http://127.0.0.1:8000` contra el banco `vendguard_battery` (PostgreSQL `127.0.0.1:54331`), con las credenciales semilla del entorno de batería.
 - **Alcance:** recorrido manual en Chromium como Coordinación y Reponedor, con clics y teclado reales, a `1280 × 932 px` y `360 × 800 px`. Se contrastaron red, DOM, respuestas API, PostgreSQL e IndexedDB.
 - **Naturaleza:** acta de verificación visual y de UI sobre la aplicación ensamblada. **No sustituye** a [`hallazgos_pruebas_funcionales_spec_37.md`](hallazgos_pruebas_funcionales_spec_37.md), que recoge la corrida funcional y los cierres `H-37-01`–`H-37-07`, ni a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con suites automatizadas.
 
-> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Un hallazgo sigue **abierto**; H-37-08, H-37-09, H-37-10, H-37-11, H-37-12, H-37-13, H-37-14 y H-37-15 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
+> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. No queda ningún hallazgo abierto: H-37-08, H-37-09, H-37-10, H-37-11, H-37-12, H-37-13, H-37-14 y H-37-15 quedaron corregidos el 2026-11-23 con regresiones automatizadas, y H-37-16 se cerró como externo documentado.
 
 ---
 
 ## 1. Resumen ejecutivo
 
-No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos). Los dos fallos P2 afectaban al flujo principal del reponedor y a la consulta de agendas de Coordinación; **ambos están corregidos**. El resto son deuda de accesibilidad, presentación o copy.
+No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos). Los dos fallos P2 afectaban al flujo principal del reponedor y a la consulta de agendas de Coordinación; **ambos están corregidos**. El resto son deuda de accesibilidad, presentación o copy, salvo H-37-16: un solapamiento del widget externo de n8n, cerrado como deuda ajena documentada.
 
 | Orden | ID | Prioridad | Hallazgo | Requisito afectado | Estado |
 |---:|---|---|---|---|---|
@@ -30,7 +30,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 | 6 | **H-37-13** | **P3 · Baja** | A 360 px las etiquetas del resumen de ruta se salían de su celda | `RNF-04`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 7 | **H-37-14** | **P3 · Baja** | El estado vacío de rutas decía «No hay paradas pendientes» aunque hubiera paradas sin cobertura | `RF-03.3`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 8 | **H-37-15** | **P4 · Cosmético** | El contador de Alta masiva decía «1 seleccionadas» | `RNF-04` | **Cerrado (2026-11-23)** |
-| 9 | **H-37-16** | **P4 · Externo** | El widget flotante de n8n tapa acciones en la esquina inferior derecha | Transversal; no es código del M37 | **Abierto** |
+| 9 | **H-37-16** | **P4 · Externo** | El widget flotante de n8n tapa acciones en la esquina inferior derecha | Transversal; no es código del M37 | **Cerrado como externo (2026-11-23)** |
 
 **Lectura de prioridades:** P2 deja un requisito funcional sin cumplir o produce un dato operativo incorrecto, con workaround; P3 es deuda de accesibilidad, presentación o semántica sin bloqueo; P4 es cosmético o ajeno al módulo.
 
@@ -43,7 +43,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 3. Se recorrió la superficie móvil de Lucía: inicio de turno, ruta por bloques, mapa, modal de omisión, validación de motivo, aviso FEFO y snapshot de IndexedDB.
 4. Cada paso se contrastó con la petición de red, el DOM renderizado, la respuesta API, PostgreSQL y el log del servidor.
 5. Se probaron los tamaños `1280 × 932` y `360 × 800`; se midieron `scrollWidth`/`clientWidth` de etiquetas y contenedores para distinguir scroll interno intencional de solapamiento real.
-6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11, H-37-12, H-37-13, H-37-14 y H-37-15 se validaron con sus suites; H-37-08, H-37-10, H-37-11, H-37-12, H-37-13, H-37-14 y H-37-15 también se verificaron en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
+6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11, H-37-12, H-37-13, H-37-14 y H-37-15 se validaron con sus suites; H-37-08, H-37-10, H-37-11, H-37-12, H-37-13, H-37-14 y H-37-15 también se verificaron en Chromium. H-37-16 se cerró como externo documentado tras verificar que el lanzador fijo del asistente mantiene el puntero y que su mitigación exige una decisión de producto sobre el widget. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
 
 **Datos utilizados:** `VEND-0101`, `VEND-0102`, `VEND-0401`, `VEND-0501`, `VEND-0502`, `VEND-0701`, `VEND-0801` y `VEND-0901`; agenda de prueba de `VEND-0901` (dada de baja); desvío FEFO de `VEND-0701` a Lucía (revocado).
 
@@ -237,21 +237,21 @@ Además, el modal no movía el foco al abrirse y no se cerraba con `Escape`; sol
 
 ---
 
-### H-37-16 · P4 · El widget flotante de n8n tapa acciones en la esquina inferior derecha
+### H-37-16 · P4 · CERRADO COMO EXTERNO DOCUMENTADO · El widget flotante de n8n tapa acciones en la esquina inferior derecha
 
 **Qué ocurre.** A `1280 × 932 px`, el botón «Desviar» de la fila visible inferior quedó debajo del SVG del chat flotante de n8n. El clic real no abría el modal y `document.elementFromPoint()` devolvía el `path` del widget. Al hacer scroll y dejar el botón libre, el modal abrió correctamente.
 
-**Causa.** El widget externo del chat se superpone a la esquina inferior derecha con mayor `z-index` que la tabla. No es código del M37 ni del repositorio; se registra porque afecta a la operativa de la pantalla.
+**Causa.** El widget externo del chat monta un lanzador fijo de 64 px en la esquina inferior derecha con mayor `z-index` que la tabla. No es código del M37: el repositorio carga el bundle de n8n y ya aplica la mitigación H-1 del Módulo 35, que hace transparente al puntero el contenedor `.chat-window-wrapper`, pero mantiene clicables la burbuja y el panel (`.chat-window-toggle` y `.chat-window`). La burbuja debe capturar el puntero para poder abrir el asistente; por eso el solapamiento con la acción inferior es inevitable cuando ambos coinciden.
 
-**Impacto.** Una acción puede quedar inaccesible si coincide con la esquina del chat. El workaround es hacer scroll; no se pierde ningún dato.
+**Mitigación existente y sus límites.** H-1 añadió `pointer-events: none` al contenedor y reactivó el puntero solo en el lanzador y el panel, además de un pasillo de 88 px para la tabla de recaudación por debajo de 1024 px. Ese pasillo no cubre el planificador de rutas ni el viewport de 1280 px, y no existe una opción de posición en `CHAT_ASSISTANT_DEFAULTS`: la configuración del repositorio solo permite activar/desactivar el asistente, cambiar sus URLs y ajustar tiempos de carga.
 
-**Reproducción.**
+**Por qué no se corrige desde el repositorio.** Mover la burbuja solo traslada el solape a otra zona; reservar un pasillo fijo en todas las superficies reduciría el ancho útil de la consola y seguiría sin proteger cualquier otro control que caiga bajo un elemento fijo; hacerla atravesable al puntero dejaría el asistente inaccesible; y retirar el asistente con `enabled: false` es una decisión de producto sobre una funcionalidad transversal, no una corrección del M37. La acción afectada sigue siendo alcanzable con scroll y no hay pérdida de datos.
 
-1. A `1280 × 932 px`, abrir el planificador y desplazarse hasta que un botón «Desviar» quede en la esquina inferior derecha.
-2. Comprobar con `elementFromPoint` que el punto devuelve el SVG del chat.
-3. Hacer scroll para liberar el botón y comprobar que el clic abre el modal.
+**Decisión (2026-11-23).** Se cierra como **externo documentado**. No se modifica `CoordinatorRestockRoutePlannerSubTab.js`, `styles.css` ni `n8nChat.js`: la eliminación del solape requiere que el propietario del widget decida moverlo, ocultarlo en determinadas superficies o retirar el asistente. Queda registrado como riesgo residual de la consola, con el scroll como workaround.
 
-**Estado:** Abierto (2026-11-23). Fallo transversal, fuera del alcance de corrección del M37.
+**Evidencia (2026-11-23).** `node tests/unit/N8nChatScopeTest.mjs`: **33/33 · 0 fallos**; las aserciones `5.1` y `5.2` confirman que el contenedor no captura el puntero y que el lanzador sí, y `5.3`–`5.5` que el pasillo existente pertenece solo a la tabla de recaudación. La revisión de `public/assets/css/styles.css` y `public/assets/js/config/chatAssistant.js` confirma que no hay posición configurable del widget ni un pasillo global.
+
+**Estado:** Cerrado (2026-11-23) como externo documentado; sin cambios de código.
 
 ---
 
@@ -298,7 +298,7 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 6. **H-37-13 (P3) — corregido el 2026-11-23.** Resumen de ruta responsive con columnas mínimas de 120 px y regresión frontend.
 7. **H-37-14 (P3) — corregido el 2026-11-23.** El estado vacío distingue las paradas sin cobertura y conserva el copy neutro cuando no hay trabajo pendiente, con regresión frontend.
 8. **H-37-15 (P4) — corregido el 2026-11-23.** El contador alterna singular y plural y la plantilla usa el valor calculado, con regresión frontend.
-9. **H-37-16 (P4):** no requiere cambio en el M37; valorar reducir el `z-index` o el área de impacto del widget de n8n.
+9. **H-37-16 (P4) — cerrado como externo documentado el 2026-11-23.** La superposición pertenece al lanzador fijo del asistente; no se toca código del M37 ni del widget. El workaround es hacer scroll; eliminarla exige una decisión de producto sobre el asistente.
 
 ---
 
@@ -306,4 +306,4 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 
 Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P2 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit. H-37-11 añade cambios en `ModalDialog.js`, `UIComponentsTest.mjs` y este acta, en su propio commit. H-37-12 añade cambios en `PdoRestockRouteReadModel.php`, `RestockRoutePlannerService.php`, `CoordinatorRestockRoutePlannerSubTab.js`, sus suites API/frontend/gateway y este acta, en su propio commit. H-37-13 añade cambios en `CoordinatorRestockRoutePlannerSubTab.js`, `coordinator_restock_route_planner.test.mjs` y este acta, en su propio commit. H-37-14 añade cambios en `CoordinatorRestockRoutePlannerSubTab.js`, `coordinator_restock_route_planner.test.mjs` y este acta, en su propio commit. H-37-15 añade cambios en `CoordinatorRestockRoutePlannerSubTab.js`, `coordinator_restock_route_planner.test.mjs` y este acta, en su propio commit; sin push.
+**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit. H-37-11 añade cambios en `ModalDialog.js`, `UIComponentsTest.mjs` y este acta, en su propio commit. H-37-12 añade cambios en `PdoRestockRouteReadModel.php`, `RestockRoutePlannerService.php`, `CoordinatorRestockRoutePlannerSubTab.js`, sus suites API/frontend/gateway y este acta, en su propio commit. H-37-13 añade cambios en `CoordinatorRestockRoutePlannerSubTab.js`, `coordinator_restock_route_planner.test.mjs` y este acta, en su propio commit. H-37-14 añade cambios en `CoordinatorRestockRoutePlannerSubTab.js`, `coordinator_restock_route_planner.test.mjs` y este acta, en su propio commit. H-37-15 añade cambios en `CoordinatorRestockRoutePlannerSubTab.js`, `coordinator_restock_route_planner.test.mjs` y este acta, en su propio commit. H-37-16 no modifica código: se cierra como externo documentado en este acta; sin push.
