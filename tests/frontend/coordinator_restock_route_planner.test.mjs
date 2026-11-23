@@ -67,8 +67,43 @@ const realPlannerApi = {
   deactivateRestockSchedule: api.coordinator.deactivateRestockSchedule,
   getRestockRouteDay: api.coordinator.getRestockRouteDay,
   createRestockRouteOverride: api.coordinator.createRestockRouteOverride,
-  revokeRestockRouteOverride: api.coordinator.revokeRestockRouteOverride
+  revokeRestockRouteOverride: api.coordinator.revokeRestockRouteOverride,
+  getMachines: api.coordinator.getMachines,
+  getZones: api.coordinator.getZones,
+  getUsers: api.coordinator.getUsers
 };
+
+const catalogMachines = [
+  {
+    id: 1,
+    code: 'VEND-01',
+    machine_type: 'PERISHABLE_FOOD',
+    machine_type_label: 'Perecederos',
+    location_id: 1,
+    location_name: 'Sede Central · Hall',
+    is_active: true
+  },
+  {
+    id: 2,
+    code: 'VEND-02',
+    machine_type: 'SNACKS',
+    machine_type_label: 'Snacks',
+    location_id: 2,
+    location_name: 'Sede Norte',
+    is_active: true
+  }
+];
+
+const catalogZones = [
+  { id: 2, code: 'ZN-02', name: 'Zona Norte', is_active: true },
+  { id: 3, code: 'ZN-03', name: 'Zona Sur', is_active: false }
+];
+
+const catalogRestockers = [
+  { id: 7, name: 'Marta Reponedora', operator_code: 'OP-07', is_active: true },
+  { id: 8, name: 'Óscar Reponedor', operator_code: 'OP-08', is_active: true },
+  { id: 9, name: 'Reponedor Inactivo', operator_code: 'OP-09', is_active: false }
+];
 
 const dayFixture = {
   service_date: TODAY,
@@ -221,6 +256,18 @@ const scheduleFixture = {
   ]
 };
 
+api.coordinator.getMachines = async (params) => {
+  calls.push({ method: 'getMachines', params });
+  return { data: catalogMachines };
+};
+api.coordinator.getZones = async () => {
+  calls.push({ method: 'getZones' });
+  return { data: { zones: catalogZones, unassigned_locations_count: 0 } };
+};
+api.coordinator.getUsers = async (params) => {
+  calls.push({ method: 'getUsers', params });
+  return { data: catalogRestockers };
+};
 api.coordinator.getRestockRouteDay = async (params) => {
   calls.push({ method: 'getRestockRouteDay', params });
   return { data: dayFixture };
@@ -347,6 +394,28 @@ async function run() {
   // ─────────────────────────────────────────────────────────────────────
   console.log('\n--- 3. Agendas individuales y alta masiva ---');
 
+  await vm.loadPlannerOptions();
+  const machinesCall = calls.filter((call) => call.method === 'getMachines').at(-1);
+  const usersCall = calls.filter((call) => call.method === 'getUsers').at(-1);
+  assert(
+    '3.0 Los selectores cargan solo máquinas, zonas y reponedores activos',
+    machinesCall?.params?.status === 'active'
+      && usersCall?.params?.role === 'RESTOCKER'
+      && usersCall?.params?.status === 'active'
+      && vm.plannerMachines.length === 2
+      && vm.plannerZones.length === 1
+      && vm.plannerRestockers.length === 2
+  );
+  assert(
+    '3.0b Las opciones muestran código, sede y operario',
+    vm.machineOptionLabel(vm.plannerMachines[0]).includes('VEND-01')
+      && vm.machineOptionLabel(vm.plannerMachines[0]).includes('Sede Central')
+      && vm.zoneOptionLabel(vm.plannerZones[0]).includes('ZN-02')
+      && vm.zoneOptionLabel(vm.plannerZones[0]).includes('Zona Norte')
+      && vm.restockerOptionLabel(vm.plannerRestockers[0]).includes('Marta Reponedora')
+      && vm.restockerOptionLabel(vm.plannerRestockers[0]).includes('OP-07')
+  );
+
   await vm.loadSchedules();
   const scheduleCall = calls.filter((call) => call.method === 'getRestockSchedules').at(-1);
   assert('3.1 El catálogo se carga con límite y sin filtros vacíos', scheduleCall?.params?.limit === 100 && !Object.prototype.hasOwnProperty.call(scheduleCall.params, 'search'));
@@ -369,7 +438,14 @@ async function run() {
   );
 
   vm.openScheduleModal(scheduleFixture.items[0]);
-  assert('3.5 Editar precarga la agenda viva y su máquina', vm.scheduleMode === 'edit' && vm.scheduleForm.machine_id === 1 && vm.scheduleForm.cadence_type === 'DAILY');
+  assert(
+    '3.5 Editar precarga la agenda viva y conserva su máquina en el selector',
+    vm.scheduleMode === 'edit'
+      && vm.scheduleForm.machine_id === 1
+      && vm.scheduleForm.machine_code === 'VEND-01'
+      && vm.scheduleForm.cadence_type === 'DAILY'
+      && vm.scheduleMachineOptions.some((machine) => Number(machine.id) === 1)
+  );
   vm.scheduleForm.include_weekends = true;
   await vm.saveSchedule();
   const updateScheduleCall = calls.filter((call) => call.method === 'updateRestockSchedule').at(-1);
@@ -379,7 +455,8 @@ async function run() {
   );
 
   vm.openBulkModal();
-  vm.bulkForm.machine_ids = '1, 2';
+  vm.bulkForm.zone_id = 2;
+  vm.bulkForm.machine_ids = [1, 2];
   vm.bulkForm.cadence_type = 'DAILY';
   vm.bulkForm.include_weekends = true;
   await vm.saveBulk();
@@ -387,6 +464,7 @@ async function run() {
   assert(
     '3.7 El alta masiva envía ids explícitos y sobrescritura atómica',
     JSON.stringify(bulkCall?.payload?.machine_ids) === JSON.stringify([1, 2])
+      && bulkCall?.payload?.zone_id === 2
       && bulkCall?.payload?.overwrite_existing === true
       && bulkCall?.payload?.include_weekends === true
   );
@@ -507,6 +585,17 @@ async function run() {
       fileURLToPath(new URL('../../public/assets/js/components/CoordinatorTerritorialMapTab.js', import.meta.url)),
       'utf8'
     ).includes('restock-route')
+  );
+  assert(
+    '6.6 Los formularios usan selectores con nombre o código',
+    template.includes('<select id="route-schedule-machine"')
+      && template.includes('<select id="route-bulk-zone"')
+      && template.includes('type="checkbox" :value="machine.id" v-model="bulkForm.machine_ids"')
+      && template.includes('<select id="route-override-target"')
+      && !template.includes('Máquina (ID)')
+      && !template.includes('Zona (ID)')
+      && !template.includes('IDs separados por coma')
+      && !template.includes('Reponedor receptor (ID)')
   );
 
   console.log('\n======================================================================');

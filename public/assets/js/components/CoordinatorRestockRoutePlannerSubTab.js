@@ -29,6 +29,14 @@ import { ModalDialog } from './ModalDialog.js';
 
 const unwrap = (response) => (response && response.data !== undefined ? response.data : response);
 
+const extractList = (payload, keys = []) => {
+  if (Array.isArray(payload)) return payload;
+  for (const key of keys) {
+    if (Array.isArray(payload?.[key])) return payload[key];
+  }
+  return [];
+};
+
 const todayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid' }).format(new Date());
 
 const emptyKpis = () => ({
@@ -43,6 +51,7 @@ const emptyKpis = () => ({
 
 const emptyScheduleForm = () => ({
   machine_id: '',
+  machine_code: '',
   cadence_type: 'DAILY',
   day_of_week: '',
   anchor_date: '',
@@ -54,7 +63,7 @@ const emptyScheduleForm = () => ({
 const emptyBulkForm = () => ({
   zone_id: '',
   machine_type: '',
-  machine_ids: '',
+  machine_ids: [],
   cadence_type: 'DAILY',
   day_of_week: '',
   anchor_date: '',
@@ -66,6 +75,7 @@ const emptyBulkForm = () => ({
 
 const emptyOverrideForm = () => ({
   machine_id: '',
+  machine_code: '',
   service_date: '',
   override_type: 'SKIPPED',
   skip_reason_code: 'LOCATION_CLOSED',
@@ -113,6 +123,12 @@ export const CoordinatorRestockRoutePlannerSubTab = {
       day: null,
       isLoadingDay: false,
       dayError: '',
+
+      plannerMachines: [],
+      plannerZones: [],
+      plannerRestockers: [],
+      isLoadingPlannerOptions: false,
+      plannerOptionsError: '',
 
       schedules: [],
       scheduleTotal: 0,
@@ -196,11 +212,27 @@ export const CoordinatorRestockRoutePlannerSubTab = {
     },
     reassignmentReasonOptions() {
       return Object.entries(REASSIGNMENT_REASON_LABELS).map(([value, label]) => ({ value, label }));
+    },
+    scheduleMachineOptions() {
+      const machines = this.plannerMachines;
+      const currentId = Number(this.scheduleForm.machine_id);
+      if (!this.isEditingSchedule || !Number.isInteger(currentId) || currentId <= 0) return machines;
+      if (machines.some((machine) => Number(machine.id) === currentId)) return machines;
+
+      return [
+        ...machines,
+        {
+          id: currentId,
+          code: this.scheduleForm.machine_code || `Máquina ${currentId}`,
+          location_name: 'Fuera del catálogo activo'
+        }
+      ];
     }
   },
   mounted() {
     this.loadDay();
     this.loadSchedules();
+    this.loadPlannerOptions();
   },
   methods: {
     async loadDay() {
@@ -236,8 +268,49 @@ export const CoordinatorRestockRoutePlannerSubTab = {
         this.isLoadingSchedules = false;
       }
     },
+    async loadPlannerOptions() {
+      this.isLoadingPlannerOptions = true;
+      this.plannerOptionsError = '';
+      const [machinesResult, zonesResult, restockersResult] = await Promise.allSettled([
+        api.coordinator.getMachines({ status: 'active' }),
+        api.coordinator.getZones(),
+        api.coordinator.getUsers({ role: 'RESTOCKER', status: 'active' })
+      ]);
+
+      if (machinesResult.status === 'fulfilled') {
+        this.plannerMachines = extractList(unwrap(machinesResult.value), ['machines', 'items'])
+          .filter((machine) => machine && machine.is_active !== false);
+      }
+      if (zonesResult.status === 'fulfilled') {
+        this.plannerZones = extractList(unwrap(zonesResult.value), ['zones'])
+          .filter((zone) => zone && zone.is_active !== false);
+      }
+      if (restockersResult.status === 'fulfilled') {
+        this.plannerRestockers = extractList(unwrap(restockersResult.value), ['users', 'items'])
+          .filter((restocker) => restocker && restocker.is_active !== false);
+      }
+      if ([machinesResult, zonesResult, restockersResult].some((result) => result.status === 'rejected')) {
+        this.plannerOptionsError = 'No se pudieron cargar todos los catálogos. Reintenta para actualizar los selectores.';
+      }
+      this.isLoadingPlannerOptions = false;
+    },
     async refreshAll() {
       await Promise.all([this.loadDay(), this.loadSchedules()]);
+    },
+    machineOptionLabel(machine) {
+      const code = machine?.code || machine?.machine_code || 'Máquina sin código';
+      const location = machine?.location_name || '';
+      const type = machine?.machine_type_label || machine?.machine_type || '';
+      return [code, location, type].filter(Boolean).join(' · ');
+    },
+    zoneOptionLabel(zone) {
+      if (!zone) return '';
+      return [zone.code, zone.name].filter(Boolean).join(' · ');
+    },
+    restockerOptionLabel(restocker) {
+      if (!restocker) return '';
+      const name = restocker.name || restocker.email || 'Reponedor sin nombre';
+      return restocker.operator_code ? `${name} · ${restocker.operator_code}` : name;
     },
     triggerLabel(trigger) {
       return TRIGGER_LABELS[trigger] || trigger;
@@ -275,6 +348,7 @@ export const CoordinatorRestockRoutePlannerSubTab = {
         this.scheduleMode = 'edit';
         this.scheduleForm = {
           machine_id: item.machine_id,
+          machine_code: item.machine_code || '',
           cadence_type: item.schedule.cadence_type || 'DAILY',
           day_of_week: item.schedule.day_of_week ? String(item.schedule.day_of_week) : '',
           anchor_date: item.schedule.anchor_date || '',
@@ -386,8 +460,8 @@ export const CoordinatorRestockRoutePlannerSubTab = {
       this.showBulkModal = true;
     },
     validateBulk() {
-      const hasMachines = this.bulkForm.machine_ids.trim() !== '';
-      const hasZone = this.bulkForm.zone_id !== '';
+      const hasMachines = Array.isArray(this.bulkForm.machine_ids) && this.bulkForm.machine_ids.length > 0;
+      const hasZone = this.bulkForm.zone_id !== '' && this.bulkForm.zone_id !== null;
       const hasType = this.bulkForm.machine_type !== '';
       if (!hasMachines && !hasZone && !hasType) {
         this.bulkError = 'Indica una zona, un tipo de máquina o una lista de máquinas.';
@@ -427,12 +501,11 @@ export const CoordinatorRestockRoutePlannerSubTab = {
         if (this.bulkForm.cadence_type === 'WEEKLY') payload.day_of_week = Number(this.bulkForm.day_of_week);
         if (this.bulkForm.cadence_type === 'BIWEEKLY') payload.anchor_date = this.bulkForm.anchor_date;
 
-        const machineIds = this.bulkForm.machine_ids
-          .split(',')
-          .map((value) => Number(value.trim()))
-          .filter((value) => Number.isInteger(value) && value > 0);
+        const machineIds = [...new Set((Array.isArray(this.bulkForm.machine_ids) ? this.bulkForm.machine_ids : [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0))];
         if (machineIds.length > 0) payload.machine_ids = machineIds;
-        if (this.bulkForm.zone_id !== '') payload.zone_id = Number(this.bulkForm.zone_id);
+        if (this.bulkForm.zone_id !== '' && this.bulkForm.zone_id !== null) payload.zone_id = Number(this.bulkForm.zone_id);
         if (this.bulkForm.machine_type !== '') payload.machine_type = this.bulkForm.machine_type;
 
         this.bulkResult = unwrap(await api.coordinator.bulkRestockSchedules(payload)) || null;
@@ -446,16 +519,18 @@ export const CoordinatorRestockRoutePlannerSubTab = {
         this.isSavingBulk = false;
       }
     },
-    openSkipModal(machineId) {
-      this.openOverrideModal(machineId, 'SKIPPED');
+    openSkipModal(machine) {
+      this.openOverrideModal(machine, 'SKIPPED');
     },
-    openReassignModal(machineId) {
-      this.openOverrideModal(machineId, 'REASSIGNED');
+    openReassignModal(machine) {
+      this.openOverrideModal(machine, 'REASSIGNED');
     },
-    openOverrideModal(machineId, type) {
+    openOverrideModal(machine, type) {
+      const selected = machine && typeof machine === 'object' ? machine : { machine_id: machine };
       this.overrideForm = {
         ...emptyOverrideForm(),
-        machine_id: Number(machineId),
+        machine_id: Number(selected.machine_id ?? selected.id),
+        machine_code: selected.machine_code || selected.code || '',
         service_date: this.serviceDate,
         override_type: type
       };
@@ -585,6 +660,10 @@ export const CoordinatorRestockRoutePlannerSubTab = {
       <div v-if="futureLabel" class="vg-alert vg-alert-info" role="status" data-testid="route-planner-future-badge" style="margin-bottom: 14px;">
         🗓️ {{ futureLabel }} · {{ serviceDate }}
       </div>
+      <div v-if="plannerOptionsError" class="vg-alert vg-alert-error" role="alert" data-testid="route-planner-options-error" style="margin-bottom: 14px;">
+        ⚠️ {{ plannerOptionsError }}
+        <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm" style="margin-left: 8px;" @click="loadPlannerOptions">Reintentar</button>
+      </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px;" data-testid="route-planner-kpis">
         <div class="vg-card" style="padding: 14px;">
@@ -644,7 +723,7 @@ export const CoordinatorRestockRoutePlannerSubTab = {
                   <span v-for="trigger in stop.triggers" :key="trigger" class="vg-badge vg-badge-neutral" style="margin-right: 4px;">{{ triggerLabel(trigger) }}</span>
                 </td>
                 <td>
-                  <button type="button" class="vg-btn vg-btn-primary" :data-testid="'route-planner-uncovered-reassign-' + stop.machine_id" @click="openReassignModal(stop.machine_id)">
+                  <button type="button" class="vg-btn vg-btn-primary" :data-testid="'route-planner-uncovered-reassign-' + stop.machine_id" @click="openReassignModal(stop)">
                     Desviar
                   </button>
                 </td>
@@ -693,10 +772,10 @@ export const CoordinatorRestockRoutePlannerSubTab = {
                 </div>
               </div>
               <div class="vg-action-group" style="gap: 4px; flex-wrap: wrap;">
-                <button type="button" class="vg-btn vg-btn-secondary" :data-testid="'route-planner-skip-' + machine.machine_id" @click="openSkipModal(machine.machine_id)">
+                <button type="button" class="vg-btn vg-btn-secondary" :data-testid="'route-planner-skip-' + machine.machine_id" @click="openSkipModal(machine)">
                   ⏭️ Omitir
                 </button>
-                <button type="button" class="vg-btn vg-btn-secondary" :data-testid="'route-planner-reassign-' + machine.machine_id" @click="openReassignModal(machine.machine_id)">
+                <button type="button" class="vg-btn vg-btn-secondary" :data-testid="'route-planner-reassign-' + machine.machine_id" @click="openReassignModal(machine)">
                   🔁 Desviar
                 </button>
               </div>
@@ -843,8 +922,11 @@ export const CoordinatorRestockRoutePlannerSubTab = {
         <div v-if="scheduleFormError" class="vg-alert vg-alert-error" role="alert" data-testid="route-planner-schedule-form-error" style="margin-bottom: 12px;">⚠️ {{ scheduleFormError }}</div>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
           <div>
-            <label class="vg-label" for="route-schedule-machine">Máquina (ID)</label>
-            <input id="route-schedule-machine" v-model="scheduleForm.machine_id" type="number" min="1" class="vg-input" :disabled="isEditingSchedule" data-testid="route-planner-schedule-form-machine" />
+            <label class="vg-label" for="route-schedule-machine">Máquina</label>
+            <select id="route-schedule-machine" v-model="scheduleForm.machine_id" class="vg-input" :disabled="isEditingSchedule" data-testid="route-planner-schedule-form-machine">
+              <option value="" disabled>{{ isLoadingPlannerOptions ? 'Cargando máquinas…' : 'Selecciona una máquina…' }}</option>
+              <option v-for="machine in scheduleMachineOptions" :key="machine.id" :value="machine.id">{{ machineOptionLabel(machine) }}</option>
+            </select>
           </div>
           <div>
             <label class="vg-label" for="route-schedule-form-cadence">Cadencia</label>
@@ -887,16 +969,30 @@ export const CoordinatorRestockRoutePlannerSubTab = {
         <div v-if="bulkError" class="vg-alert vg-alert-error" role="alert" data-testid="route-planner-bulk-error" style="margin-bottom: 12px;">⚠️ {{ bulkError }}</div>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
           <div>
-            <label class="vg-label" for="route-bulk-zone">Zona (ID)</label>
-            <input id="route-bulk-zone" v-model="bulkForm.zone_id" type="number" min="1" class="vg-input" data-testid="route-planner-bulk-zone" />
+            <label class="vg-label" for="route-bulk-zone">Zona</label>
+            <select id="route-bulk-zone" v-model="bulkForm.zone_id" class="vg-input" data-testid="route-planner-bulk-zone">
+              <option value="">Sin filtro de zona</option>
+              <option v-for="zone in plannerZones" :key="zone.id" :value="zone.id">{{ zoneOptionLabel(zone) }}</option>
+            </select>
           </div>
           <div>
             <label class="vg-label" for="route-bulk-type">Tipo de máquina</label>
             <input id="route-bulk-type" v-model="bulkForm.machine_type" class="vg-input" placeholder="SNACKS" data-testid="route-planner-bulk-type" />
           </div>
-          <div>
-            <label class="vg-label" for="route-bulk-ids">Máquinas (IDs separados por coma)</label>
-            <input id="route-bulk-ids" v-model="bulkForm.machine_ids" class="vg-input" placeholder="1, 2, 3" data-testid="route-planner-bulk-ids" />
+          <div style="grid-column: 1 / -1;">
+            <span class="vg-label">Máquinas (opcional · {{ bulkForm.machine_ids.length }} seleccionadas)</span>
+            <div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 8px;" data-testid="route-planner-bulk-machine-list">
+              <label v-for="machine in plannerMachines" :key="machine.id" style="display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: var(--font-size-body-sm);">
+                <input type="checkbox" :value="machine.id" v-model="bulkForm.machine_ids" :data-testid="'route-planner-bulk-machine-' + machine.id" />
+                <span>{{ machineOptionLabel(machine) }}</span>
+              </label>
+              <p v-if="plannerMachines.length === 0" style="margin: 4px 0; font-size: var(--font-size-caption); color: var(--color-ink-muted);">
+                {{ isLoadingPlannerOptions ? 'Cargando máquinas…' : 'No hay máquinas activas disponibles.' }}
+              </p>
+            </div>
+            <p style="margin: 4px 0 0; font-size: var(--font-size-caption); color: var(--color-ink-muted);">
+              Marca máquinas concretas o deja la lista vacía para aplicar solo por zona y tipo.
+            </p>
           </div>
           <div>
             <label class="vg-label" for="route-bulk-cadence">Cadencia</label>
@@ -947,7 +1043,7 @@ export const CoordinatorRestockRoutePlannerSubTab = {
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
           <div>
             <label class="vg-label">Máquina</label>
-            <div class="vg-input" style="background: var(--color-surface-1);">#{{ overrideForm.machine_id }}</div>
+            <div class="vg-input" style="background: var(--color-surface-1);">{{ overrideForm.machine_code || 'Máquina de la parada' }}</div>
           </div>
           <div>
             <label class="vg-label" for="route-override-date">Fecha de servicio</label>
@@ -970,8 +1066,11 @@ export const CoordinatorRestockRoutePlannerSubTab = {
 
         <template v-else>
           <div style="margin-top: 12px;">
-            <label class="vg-label" for="route-override-target">Reponedor receptor (ID)</label>
-            <input id="route-override-target" v-model="overrideForm.target_restocker_id" type="number" min="1" class="vg-input" data-testid="route-planner-override-target" />
+            <label class="vg-label" for="route-override-target">Reponedor receptor</label>
+            <select id="route-override-target" v-model="overrideForm.target_restocker_id" class="vg-input" data-testid="route-planner-override-target">
+              <option value="" disabled>{{ isLoadingPlannerOptions ? 'Cargando reponedores…' : 'Selecciona un reponedor…' }}</option>
+              <option v-for="restocker in plannerRestockers" :key="restocker.id" :value="restocker.id">{{ restockerOptionLabel(restocker) }}</option>
+            </select>
           </div>
           <div style="margin-top: 12px;">
             <label class="vg-label" for="route-override-reassign-reason">Causa del desvío</label>

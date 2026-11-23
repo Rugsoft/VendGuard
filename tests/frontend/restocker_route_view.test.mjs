@@ -1696,7 +1696,7 @@ assert(
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/CashCollectionOfflineQueue.js')
     && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
-      .includes('vendguard-app-shell-v29')
+      .includes('vendguard-app-shell-v30')
 );
 assert(
   'La vista completa no expone ninguna de las cinco claves del Arqueo Ciego',
@@ -1849,7 +1849,7 @@ assert(
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/RestockerIncidentOfflineQueue.js')
     && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
-      .includes('vendguard-app-shell-v29')
+      .includes('vendguard-app-shell-v30')
 );
 assert(
   'El cliente API expone inicio, resolución, escalado y volcado de conflicto L1',

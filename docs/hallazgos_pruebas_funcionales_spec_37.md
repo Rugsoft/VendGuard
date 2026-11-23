@@ -24,7 +24,7 @@ Los siete hallazgos se ordenan así:
 | 1 | **H-37-01** | **P1 · Alta** | El snapshot offline de la ruta nunca se guarda en IndexedDB (`DataCloneError`) | `RF-05.1`, `C3` | **Cerrado (2026-11-23)** |
 | 2 | **H-37-02** | **P2 · Media** | El tablero de Coordinación muestra `0.0 km` en todas las rutas | `RF-03.2.4`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 3 | **H-37-03** | **P2 · Media** | El modal de omisión móvil no advierte de alerta FEFO ni perecedero caducado | `RF-05.2` (EARS 05.2.1) | **Cerrado (2026-11-23)** |
-| 4 | **H-37-04** | **P3 · Baja** | Los formularios piden IDs internos numéricos en vez de selectores | `RF-01.3`, `RF-02.3`, `RF-05.3` | Abierto |
+| 4 | **H-37-04** | **P3 · Baja** | Los formularios piden IDs internos numéricos en vez de selectores | `RF-01.3`, `RF-02.3`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 5 | **H-37-05** | **P3 · Baja** | El modal de omisión no declara semántica de diálogo | Hoja móvil (`RF-05.2`) | Abierto |
 | 6 | **H-37-06** | **P3 · Observación** | `service_date` pasada se acepta en propuesta y emisión `TODAY_ROUTE` | Contrato §4 y `TODAY_ROUTE` | Abierto · requiere decisión |
 | 7 | **H-37-07** | **P3 · Observación** | Cambiar la fecha del tablero no recarga hasta pulsar «Actualizar» | `RF-05.3` | Abierto |
@@ -119,17 +119,19 @@ La base `vendguard-restock-route-overrides` existe y su almacén `route_snapshot
 
 **Qué ocurre.** Tres formularios del módulo piden identificadores numéricos que el operador no puede descubrir desde la propia pantalla:
 
-- «Nueva agenda»: `Máquina (ID)` ([`CoordinatorRestockRoutePlannerSubTab.js:846`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js)).
-- «Alta masiva»: `Zona (ID)` y `Máquinas (IDs separados por coma)` ([`CoordinatorRestockRoutePlannerSubTab.js:890`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js)).
-- «Desviar parada»: `Reponedor receptor (ID)` ([`CoordinatorRestockRoutePlannerSubTab.js:973`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js)).
+- «Nueva agenda»: `Máquina (ID)` ([`CoordinatorRestockRoutePlannerSubTab.js`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js)).
+- «Alta masiva»: `Zona (ID)` y `Máquinas (IDs separados por coma)` ([`CoordinatorRestockRoutePlannerSubTab.js`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js)).
+- «Desviar parada»: `Reponedor receptor (ID)` ([`CoordinatorRestockRoutePlannerSubTab.js`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js)).
 
 Las tablas muestran códigos `VEND-xxxx` y nombres de reponedor, pero no sus IDs internos.
 
 **Impacto.** El alta de agenda y el desvío se vuelven propensos a error: hay que conocer el ID de memoria o consultarlo fuera de la consola. El backend valida y rechaza IDs inexistentes, pero la fricción es de la UI.
 
-**Corrección propuesta.** Sustituir los campos numéricos por selectores poblados con los endpoints que ya existen (máquinas, zonas y reponedores activos), manteniendo el mismo contrato de payload con IDs. En «Alta masiva», permitir selección múltiple o un selector de zona con nombre y código.
+**Corrección aplicada (2026-11-23).** [`loadPlannerOptions()`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js) carga en paralelo `getMachines({ status: 'active' })`, `getZones()` y `getUsers({ role: 'RESTOCKER', status: 'active' })`; descarta las zonas y reponedores inactivos y, si un catálogo falla, muestra un aviso con reintento sin romper los demás. «Nueva agenda» usa un `select` con `código · sede · tipo` que conserva la máquina actual al versionar una agenda fuera del catálogo activo. «Alta masiva» usa un `select` de zona con `código · nombre` y una lista de checkboxes de máquinas con contador, sin perder la selección múltiple. «Desviar parada» usa un `select` de reponedor con `nombre · operator_code` y el modal muestra el código de la máquina en lugar de `#id`. Los payload conservan exactamente los mismos IDs numéricos; las máquinas se deduplican en cliente.
 
-**Estado:** Abierto.
+**Evidencia (2026-11-23).** La línea base de [`coordinator_restock_route_planner.test.mjs`](../tests/frontend/coordinator_restock_route_planner.test.mjs) era **32/32**; con las regresiones `3.0`, `3.0b`, la ampliación de `3.5` y `3.7`, y la guarda `6.6`, cierra **35/35**. Las guardas de shell (`coordinator_product_loading_tab`, `restocker_route_view`, `N8nChatScope` y `OfflinePwaAssetsAndUiGuard`) siguen en verde con el App Shell en `vendguard-app-shell-v30`. En Chromium, con Coordinación y el planificador reales, los selectores publicaron **13 máquinas**, **3 zonas** y **2 reponedores** activos: `VEND-0101 · Hospital del Mar - Edificio Central · Alimentos perecederos…`, `ZONA-BCN-CENTRO · Barcelona Centro y Litoral` y `Lucía Reponedora BCN · REP-01`. La lista de Alta masiva mostró los 13 checkboxes y el contador pasó de 0 a 1 al marcar una máquina; el desvío de `VEND-0101` mostró su código y los receptores Lucía (`REP-01`) y Óscar (`REP-02`). No se guardó ninguna agenda ni excepción durante la comprobación.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -207,11 +209,12 @@ Estas comprobaciones pasaron durante la misma corrida y se conservan para delimi
 1. **H-37-01 (P1) — corregido el 2026-11-23 (commit `088f66e`).** Snapshot offline: clonar el `route_plan` antes de `put()` y cubrir el caso con un proxy reactivo.
 2. **H-37-03 (P2) — corregido el 2026-11-23.** Aviso FEFO y perecedero caducado en el modal de omisión; era la deuda más sensible por Art. II.
 3. **H-37-02 (P2) — corregido el 2026-11-23.** Origen del optimizador en `buildCoordinatorDay()` y aserción de distancia.
-4. **H-37-04 y H-37-05 (P3).** Selectores con nombre/código y semántica ARIA del modal.
-5. **H-37-06.** Decidir contrato antes de implementar; si se rechaza la fecha pasada, añadir `422 PAST_SERVICE_DATE_FORBIDDEN` y su aserción. Si se permite, persistir `service_date`.
-6. **H-37-07 (P3).** Recarga al cambiar la fecha o estado visual de «desactualizado».
+4. **H-37-04 (P3) — corregido el 2026-11-23.** Selectores con nombre/código en Nueva agenda, Alta masiva y Desviar parada.
+5. **H-37-05 (P3).** Semántica ARIA, foco y cierre con `Escape` del modal de omisión.
+6. **H-37-06.** Decidir contrato antes de implementar; si se rechaza la fecha pasada, añadir `422 PAST_SERVICE_DATE_FORBIDDEN` y su aserción. Si se permite, persistir `service_date`.
+7. **H-37-07 (P3).** Recarga al cambiar la fecha o estado visual de «desactualizado».
 
-Los puntos 2 y 4 son correcciones contra requisitos ya existentes; no requieren cambiar la especificación. El punto 3 quedó corregido sin cambio de contrato. El punto 5 requiere decisión de producto y, si se opta por permitir fechas pasadas, una enmienda del contrato. El punto 6 es una mejora de usabilidad sin cambio de contrato.
+Los puntos 2, 4 y 5 son correcciones contra requisitos ya existentes; no requieren cambiar la especificación. El punto 3 quedó corregido sin cambio de contrato. El punto 6 requiere decisión de producto y, si se opta por permitir fechas pasadas, una enmienda del contrato. El punto 7 es una mejora de usabilidad sin cambio de contrato.
 
 ---
 
@@ -219,4 +222,4 @@ Los puntos 2 y 4 son correcciones contra requisitos ya existentes; no requieren 
 
 Este acta se actualizará cuando cada hallazgo se corrija, con la misma disciplina que las auditorías de los módulos 33–36: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P1 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** árbol limpio tras los commits de corrección de `H-37-01` (`088f66e`), `H-37-02` (`bf7b018`) y `H-37-03`; sin push. Los scripts de la sonda viven en `scratch/` y no se versionan. El acta recoge la corrida original y las correcciones posteriores.
+**Estado del árbol:** árbol limpio tras los commits de corrección de `H-37-01` (`088f66e`), `H-37-02` (`bf7b018`), `H-37-03` y `H-37-04`; sin push. Los scripts de la sonda viven en `scratch/` y no se versionan. El acta recoge la corrida original y las correcciones posteriores.
