@@ -13,10 +13,12 @@ use VendGuard\Application\Service\RestockRoutePlannerService;
 use VendGuard\Application\Service\RestockRouteScheduleService;
 use VendGuard\Core\Domain\Exception\RestockRoutePlannerValidationException;
 use VendGuard\Core\Domain\Model\User;
+use VendGuard\Core\Domain\Repository\RouteSettingsRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoRestockRoutePlannerGateway;
 use VendGuard\Infrastructure\Repository\PdoRestockRouteReadModel;
+use VendGuard\Infrastructure\Repository\PdoRouteSettingsRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -55,11 +57,14 @@ final class CoordinatorRestockRoutePlannerController
 
     private RestockRouteOverrideService $overrides;
 
+    private RouteSettingsRepositoryInterface $routeSettings;
+
     public function __construct(
         ?PDO $pdo = null,
         ?RestockRouteScheduleService $schedules = null,
         ?RestockRoutePlannerService $planner = null,
-        ?RestockRouteOverrideService $overrides = null
+        ?RestockRouteOverrideService $overrides = null,
+        ?RouteSettingsRepositoryInterface $routeSettings = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $gateway = new PdoRestockRoutePlannerGateway($pdo);
@@ -79,6 +84,7 @@ final class CoordinatorRestockRoutePlannerController
             new AuditLogger(),
             new PdoTransactionManager($pdo)
         );
+        $this->routeSettings = $routeSettings ?? new PdoRouteSettingsRepository($pdo);
     }
 
     /** GET /api/coordinator/restock-schedules */
@@ -209,7 +215,9 @@ final class CoordinatorRestockRoutePlannerController
             return Response::json(
                 $this->planner->buildCoordinatorDay(
                     $this->optionalQuery($request, 'service_date'),
-                    $filters
+                    $filters,
+                    null,
+                    $this->routeOrigin()
                 ),
                 200
             );
@@ -326,6 +334,25 @@ final class CoordinatorRestockRoutePlannerController
             'El campo %s es obligatorio y debe ser un entero positivo.',
             $field
         ));
+    }
+
+    /**
+     * Origen de la ruta: la Base Central configurada, igual que la hoja móvil.
+     *
+     * @return array{source: string, latitude: float, longitude: float}|null
+     */
+    private function routeOrigin(): ?array
+    {
+        $settings = $this->routeSettings->find();
+        if ($settings === null) {
+            return null;
+        }
+
+        return [
+            'source' => 'BASE_CENTRAL',
+            'latitude' => $settings->getBaseLatitude(),
+            'longitude' => $settings->getBaseLongitude(),
+        ];
     }
 
     private function optionalQuery(Request $request, string $field): ?string

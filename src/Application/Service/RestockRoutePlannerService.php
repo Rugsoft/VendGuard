@@ -192,13 +192,15 @@ final class RestockRoutePlannerService
      * Tablero «Ruta del Día» de Coordinación.
      *
      * @param array{restocker_id?: int|null, zone_id?: int|null} $filters
+     * @param array{source?: string, latitude?: float|null, longitude?: float|null}|null $origin
      *
      * @return array<string, mixed>
      */
     public function buildCoordinatorDay(
         ?string $serviceDate = null,
         array $filters = [],
-        ?DateTimeImmutable $now = null
+        ?DateTimeImmutable $now = null,
+        ?array $origin = null
     ): array {
         $today = RestockCadenceEvaluator::today($now ?? new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')));
         $date = $serviceDate !== null
@@ -337,7 +339,7 @@ final class RestockRoutePlannerService
                 );
             }
 
-            $optimized = $this->optimizer->optimize($pendingStops);
+            $optimized = $this->optimizer->optimize($pendingStops, $origin);
 
             $routes[] = [
                 'restocker_id' => $ownerId,

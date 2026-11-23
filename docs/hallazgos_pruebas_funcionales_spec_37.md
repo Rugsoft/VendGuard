@@ -7,7 +7,7 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD:** `13637b7` · `test(restock-route): certify 360x800 layout of M37 surfaces (AUD-37-04)`
-- **Árbol:** la corrida inicial no modificó código. La corrección posterior de `H-37-01` (2026-11-23) toca `public/assets/js/utils/RestockRouteOverrideOfflineQueue.js`, `public/sw.js`, `tests/frontend/restocker_route_planner_view.test.mjs` y las guardas de versión del shell; queda pendiente de commit.
+- **Árbol:** la corrida inicial no modificó código. Las correcciones posteriores de `H-37-01` y `H-37-02` (2026-11-23) tocan la cola offline, el servicio y el controlador del planificador, la suite API, las guardas de versión del shell y este acta; `H-37-02` se incluye en su commit de corrección.
 - **Entorno:** app local `http://127.0.0.1:8000` levantada con `VENDGUARD_DEV_SITE_KEYS=1 php -S 127.0.0.1:8000 -t public public/index.php`, contra el banco local `vendguard_battery` (PostgreSQL `127.0.0.1:54331`).
 - **Naturaleza:** acta de verificación funcional sobre la aplicación ensamblada. **No sustituye** a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con las suites automatizadas. Los siete hallazgos de este documento son nuevos y aparecieron al recorrer la app real, no en las suites.
 
@@ -22,7 +22,7 @@ Los siete hallazgos se ordenan así:
 | Orden | ID | Prioridad | Hallazgo | Requisito afectado | Estado |
 |---:|---|---|---|---|---|
 | 1 | **H-37-01** | **P1 · Alta** | El snapshot offline de la ruta nunca se guarda en IndexedDB (`DataCloneError`) | `RF-05.1`, `C3` | **Cerrado (2026-11-23)** |
-| 2 | **H-37-02** | **P2 · Media** | El tablero de Coordinación muestra `0.0 km` en todas las rutas | `RF-03.2.4`, `RF-05.3` | Abierto |
+| 2 | **H-37-02** | **P2 · Media** | El tablero de Coordinación muestra `0.0 km` en todas las rutas | `RF-03.2.4`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 3 | **H-37-03** | **P2 · Media** | El modal de omisión móvil no advierte de alerta FEFO ni perecedero caducado | `RF-05.2` (EARS 05.2.1) | Abierto |
 | 4 | **H-37-04** | **P3 · Baja** | Los formularios piden IDs internos numéricos en vez de selectores | `RF-01.3`, `RF-02.3`, `RF-05.3` | Abierto |
 | 5 | **H-37-05** | **P3 · Baja** | El modal de omisión no declara semántica de diálogo | Hoja móvil (`RF-05.2`) | Abierto |
@@ -87,9 +87,11 @@ La base `vendguard-restock-route-overrides` existe y su almacén `route_snapshot
 
 **Impacto.** El indicador de planificación es engañoso y no permite comparar carga entre reponedores. El dato existe y es correcto en la ruta móvil; el defecto está solo en la composición de Coordinación.
 
-**Corrección propuesta.** Resolver el mismo origen que usa la ruta móvil (base de operaciones o `RouteSettings`) dentro de `buildCoordinatorDay()` y pasarlo a `optimize()`. Añadir una aserción de `total_distance_km > 0` cuando las paradas y el origen tienen coordenadas válidas, y otra de `0.0` cuando no las tienen, para conservar la degradación elegante de `C2`.
+**Corrección aplicada (2026-11-23).** `buildCoordinatorDay()` acepta un `$origin` opcional y lo reenvía al optimizador. [`CoordinatorRestockRoutePlannerController.php`](../src/Presentation/Controller/CoordinatorRestockRoutePlannerController.php) resuelve la Base Central con `RouteSettingsRepositoryInterface` mediante el mismo `routeOrigin()` que usa la hoja móvil y lo pasa como cuarto argumento. Se añadió la aserción API `3.4` en [`RestockRoutePlannerApiTest.php`](../tests/integration/RestockRoutePlannerApiTest.php): con `route_settings` y sedes con coordenadas, la ruta del titular debe publicar `total_distance_km > 0`.
 
-**Estado:** Abierto.
+**Evidencia (2026-11-23).** Antes de la corrección, `3.4` fallaba y la suite cerraba **40 aserciones · 1 fallo**. Después, la misma suite cierra **40/40 · 0 fallos · `exit=0`**. En la app local, `GET /api/coordinator/restock-route/day` devuelve para Lucía `total_distance_km = 8.49` (antes `0`), coherente con los `8.5 km` de la hoja móvil; las demás rutas y contadores no cambian.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -200,14 +202,14 @@ Estas comprobaciones pasaron durante la misma corrida y se conservan para delimi
 
 ## 6. Orden de corrección propuesto
 
-1. **H-37-01 (P1) — corregido el 2026-11-23.** Snapshot offline: clonar el `route_plan` antes de `put()` y cubrir el caso con un proxy reactivo.
+1. **H-37-01 (P1) — corregido el 2026-11-23 (commit `088f66e`).** Snapshot offline: clonar el `route_plan` antes de `put()` y cubrir el caso con un proxy reactivo.
 2. **H-37-03 (P2).** Aviso FEFO en el modal de omisión; es la deuda más sensible por Art. II.
-3. **H-37-02 (P2).** Origen del optimizador en `buildCoordinatorDay()` y aserción de distancia.
+3. **H-37-02 (P2) — corregido el 2026-11-23.** Origen del optimizador en `buildCoordinatorDay()` y aserción de distancia.
 4. **H-37-04 y H-37-05 (P3).** Selectores con nombre/código y semántica ARIA del modal.
 5. **H-37-06.** Decidir contrato antes de implementar; si se rechaza la fecha pasada, añadir `422 PAST_SERVICE_DATE_FORBIDDEN` y su aserción. Si se permite, persistir `service_date`.
 6. **H-37-07 (P3).** Recarga al cambiar la fecha o estado visual de «desactualizado».
 
-Los puntos 2, 3 y 4 son correcciones contra requisitos ya existentes; no requieren cambiar la especificación. El punto 5 requiere decisión de producto y, si se opta por permitir fechas pasadas, una enmienda del contrato. El punto 6 es una mejora de usabilidad sin cambio de contrato.
+Los puntos 2 y 4 son correcciones contra requisitos ya existentes; no requieren cambiar la especificación. El punto 3 quedó corregido sin cambio de contrato. El punto 5 requiere decisión de producto y, si se opta por permitir fechas pasadas, una enmienda del contrato. El punto 6 es una mejora de usabilidad sin cambio de contrato.
 
 ---
 
@@ -215,4 +217,4 @@ Los puntos 2, 3 y 4 son correcciones contra requisitos ya existentes; no requier
 
 Este acta se actualizará cuando cada hallazgo se corrija, con la misma disciplina que las auditorías de los módulos 33–36: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P1 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** HEAD `13637b7` más la corrección local de `H-37-01`, pendiente de commit. Los scripts de la sonda viven en `scratch/` y no se versionan. El acta recoge la corrida original y la corrección posterior.
+**Estado del árbol:** HEAD `13637b7` más la corrección de `H-37-01` (commit `088f66e`) y la corrección de `H-37-02`, incluida en su commit de corrección. Los scripts de la sonda viven en `scratch/` y no se versionan. El acta recoge la corrida original y las correcciones posteriores.

@@ -513,6 +513,10 @@ try {
         '3.3 La máquina en cuarentena se segrega en blocked_stops',
         in_array($machineBlocked, $blockedIds, true)
     );
+    $assert(
+        '3.4 La distancia total de la ruta se calcula desde la Base Central',
+        $ownerRoute !== null && (float)($ownerRoute['summary']['total_distance_km'] ?? 0) > 0.0
+    );
 
     // ─────────────────────────────────────────────────────────────────────
     // 4. Excepciones diarias
