@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * FunctionalSpecMirrorParityTest · Módulo 28 (guardia de deriva)
+ * FunctionalSpecMirrorParityTest · Módulos 28 y 37 (guardia de deriva)
  *
  * El espejo funcional de `specs/functional/` debe seguir siendo una copia
  * funcional completa del spec canónico, no un puntero. Esta guarda no exige
@@ -19,12 +19,13 @@ declare(strict_types=1);
  *   4. Mismo conjunto de `RF`, `EARS`, `RNF`, `D`, `C` y `QA`.
  *   5. Mismas historias de usuario y ninguna duda abierta.
  *   6. Coherencia nominal del modelo real del parque (`Fas Fast 900`).
+ *   7. Paridad byte a byte del espejo del Módulo 37 con su spec canónica.
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias.
  */
 
 echo "======================================================================\n";
-echo " VendGuard: Suite unitaria - FunctionalSpecMirrorParityTest (Módulo 28)\n";
+echo " VendGuard: Suite unitaria - FunctionalSpecMirrorParityTest (Módulos 28 y 37)\n";
 echo "======================================================================\n\n";
 
 $assertions = 0;
@@ -196,6 +197,33 @@ $assert('7.1 El canónico nombra el modelo real «Fas Fast 900»', str_contains(
 $assert('7.2 El canónico no conserva la grafía «Fasel Fast 900»', !str_contains($canonical, 'Fasel Fast 900'));
 $assert('7.3 El espejo nombra el modelo real «Fas Fast 900»', str_contains($mirror, 'Fas Fast 900'));
 $assert('7.4 El espejo no conserva la grafía «Fasel Fast 900»', !str_contains($mirror, 'Fasel Fast 900'));
+
+// =====================================================================
+// GRUPO 8: Paridad byte a byte del espejo del Módulo 37
+// =====================================================================
+echo "\n--- 8. Paridad del espejo del Módulo 37 ---\n";
+
+// El espejo del Módulo 37 no admite cabecera propia: la convención del módulo
+// es una copia idéntica byte a byte. Así cualquier edición futura de la spec
+// canónica que no se replique en `specs/functional/` rompe la batería en vez
+// de dejar ambos documentos divergiendo en silencio.
+$rrpCanonicalPath = $projectRoot . '/specs/37-restock-route-planner/spec.md';
+$rrpMirrorPath = $projectRoot . '/specs/functional/restock_route_planner_spec.md';
+$rrpCanonicalExists = is_file($rrpCanonicalPath);
+$rrpMirrorExists = is_file($rrpMirrorPath);
+
+$assert('8.1 La spec canónica del Módulo 37 existe', $rrpCanonicalExists, $rrpCanonicalPath);
+$assert('8.2 El espejo funcional del Módulo 37 existe', $rrpMirrorExists, $rrpMirrorPath);
+
+$rrpCanonical = $rrpCanonicalExists ? (string) file_get_contents($rrpCanonicalPath) : '';
+$rrpMirror = $rrpMirrorExists ? (string) file_get_contents($rrpMirrorPath) : '';
+
+$assert(
+    '8.3 El espejo del Módulo 37 es idéntico byte a byte a la spec canónica',
+    $rrpCanonical !== '' && $rrpMirror !== ''
+        && hash_equals(hash('sha256', $rrpCanonical), hash('sha256', $rrpMirror)),
+    'El espejo se ha desincronizado: copia de nuevo specs/37-restock-route-planner/spec.md en specs/functional/restock_route_planner_spec.md.'
+);
 
 // =====================================================================
 // RESUMEN DE EJECUCIÓN

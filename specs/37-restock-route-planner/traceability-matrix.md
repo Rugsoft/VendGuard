@@ -4,7 +4,7 @@
 
 **Esquema de referencia canónico:** `RF-01` agendas versionadas y herencia territorial · `RF-02` excepciones diarias, perímetro unificado y salvaguarda Art. II · `RF-03` motor de ruta, tres bloques y degradación sin GPS · `RF-04` integración M33 (`TODAY_ROUTE`) y M34 (`route_schedule_id`) · `RF-05` cola Offline, superficies móvil/Coordinación y opacidad.
 
-**Corrida de certificación:** 2026-11-23 · batería global **448 suites · 17.410 aserciones · 0 fallos** (`DocMetricsGuard` coherente) · canal `new_engine`: **76 evaluadas · 76 verdes · 2.610 aserciones · 0 fallos** · PostgreSQL 16.15 local con TLS (`vendguard_battery` y `vendguard_pg_test`).
+**Corrida de certificación:** 2026-11-23 · batería global **448 suites · 17.413 aserciones · 0 fallos** (`DocMetricsGuard` coherente) · canal `new_engine`: **76 evaluadas · 76 verdes · 2.610 aserciones · 0 fallos** · PostgreSQL 16.15 local con TLS (`vendguard_battery` y `vendguard_pg_test`).
 
 **Estado:** ✅ Módulo 37 cerrado al 100 % · **13/13 tareas** (`T-RRP-01` a `T-RRP-13`) · **12 suites propias con 593 aserciones verdes** + regresiones de esquema, servicios y superficies · **5/5 DoD** · `CoordinatorTerritorialMapTab.js` y el DDL de `locations` intactos.
 
@@ -98,7 +98,7 @@
 | **2.** Dominio, cadencias, optimizador, servicios, excepciones y perímetro M32–M36 | `RestockRoutePlannerDomainModelsTest` **67/67**; `RestockCadenceAndValidatorTest` **60/60**; `RestockRouteOptimizerTest` **30/30**; `RestockRoutePlannerServicesTest` **120/120**; `RestockRoutePlannerIntegrationsTest` **23/23**; `PdoRestockRoutePlannerGatewayTest` **36/36** |
 | **3.** API REST, RBAC, idempotencia y opacidad | `RestockRoutePlannerApiTest` **43/43**; `RestockRoutePlannerConstitutionalTest` **45/45** |
 | **4.** Superficies móvil y de Coordinación, mapa, Offline y `TODAY_ROUTE` | `restocker_route_planner_view.test.mjs` **48/48**; `restocker_route_view.test.mjs` **245/245**; `coordinator_restock_route_planner.test.mjs` **38/38**; `coordinator_product_loading_tab.test.mjs` **80/80**; `RestockRoutePlannerLayoutBrowserTest` **38/38**; `OfflinePwaAssetsAndUiGuardTest.mjs` **45/45** |
-| **5.** Batería global y canal `new_engine` | `php tests/run_all.php` → **448 suites · 17.410 aserciones · 0 fallos · `DocMetricsGuard` coherente · `exit=0`**. `php tests/run_new_engine.php` (`.env.docker-tls`) → **76/76 suites en verde · 0 no ejecutables · 2.610 aserciones · 0 fallos · `exit=0`**. Residuo 0 de esquemas `t_*` y `contract_convergence_check*`. |
+| **5.** Batería global y canal `new_engine` | `php tests/run_all.php` → **448 suites · 17.413 aserciones · 0 fallos · `DocMetricsGuard` coherente · `exit=0`**. `php tests/run_new_engine.php` (`.env.docker-tls`) → **76/76 suites en verde · 0 no ejecutables · 2.610 aserciones · 0 fallos · `exit=0`**. Residuo 0 de esquemas `t_*` y `contract_convergence_check*`. |
 
 ---
 
@@ -106,14 +106,14 @@
 
 | Puerta | Comando | Resultado |
 | :--- | :--- | :--- |
-| Batería global | `source deploy/local/postgres/.env.battery && php tests/run_all.php` | **448 suites · 17.410 aserciones · 0 fallos** · `DocMetricsGuard` coherente · base restablecida · `exit=0` |
+| Batería global | `source deploy/local/postgres/.env.battery && php tests/run_all.php` | **448 suites · 17.413 aserciones · 0 fallos** · `DocMetricsGuard` coherente · base restablecida · `exit=0` |
 | Canal `new_engine` | `source deploy/local/postgres/.env.docker-tls && php tests/run_new_engine.php` | **76 evaluadas · 76 verdes · 2.610 aserciones · 0 fallos · `exit=0`** |
 | Esquema y despliegue | `PostgresSchemaTest` + `PostgresConstitutionalTest` + `SchemaConvergenceParityTest` + `CloudDeploySchemaParityTest` | **159/159 · 88/88 · 42/42 · 55/55** · `exit=0` |
 | Suites propias | Las 12 suites del mapa 1.1 | **593 aserciones · 0 fallos · `exit=0`** |
 | Guardas de interfaz | Botones + plantillas + tokens + PWA + layout móvil | **23/23 · 15/15 · 3/3 · 45/45 · 38/38** |
 | Residuo de esquemas temporales | Consulta a `pg_namespace` tras ambas corridas | **0** esquemas `t_*` ni `contract_convergence_check*` |
 
-**Nota de cierre:** la cifra viva de la última corrida es **448 suites / 17.410 aserciones**; las 12 suites propias suman **593** (16 más que el cierre anterior) y el canal `new_engine` mide **76/76 suites / 2.610 aserciones**. La guarda de botones vuelve a **23/23**, `TieredSlaFrontendTest` queda en verde al corregir la guarda que invoca, el catálogo de auditoría incorpora las siete acciones del M37 (`UPSERT_RESTOCK_SCHEDULE`, `BULK_RESTOCK_SCHEDULE`, `DEACTIVATE_RESTOCK_SCHEDULE`, `SKIP_RESTOCK_STOP`, `REASSIGN_RESTOCK_STOP`, `REVOKE_RESTOCK_ROUTE_OVERRIDE` y `DUMP_RESTOCK_OVERRIDE_CONFLICT`) y el espejo funcional vuelve a ser idéntico byte a byte a la spec canónica. No cambia el alcance funcional del módulo.
+**Nota de cierre:** la cifra viva de la última corrida es **448 suites / 17.413 aserciones**; las 12 suites propias suman **593** (16 más que el cierre anterior) y el canal `new_engine` mide **76/76 suites / 2.610 aserciones**. La guarda de botones vuelve a **23/23**, `TieredSlaFrontendTest` queda en verde al corregir la guarda que invoca, el catálogo de auditoría incorpora las siete acciones del M37 (`UPSERT_RESTOCK_SCHEDULE`, `BULK_RESTOCK_SCHEDULE`, `DEACTIVATE_RESTOCK_SCHEDULE`, `SKIP_RESTOCK_STOP`, `REASSIGN_RESTOCK_STOP`, `REVOKE_RESTOCK_ROUTE_OVERRIDE` y `DUMP_RESTOCK_OVERRIDE_CONFLICT`) y el espejo funcional vuelve a ser idéntico byte a byte a la spec canónica. No cambia el alcance funcional del módulo.
 
 ---
 
