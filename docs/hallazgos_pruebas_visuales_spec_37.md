@@ -6,23 +6,23 @@
 - **Sistema de diseño:** [`docs/design.md`](design.md)
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
-- **HEAD:** `cefed9e`
-- **Árbol:** la corrida no modificó código. `git status` quedó limpio; este documento es el único cambio.
+- **HEAD de la corrida:** `cefed9e`
+- **Árbol:** la corrida original no modificó código. La corrección posterior de H-37-08 toca la vista móvil, su suite y este acta; se registra en el mismo commit que este documento.
 - **Entorno:** app local `http://127.0.0.1:8000` contra el banco `vendguard_battery` (PostgreSQL `127.0.0.1:54331`), con las credenciales semilla del entorno de batería.
 - **Alcance:** recorrido manual en Chromium como Coordinación y Reponedor, con clics y teclado reales, a `1280 × 932 px` y `360 × 800 px`. Se contrastaron red, DOM, respuestas API, PostgreSQL e IndexedDB.
 - **Naturaleza:** acta de verificación visual y de UI sobre la aplicación ensamblada. **No sustituye** a [`hallazgos_pruebas_funcionales_spec_37.md`](hallazgos_pruebas_funcionales_spec_37.md), que recoge la corrida funcional y los cierres `H-37-01`–`H-37-07`, ni a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con suites automatizadas.
 
-> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Los nueve hallazgos están **abiertos** a fecha de este documento: la corrida no aplicó correcciones.
+> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Ocho hallazgos siguen **abiertos**; H-37-08 quedó corregido el 2026-11-23 con regresión automatizada y verificación en Chromium.
 
 ---
 
 ## 1. Resumen ejecutivo
 
-No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos). Los dos fallos P2 afectan al flujo principal del reponedor y a la consulta de agendas de Coordinación; el resto son deuda de accesibilidad, presentación o copy.
+No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos). Los dos fallos P2 afectan al flujo principal del reponedor y a la consulta de agendas de Coordinación; el resto son deuda de accesibilidad, presentación o copy. **H-37-08 ya está corregido**; el fallo de agendas de H-37-09 sigue abierto.
 
 | Orden | ID | Prioridad | Hallazgo | Requisito afectado | Estado |
 |---:|---|---|---|---|---|
-| 1 | **H-37-08** | **P2 · Media** | La ruta móvil no se recarga al iniciar o cerrar turno | `RF-05.2`, `RF-03` | **Abierto** |
+| 1 | **H-37-08** | **P2 · Media** | La ruta móvil no se recarga al iniciar o cerrar turno | `RF-05.2`, `RF-03` | **Cerrado (2026-11-23)** |
 | 2 | **H-37-09** | **P2 · Media** | El filtro de agendas ignora la búsqueda en máquinas sin agenda | `RF-01.3`, `RF-05.3` | **Abierto** |
 | 3 | **H-37-10** | **P3 · Baja-media** | El cierre del mapa tiene contraste 1,72:1 y el modal no recibe foco ni cierra con Escape | `RNF-04`, `RF-05.2` | **Abierto** |
 | 4 | **H-37-11** | **P3 · Baja-media** | El modal de «Nueva agenda» no atrapa el foco | `RNF-04` | **Abierto** |
@@ -43,7 +43,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 3. Se recorrió la superficie móvil de Lucía: inicio de turno, ruta por bloques, mapa, modal de omisión, validación de motivo, aviso FEFO y snapshot de IndexedDB.
 4. Cada paso se contrastó con la petición de red, el DOM renderizado, la respuesta API, PostgreSQL y el log del servidor.
 5. Se probaron los tamaños `1280 × 932` y `360 × 800`; se midieron `scrollWidth`/`clientWidth` de etiquetas y contenedores para distinguir scroll interno intencional de solapamiento real.
-6. No se corrigió código ni se hizo commit. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
+6. La corrida original no corrigió código ni hizo commit. La corrección posterior de H-37-08 se validó con la suite y Chromium; se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
 
 **Datos utilizados:** `VEND-0101`, `VEND-0102`, `VEND-0401`, `VEND-0501`, `VEND-0502`, `VEND-0701`, `VEND-0801` y `VEND-0901`; agenda de prueba de `VEND-0901` (dada de baja); desvío FEFO de `VEND-0701` a Lucía (revocado).
 
@@ -51,15 +51,15 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 
 ## 3. Hallazgos detallados
 
-### H-37-08 · P2 · La ruta móvil no se recarga al iniciar o cerrar turno
+### H-37-08 · P2 · CORREGIDO · La ruta móvil se recarga al iniciar y cerrar turno
 
-**Qué ocurre.** Con Lucía en `OFF_SHIFT`, la superficie móvil muestra `0.0 km` y «Sin paradas asignadas». Al pulsar «Iniciar turno», la cabecera cambia a «En turno», pero la ruta sigue vacía y no se vuelve a pedir `/api/restocker/my-route`. Al recargar la página aparece la ruta correcta: **3 paradas, 5 máquinas y 8,77 km**. El endpoint ya devolvía esos datos al iniciar el turno.
+**Qué ocurría.** Con Lucía en `OFF_SHIFT`, la superficie móvil muestra `0.0 km` y «Sin paradas asignadas». Al pulsar «Iniciar turno», la cabecera cambia a «En turno», pero la ruta sigue vacía y no se vuelve a pedir `/api/restocker/my-route`. Al recargar la página aparece la ruta correcta: **3 paradas, 5 máquinas y 8,77 km**. El endpoint ya devolvía esos datos al iniciar el turno.
 
-**Causa.** [`RestockerRouteView.js:1244`](../public/assets/js/components/RestockerRouteView.js) define `startShift()` sobre `runShiftAction()`; este aplica la respuesta del turno con `applyShiftResponse()` ([`:1214`](../public/assets/js/components/RestockerRouteView.js)), pero no llama a `loadMyRoute()`. `closeShift()` tampoco recarga la ruta.
+**Causa.** [`RestockerRouteView.js:1244`](../public/assets/js/components/RestockerRouteView.js) define `startShift()` sobre `runShiftAction()`; este aplica la respuesta del turno con `applyShiftResponse()` ([`:1214`](../public/assets/js/components/RestockerRouteView.js)), pero no llamaba a `loadMyRoute()`. `closeShift()` tampoco recargaba la ruta.
 
-**Impacto.** El reponedor puede creer que no tiene trabajo hasta que recarga manualmente. Rompe la continuidad del flujo principal de inicio de jornada, aunque el dato del servidor es correcto.
+**Impacto.** El reponedor podía creer que no tenía trabajo hasta que recargaba manualmente. Rompía la continuidad del flujo principal de inicio de jornada, aunque el dato del servidor era correcto.
 
-**Reproducción.**
+**Reproducción original.**
 
 1. Entrar como Lucía con el turno cerrado.
 2. Abrir la ruta móvil y comprobar «0.0 km».
@@ -67,7 +67,11 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 4. Verificar que el estado pasa a «En turno» pero no hay petición a `/api/restocker/my-route` y la ruta sigue vacía.
 5. Recargar: aparecen las 3 paradas y los 8,77 km.
 
-**Estado:** Abierto (2026-11-23).
+**Corrección aplicada (2026-11-23).** `startShift()` pasa `refreshRoute = true` a `runShiftAction()`, que ejecuta `loadMyRoute()` solo después de un `POST` correcto. `closeShift()` recarga la hoja móvil después de aplicar `OFF_SHIFT` y antes de liberar `isShiftLoading`. Así la ruta y el estado del turno se publican con la misma transición; un fallo del `POST` no provoca una recarga.
+
+**Evidencia (2026-11-23).** `node tests/frontend/restocker_route_view.test.mjs`: **247/247 · 0 fallos**, con las aserciones `H-37-08: Iniciar Turno recarga /api/restocker/my-route tras el éxito` y `H-37-08: Cerrar Turno recarga /api/restocker/my-route y deja OFF_SHIFT`. En Chromium, con el service worker desregistrado y la caché limpia: al pulsar «Iniciar Turno», el log mostró `POST /api/technician/shift/start → 200` seguido de `GET /api/restocker/my-route → 200`, y la ruta pasó a **3 paradas, 5 máquinas y 8,8 km** sin recargar la página; al pulsar «Cerrar Turno», `POST /api/technician/shift/close → 200` seguido de `GET /api/restocker/my-route → 200`, y la ruta quedó vacía con `0.0 km`. El cierre dejó el turno en `OFF_SHIFT`.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -254,7 +258,7 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 
 ## 6. Orden de corrección propuesto
 
-1. **H-37-08 (P2):** recargar `my-route` tras iniciar y cerrar turno, y añadir una regresión de que la petición se dispara.
+1. **H-37-08 (P2) — corregido el 2026-11-23.** Recargar `my-route` tras iniciar y cerrar turno, con una regresión que comprueba que la petición se dispara.
 2. **H-37-09 (P2):** aplicar `search` también en la rama de máquinas sin agenda, antes de añadirlas a `$items`.
 3. **H-37-10 y H-37-11 (P3):** usar `vg-btn-ghost-inverse` y dotar a los modales de foco inicial, focus trap y `Escape`; el mapa y `ModalDialog` comparten la deuda.
 4. **H-37-12, H-37-13 y H-37-14 (P3):** publicar `machine_code` en la excepción, adaptar el resumen a 360 px y distinguir los estados vacíos de cobertura.
@@ -267,4 +271,4 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 
 Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P2 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** `cefed9e`, rama `feat/restock-route-planner`, sin cambios de código durante la corrida. El único cambio de este trabajo es este documento.
+**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. La corrección de H-37-08 añade cambios en `RestockerRouteView.js`, `restocker_route_view.test.mjs` y este acta, en el mismo commit; sin push.

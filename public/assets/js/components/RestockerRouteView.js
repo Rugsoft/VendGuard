@@ -1242,7 +1242,7 @@ export const RestockerRouteView = {
     },
 
     async startShift() {
-      await this.runShiftAction('/technician/shift/start', 'ON_SHIFT', 'No se pudo iniciar el turno.');
+      await this.runShiftAction('/technician/shift/start', 'ON_SHIFT', 'No se pudo iniciar el turno.', true);
     },
 
     async pauseMealShift() {
@@ -1266,6 +1266,7 @@ export const RestockerRouteView = {
         this.applyShiftResponse(response, 'OFF_SHIFT');
         this.activeShiftId = null;
         this.feedbackMessage = 'Jornada cerrada. Tu ruta de reposición queda fuera de turno.';
+        await this.loadMyRoute();
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo cerrar el turno.';
       } finally {
@@ -1273,13 +1274,16 @@ export const RestockerRouteView = {
       }
     },
 
-    async runShiftAction(url, fallbackStatus, errorMessage) {
+    async runShiftAction(url, fallbackStatus, errorMessage, refreshRoute = false) {
       this.isShiftLoading = true;
       this.shiftError = '';
       this.feedbackMessage = '';
       try {
         const response = await api.post(url);
         this.applyShiftResponse(response, fallbackStatus);
+        if (refreshRoute) {
+          await this.loadMyRoute();
+        }
       } catch (err) {
         this.shiftError = err?.message || errorMessage;
       } finally {
