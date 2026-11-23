@@ -612,7 +612,7 @@ async function run() {
   assert(
     '6.3 Las tablas anchas se desplazan dentro de su tarjeta, no en la página',
     template.includes('overflow-x: auto')
-      && template.includes('minmax(0, 1fr)')
+      && /minmax\(\d+px, 1fr\)/.test(template)
       && template.includes('flex-wrap: wrap')
   );
   assert(
@@ -641,6 +641,10 @@ async function run() {
   assert(
     '6.7 La tabla de excepciones muestra el código de máquina, no el ID interno',
     template.includes('{{ override.machine_code') && !template.includes('#{{ override.machine_id }}')
+  );
+  assert(
+    '6.8 El resumen de ruta reserva 120px por columna para no cortar etiquetas',
+    template.includes('grid-template-columns: repeat(auto-fit, minmax(120px, 1fr))')
   );
 
   console.log('\n======================================================================');

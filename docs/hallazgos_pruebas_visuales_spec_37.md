@@ -7,12 +7,12 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD de la corrida:** `cefed9e`
-- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11 y H-37-12 tocan la vista móvil, el servicio de agendas, los modales del mapa y compartido, el read model del tablero, sus suites y este acta; se registran en commits separados.
+- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11, H-37-12 y H-37-13 tocan la vista móvil, el servicio de agendas, los modales del mapa y compartido, el read model del tablero, el resumen responsive, sus suites y este acta; se registran en commits separados.
 - **Entorno:** app local `http://127.0.0.1:8000` contra el banco `vendguard_battery` (PostgreSQL `127.0.0.1:54331`), con las credenciales semilla del entorno de batería.
 - **Alcance:** recorrido manual en Chromium como Coordinación y Reponedor, con clics y teclado reales, a `1280 × 932 px` y `360 × 800 px`. Se contrastaron red, DOM, respuestas API, PostgreSQL e IndexedDB.
 - **Naturaleza:** acta de verificación visual y de UI sobre la aplicación ensamblada. **No sustituye** a [`hallazgos_pruebas_funcionales_spec_37.md`](hallazgos_pruebas_funcionales_spec_37.md), que recoge la corrida funcional y los cierres `H-37-01`–`H-37-07`, ni a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con suites automatizadas.
 
-> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Cuatro hallazgos siguen **abiertos**; H-37-08, H-37-09, H-37-10, H-37-11 y H-37-12 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
+> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Tres hallazgos siguen **abiertos**; H-37-08, H-37-09, H-37-10, H-37-11, H-37-12 y H-37-13 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
 
 ---
 
@@ -27,7 +27,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 | 3 | **H-37-10** | **P3 · Baja-media** | El cierre del mapa tenía contraste 1,72:1 y el modal no recibía foco ni cerraba con Escape | `RNF-04`, `RF-05.2` | **Cerrado (2026-11-23)** |
 | 4 | **H-37-11** | **P3 · Baja-media** | El modal de «Nueva agenda» no atrapaba el foco | `RNF-04` | **Cerrado (2026-11-23)** |
 | 5 | **H-37-12** | **P3 · Baja** | La tabla de excepciones mostraba el ID interno (`#10`) en vez del código de máquina | `RF-05.3`, Art. V.4 | **Cerrado (2026-11-23)** |
-| 6 | **H-37-13** | **P3 · Baja** | A 360 px las etiquetas del resumen de ruta se salen de su celda | `RNF-04`, `RF-05.3` | **Abierto** |
+| 6 | **H-37-13** | **P3 · Baja** | A 360 px las etiquetas del resumen de ruta se salían de su celda | `RNF-04`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 7 | **H-37-14** | **P3 · Baja** | El estado vacío de rutas dice «No hay paradas pendientes» aunque haya paradas sin cobertura | `RF-03.3`, `RF-05.3` | **Abierto** |
 | 8 | **H-37-15** | **P4 · Cosmético** | El contador de Alta masiva dice «1 seleccionadas» | `RNF-04` | **Abierto** |
 | 9 | **H-37-16** | **P4 · Externo** | El widget flotante de n8n tapa acciones en la esquina inferior derecha | Transversal; no es código del M37 | **Abierto** |
@@ -43,7 +43,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 3. Se recorrió la superficie móvil de Lucía: inicio de turno, ruta por bloques, mapa, modal de omisión, validación de motivo, aviso FEFO y snapshot de IndexedDB.
 4. Cada paso se contrastó con la petición de red, el DOM renderizado, la respuesta API, PostgreSQL y el log del servidor.
 5. Se probaron los tamaños `1280 × 932` y `360 × 800`; se midieron `scrollWidth`/`clientWidth` de etiquetas y contenedores para distinguir scroll interno intencional de solapamiento real.
-6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11 y H-37-12 se validaron con sus suites; H-37-08, H-37-10, H-37-11 y H-37-12 también se verificaron en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
+6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11, H-37-12 y H-37-13 se validaron con sus suites; H-37-08, H-37-10, H-37-11, H-37-12 y H-37-13 también se verificaron en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
 
 **Datos utilizados:** `VEND-0101`, `VEND-0102`, `VEND-0401`, `VEND-0501`, `VEND-0502`, `VEND-0701`, `VEND-0801` y `VEND-0901`; agenda de prueba de `VEND-0901` (dada de baja); desvío FEFO de `VEND-0701` a Lucía (revocado).
 
@@ -169,22 +169,26 @@ Además, el modal no movía el foco al abrirse y no se cerraba con `Escape`; sol
 
 ---
 
-### H-37-13 · P3 · A 360 px las etiquetas del resumen de ruta se salen de su celda
+### H-37-13 · P3 · CORREGIDO · A 360 px las etiquetas del resumen de ruta se salían de su celda
 
-**Qué ocurre.** En la tarjeta de ruta de «Rutas por reponedor», a `360 × 800 px`, las etiquetas del resumen se salen de su columna. «Completadas» ocupa `77 px` en una celda de `64 px` y «Bloqueadas» `68 px` en `64 px`; visualmente se lee **«CompletadasOmitidas»**. La página no genera scroll horizontal; el desbordamiento es del texto dentro de la cuadrícula.
+**Qué ocurría.** En la tarjeta de ruta de «Rutas por reponedor», a `360 × 800 px`, las etiquetas del resumen se salían de su columna. «Completadas» ocupaba `77 px` en una celda de `64 px` y «Bloqueadas» `68 px` en `64 px`; visualmente se leía **«CompletadasOmitidas»**. La página no generaba scroll horizontal; el desbordamiento era del texto dentro de la cuadrícula.
 
-**Causa.** Las etiquetas se pintan en [`CoordinatorRestockRoutePlannerSubTab.js:802-805`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js) dentro de una cuadrícula de cuatro columnas iguales, sin `overflow`, `min-width` o tamaño de fuente adaptativo para el ancho móvil.
+**Causa.** Las etiquetas se pintaban en [`CoordinatorRestockRoutePlannerSubTab.js:802-805`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js) dentro de una cuadrícula `repeat(auto-fit, minmax(0, 1fr))`: cuatro columnas iguales que a 360 px dejaban unos 64 px por celda, sin `overflow`, `min-width` ni tamaño de fuente adaptativo.
 
-**Impacto.** El resumen sigue siendo legible con esfuerzo, pero pierde separación entre métricas y aparenta un texto corrupto. Incumple la expectativa de legibilidad y acabado a 360 px de `RNF-04`.
+**Impacto.** El resumen seguía siendo legible con esfuerzo, pero perdía separación entre métricas y aparentaba un texto corrupto. Incumplía la expectativa de legibilidad y acabado a 360 px de `RNF-04`.
 
-**Reproducción.**
+**Reproducción original.**
 
 1. Abrir el planificador a `360 × 800 px` con una ruta de reponedor visible.
 2. Localizar el resumen «Completadas / Omitidas / Bloqueadas / FEFO».
 3. Medir `scrollWidth` y `clientWidth` de las etiquetas: `77 > 64` y `68 > 64`.
 4. Observar la unión visual de «Completadas» y «Omitidas».
 
-**Estado:** Abierto (2026-11-23).
+**Corrección aplicada (2026-11-23).** La cuadrícula reserva `minmax(120px, 1fr)` por columna ([`CoordinatorRestockRoutePlannerSubTab.js:801`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js)). Con los 281 px útiles de la tarjeta a 360 px caben dos columnas de 136,5 px en dos filas; en escritorio siguen cabiendo las cuatro métricas en una sola fila.
+
+**Evidencia (2026-11-23).** `node tests/frontend/coordinator_restock_route_planner.test.mjs`: **40/40 · 0 fallos**, con la aserción `6.8`. En Chromium, a `360 × 800 px` y con la ruta real de Lucía, la cuadrícula calculó dos pistas de `136,5 px`; las etiquetas quedaron dentro de su celda (`Completadas` y `Bloqueadas` sin invadir la siguiente), y la página mantuvo `scrollWidth = clientWidth = 343`. A `1280 × 932 px` se mantuvieron cuatro pistas de `294,25 px`. Lucía volvió a `OFF_SHIFT` al terminar.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -253,6 +257,7 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 | Alta, versionado y baja lógica de una agenda semanal | Correcto |
 | Modales compartidos: foco inicial, focus trap y retorno al disparador | Correcto; H-37-11 corregido en `ModalDialog` |
 | Tabla de excepciones: código de máquina en lugar del ID interno | Correcto; H-37-12 corregido |
+| Resumen de ruta a 360 px: etiquetas dentro de su celda y 2×2 sin solapamiento | Correcto; H-37-13 corregido |
 | Modal de alta masiva, selector de zonas/máquinas y contador | Correcto salvo el copy de H-37-15 |
 | Validación de omisión sin causa o con motivo corto | Correcto |
 | Modal de omisión: `role="dialog"`, `aria-modal`, foco inicial, `Escape` y retorno de foco | Correcto |
@@ -281,9 +286,10 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 3. **H-37-10 (P3) — corregido el 2026-11-23.** Contraste inverso, foco inicial, focus trap, `Escape` y retorno al disparador en el mapa, con regresión frontend.
 4. **H-37-11 (P3) — corregido el 2026-11-23.** `ModalDialog` incorpora foco inicial, focus trap y retorno al disparador; el mapa ya no comparte esta deuda.
 5. **H-37-12 (P3) — corregido el 2026-11-23.** Publicar `machine_code` en las excepciones y pintarlo en la tabla, con regresión API y UI.
-6. **H-37-13 y H-37-14 (P3):** adaptar el resumen a 360 px y distinguir los estados vacíos de cobertura.
-7. **H-37-15 (P4):** alternar singular/plural en el contador.
-8. **H-37-16 (P4):** no requiere cambio en el M37; valorar reducir el `z-index` o el área de impacto del widget de n8n.
+6. **H-37-13 (P3) — corregido el 2026-11-23.** Resumen de ruta responsive con columnas mínimas de 120 px y regresión frontend.
+7. **H-37-14 (P3):** distinguir los estados vacíos de cobertura.
+8. **H-37-15 (P4):** alternar singular/plural en el contador.
+9. **H-37-16 (P4):** no requiere cambio en el M37; valorar reducir el `z-index` o el área de impacto del widget de n8n.
 
 ---
 
@@ -291,4 +297,4 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 
 Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P2 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit. H-37-11 añade cambios en `ModalDialog.js`, `UIComponentsTest.mjs` y este acta, en su propio commit. H-37-12 añade cambios en `PdoRestockRouteReadModel.php`, `RestockRoutePlannerService.php`, `CoordinatorRestockRoutePlannerSubTab.js`, sus suites API/frontend/gateway y este acta, en su propio commit; sin push.
+**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit. H-37-11 añade cambios en `ModalDialog.js`, `UIComponentsTest.mjs` y este acta, en su propio commit. H-37-12 añade cambios en `PdoRestockRouteReadModel.php`, `RestockRoutePlannerService.php`, `CoordinatorRestockRoutePlannerSubTab.js`, sus suites API/frontend/gateway y este acta, en su propio commit. H-37-13 añade cambios en `CoordinatorRestockRoutePlannerSubTab.js`, `coordinator_restock_route_planner.test.mjs` y este acta, en su propio commit; sin push.

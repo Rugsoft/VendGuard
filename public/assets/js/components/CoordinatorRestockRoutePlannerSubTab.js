@@ -798,7 +798,7 @@ export const CoordinatorRestockRoutePlannerSubTab = {
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; margin-top: 10px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 10px;">
             <div><span class="vg-label">Completadas</span>{{ route.summary?.completed_machines_count || 0 }}</div>
             <div><span class="vg-label">Omitidas</span>{{ route.summary?.skipped_machines_count || 0 }}</div>
             <div><span class="vg-label">Bloqueadas</span>{{ route.summary?.blocked_machines_count || 0 }}</div>
