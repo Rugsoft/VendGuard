@@ -644,6 +644,30 @@ export const RestockerRouteView = {
     },
     skipReasonOptions() {
       return Object.entries(ROUTE_SKIP_REASON_LABELS).map(([value, label]) => ({ value, label }));
+    },
+    skipRouteFefoWarning() {
+      const stop = this.skipRouteStop;
+      if (!stop || !this.routeStopHasFefo(stop)) return null;
+
+      const affected = (Array.isArray(stop.machines) ? stop.machines : [])
+        .filter((machine) => this.routeMachineHasFefo(machine));
+      const dates = affected
+        .map((machine) => machine.earliest_fefo_expiration_date || stop.earliest_fefo_expiration_date || null)
+        .filter(Boolean)
+        .sort();
+      const machineCodes = [...new Set(affected.map((machine) => machine.machine_code).filter(Boolean))];
+      const hasExpiredBatch = affected.some((machine) => machine.has_expired_cold_batch === true);
+
+      return {
+        title: hasExpiredBatch ? 'Perecedero caducado' : 'Alerta FEFO activa',
+        message: hasExpiredBatch
+          ? 'Esta parada tiene género refrigerado ya caducado. La omisión encolará una alerta sanitaria crítica y la máquina quedará marcada como EXPIRED hasta la retirada.'
+          : 'Esta parada tiene género refrigerado con caducidad próxima o vencida. La omisión encolará una alerta sanitaria crítica para Coordinación.',
+        has_expired_batch: hasExpiredBatch,
+        earliest_fefo_expiration_date: dates[0] || null,
+        machine_codes: machineCodes,
+        machine_codes_label: machineCodes.join(', ')
+      };
     }
   },
   mounted() {
@@ -5372,6 +5396,22 @@ export const RestockerRouteView = {
               </p>
             </div>
             <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-route-skip" :disabled="isSkippingRoute" @click="closeSkipRouteModal">Cerrar</button>
+          </div>
+
+          <div
+            v-if="skipRouteFefoWarning"
+            role="alert"
+            data-testid="route-skip-fefo-warning"
+            style="margin-top: 14px; padding: 10px 12px; background-color: var(--color-error-bg); color: var(--color-error-text); border-left: 4px solid var(--color-error-text); border-radius: var(--radius-interactive);"
+          >
+            <strong style="display: block; font-size: 12px;">⚠️ {{ skipRouteFefoWarning.title }}</strong>
+            <span style="display: block; font-size: 12px; margin-top: 2px;">{{ skipRouteFefoWarning.message }}</span>
+            <span v-if="skipRouteFefoWarning.earliest_fefo_expiration_date" style="display: block; font-size: 11px; margin-top: 4px;">
+              Caducidad: {{ routeFormatDate(skipRouteFefoWarning.earliest_fefo_expiration_date) }}
+            </span>
+            <span v-if="skipRouteFefoWarning.machine_codes.length" style="display: block; font-size: 11px; margin-top: 2px;">
+              Máquinas afectadas: {{ skipRouteFefoWarning.machine_codes_label }}
+            </span>
           </div>
 
           <label style="display: block; font-size: 12px; font-weight: 600; margin: 14px 0 4px 0;">Causa de la omisión</label>

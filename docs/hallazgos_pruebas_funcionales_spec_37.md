@@ -23,7 +23,7 @@ Los siete hallazgos se ordenan así:
 |---:|---|---|---|---|---|
 | 1 | **H-37-01** | **P1 · Alta** | El snapshot offline de la ruta nunca se guarda en IndexedDB (`DataCloneError`) | `RF-05.1`, `C3` | **Cerrado (2026-11-23)** |
 | 2 | **H-37-02** | **P2 · Media** | El tablero de Coordinación muestra `0.0 km` en todas las rutas | `RF-03.2.4`, `RF-05.3` | **Cerrado (2026-11-23)** |
-| 3 | **H-37-03** | **P2 · Media** | El modal de omisión móvil no advierte de alerta FEFO ni perecedero caducado | `RF-05.2` (EARS 05.2.1) | Abierto |
+| 3 | **H-37-03** | **P2 · Media** | El modal de omisión móvil no advierte de alerta FEFO ni perecedero caducado | `RF-05.2` (EARS 05.2.1) | **Cerrado (2026-11-23)** |
 | 4 | **H-37-04** | **P3 · Baja** | Los formularios piden IDs internos numéricos en vez de selectores | `RF-01.3`, `RF-02.3`, `RF-05.3` | Abierto |
 | 5 | **H-37-05** | **P3 · Baja** | El modal de omisión no declara semántica de diálogo | Hoja móvil (`RF-05.2`) | Abierto |
 | 6 | **H-37-06** | **P3 · Observación** | `service_date` pasada se acepta en propuesta y emisión `TODAY_ROUTE` | Contrato §4 y `TODAY_ROUTE` | Abierto · requiere decisión |
@@ -73,7 +73,7 @@ La base `vendguard-restock-route-overrides` existe y su almacén `route_snapshot
 
 **Corrección aplicada (2026-11-23).** `RestockRouteOverrideOfflineQueue.saveSnapshot()` convierte el plan con `toPlainRoutePlan()` (`JSON.parse(JSON.stringify(...))`) antes de construir el snapshot, de modo que IndexedDB recibe un objeto plano y no el proxy de Vue. Se añadió la regresión `1.3b` en `restocker_route_planner_view.test.mjs`, que envuelve el fixture en un `Proxy` y exige que `structuredClone(snapshot.route_plan)` funcione y que no sea la misma referencia. La suite pasa de 42 a **43/43 aserciones**.
 
-**Evidencia real (2026-11-23).** En Chromium, tras desregistrar el Service Worker y limpiar cachés, Lucía abrió su ruta y `route_snapshots` quedó con **1 fila** (`restocker_id = 7`, `service_date = 2026-11-23`, 2 paradas, 3 máquinas, `saved_at` de la carga); no aparece el `DataCloneError`. Tras recargar la página la fila sigue existiendo, con `saved_at` actualizado por la nueva carga. El App Shell sube a `vendguard-app-shell-v28` para que una PWA instalada reciba el módulo corregido.
+**Evidencia real (2026-11-23).** En Chromium, tras desregistrar el Service Worker y limpiar cachés, Lucía abrió su ruta y `route_snapshots` quedó con **1 fila** (`restocker_id = 7`, `service_date = 2026-11-23`, 2 paradas, 3 máquinas, `saved_at` de la carga); no aparece el `DataCloneError`. Tras recargar la página la fila sigue existiendo, con `saved_at` actualizado por la nueva carga. El App Shell sube a `vendguard-app-shell-v28` para que una PWA instalada reciba el módulo corregido; con `H-37-03` pasa a `v29`.
 
 **Estado:** Cerrado (2026-11-23).
 
@@ -101,15 +101,17 @@ La base `vendguard-restock-route-overrides` existe y su almacén `route_snapshot
 
 **Requisito.** [`spec.md:230`](../specs/37-restock-route-planner/spec.md) exige que el modal advierta «de forma destacada si la parada tiene alerta FEFO o perecedero caducado».
 
-**Causa.** [`RestockerRouteView.js:827`](../public/assets/js/components/RestockerRouteView.js) define `routeStopHasFefo()`, pero el modal de [`RestockerRouteView.js:5362`](../public/assets/js/components/RestockerRouteView.js) no lo consulta. La comprobación solo se usa para el badge de la tarjeta.
+**Causa.** [`RestockerRouteView.js:852`](../public/assets/js/components/RestockerRouteView.js) define `routeStopHasFefo()`, pero el modal de [`RestockerRouteView.js:5405`](../public/assets/js/components/RestockerRouteView.js) no lo consulta. La comprobación solo se usa para el badge de la tarjeta.
 
 **Evidencia complementaria.** El backend sí cumple la salvaguarda: la omisión creó la excepción `1534` con `had_active_fefo_alert = true` y la notificación `6610` `RESTOCK_FEFO_STOP_SKIPPED_ALERT` / `CRITICAL_SANITARY` / `PENDING` para Coordinación. El fallo es exclusivamente de la interfaz que debe informar al reponedor antes de decidir.
 
 **Impacto.** El reponedor puede omitir una parada con género refrigerado en riesgo sin ver la advertencia que el criterio EARS le exige. La protección de datos y la alerta interna no se pierden, pero se degrada la decisión informada y la trazabilidad visual del Art. II.
 
-**Corrección propuesta.** Calcular `routeStopHasFefo(stop)` al abrir el modal y mostrar un banner `danger` con la fecha FEFO y, si existe, la mención de lote caducado. Mantener el bloqueo de validación de 20 caracteres y 3 bloques. Añadir una prueba de la vista con una parada FEFO y otra sin ella.
+**Corrección aplicada (2026-11-23).** La vista calcula `skipRouteFefoWarning` a partir de `routeStopHasFefo(stop)`: reúne las máquinas afectadas, la caducidad más próxima (`earliest_fefo_expiration_date` de máquina o parada) y el indicador `has_expired_cold_batch`. El modal pinta un banner `role="alert"` con `data-testid="route-skip-fefo-warning"` antes de la causa, con fondo y borde de error. Si hay lote caducado el título es «Perecedero caducado» y anuncia la marca `EXPIRED`; si solo hay alerta FEFO el título es «Alerta FEFO activa». Incluye la fecha y los códigos de las máquinas afectadas. Se mantiene el bloqueo de validación de 20 caracteres y 3 bloques.
 
-**Estado:** Abierto.
+**Evidencia (2026-11-23).** Antes de la corrección, las nuevas aserciones `3.1b`, `3.1c` y `5.8` fallaban (45 aserciones · 3 fallos). Después, [`restocker_route_planner_view.test.mjs`](../tests/frontend/restocker_route_planner_view.test.mjs) cierra **45/45**, y las guardas de shell (`restocker_route_view`, `coordinator_product_loading_tab`, `N8nChatScope` y `OfflinePwaAssetsAndUiGuard`) siguen en verde con el App Shell en `vendguard-app-shell-v29`. En Chromium, tras revocar la excepción de prueba `1534`, `VEND-0101` volvió a la ruta de Lucía; al abrir su omisión el modal mostró `role="alert"`, «Alerta FEFO activa», «Caducidad: 24/11/2026» y «Máquinas afectadas: VEND-0101», con fondo y borde de error. El caso de perecedero caducado se cubre con el fixture (`has_expired_cold_batch: true`), que exige el título «Perecedero caducado».
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -203,7 +205,7 @@ Estas comprobaciones pasaron durante la misma corrida y se conservan para delimi
 ## 6. Orden de corrección propuesto
 
 1. **H-37-01 (P1) — corregido el 2026-11-23 (commit `088f66e`).** Snapshot offline: clonar el `route_plan` antes de `put()` y cubrir el caso con un proxy reactivo.
-2. **H-37-03 (P2).** Aviso FEFO en el modal de omisión; es la deuda más sensible por Art. II.
+2. **H-37-03 (P2) — corregido el 2026-11-23.** Aviso FEFO y perecedero caducado en el modal de omisión; era la deuda más sensible por Art. II.
 3. **H-37-02 (P2) — corregido el 2026-11-23.** Origen del optimizador en `buildCoordinatorDay()` y aserción de distancia.
 4. **H-37-04 y H-37-05 (P3).** Selectores con nombre/código y semántica ARIA del modal.
 5. **H-37-06.** Decidir contrato antes de implementar; si se rechaza la fecha pasada, añadir `422 PAST_SERVICE_DATE_FORBIDDEN` y su aserción. Si se permite, persistir `service_date`.
@@ -217,4 +219,4 @@ Los puntos 2 y 4 son correcciones contra requisitos ya existentes; no requieren 
 
 Este acta se actualizará cuando cada hallazgo se corrija, con la misma disciplina que las auditorías de los módulos 33–36: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P1 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** HEAD `13637b7` más la corrección de `H-37-01` (commit `088f66e`) y la corrección de `H-37-02`, incluida en su commit de corrección. Los scripts de la sonda viven en `scratch/` y no se versionan. El acta recoge la corrida original y las correcciones posteriores.
+**Estado del árbol:** árbol limpio tras los commits de corrección de `H-37-01` (`088f66e`), `H-37-02` (`bf7b018`) y `H-37-03`; sin push. Los scripts de la sonda viven en `scratch/` y no se versionan. El acta recoge la corrida original y las correcciones posteriores.

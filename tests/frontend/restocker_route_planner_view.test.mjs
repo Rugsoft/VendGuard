@@ -317,6 +317,24 @@ async function run() {
   vm.loadPendingRouteOverrides = async () => {};
   vm.openSkipRouteModal(vm.routePlanStops[0].machines[0], vm.routePlanStops[0]);
   assert('3.1 El modal precarga máquina, fecha y mutación idempotente', vm.showSkipRouteModal === true && vm.skipRouteForm.service_date === '2026-11-21' && vm.skipRouteForm.client_mutation_id.length >= 8);
+  assert(
+    '3.1b El modal destaca FEFO y lote caducado antes de omitir',
+    vm.skipRouteFefoWarning?.has_expired_batch === true
+      && vm.skipRouteFefoWarning?.title === 'Perecedero caducado'
+      && vm.skipRouteFefoWarning?.machine_codes.includes('VEND-MAD-005')
+      && vm.skipRouteFefoWarning?.earliest_fefo_expiration_date === '2026-11-21'
+  );
+
+  const nonFefoVm = buildView({
+    restocker: { id: 12, name: 'Lucía Gómez' },
+    currentUser: { id: 12 },
+    routePlan: routePlanFixture(),
+    routeServiceDate: '2026-11-21'
+  });
+  nonFefoVm.routeToday = () => '2026-11-21';
+  nonFefoVm.openSkipRouteModal(nonFefoVm.routePlanStops[1].machines[0], nonFefoVm.routePlanStops[1]);
+  assert('3.1c Una parada sin FEFO no muestra aviso sanitario', nonFefoVm.skipRouteFefoWarning === null);
+
   vm.skipRouteForm.reason_text = 'Corto';
   assert('3.2 Un motivo corto se rechaza antes de viajar', vm.validateSkipRoute() === false && vm.skipRouteError.includes('20'));
   vm.skipRouteForm.reason_text = 'La conserjería permanece cerrada con persiana metálica bajada y sin personal de acceso.';
@@ -499,6 +517,7 @@ async function run() {
       && viewSource.includes('Sin GPS')
       && viewSource.includes('<details')
       && viewSource.includes('⏭️ Omitir parada hoy')
+      && viewSource.includes('data-testid="route-skip-fefo-warning"')
   );
   assert('5.9 El mapa reutiliza Mercator y MapZoomPan', mapSource.includes("from '../utils/Mercator.js'") && mapSource.includes("from '../utils/MapZoomPan.js'"));
   assert('5.10 El Service Worker precachea los módulos y sube la versión', swSource.includes('/assets/js/components/RestockerRouteMapModal.js') && swSource.includes('/assets/js/utils/RestockRouteOverrideOfflineQueue.js') && /vendguard-app-shell-v(\d+)/.exec(swSource)?.[1] >= 27);
