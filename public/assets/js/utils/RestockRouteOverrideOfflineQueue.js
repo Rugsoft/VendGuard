@@ -34,6 +34,22 @@ function requireText(value, field) {
   return text;
 }
 
+/**
+ * Unwraps a possibly reactive route plan (Vue Proxy) into a plain object that
+ * IndexedDB can structured-clone. Proxies are not cloneable and make put() fail.
+ */
+function toPlainRoutePlan(routePlan) {
+  try {
+    const plain = JSON.parse(JSON.stringify(routePlan));
+    if (plain === null || typeof plain !== 'object') {
+      throw new Error('route_plan is not an object');
+    }
+    return plain;
+  } catch (error) {
+    throw new Error('RestockRouteOverrideOfflineQueue: route_plan must be a JSON-serializable object.');
+  }
+}
+
 function requestResult(request) {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -239,7 +255,7 @@ export class RestockRouteOverrideOfflineQueue {
     const snapshot = {
       restocker_id: owner,
       service_date: date,
-      route_plan: routePlan,
+      route_plan: toPlainRoutePlan(routePlan),
       saved_at: String(savedAt ?? new Date().toISOString())
     };
 

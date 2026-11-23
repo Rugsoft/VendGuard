@@ -7,7 +7,7 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD:** `13637b7` · `test(restock-route): certify 360x800 layout of M37 surfaces (AUD-37-04)`
-- **Árbol:** sin cambios de código, esquema ni tests. La corrida solo dejó scripts temporales en `scratch/`, ignorados por Git, y este acta como único artefacto nuevo.
+- **Árbol:** la corrida inicial no modificó código. La corrección posterior de `H-37-01` (2026-11-23) toca `public/assets/js/utils/RestockRouteOverrideOfflineQueue.js`, `public/sw.js`, `tests/frontend/restocker_route_planner_view.test.mjs` y las guardas de versión del shell; queda pendiente de commit.
 - **Entorno:** app local `http://127.0.0.1:8000` levantada con `VENDGUARD_DEV_SITE_KEYS=1 php -S 127.0.0.1:8000 -t public public/index.php`, contra el banco local `vendguard_battery` (PostgreSQL `127.0.0.1:54331`).
 - **Naturaleza:** acta de verificación funcional sobre la aplicación ensamblada. **No sustituye** a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con las suites automatizadas. Los siete hallazgos de este documento son nuevos y aparecieron al recorrer la app real, no en las suites.
 
@@ -21,7 +21,7 @@ Los siete hallazgos se ordenan así:
 
 | Orden | ID | Prioridad | Hallazgo | Requisito afectado | Estado |
 |---:|---|---|---|---|---|
-| 1 | **H-37-01** | **P1 · Alta** | El snapshot offline de la ruta nunca se guarda en IndexedDB (`DataCloneError`) | `RF-05.1`, `C3` | Abierto |
+| 1 | **H-37-01** | **P1 · Alta** | El snapshot offline de la ruta nunca se guarda en IndexedDB (`DataCloneError`) | `RF-05.1`, `C3` | **Cerrado (2026-11-23)** |
 | 2 | **H-37-02** | **P2 · Media** | El tablero de Coordinación muestra `0.0 km` en todas las rutas | `RF-03.2.4`, `RF-05.3` | Abierto |
 | 3 | **H-37-03** | **P2 · Media** | El modal de omisión móvil no advierte de alerta FEFO ni perecedero caducado | `RF-05.2` (EARS 05.2.1) | Abierto |
 | 4 | **H-37-04** | **P3 · Baja** | Los formularios piden IDs internos numéricos en vez de selectores | `RF-01.3`, `RF-02.3`, `RF-05.3` | Abierto |
@@ -71,9 +71,11 @@ La base `vendguard-restock-route-overrides` existe y su almacén `route_snapshot
 
 **Impacto.** `RF-05.1` y `C3` quedan rotos en la práctica: la ruta no se cachea, por lo que al recargar sin cobertura no hay snapshot que restaurar. La cola de omisiones y el flujo online sí funcionan, lo que hace el fallo más silencioso: solo se manifiesta al intentar trabajar offline.
 
-**Corrección propuesta.** Convertir el `route_plan` a un objeto plano antes de guardarlo (`structuredClone(toRaw(...))` o `JSON.parse(JSON.stringify(...))`, según el tamaño y los tipos del payload) y añadir una prueba de composición que entregue un proxy reactivo real a `saveSnapshot()`. Las pruebas actuales usan objetos planos, por eso no detectan el caso. Verificar después con IndexedDB real que `route_snapshots` contiene una fila por reponedor y día.
+**Corrección aplicada (2026-11-23).** `RestockRouteOverrideOfflineQueue.saveSnapshot()` convierte el plan con `toPlainRoutePlan()` (`JSON.parse(JSON.stringify(...))`) antes de construir el snapshot, de modo que IndexedDB recibe un objeto plano y no el proxy de Vue. Se añadió la regresión `1.3b` en `restocker_route_planner_view.test.mjs`, que envuelve el fixture en un `Proxy` y exige que `structuredClone(snapshot.route_plan)` funcione y que no sea la misma referencia. La suite pasa de 42 a **43/43 aserciones**.
 
-**Estado:** Abierto.
+**Evidencia real (2026-11-23).** En Chromium, tras desregistrar el Service Worker y limpiar cachés, Lucía abrió su ruta y `route_snapshots` quedó con **1 fila** (`restocker_id = 7`, `service_date = 2026-11-23`, 2 paradas, 3 máquinas, `saved_at` de la carga); no aparece el `DataCloneError`. Tras recargar la página la fila sigue existiendo, con `saved_at` actualizado por la nueva carga. El App Shell sube a `vendguard-app-shell-v28` para que una PWA instalada reciba el módulo corregido.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -188,7 +190,7 @@ Estas comprobaciones pasaron durante la misma corrida y se conservan para delimi
 
 ## 5. No verificado
 
-- Desconexión de red real con la PWA instalada y recarga en frío; el snapshot vacío de `H-37-01` hace prever que la ruta no se restauraría, pero no se ejecutó el corte físico.
+- Desconexión de red real con la PWA instalada y recarga en frío; el snapshot de `H-37-01` ya persiste y se recupera con la base abierta, pero no se ejecutó el corte físico de red.
 - Dispositivo móvil físico; el recorrido se hizo con el navegador del panel.
 - Envío real del lote masivo desde la UI; el modal se revisó y la atomicidad está cubierta por la sonda API.
 - Validación cliente del motivo de omisión por debajo de 20 caracteres; el `422` del servidor sí está cubierto por la sonda.
@@ -198,14 +200,14 @@ Estas comprobaciones pasaron durante la misma corrida y se conservan para delimi
 
 ## 6. Orden de corrección propuesto
 
-1. **H-37-01 (P1).** Snapshot offline: clonar el `route_plan` antes de `put()` y cubrir el caso con un proxy reactivo.
+1. **H-37-01 (P1) — corregido el 2026-11-23.** Snapshot offline: clonar el `route_plan` antes de `put()` y cubrir el caso con un proxy reactivo.
 2. **H-37-03 (P2).** Aviso FEFO en el modal de omisión; es la deuda más sensible por Art. II.
 3. **H-37-02 (P2).** Origen del optimizador en `buildCoordinatorDay()` y aserción de distancia.
 4. **H-37-04 y H-37-05 (P3).** Selectores con nombre/código y semántica ARIA del modal.
 5. **H-37-06.** Decidir contrato antes de implementar; si se rechaza la fecha pasada, añadir `422 PAST_SERVICE_DATE_FORBIDDEN` y su aserción. Si se permite, persistir `service_date`.
 6. **H-37-07 (P3).** Recarga al cambiar la fecha o estado visual de «desactualizado».
 
-Los puntos 1–3 y 5 son correcciones contra requisitos ya existentes; no requieren cambiar la especificación. El punto 6 requiere decisión de producto y, si se opta por permitir fechas pasadas, una enmienda del contrato.
+Los puntos 2, 3 y 4 son correcciones contra requisitos ya existentes; no requieren cambiar la especificación. El punto 5 requiere decisión de producto y, si se opta por permitir fechas pasadas, una enmienda del contrato. El punto 6 es una mejora de usabilidad sin cambio de contrato.
 
 ---
 
@@ -213,4 +215,4 @@ Los puntos 1–3 y 5 son correcciones contra requisitos ya existentes; no requie
 
 Este acta se actualizará cuando cada hallazgo se corrija, con la misma disciplina que las auditorías de los módulos 33–36: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P1 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** HEAD `13637b7`, sin cambios de código. Los scripts de la sonda viven en `scratch/` y no se versionan. Este documento es el único artefacto nuevo de la corrida.
+**Estado del árbol:** HEAD `13637b7` más la corrección local de `H-37-01`, pendiente de commit. Los scripts de la sonda viven en `scratch/` y no se versionan. El acta recoge la corrida original y la corrección posterior.

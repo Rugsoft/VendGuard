@@ -222,6 +222,21 @@ async function run() {
   assert('1.2 La cola es idempotente por client_mutation_id', ownerItems.length === 1 && enqueued.status === RESTOCK_ROUTE_OVERRIDE_PENDING);
   assert('1.3 La cola aísla por restocker_id', (await queue.list(99)).length === 1 && (await queue.list(99))[0].machine_id === 6);
 
+  const reactivePlan = new Proxy(routePlanFixture(), {});
+  const reactiveSnapshot = await queue.saveSnapshot(12, '2026-11-21', reactivePlan);
+  let reactivePlanCloneable = true;
+  try {
+    structuredClone(reactiveSnapshot.route_plan);
+  } catch (error) {
+    reactivePlanCloneable = false;
+  }
+  assert(
+    '1.3b El snapshot desenvuelve el plan reactivo en un objeto clonable (H-37-01)',
+    reactivePlanCloneable
+      && reactiveSnapshot.route_plan !== reactivePlan
+      && reactiveSnapshot.route_plan.stops.length === 3
+  );
+
   const snapshot = await queue.saveSnapshot(12, '2026-11-21', routePlanFixture(), '2026-11-21T22:30:00+01:00');
   assert('1.4 El snapshot conserva la ruta y su fecha de servicio', snapshot.service_date === '2026-11-21' && snapshot.route_plan.stops.length === 3);
   assert('1.5 El snapshot vigente se recupera para el mismo día', (await queue.loadSnapshot(12, '2026-11-21'))?.route_plan.stops.length === 3);

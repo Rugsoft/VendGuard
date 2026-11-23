@@ -290,7 +290,7 @@ assert(
 assert(
   "4.6 El Service Worker precachea el módulo de configuración (shell cerrado)",
   swSource.includes('/assets/js/config/chatAssistant.js')
-    && /vendguard-app-shell-v27/.test(swSource)
+    && /vendguard-app-shell-v28/.test(swSource)
 );
 
 assert(
