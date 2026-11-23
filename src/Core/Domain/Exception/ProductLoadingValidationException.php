@@ -20,7 +20,7 @@ use DomainException;
  * Códigos por estado HTTP:
  *   - `409`: `BATCH_EXPIRATION_MISMATCH`, `INVALID_ORDER_STATE_TRANSITION` y
  *     `ORDER_CANCELLATION_NOT_ALLOWED`.
- *   - `422`: cotas de cantidad, orden sin líneas, temperatura de cámara, lote y
+ *   - `422`: fecha pasada en `TODAY_ROUTE`, cotas de cantidad, orden sin líneas,
  *     caducidad, justificación insuficiente y cuadre de liquidación.
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias.
@@ -39,6 +39,7 @@ final class ProductLoadingValidationException extends DomainException
     public const FORBIDDEN_LOADING_ORDER_ACCESS = 'FORBIDDEN_LOADING_ORDER_ACCESS';
 
     // ── 422 ────────────────────────────────────────────────────────────────
+    public const PAST_SERVICE_DATE_FORBIDDEN = 'PAST_SERVICE_DATE_FORBIDDEN';
     public const EMPTY_LOADING_ORDER_ITEMS = 'EMPTY_LOADING_ORDER_ITEMS';
     public const INVALID_RESTOCKER_RECIPIENT = 'INVALID_RESTOCKER_RECIPIENT';
     public const PRODUCT_INACTIVE = 'PRODUCT_INACTIVE';
@@ -208,6 +209,21 @@ final class ProductLoadingValidationException extends DomainException
     // ─────────────────────────────────────────────────────────────────────
     // 422 · cantidades, líneas y temperatura
     // ─────────────────────────────────────────────────────────────────────
+
+    public static function pastServiceDateForbidden(string $serviceDate, string $today): self
+    {
+        return new self(
+            self::PAST_SERVICE_DATE_FORBIDDEN,
+            sprintf(
+                'La fecha de servicio %s es anterior a hoy (%s) en Europe/Madrid; TODAY_ROUTE solo admite hoy o fechas futuras (RF-04.1, QA-5).',
+                $serviceDate,
+                $today
+            ),
+            422,
+            'service_date',
+            ['service_date' => $serviceDate, 'today' => $today]
+        );
+    }
 
     public static function invalidRestockerRecipient(int $restockerId, string $detail): self
     {

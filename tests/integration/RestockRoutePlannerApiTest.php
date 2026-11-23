@@ -113,6 +113,10 @@ try {
         ->modify('+1 day')
         ->format('Y-m-d');
 
+    $yesterday = (new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))
+        ->modify('-1 day')
+        ->format('Y-m-d');
+
     $createUser = static function (string $suffix, string $role, string $name) use ($pdo): int {
         $stmt = $pdo->prepare(
             'INSERT INTO users (name, email, email_key, password_hash, role, operator_code, is_active, is_on_call)
@@ -955,6 +959,48 @@ try {
     $assert(
         '6.3 Una service_date inválida responde 400 VALIDATION_ERROR',
         $invalidDate->getStatusCode() === 400 && $errorCode($invalidDate) === 'VALIDATION_ERROR'
+    );
+
+    $ordersBeforePast = (int)$pdo->query('SELECT COUNT(*) FROM product_loading_orders')->fetchColumn();
+
+    $proposalPast = $call('GET', '/api/coordinator/product-loading-orders/proposal', [], $coordinatorToken, [
+        'restocker_id' => (string)$ownerId,
+        'demand_mode' => 'TODAY_ROUTE',
+        'service_date' => $yesterday,
+    ]);
+    $assert(
+        '6.3b La propuesta TODAY_ROUTE con fecha pasada responde 422 PAST_SERVICE_DATE_FORBIDDEN',
+        $proposalPast->getStatusCode() === 422
+            && $errorCode($proposalPast) === 'PAST_SERVICE_DATE_FORBIDDEN'
+            && (int)$pdo->query('SELECT COUNT(*) FROM product_loading_orders')->fetchColumn() === $ordersBeforePast
+    );
+
+    $individualPast = $call('POST', '/api/coordinator/product-loading-orders', [
+        'restocker_id' => $ownerId,
+        'demand_mode' => 'TODAY_ROUTE',
+        'service_date' => $yesterday,
+        'safety_buffer_pct' => 10,
+        'items' => [
+            ['product_id' => $productId, 'reason' => 'ROUTE_GAP_FILL', 'requested_qty' => 1],
+        ],
+    ], $coordinatorToken);
+    $assert(
+        '6.3c La emisión individual TODAY_ROUTE con fecha pasada responde 422 sin crear la orden',
+        $individualPast->getStatusCode() === 422
+            && $errorCode($individualPast) === 'PAST_SERVICE_DATE_FORBIDDEN'
+            && (int)$pdo->query('SELECT COUNT(*) FROM product_loading_orders')->fetchColumn() === $ordersBeforePast
+    );
+
+    $batchPast = $call('POST', '/api/coordinator/product-loading-orders/batch', [
+        'demand_mode' => 'TODAY_ROUTE',
+        'service_date' => $yesterday,
+        'safety_buffer_pct' => 10,
+    ], $coordinatorToken);
+    $assert(
+        '6.3d El lote TODAY_ROUTE con fecha pasada responde 422 sin crear órdenes parciales',
+        $batchPast->getStatusCode() === 422
+            && $errorCode($batchPast) === 'PAST_SERVICE_DATE_FORBIDDEN'
+            && (int)$pdo->query('SELECT COUNT(*) FROM product_loading_orders')->fetchColumn() === $ordersBeforePast
     );
 
     $batch = $call('POST', '/api/coordinator/product-loading-orders/batch', [

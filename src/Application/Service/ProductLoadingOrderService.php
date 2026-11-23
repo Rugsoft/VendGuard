@@ -125,6 +125,7 @@ final class ProductLoadingOrderService
     ): array {
         $mode = ProductLoadingDemandMode::fromString($demandMode);
         $this->assertSafetyBuffer($safetyBufferPct);
+        $this->assertTodayRouteServiceDate($mode, $serviceDate);
         $scope = $this->routeScope($restockerId, $mode, $reference, $serviceDate);
 
         $inputs = $this->orderRepository->fetchProposalInputs(
@@ -165,6 +166,13 @@ final class ProductLoadingOrderService
         $mode = ProductLoadingDemandMode::fromString((string)($payload['demand_mode'] ?? 'ALERTS_ONLY'));
         $buffer = $this->readInteger($payload['safety_buffer_pct'] ?? 10, 'safety_buffer_pct', 0, 50);
         $notes = $this->optionalText($payload['notes'] ?? null, 'notes');
+
+        if ($mode->isTodayRoute()) {
+            $this->assertTodayRouteServiceDate(
+                $mode,
+                $this->optionalServiceDate($payload['service_date'] ?? null)
+            );
+        }
 
         $restocker = $this->requireActiveRestocker($restockerId);
         $active = $this->orderRepository->findActiveByRestocker($restockerId);
@@ -250,6 +258,7 @@ final class ProductLoadingOrderService
         $mode = ProductLoadingDemandMode::fromString((string)($payload['demand_mode'] ?? 'ALERTS_ONLY'));
         $buffer = $this->readInteger($payload['safety_buffer_pct'] ?? 10, 'safety_buffer_pct', 0, 50);
         $serviceDate = $this->optionalServiceDate($payload['service_date'] ?? null);
+        $this->assertTodayRouteServiceDate($mode, $serviceDate);
 
         $created = [];
         $skipped = [];
@@ -1040,6 +1049,27 @@ final class ProductLoadingOrderService
             'blocked' => array_values($blocked),
             'service_date' => $date,
         ];
+    }
+
+    /**
+     * Rechaza el pasado estricto en TODAY_ROUTE (RF-04.1, QA-5).
+     */
+    private function assertTodayRouteServiceDate(
+        ProductLoadingDemandMode $mode,
+        ?string $serviceDate,
+        ?DateTimeImmutable $now = null
+    ): void {
+        if (!$mode->isTodayRoute() || $serviceDate === null || trim($serviceDate) === '') {
+            return;
+        }
+
+        $now ??= new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid'));
+        $normalizedDate = RestockCadenceEvaluator::normalizeServiceDate($serviceDate);
+        $today = RestockCadenceEvaluator::today($now);
+
+        if ($normalizedDate < $today) {
+            throw ProductLoadingValidationException::pastServiceDateForbidden($normalizedDate, $today);
+        }
     }
 
     private function optionalServiceDate(mixed $value): ?string

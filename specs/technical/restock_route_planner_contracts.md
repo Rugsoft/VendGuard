@@ -27,8 +27,8 @@
 | `POST` | `/api/coordinator/restock-route/overrides` | `InternalAuthMiddleware(COORDINATOR)` | Registra para `(machine_id, service_date >= today)` un desvío puntual `REASSIGNED` (`target_restocker_id` + `reassignment_reason_code` + `reason_text` opcional; rechaza auto-desvío `422`) o una omisión `SKIPPED` (`skip_reason_code` + `reason_text` $\ge 20$ chars reales). Si existía una excepción previa `ACTIVE` para esa máquina y día, la pasa a `'REVOKED'` dentro de la misma transacción (`RF-02.3`). Rechaza con `409` si existe visita `COMPLETED` o `ABORTED_THERMAL_BREACH` en `service_date`. |
 | `POST` | `/api/coordinator/restock-route/overrides/{id}/revoke` | `InternalAuthMiddleware(COORDINATOR)` | Revoca manualmente una excepción `ACTIVE` (`ACTIVE` $\rightarrow$ `REVOKED`) siempre que no exista visita `COMPLETED` o `ABORTED_THERMAL_BREACH` para esa máquina en `service_date` (`RF-02.3`). |
 | **Integración con Órdenes de Carga M33 (`RF-04.1`, `D5`, `QA-5`)** | | | |
-| `GET` | `/api/coordinator/product-loading-orders/proposal` | `InternalAuthMiddleware(COORDINATOR)` | Extiende el cálculo de propuesta aceptando `demand_mode=TODAY_ROUTE` y parámetro opcional `service_date` (`YYYY-MM-DD`, por defecto hoy en `Europe/Madrid`), reclamando todos los huecos llenables (`ALL_GAPS` sobre ruta) exclusivamente de las máquinas `PENDING` en la ruta efectiva del `restocker_id`. |
-| `POST` | `/api/coordinator/product-loading-orders` · `/api/coordinator/product-loading-orders/batch` | `InternalAuthMiddleware(COORDINATOR)` | Acepta `demand_mode = "TODAY_ROUTE"` (y `service_date` opcional); en emisión en lote omite con causa `'NO_DEMAND'` a los reponedores sin paradas pendientes o sin huecos llenables hoy. |
+| `GET` | `/api/coordinator/product-loading-orders/proposal` | `InternalAuthMiddleware(COORDINATOR)` | Extiende el cálculo de propuesta aceptando `demand_mode=TODAY_ROUTE` y parámetro opcional `service_date` (`YYYY-MM-DD`, por defecto hoy en `Europe/Madrid`), reclamando todos los huecos llenables (`ALL_GAPS` sobre ruta) exclusivamente de las máquinas `PENDING` en la ruta efectiva del `restocker_id`. Rechaza con `422 PAST_SERVICE_DATE_FORBIDDEN` si `service_date` es anterior a hoy; hoy y el futuro siguen admitidos. |
+| `POST` | `/api/coordinator/product-loading-orders` · `/api/coordinator/product-loading-orders/batch` | `InternalAuthMiddleware(COORDINATOR)` | Acepta `demand_mode = "TODAY_ROUTE"` (y `service_date` opcional); en emisión en lote omite con causa `'NO_DEMAND'` a los reponedores sin paradas pendientes o sin huecos llenables hoy. Rechaza con `422 PAST_SERVICE_DATE_FORBIDDEN` un `service_date` anterior a hoy sin crear órdenes. |
 | **Opacidad Constitucional (`Art. V.4`)** | | | |
 | `ALL` | `/api/incidents/*`, `/api/qr/*`, Albaranes A4 | `SiteAuthMiddleware` / Público | Opacidad total: ningún endpoint ciudadano, de Portal de Sede ni de impresión externa expone cadencias, órdenes de parada, excepciones `SKIPPED`/`REASSIGNED`, alertas FEFO ni cobertura territorial. |
 
@@ -673,6 +673,24 @@ ALTER TABLE offline_sync_mutations
 
 ---
 
+**Response `422 Unprocessable Entity` si `service_date` es anterior a hoy en `Europe/Madrid`:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "PAST_SERVICE_DATE_FORBIDDEN",
+    "message": "La fecha de servicio 2026-01-05 es anterior a hoy (2026-11-23) en Europe/Madrid; TODAY_ROUTE solo admite hoy o fechas futuras (RF-04.1, QA-5).",
+    "details": {
+      "field": "service_date",
+      "service_date": "2026-01-05",
+      "today": "2026-11-23"
+    }
+  }
+}
+```
+
+---
+
 ## 4. Catálogo Determinista de Códigos de Error HTTP
 
 | Código HTTP | `error_code` | Condición de Disparo | Referencia |
@@ -690,5 +708,6 @@ ALTER TABLE offline_sync_mutations
 | `422` | `REASSIGNMENT_REASON_INVALID` | `reassignment_reason_code` ausente o ajeno al enum `#50 restock_reassignment_reason_code`, o `reason_text` superior a `500` caracteres. | `RF-02.3`, `QA-4` |
 | `422` | `INVALID_TARGET_RESTOCKER` | `target_restocker_id` no corresponde a un usuario activo con rol `'RESTOCKER'`. | `RF-02.3` |
 | `422` | `SELF_REASSIGNMENT_FORBIDDEN` | Coordinación intenta registrar `REASSIGNED` hacia el mismo reponedor que ya posee la parada en `service_date`. | `RF-02.3`, `QA-4` |
-| `422` | `PAST_SERVICE_DATE_FORBIDDEN` / `SKIP_FUTURE_DATE_FORBIDDEN_FOR_RESTOCKER` | `service_date` anterior a hoy (`COORDINATOR` y `RESTOCKER`), o `RESTOCKER` intentando `SKIPPED` en una fecha distinta de `today` (`Europe/Madrid`). | `RF-02.2`, `QA-4` |
+| `422` | `PAST_SERVICE_DATE_FORBIDDEN` | `service_date` anterior a hoy en `Europe/Madrid` en excepciones diarias (`COORDINATOR` y `RESTOCKER`) o en propuesta/emisión de órdenes M33 con `demand_mode = 'TODAY_ROUTE'`. | `RF-02.2`, `RF-04.1`, `QA-4`, `QA-5` |
+| `422` | `SKIP_FUTURE_DATE_FORBIDDEN_FOR_RESTOCKER` | `RESTOCKER` intentando `SKIPPED` en una fecha distinta de `today` (`Europe/Madrid`). | `RF-02.2`, `QA-4` |
 | `422` | `INVALID_CLIENT_MUTATION_ID` | `client_mutation_id` ausente en mutación móvil o fuera de `8..64` caracteres `^[A-Za-z0-9_.:-]+$`. | `RF-02.1`, `RF-05.1` |

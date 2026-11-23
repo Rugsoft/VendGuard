@@ -7,7 +7,7 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD:** `13637b7` · `test(restock-route): certify 360x800 layout of M37 surfaces (AUD-37-04)`
-- **Árbol:** la corrida inicial no modificó código. Las correcciones posteriores de `H-37-01` y `H-37-02` (2026-11-23) tocan la cola offline, el servicio y el controlador del planificador, la suite API, las guardas de versión del shell y este acta; `H-37-02` se incluye en su commit de corrección.
+- **Árbol:** la corrida inicial no modificó código. Las correcciones posteriores de 2026-11-23 (`H-37-01` a `H-37-06`) tocan la cola offline, los servicios y controladores del planificador y de M33, las suites y este acta; `H-37-07` sigue abierto.
 - **Entorno:** app local `http://127.0.0.1:8000` levantada con `VENDGUARD_DEV_SITE_KEYS=1 php -S 127.0.0.1:8000 -t public public/index.php`, contra el banco local `vendguard_battery` (PostgreSQL `127.0.0.1:54331`).
 - **Naturaleza:** acta de verificación funcional sobre la aplicación ensamblada. **No sustituye** a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con las suites automatizadas. Los siete hallazgos de este documento son nuevos y aparecieron al recorrer la app real, no en las suites.
 
@@ -15,7 +15,7 @@
 
 ## 1. Resumen ejecutivo
 
-La sonda API de caja negra cerró con **63 PASS · 1 FAIL**, y el único fallo correspondía a un supuesto que el contrato no exige; la validación de fechas pasadas se trata aparte en `H-37-06`. El recorrido E2E de Coordinación y Reponedor confirmó que los flujos principales funcionan: agendas, ruta del día, desvío y revocación, omisión, mapa, visita y salvaguarda FEFO en servidor.
+La sonda API de caja negra cerró con **63 PASS · 1 FAIL**, y el único fallo correspondía a un supuesto que el contrato no exige; la validación de fechas pasadas quedó resuelta en `H-37-06` con `422` para el pasado estricto. El recorrido E2E de Coordinación y Reponedor confirmó que los flujos principales funcionan: agendas, ruta del día, desvío y revocación, omisión, mapa, visita y salvaguarda FEFO en servidor.
 
 Los siete hallazgos se ordenan así:
 
@@ -26,10 +26,10 @@ Los siete hallazgos se ordenan así:
 | 3 | **H-37-03** | **P2 · Media** | El modal de omisión móvil no advierte de alerta FEFO ni perecedero caducado | `RF-05.2` (EARS 05.2.1) | **Cerrado (2026-11-23)** |
 | 4 | **H-37-04** | **P3 · Baja** | Los formularios piden IDs internos numéricos en vez de selectores | `RF-01.3`, `RF-02.3`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 5 | **H-37-05** | **P3 · Baja** | El modal de omisión no declara semántica de diálogo | Hoja móvil (`RF-05.2`) | **Cerrado (2026-11-23)** |
-| 6 | **H-37-06** | **P3 · Observación** | `service_date` pasada se acepta en propuesta y emisión `TODAY_ROUTE` | Contrato §4 y `TODAY_ROUTE` | Abierto · requiere decisión |
+| 6 | **H-37-06** | **P3 · Observación** | `service_date` pasada se acepta en propuesta y emisión `TODAY_ROUTE` | Contrato §4 y `TODAY_ROUTE` | **Cerrado (2026-11-23)** |
 | 7 | **H-37-07** | **P3 · Observación** | Cambiar la fecha del tablero no recarga hasta pulsar «Actualizar» | `RF-05.3` | Abierto |
 
-> Los identificadores `H-37-01`–`H-37-07` son nuevos para no reutilizar los `AUD-37-01`–`AUD-37-09` ya cerrados. `H-37-06` y `H-37-07` se clasifican como observaciones porque el primero depende de una ambigüedad del contrato y el segundo es una fricción de uso, no una pérdida de función.
+> Los identificadores `H-37-01`–`H-37-07` son nuevos para no reutilizar los `AUD-37-01`–`AUD-37-09` ya cerrados. `H-37-06` quedó cerrado al fijar la regla de contrato; `H-37-07` sigue como observación de fricción de uso, no como pérdida de función.
 
 ---
 
@@ -153,13 +153,17 @@ Las tablas muestran códigos `VEND-xxxx` y nombres de reponedor, pero no sus IDs
 
 **Qué ocurre.** Una propuesta `GET /api/coordinator/product-loading-orders/proposal?demand_mode=TODAY_ROUTE&service_date=2026-01-05` responde `200`, y un `POST /api/coordinator/product-loading-orders` con esa misma fecha responde `201`. La orden creada (`4290`) se canceló después con su motivo para dejar el banco limpio.
 
-**Matiz contractual.** El catálogo de errores de [`restock_route_planner_contracts.md`](../specs/technical/restock_route_planner_contracts.md) declara `422 PAST_SERVICE_DATE_FORBIDDEN` en el contexto de las excepciones diarias, no de las órdenes de carga. La orden tampoco persiste `service_date` (la tabla solo tiene `updated_at`): el parámetro se usa para calcular el alcance de ruta durante la emisión y luego se descarta. Por eso se registra como observación y no como incumplimiento cerrado.
+**Matiz contractual.** El catálogo de errores de [`restock_route_planner_contracts.md`](../specs/technical/restock_route_planner_contracts.md) declara `422 PAST_SERVICE_DATE_FORBIDDEN` en el contexto de las excepciones diarias, no de las órdenes de carga. La orden tampoco persiste `service_date` (la tabla no tiene esa columna; solo timestamps de ciclo de vida): el parámetro se usa para calcular el alcance de ruta durante la emisión y luego se descarta. Por eso se registra como observación y no como incumplimiento cerrado.
 
 **Impacto.** Un modo llamado «Ruta efectiva de hoy» acepta una fecha histórica y puede emitir una orden sobre una ruta que ya no existe, sin que el dato quede guardado para auditar con qué fecha se calculó. La propuesta es de solo lectura; la emisión sí es una mutación.
 
-**Decisión necesaria.** El Product Owner debe elegir una de dos salidas antes de tocar código: (a) rechazar fechas pasadas en propuesta y emisión con `422 PAST_SERVICE_DATE_FORBIDDEN`, o (b) permitirlas y persistir `service_date` en la orden, documentando el caso de uso. Cualquiera de las dos exige actualizar el contrato y añadir aserciones HTTP.
+**Decisión aprobada (2026-11-23).** Prevalece (a): rechazar con `422 PAST_SERVICE_DATE_FORBIDDEN` las fechas pasadas en propuesta, emisión individual y lote de `TODAY_ROUTE`, manteniendo hoy y el futuro y sin cambiar otros modos. Se descarta (b) porque una foto histórica de M33 usaría stock, FEFO y estado de ruta actuales, exigiría una migración ajena al alcance del hallazgo y permitiría órdenes sobre jornadas cerradas.
 
-**Estado:** Abierto · requiere decisión de contrato.
+**Corrección aplicada.** `ProductLoadingOrderService::assertTodayRouteServiceDate()` normaliza la fecha en `Europe/Madrid` y rechaza `service_date < today` en `buildProposal()`, en `createOrder()` antes del camino de `items` explícitos y en `createBatchOrders()` antes de iterar. No se modificó el esquema ni se añadió persistencia de `service_date`; hoy, futuro y los demás modos conservan su comportamiento.
+
+**Evidencia (2026-11-23).** `php tests/unit/ProductLoadingOrderServiceTest.php`: **57/57**; `php tests/integration/RestockRoutePlannerApiTest.php`: **43/43**, incluidas `6.3b` (propuesta), `6.3c` (emisión individual con `items` explícitos) y `6.3d` (lote), todas con `422` y sin incrementar el recuento de `product_loading_orders`; `php -l` sin errores y `git diff --check` limpio. Las regresiones de hoy/futuro (`6.1`, `6.2`, `6.4`) siguen verdes. No se ejecutaron suites frontend porque no hubo cambios de UI.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
