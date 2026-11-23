@@ -7,12 +7,12 @@
 - **Fecha de la corrida:** 2026-11-23
 - **Rama:** `feat/restock-route-planner`
 - **HEAD de la corrida:** `cefed9e`
-- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11, H-37-12 y H-37-13 tocan la vista móvil, el servicio de agendas, los modales del mapa y compartido, el read model del tablero, el resumen responsive, sus suites y este acta; se registran en commits separados.
+- **Árbol:** la corrida original no modificó código. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11, H-37-12, H-37-13 y H-37-14 tocan la vista móvil, el servicio de agendas, los modales del mapa y compartido, el read model del tablero, el resumen responsive, el estado vacío de rutas, sus suites y este acta; se registran en commits separados.
 - **Entorno:** app local `http://127.0.0.1:8000` contra el banco `vendguard_battery` (PostgreSQL `127.0.0.1:54331`), con las credenciales semilla del entorno de batería.
 - **Alcance:** recorrido manual en Chromium como Coordinación y Reponedor, con clics y teclado reales, a `1280 × 932 px` y `360 × 800 px`. Se contrastaron red, DOM, respuestas API, PostgreSQL e IndexedDB.
 - **Naturaleza:** acta de verificación visual y de UI sobre la aplicación ensamblada. **No sustituye** a [`hallazgos_pruebas_funcionales_spec_37.md`](hallazgos_pruebas_funcionales_spec_37.md), que recoge la corrida funcional y los cierres `H-37-01`–`H-37-07`, ni a [`auditoria_spec_37_brechas.md`](auditoria_spec_37_brechas.md), que certifica las brechas `AUD-37-01`–`AUD-37-09` con suites automatizadas.
 
-> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Tres hallazgos siguen **abiertos**; H-37-08, H-37-09, H-37-10, H-37-11, H-37-12 y H-37-13 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
+> Los identificadores `H-37-08`–`H-37-16` son nuevos para no reutilizar los `H-37-01`–`H-37-07` del acta funcional. Dos hallazgos siguen **abiertos**; H-37-08, H-37-09, H-37-10, H-37-11, H-37-12, H-37-13 y H-37-14 quedaron corregidos el 2026-11-23 con regresiones automatizadas.
 
 ---
 
@@ -28,7 +28,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 | 4 | **H-37-11** | **P3 · Baja-media** | El modal de «Nueva agenda» no atrapaba el foco | `RNF-04` | **Cerrado (2026-11-23)** |
 | 5 | **H-37-12** | **P3 · Baja** | La tabla de excepciones mostraba el ID interno (`#10`) en vez del código de máquina | `RF-05.3`, Art. V.4 | **Cerrado (2026-11-23)** |
 | 6 | **H-37-13** | **P3 · Baja** | A 360 px las etiquetas del resumen de ruta se salían de su celda | `RNF-04`, `RF-05.3` | **Cerrado (2026-11-23)** |
-| 7 | **H-37-14** | **P3 · Baja** | El estado vacío de rutas dice «No hay paradas pendientes» aunque haya paradas sin cobertura | `RF-03.3`, `RF-05.3` | **Abierto** |
+| 7 | **H-37-14** | **P3 · Baja** | El estado vacío de rutas decía «No hay paradas pendientes» aunque hubiera paradas sin cobertura | `RF-03.3`, `RF-05.3` | **Cerrado (2026-11-23)** |
 | 8 | **H-37-15** | **P4 · Cosmético** | El contador de Alta masiva dice «1 seleccionadas» | `RNF-04` | **Abierto** |
 | 9 | **H-37-16** | **P4 · Externo** | El widget flotante de n8n tapa acciones en la esquina inferior derecha | Transversal; no es código del M37 | **Abierto** |
 
@@ -43,7 +43,7 @@ No se detectó ningún fallo **P1** (bloqueo sin workaround ni pérdida de datos
 3. Se recorrió la superficie móvil de Lucía: inicio de turno, ruta por bloques, mapa, modal de omisión, validación de motivo, aviso FEFO y snapshot de IndexedDB.
 4. Cada paso se contrastó con la petición de red, el DOM renderizado, la respuesta API, PostgreSQL y el log del servidor.
 5. Se probaron los tamaños `1280 × 932` y `360 × 800`; se midieron `scrollWidth`/`clientWidth` de etiquetas y contenedores para distinguir scroll interno intencional de solapamiento real.
-6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11, H-37-12 y H-37-13 se validaron con sus suites; H-37-08, H-37-10, H-37-11, H-37-12 y H-37-13 también se verificaron en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
+6. La corrida original no corrigió código ni hizo commit. Las correcciones posteriores de H-37-08, H-37-09, H-37-10, H-37-11, H-37-12, H-37-13 y H-37-14 se validaron con sus suites; H-37-08, H-37-10, H-37-11, H-37-12, H-37-13 y H-37-14 también se verificaron en Chromium. Se revocó la excepción de prueba y se cerró el turno de Lucía al terminar.
 
 **Datos utilizados:** `VEND-0101`, `VEND-0102`, `VEND-0401`, `VEND-0501`, `VEND-0502`, `VEND-0701`, `VEND-0801` y `VEND-0901`; agenda de prueba de `VEND-0901` (dada de baja); desvío FEFO de `VEND-0701` a Lucía (revocado).
 
@@ -192,22 +192,26 @@ Además, el modal no movía el foco al abrirse y no se cerraba con `Escape`; sol
 
 ---
 
-### H-37-14 · P3 · El estado vacío de rutas es engañoso cuando hay paradas sin cobertura
+### H-37-14 · P3 · CORREGIDO · El estado vacío de rutas era engañoso cuando había paradas sin cobertura
 
-**Qué ocurre.** Con los dos reponedores fuera de turno, la sección «Rutas por reponedor» mostraba «No hay paradas pendientes para la fecha seleccionada», mientras el KPI «Sin cobertura» y la bandeja prioritaria listaban **9 paradas**. El mensaje sugiere que no queda trabajo, cuando en realidad no hay ningún reponedor en turno para cubrirlo.
+**Qué ocurría.** Con los dos reponedores fuera de turno, la sección «Rutas por reponedor» mostraba «No hay paradas pendientes para la fecha seleccionada», mientras el KPI «Sin cobertura» y la bandeja prioritaria listaban **9 paradas**. El mensaje sugería que no quedaba trabajo, cuando en realidad no había ningún reponedor en turno para cubrirlo.
 
-**Causa.** El texto de [`CoordinatorRestockRoutePlannerSubTab.js:760`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js) se muestra siempre que no hay rutas de reponedor, sin distinguir entre «ningún reponedor en turno», «todos los reponedores sin paradas» y «paradas sin cobertura».
+**Causa.** El texto de [`CoordinatorRestockRoutePlannerSubTab.js`](../public/assets/js/components/CoordinatorRestockRoutePlannerSubTab.js) se mostraba siempre que no había rutas de reponedor, sin distinguir entre «ningún reponedor en turno», «todos los reponedores sin paradas» y «paradas sin cobertura».
 
-**Impacto.** El coordinador puede interpretar que el día está cubierto y dejar sin atender las paradas de la bandeja. No hay pérdida de datos ni error de cálculo; es un problema de semántica del estado vacío.
+**Impacto.** El coordinador podía interpretar que el día estaba cubierto y dejar sin atender las paradas de la bandeja. No hay pérdida de datos ni error de cálculo; era un problema de semántica del estado vacío.
 
-**Reproducción.**
+**Reproducción original.**
 
 1. Asegurar que Lucía y Óscar están fuera de turno.
 2. Abrir el planificador de hoy.
 3. Comparar «Rutas por reponedor» con el KPI y la tabla de «Paradas sin cobertura».
 4. Observar el mensaje «No hay paradas pendientes» junto a 9 paradas sin cobertura.
 
-**Estado:** Abierto (2026-11-23).
+**Corrección aplicada (2026-11-23).** El estado vacío pasa por el computed `emptyRoutesMessage`: si no hay rutas pero la bandeja contiene paradas sin cobertura, publica «Hay 9 paradas sin cobertura y ninguna ruta de reponedor para la fecha seleccionada. Revisa los turnos o desvía las paradas desde la bandeja superior.» Solo conserva «No hay paradas pendientes» cuando tampoco hay paradas sin cobertura. La tarjeta incorpora `data-testid="route-planner-routes-empty"` para la comprobación dirigida.
+
+**Evidencia (2026-11-23).** `node tests/frontend/coordinator_restock_route_planner.test.mjs`: **42/42 · 0 fallos**, con las aserciones `1.10` y `1.11`, que cubren el caso con 9 paradas sin cobertura y el estado neutro sin paradas. En Chromium, con el tablero real sin rutas y **9** paradas en la bandeja, la sección mostró el mensaje correcto y ningún «No hay paradas pendientes»; a `1280 × 932 px` la tarjeta midió 622 px y a `360 × 800 px` 311 px, con `scrollWidth = clientWidth = 343` en ambos casos.
+
+**Estado:** Cerrado (2026-11-23).
 
 ---
 
@@ -258,6 +262,7 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 | Modales compartidos: foco inicial, focus trap y retorno al disparador | Correcto; H-37-11 corregido en `ModalDialog` |
 | Tabla de excepciones: código de máquina en lugar del ID interno | Correcto; H-37-12 corregido |
 | Resumen de ruta a 360 px: etiquetas dentro de su celda y 2×2 sin solapamiento | Correcto; H-37-13 corregido |
+| Estado vacío de rutas con 9 paradas sin cobertura: copy correcto, sin scroll horizontal a 360 px | Correcto; H-37-14 corregido |
 | Modal de alta masiva, selector de zonas/máquinas y contador | Correcto salvo el copy de H-37-15 |
 | Validación de omisión sin causa o con motivo corto | Correcto |
 | Modal de omisión: `role="dialog"`, `aria-modal`, foco inicial, `Escape` y retorno de foco | Correcto |
@@ -287,7 +292,7 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 4. **H-37-11 (P3) — corregido el 2026-11-23.** `ModalDialog` incorpora foco inicial, focus trap y retorno al disparador; el mapa ya no comparte esta deuda.
 5. **H-37-12 (P3) — corregido el 2026-11-23.** Publicar `machine_code` en las excepciones y pintarlo en la tabla, con regresión API y UI.
 6. **H-37-13 (P3) — corregido el 2026-11-23.** Resumen de ruta responsive con columnas mínimas de 120 px y regresión frontend.
-7. **H-37-14 (P3):** distinguir los estados vacíos de cobertura.
+7. **H-37-14 (P3) — corregido el 2026-11-23.** El estado vacío distingue las paradas sin cobertura y conserva el copy neutro cuando no hay trabajo pendiente, con regresión frontend.
 8. **H-37-15 (P4):** alternar singular/plural en el contador.
 9. **H-37-16 (P4):** no requiere cambio en el M37; valorar reducir el `z-index` o el área de impacto del widget de n8n.
 
@@ -297,4 +302,4 @@ Estas comprobaciones pasaron en la misma corrida y delimitan el alcance:
 
 Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de **Abierto** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre, incluida la suite o la comprobación manual reproducible. No se declarará cerrado un hallazgo P2 mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
-**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit. H-37-11 añade cambios en `ModalDialog.js`, `UIComponentsTest.mjs` y este acta, en su propio commit. H-37-12 añade cambios en `PdoRestockRouteReadModel.php`, `RestockRoutePlannerService.php`, `CoordinatorRestockRoutePlannerSubTab.js`, sus suites API/frontend/gateway y este acta, en su propio commit. H-37-13 añade cambios en `CoordinatorRestockRoutePlannerSubTab.js`, `coordinator_restock_route_planner.test.mjs` y este acta, en su propio commit; sin push.
+**Estado del árbol:** rama `feat/restock-route-planner`; la corrida original se hizo sobre `cefed9e` sin cambios de código. H-37-08 se corrigió en `f59d13c` (vista móvil y suite frontend). H-37-09 añade cambios en `RestockRouteScheduleService.php`, `RestockRoutePlannerApiTest.php` y este acta, en su propio commit. H-37-10 añade cambios en `RestockerRouteMapModal.js`, `restocker_route_planner_view.test.mjs` y este acta, en su propio commit. H-37-11 añade cambios en `ModalDialog.js`, `UIComponentsTest.mjs` y este acta, en su propio commit. H-37-12 añade cambios en `PdoRestockRouteReadModel.php`, `RestockRoutePlannerService.php`, `CoordinatorRestockRoutePlannerSubTab.js`, sus suites API/frontend/gateway y este acta, en su propio commit. H-37-13 añade cambios en `CoordinatorRestockRoutePlannerSubTab.js`, `coordinator_restock_route_planner.test.mjs` y este acta, en su propio commit. H-37-14 añade cambios en `CoordinatorRestockRoutePlannerSubTab.js`, `coordinator_restock_route_planner.test.mjs` y este acta, en su propio commit; sin push.

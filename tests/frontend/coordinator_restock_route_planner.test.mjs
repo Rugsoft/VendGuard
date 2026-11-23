@@ -392,6 +392,26 @@ async function run() {
     CoordinatorRestockRoutePlannerSubTab.template.includes('@change="onServiceDateChange"')
   );
 
+  vm.day = {
+    ...dayFixture,
+    restocker_routes: [],
+    uncovered_stops: Array.from({ length: 9 }, (_, index) => ({ ...dayFixture.uncovered_stops[0], machine_id: 20 + index })),
+    kpis: { ...dayFixture.kpis, uncovered_count: 9 }
+  };
+  assert(
+    '1.10 Sin rutas y con paradas sin cobertura, el estado vacío no niega el trabajo pendiente',
+    vm.routes.length === 0
+      && vm.emptyRoutesMessage.includes('9 paradas sin cobertura')
+      && !vm.emptyRoutesMessage.includes('No hay paradas pendientes')
+      && CoordinatorRestockRoutePlannerSubTab.template.includes('{{ emptyRoutesMessage }}')
+  );
+  vm.day = { ...dayFixture, restocker_routes: [], uncovered_stops: [], kpis: { ...dayFixture.kpis, uncovered_count: 0 } };
+  assert(
+    '1.11 Sin rutas ni paradas sin cobertura se conserva el estado vacío neutro',
+    vm.emptyRoutesMessage === 'No hay paradas pendientes para la fecha seleccionada.'
+  );
+  vm.day = dayFixtureFor(TODAY);
+
   // ─────────────────────────────────────────────────────────────────────
   // 2. Omisión, desvío y revocación
   // ─────────────────────────────────────────────────────────────────────

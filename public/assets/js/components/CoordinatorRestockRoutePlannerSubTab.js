@@ -174,6 +174,14 @@ export const CoordinatorRestockRoutePlannerSubTab = {
     hasUncovered() {
       return this.uncoveredStops.length > 0;
     },
+    emptyRoutesMessage() {
+      const uncoveredCount = this.uncoveredStops.length;
+      if (uncoveredCount === 0) {
+        return 'No hay paradas pendientes para la fecha seleccionada.';
+      }
+      const stopsLabel = uncoveredCount === 1 ? '1 parada sin cobertura' : `${uncoveredCount} paradas sin cobertura`;
+      return `Hay ${stopsLabel} y ninguna ruta de reponedor para la fecha seleccionada. Revisa los turnos o desvía las paradas desde la bandeja superior.`;
+    },
     isFuture() {
       return this.serviceDate > todayIso();
     },
@@ -756,8 +764,8 @@ export const CoordinatorRestockRoutePlannerSubTab = {
         <h4 style="margin: 0 0 8px; font-family: var(--font-display); font-size: var(--font-size-heading-md); color: var(--color-ink-slate);">
           Rutas por reponedor
         </h4>
-        <div v-if="routes.length === 0" class="vg-card" style="padding: 14px; color: var(--color-ink-muted);">
-          No hay paradas pendientes para la fecha seleccionada.
+        <div v-if="routes.length === 0" data-testid="route-planner-routes-empty" class="vg-card" style="padding: 14px; color: var(--color-ink-muted);">
+          {{ emptyRoutesMessage }}
         </div>
         <div v-for="route in routes" :key="route.restocker_id" class="vg-card" style="padding: 14px; margin-bottom: 12px;">
           <div class="vg-action-group" style="justify-content: space-between; flex-wrap: wrap; margin-bottom: 10px;">
