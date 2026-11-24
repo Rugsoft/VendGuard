@@ -623,9 +623,18 @@ try {
     sort($biMarkedFiles);
     sort($routeReferrers);
 
+    // Superficie aprobada en T-RBI-06: el cliente API compone las rutas y la
+    // sub-pestaña de Coordinación las consume; la vista solo la integra y el
+    // catálogo de auditoría traduce la acción global. Cualquier otra vista que
+    // mencione el módulo sigue siendo una fuga de perímetro.
     $assert(
-        $biMarkedFiles === ['public/assets/js/api.js'],
-        'Ninguna vista o componente conoce el módulo; solo el cliente API',
+        $biMarkedFiles === [
+            'public/assets/js/api.js',
+            'public/assets/js/components/CoordinatorRestockingBiTab.js',
+            'public/assets/js/utils/AuditActionLabels.js',
+            'public/assets/js/views/CoordinatorMetricsView.js',
+        ],
+        'Las únicas superficies que conocen el módulo son el cliente API y la sub-pestaña de Coordinación',
         implode(', ', $biMarkedFiles)
     );
     $assert(
