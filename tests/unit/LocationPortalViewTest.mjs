@@ -24,12 +24,15 @@ const storageMock = (() => {
 })();
 globalThis.localStorage = storageMock;
 
+import { readFileSync } from 'node:fs';
 import { api } from '../../public/assets/js/api.js';
 import { store, clearSession, setSiteSession } from '../../public/assets/js/store.js';
 import { MachineCard } from '../../public/assets/js/components/MachineCard.js';
 import { IncidentReportModal } from '../../public/assets/js/components/IncidentReportModal.js';
 import { SatisfactionSurveyModal } from '../../public/assets/js/components/SatisfactionSurveyModal.js';
 import { LocationPortalView } from '../../public/assets/js/views/LocationPortalView.js';
+
+const stylesSource = readFileSync(new URL('../../public/assets/css/styles.css', import.meta.url), 'utf8');
 
 let assertions = 0;
 let failures = 0;
@@ -298,6 +301,15 @@ assert('5.3 The refunds section renders the anonymized refunds component',
 const tabState = { activePortalTab: 'machines' };
 LocationPortalView.methods.setPortalTab.call(tabState, 'refunds');
 assert('5.4 setPortalTab("refunds") activates the refunds section', tabState.activePortalTab === 'refunds');
+
+assert('5.5 The portal tab bar is a single-line scroll strip',
+  LocationPortalView.template.includes('class="vg-location-portal-tabs"')
+    && LocationPortalView.template.includes('📋 Máquinas e Incidencias')
+    && LocationPortalView.template.includes('🛡️ Control Higiénico y Certificados')
+    && LocationPortalView.template.includes('💶 Reintegros')
+    && /\.vg-location-portal-tabs\s*\{[^}]*overflow-x:\s*auto/s.test(stylesSource));
+assert('5.6 Portal tab buttons keep their intrinsic width and one-line labels',
+  /\.vg-location-portal-tabs \.vg-btn\s*\{[^}]*flex:\s*0 0 auto[^}]*white-space:\s*nowrap/s.test(stylesSource));
 
 // ---------------------------------------------------------------------
 // TEST GROUP 6: Optional Informant Mailbox on the Report Form (RF-02.2)

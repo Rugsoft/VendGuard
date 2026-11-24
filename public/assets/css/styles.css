@@ -2165,3 +2165,25 @@ details.vg-guide-accordion__disclosure:not([open]) .vg-guide-accordion__body {
     padding-right: 88px;
   }
 }
+
+/*
+ * Portal de sede · Pestañas de sección.
+ *
+ * A 360 px los tres botones se encogían y el texto se partía dentro de los
+ * 36 px de alto. La tira conserva una sola fila, con scroll horizontal propio,
+ * y cada botón mantiene su ancho intrínseco y su etiqueta sin saltos.
+ */
+.vg-location-portal-tabs {
+  flex-wrap: nowrap;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.vg-location-portal-tabs .vg-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}

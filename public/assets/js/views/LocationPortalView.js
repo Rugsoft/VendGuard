@@ -587,7 +587,7 @@ export const LocationPortalView = {
         </div>
 
         <!-- Portal Section Tabs: Machines vs Sanitary (RF-PREV-06, RF-PREV-07) -->
-        <div style="display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--color-hairline, #c8cfda); padding-bottom: 10px;">
+        <div class="vg-location-portal-tabs" style="display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--color-hairline, #c8cfda); padding-bottom: 10px;">
           <button
             type="button"
             class="vg-btn"
