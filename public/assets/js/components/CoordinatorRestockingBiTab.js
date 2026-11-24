@@ -579,6 +579,31 @@ export const CoordinatorRestockingBiTab = {
       }
     },
 
+    /**
+     * Switching the criterion can mount the canvas behind `v-if`. Wait for
+     * Vue's DOM patch so `renderCharts()` can resolve the template ref.
+     */
+    async setTopMetric(metric) {
+      if (this.topMetric === metric) {
+        return;
+      }
+
+      this.topMetric = metric;
+      await this.$nextTick();
+      this.renderCharts();
+    },
+
+    /** Same wait as `setTopMetric`: the dimension can mount the canvas too. */
+    async setTopDimension(dimension) {
+      if (this.topDimension === dimension) {
+        return;
+      }
+
+      this.topDimension = dimension;
+      await this.$nextTick();
+      this.renderCharts();
+    },
+
     /** Recrea ambos gráficos en cada recarga o cambio de conmutador (D5). */
     renderCharts() {
       this.destroyCharts();
@@ -954,7 +979,7 @@ export const CoordinatorRestockingBiTab = {
               class="vg-btn vg-btn-tab vg-btn-sm"
               :class="{ 'vg-btn-tab-active': topMetric === 'stockout' }"
               data-testid="restocking-bi-top-stockout"
-              @click="topMetric = 'stockout'; renderCharts()"
+              @click="setTopMetric('stockout')"
             >
               Rotura
             </button>
@@ -963,7 +988,7 @@ export const CoordinatorRestockingBiTab = {
               class="vg-btn vg-btn-tab vg-btn-sm"
               :class="{ 'vg-btn-tab-active': topMetric === 'expiry' }"
               data-testid="restocking-bi-top-expiry"
-              @click="topMetric = 'expiry'; renderCharts()"
+              @click="setTopMetric('expiry')"
             >
               Caducidad
             </button>
@@ -972,7 +997,7 @@ export const CoordinatorRestockingBiTab = {
               class="vg-btn vg-btn-tab vg-btn-sm"
               :class="{ 'vg-btn-tab-active': topDimension === 'machine' }"
               data-testid="restocking-bi-top-machine"
-              @click="topDimension = 'machine'; renderCharts()"
+              @click="setTopDimension('machine')"
             >
               Máquinas
             </button>
@@ -981,7 +1006,7 @@ export const CoordinatorRestockingBiTab = {
               class="vg-btn vg-btn-tab vg-btn-sm"
               :class="{ 'vg-btn-tab-active': topDimension === 'product' }"
               data-testid="restocking-bi-top-product"
-              @click="topDimension = 'product'; renderCharts()"
+              @click="setTopDimension('product')"
             >
               Productos
             </button>

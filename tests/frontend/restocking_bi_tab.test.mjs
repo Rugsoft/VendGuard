@@ -651,6 +651,42 @@ async function runTests() {
     FakeChart.instances.length === beforeEmpty && emptyComponent.chartUnavailable === false
   );
 
+  const deferredComponent = buildInstance();
+  const deferredReport = buildReport();
+  deferredComponent.report = {
+    ...deferredReport,
+    charts: {
+      ...deferredReport.charts,
+      top_critical_stockout: { by_machine: [], by_product: [] }
+    }
+  };
+  let releaseDomPatch = null;
+  deferredComponent.$nextTick = () => new Promise((resolvePatch) => {
+    releaseDomPatch = resolvePatch;
+  });
+  deferredComponent.$refs.topChartCanvas = null;
+  FakeChart.instances = [];
+
+  const togglePromise = deferredComponent.setTopMetric('expiry');
+  deferredComponent.$refs.topChartCanvas = { name: 'top-after-patch' };
+  releaseDomPatch();
+  await togglePromise;
+
+  assert(
+    '5.10 El cambio de criterio espera al parche DOM y pinta el Top 10 al primer clic',
+    FakeChart.instances.some((chart) => chart.canvas?.name === 'top-after-patch')
+      && deferredComponent.topMetric === 'expiry'
+  );
+  assert(
+    '5.11 Los cuatro conmutadores del Top 10 delegan en los métodos que esperan al parche DOM',
+    [
+      '@click="setTopMetric(\'stockout\')"',
+      '@click="setTopMetric(\'expiry\')"',
+      '@click="setTopDimension(\'machine\')"',
+      '@click="setTopDimension(\'product\')"'
+    ].every((handler) => CoordinatorRestockingBiTab.template.includes(handler))
+  );
+
   // ───────────────────────────────────────────────────────────────────────
   // 6. Exportación y errores
   // ───────────────────────────────────────────────────────────────────────

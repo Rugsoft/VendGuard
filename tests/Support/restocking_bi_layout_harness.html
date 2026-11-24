@@ -26,6 +26,7 @@
     window.__requests = [];
     window.__downloads = [];
     window.__consoleErrors = [];
+    window.__harnessScenario = null;
 
     const nativeAnchorClick = HTMLAnchorElement.prototype.click;
     HTMLAnchorElement.prototype.click = function clickHarnessAnchor() {
@@ -88,6 +89,14 @@
           unit_values: [15, 3],
           thermal_segmentable: false
         }
+      }
+    });
+
+    const emptyStockoutVariant = (report) => ({
+      ...report,
+      charts: {
+        ...report.charts,
+        top_critical_stockout: { by_machine: [], by_product: [] }
       }
     });
 
@@ -295,10 +304,11 @@
         const parsed = new URL(url, window.location.origin);
         const restockerId = parsed.searchParams.get('restocker_id');
         const base = buildReport();
-        return jsonResponse({
-          success: true,
-          data: restockerId === null ? zoneFilter(base, parsed.searchParams.get('zone_id')) : restockerVariant(base)
-        });
+        let data = restockerId === null ? zoneFilter(base, parsed.searchParams.get('zone_id')) : restockerVariant(base);
+        if (window.__harnessScenario === 'stockout-empty') {
+          data = emptyStockoutVariant(data);
+        }
+        return jsonResponse({ success: true, data });
       }
 
       if (url.includes('/coordinator/metrics/breakdown')) {

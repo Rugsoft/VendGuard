@@ -13,8 +13,11 @@
  *     Rotura/Caducidad × Máquina/Producto.
  *  5. Aviso térmico no segmentable al filtrar por reponedor (`D2`).
  *  6. Descarga CSV autenticada vía `fetch` + `Blob` con cabecera Bearer.
- *  7. Sin errores de consola ni excepciones no capturadas.
- *  8. Rejilla de escritorio a 1280 x 900 sin desbordamiento.
+ *  7. Regresión del «Top 10»: un criterio vacío seguido de uno con datos se
+ *     pinta en el primer clic.
+ *  8. Sin errores de consola ni excepciones no capturadas.
+ *  9. Ida y vuelta de la sub-pestaña con la barra global (QA-3).
+ * 10. Rejilla de escritorio a 1280 x 900 sin desbordamiento.
  *
  * La suite no usa dobles de layout: sirve el documento real, bloquea/intercepta
  * las tipografías externas y mide los rectángulos. Si no hay navegador o Node
@@ -634,10 +637,10 @@ function chartStateExpression() {
     const spoilageCanvas = document.querySelector('[data-testid="restocking-bi-spoilage-chart"] canvas');
     const topCanvas = document.querySelector('[data-testid="restocking-bi-top-chart"] canvas');
     const spoilageChart = spoilageCanvas !== null && typeof window.Chart === 'function'
-      ? window.Chart.getChart(spoilageCanvas)
+      ? (window.Chart.getChart(spoilageCanvas) ?? null)
       : null;
     const topChart = topCanvas !== null && typeof window.Chart === 'function'
-      ? window.Chart.getChart(topCanvas)
+      ? (window.Chart.getChart(topCanvas) ?? null)
       : null;
     const rectOf = (canvas) => {
       if (canvas === null) return null;
@@ -1021,22 +1024,71 @@ try {
   );
 
   // ───────────────────────────────────────────────────────────────────────
-  // 7. Consola limpia
+  // 7. Regresión: Top 10 de vacío a datos en un solo clic
   // ───────────────────────────────────────────────────────────────────────
 
-  console.log('\n--- 7. Consola y excepciones ---');
+  console.log('\n--- 7. Regresión del Top 10: de vacío a datos en un clic ---');
+  await click(surface, '[data-testid="restocking-bi-top-stockout"]');
+  const stockoutWithData = await waitForCondition(
+    surface,
+    `(() => {
+      const canvas = document.querySelector('[data-testid="restocking-bi-top-chart"] canvas');
+      const chart = canvas === null ? null : window.Chart.getChart(canvas);
+      return chart?.data?.datasets?.[0]?.data?.[0] === 30;
+    })()`
+  );
+
+  await surface.evaluate(`window.__harnessScenario = 'stockout-empty'`);
+  await click(surface, '[data-testid="restocking-bi-apply-filters"]');
+  const stockoutEmptied = await waitForCondition(
+    surface,
+    `document.querySelector('[data-testid="restocking-bi-top-chart"]') === null
+      && document.querySelector('[data-testid="restocking-bi-top-empty"]') !== null`
+  );
+
+  await click(surface, '[data-testid="restocking-bi-top-expiry"]');
+  const paintedOnFirstClick = await waitForCondition(
+    surface,
+    `(() => {
+      const canvas = document.querySelector('[data-testid="restocking-bi-top-chart"] canvas');
+      const chart = canvas === null ? null : window.Chart.getChart(canvas);
+      return chart?.data?.labels?.[0] === 'SAND-MIXTO-01 · Sándwich Mixto Fresco'
+        && chart?.data?.datasets?.[0]?.data?.[0] === 20;
+    })()`,
+    3000
+  );
+  const firstClickState = await surface.evaluate(chartStateExpression());
+
+  assert(
+    '7.1 Pasar de un criterio vacío a uno con datos pinta el Top 10 en el primer clic',
+    stockoutWithData === true
+      && stockoutEmptied === true
+      && paintedOnFirstClick === true
+      && firstClickState.top !== null
+      && firstClickState.top.labels[0] === 'SAND-MIXTO-01 · Sándwich Mixto Fresco'
+      && firstClickState.top.values[0] === 20,
+    formatDetails({ stockoutWithData, stockoutEmptied, paintedOnFirstClick, top: firstClickState.top })
+  );
+
+  await surface.evaluate(`window.__harnessScenario = null`);
+
+  // ───────────────────────────────────────────────────────────────────────
+  // 8. Consola limpia
+  // ───────────────────────────────────────────────────────────────────────
+
+  console.log('\n--- 8. Consola y excepciones ---');
   await new Promise((resolveWait) => setTimeout(resolveWait, 250));
   assert(
-    '7.1 No hay errores de consola ni excepciones no capturadas',
+    '8.1 No hay errores de consola ni excepciones no capturadas',
     surface.consoleErrors.length === 0,
     formatDetails(surface.consoleErrors)
   );
 
   // ───────────────────────────────────────────────────────────────────────
-  // 8. La barra global vuelve al salir de la sub-pestaña (QA-3)
+  // 9. La barra global vuelve al salir de la sub-pestaña (QA-3)
   // ───────────────────────────────────────────────────────────────────────
 
-  console.log('\n--- 8. Ida y vuelta de la pestaña (QA-3) ---');
+  console.log('\n--- 9. Ida y vuelta de la pestaña (QA-3) ---');
   await clickByText(surface, 'Cuadro de Mandos (KPIs)');
   const returnedToKpis = await waitForCondition(
     surface,
@@ -1044,7 +1096,7 @@ try {
       && document.querySelector('[data-testid="restocking-bi-tab"]') === null`
   );
   assert(
-    '8.1 Al volver a KPIs reaparece la barra global y desaparece la pestaña de reposición',
+    '9.1 Al volver a KPIs reaparece la barra global y desaparece la pestaña de reposición',
     returnedToKpis === true
   );
 
@@ -1061,21 +1113,21 @@ try {
       })()`
   );
   assert(
-    '8.2 Al volver a reposición se oculta la barra global y se remontan los dos gráficos con el informe por defecto',
+    '9.2 Al volver a reposición se oculta la barra global y se remontan los dos gráficos con el informe por defecto',
     returnedToRestocking === true
   );
 
   await surface.close();
 
   // ───────────────────────────────────────────────────────────────────────
-  // 9. Escritorio 1280 x 900 (carga propia: el layout se mide desde el montaje)
+  // 10. Escritorio 1280 x 900 (carga propia: el layout se mide desde el montaje)
   // ───────────────────────────────────────────────────────────────────────
 
-  console.log('\n--- 9. Escritorio 1280 x 900 ---');
+  console.log('\n--- 10. Escritorio 1280 x 900 ---');
   const desktopSurface = await openSurface(cdp, DESKTOP);
   const desktopDocument = await measureDocument(desktopSurface);
   assert(
-    '9.1 En escritorio el documento mide 1280 px y no se ensancha',
+    '10.1 En escritorio el documento mide 1280 px y no se ensancha',
     desktopDocument.viewportWidth === 1280
       && desktopDocument.clientWidth === 1280
       && desktopDocument.documentScrollWidth <= 1280
@@ -1083,14 +1135,14 @@ try {
     formatDetails(desktopDocument)
   );
   assert(
-    '9.2 Ningún elemento visible se sale del viewport de escritorio',
+    '10.2 Ningún elemento visible se sale del viewport de escritorio',
     desktopDocument.offenders.length === 0,
     formatDetails(desktopDocument.offenders)
   );
 
   const desktopCharts = await desktopSurface.evaluate(chartStateExpression());
   assert(
-    '9.3 Los dos gráficos se redimensionan al ancho de escritorio',
+    '10.3 Los dos gráficos se redimensionan al ancho de escritorio',
     desktopCharts.spoilage !== null
       && desktopCharts.top !== null
       && desktopCharts.spoilage.rect.width > 700
@@ -1113,7 +1165,7 @@ try {
     };
   })()`);
   assert(
-    '9.4 Las nueve tarjetas KPI se reorganizan en rejilla de escritorio sin desbordarse',
+    '10.4 Las nueve tarjetas KPI se reorganizan en rejilla de escritorio sin desbordarse',
     desktopKpis.count === 9 && desktopKpis.bad.length === 0,
     formatDetails(desktopKpis)
   );
@@ -1121,7 +1173,7 @@ try {
   for (const [testId, label] of tableSelectors) {
     const table = await measureTable(desktopSurface, `[data-testid="${testId}"]`);
     assert(
-      `9.5 La tabla de ${label} conserva su wrapper y cabe en escritorio`,
+      `10.5 La tabla de ${label} conserva su wrapper y cabe en escritorio`,
       table.found === true
         && table.wrapper !== null
         && table.wrapper.left >= 0
@@ -1132,7 +1184,7 @@ try {
 
   await new Promise((resolveWait) => setTimeout(resolveWait, 250));
   assert(
-    '9.6 La carga de escritorio no emite errores de consola',
+    '10.6 La carga de escritorio no emite errores de consola',
     desktopSurface.consoleErrors.length === 0,
     formatDetails(desktopSurface.consoleErrors)
   );

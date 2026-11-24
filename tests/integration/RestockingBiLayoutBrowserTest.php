@@ -16,6 +16,8 @@ declare(strict_types=1);
  *    «Planograma sobredimensionado».
  *  - Dos `<canvas>` Chart.js reales, conmutadores €/Unidades y
  *    Rotura/Caducidad × Máquina/Producto.
+ *  - Regresión del «Top 10»: pasar de un criterio vacío a uno con datos pinta
+ *    el gráfico en el primer clic.
  *  - Aviso térmico no segmentable al filtrar por reponedor.
  *  - Descarga CSV autenticada vía `fetch` + `Blob` con cabecera Bearer.
  *  - Consola sin errores ni excepciones no capturadas.
