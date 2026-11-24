@@ -19,7 +19,7 @@ S5 — **Interfaz Vue 3 ESM, 2 Gráficos Chart.js, Guardas SW y Certificación G
 
 | ID | Specs | Ruta | Commit | Estado |
 | :--- | :--- | :--- | :--- | :--- |
-| **WU-1 / T-RBI-01** | S1, S2, S3 | inline | — | ⏳ pendiente |
+| **WU-1 / T-RBI-01** | S1, S2, S3 | inline | — | ✅ completada (2026-11-24) |
 | **WU-2 / T-RBI-02** | S1, S2, S3 | inline | — | ⏳ pendiente |
 | **WU-3 / T-RBI-03** | S2, S4 | inline | — | ⏳ pendiente |
 | **WU-4 / T-RBI-04** | S1, S4 | inline | — | ⏳ pendiente |
@@ -31,4 +31,5 @@ S5 — **Interfaz Vue 3 ESM, 2 Gráficos Chart.js, Guardas SW y Certificación G
 ## Log
 
 * **L1 (2026-11-24):** Petición original del usuario: `"antes de empezar con el mecanismo sdd y escribir la spec, vamos a definir un poco esta feature de docs/features_pendientes-md: 28. 📊 Cuadro de Mando de Reposición, Roturas de Stock y Mermas Comerciales (Restocking BI, Stockout Rate & Merchandising Analytics)"`.
+* **L3 (2026-11-24):** T-RBI-01 completada: dominio puro con `RestockingBiFilterValidator` (ventana de 30 días `Europe/Madrid`, par obligatorio, formato y fecha civil estrictos, `from <= to`, techo de 366 días inclusivos, `to > today` admitido, IDs `>= 1`), `RestockingBiFilterDto` (intervalo semiabierto DST-safe con días naturales contados en UTC y `filters` del contrato), `RestockingBiCalculator` (disponibilidad dual cerrada al `100,00 %`, FEFO/dañado exacto al céntimo, bloqueo térmico por reponedor con su aviso, insignia `15 % / 2 visitas / 3 uds`, `machines_per_shift` con sus dos motivos nulos, duración media real, L1 frente a escalados, exactitud de arqueos, prioridad sanitaria Art. II.2, inclusiones `QA-4` y Top 10) y `RestockingBiReportDto` (siete bloques). Verificación real: `RestockingBiDomainTest.php` **250/250 aserciones · `exit=0`** (primera pasada en rojo por una expectativa invertida en la prueba, corregida antes del verde); regresiones directas `InSituRestockVisitDomainModelsTest` **75/75** y `MachineCashCollectionValidatorTest` **114/114**, `exit=0`. Cero DDL y ficheros protegidos intactos. Siguiente tarea pendiente: **T-RBI-02**.
 * **L2 (2026-11-24):** Consensuadas con el Product Owner las 5 decisiones de diseño (`D1`–`D5`), los 6 casos límite (`C1`–`C6`) y las 5 resoluciones de auditoría QA (`QA-1`–`QA-5`). Aprobada formalmente la Puerta SDD de Fase 2 (`spec.md` v1.1, `restocking_bi_analytics_spec.md` v1.1, `restocking_bi_analytics_contracts.md` v1.1, `plan.md` v1.1 y `tasks.md` v1.1) e instruido el arranque del seguimiento ODD, la creación de rama y el primer commit sin iniciar ninguna tarea: `"si, la doy aprobada. crea el documento odd de seguimiento, crea la nueva rama  y haz el primer commit de rama con los archivos pendientes. Pero no hagas ninguna tarea"`.
