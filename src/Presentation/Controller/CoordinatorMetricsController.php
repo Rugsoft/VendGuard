@@ -9,15 +9,21 @@ use DateTimeZone;
 use InvalidArgumentException;
 use Throwable;
 use VendGuard\Application\DTO\ParetoFilterDto;
+use VendGuard\Application\DTO\RestockingBiFilterDto;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\MetricsCalculationService;
 use VendGuard\Application\Service\MetricsExportService;
+use VendGuard\Application\Service\RestockingBiAnalyticsService;
+use VendGuard\Application\Service\RestockingBiExportService;
 use VendGuard\Application\Service\RootCauseParetoService;
 use VendGuard\Core\Domain\Model\MetricFilter;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SatisfactionSurveyRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Service\RestockingBiFilterValidator;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoRestockingBiAnalyticsRepository;
 use VendGuard\Infrastructure\Repository\PdoRootCauseParetoAnalyticsRepository;
 use VendGuard\Infrastructure\Repository\PdoSatisfactionSurveyRepository;
 use VendGuard\Presentation\Http\Request;
@@ -65,18 +71,27 @@ class CoordinatorMetricsController
     /** Motor Pareto 80/20 (Módulo 25); se resuelve bajo demanda para no abrir conexión al construir. */
     private ?RootCauseParetoService $paretoService;
 
+    /** Servicios del Cuadro de Reposición (Módulo 38), también perezosos. */
+    private ?RestockingBiAnalyticsService $restockingBiService;
+
+    private ?RestockingBiExportService $restockingBiExportService;
+
     public function __construct(
         ?MetricsCalculationService $metricsService = null,
         ?MetricsExportService $exportService = null,
         ?AuditLogRepositoryInterface $auditRepo = null,
         ?SatisfactionSurveyRepositoryInterface $surveyRepo = null,
-        ?RootCauseParetoService $paretoService = null
+        ?RootCauseParetoService $paretoService = null,
+        ?RestockingBiAnalyticsService $restockingBiService = null,
+        ?RestockingBiExportService $restockingBiExportService = null
     ) {
         $this->metricsService = $metricsService ?? new MetricsCalculationService();
         $this->exportService = $exportService ?? new MetricsExportService();
         $this->auditRepo = $auditRepo ?? new PdoAuditLogRepository();
         $this->surveyRepo = $surveyRepo ?? new PdoSatisfactionSurveyRepository();
         $this->paretoService = $paretoService;
+        $this->restockingBiService = $restockingBiService;
+        $this->restockingBiExportService = $restockingBiExportService;
     }
 
     /**
@@ -233,6 +248,108 @@ class CoordinatorMetricsController
                 500
             );
         }
+    }
+
+    /**
+     * GET /api/coordinator/metrics/restocking
+     *
+     * Informe de reposición, roturas y mermas (`RF-01.2`): KPIs, comparativa de
+     * mermas, series de los dos gráficos, tablas y catálogos de filtros. Un
+     * filtro inválido responde `400 INVALID_FILTER_PARAMS`; la puerta de rol la
+     * impone `InternalAuthMiddleware(COORDINATOR)` en el router (Art. V.4).
+     */
+    public function getRestockingBi(Request $request): Response
+    {
+        try {
+            $filter = $this->buildRestockingBiFilter($request);
+
+            return Response::json($this->restockingBi()->buildReport($filter)->toArray());
+        } catch (InvalidArgumentException $exception) {
+            return Response::error(
+                RestockingBiFilterValidator::INVALID_FILTER_PARAMS,
+                $exception->getMessage(),
+                400
+            );
+        } catch (Throwable $exception) {
+            $this->logInternalFailure($exception);
+
+            return Response::error(
+                'INTERNAL_SERVER_ERROR',
+                'No se pudo calcular el cuadro de mando de reposición.',
+                500
+            );
+        }
+    }
+
+    /**
+     * GET /api/coordinator/metrics/restocking/export
+     *
+     * Descarga CSV `UTF-8 BOM` de cinco secciones (`RF-06.3`, `QA-1`). El
+     * exportador registra `EXPORT_RESTOCKING_BI_CSV` con el actor autenticado y
+     * los filtros normalizados, antes de devolver el archivo.
+     */
+    public function exportRestockingBiCsv(Request $request): Response
+    {
+        try {
+            $filter = $this->buildRestockingBiFilter($request);
+            $csvContent = $this->restockingBiExport()->exportCsv($filter, $this->extractActor($request));
+
+            $filename = 'vendguard_restocking_bi_' . $filter->from() . '_' . $filter->to() . '.csv';
+
+            return new Response($csvContent, 200, [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+                'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            ]);
+        } catch (InvalidArgumentException $exception) {
+            return Response::error(
+                RestockingBiFilterValidator::INVALID_FILTER_PARAMS,
+                $exception->getMessage(),
+                400
+            );
+        } catch (Throwable $exception) {
+            $this->logInternalFailure($exception);
+
+            return Response::error(
+                'INTERNAL_SERVER_ERROR',
+                'No se pudo exportar el cuadro de mando de reposición.',
+                500
+            );
+        }
+    }
+
+    /**
+     * Construye el filtro del contrato §2 con el validador puro del dominio.
+     *
+     * No reinterpreta fechas ni identificadores: el validador es la única
+     * fuente de verdad y el mensaje ya nombra el campo culpable (`C5`, `QA-5`).
+     */
+    private function buildRestockingBiFilter(Request $request): RestockingBiFilterDto
+    {
+        return RestockingBiFilterValidator::validate($request->getQueryParams());
+    }
+
+    /**
+     * Repositorio y servicio BI se resuelven bajo demanda: la suite unitaria
+     * construye el controlador sin base de datos y no debe abrir PDO.
+     */
+    private function restockingBi(): RestockingBiAnalyticsService
+    {
+        return $this->restockingBiService ??= new RestockingBiAnalyticsService(
+            new PdoRestockingBiAnalyticsRepository(ConnectionFactory::getConnection())
+        );
+    }
+
+    /**
+     * El exportador comparte la conexión de auditoría inyectada en el
+     * controlador, de modo que `QA-1` se persiste por la misma puerta.
+     */
+    private function restockingBiExport(): RestockingBiExportService
+    {
+        return $this->restockingBiExportService ??= new RestockingBiExportService(
+            $this->restockingBi(),
+            new AuditLogger($this->auditRepo)
+        );
     }
 
     /**

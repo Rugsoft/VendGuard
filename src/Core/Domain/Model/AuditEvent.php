@@ -369,10 +369,11 @@ class AuditEvent implements JsonSerializable
         ?array $previousState,
         array $newState,
         ?array $metadata = null,
-        ?string $createdAt = null
+        ?string $createdAt = null,
+        ?int $id = null
     ): self {
         return new self(
-            null,
+            $id,
             $entityType,
             self::GLOBAL_SCOPE_ENTITY_ID,
             $action,

@@ -67,6 +67,21 @@ class PdoAuditLogRepository implements AuditLogRepositoryInterface
             $stmt->execute();
             $newId = (int)$this->pdo->lastInsertId();
 
+            if ($event->getEntityId() === AuditEvent::GLOBAL_SCOPE_ENTITY_ID) {
+                return AuditEvent::forGlobalExport(
+                    entityType: $event->getEntityType(),
+                    action: $event->getAction(),
+                    userId: $event->getUserId(),
+                    userRole: $event->getUserRole(),
+                    userName: $event->getUserName(),
+                    previousState: $event->getPreviousState(),
+                    newState: $event->getNewState(),
+                    metadata: $event->getMetadata(),
+                    createdAt: $event->getCreatedAt(),
+                    id: $newId
+                );
+            }
+
             return new AuditEvent(
                 id: $newId,
                 entityType: $event->getEntityType(),
@@ -271,10 +286,31 @@ class PdoAuditLogRepository implements AuditLogRepositoryInterface
             }
         }
 
+        $eventId = (int)$row['id'];
+        $entityId = (int)$row['entity_id'];
+
+        // Los hechos globales de exportación (`QA-1`) se auditan con
+        // `entity_id = 0`; su rehidratación debe pasar por la misma fábrica que
+        // los escribió o la lectura rompería la guarda de entidad positiva.
+        if ($entityId === AuditEvent::GLOBAL_SCOPE_ENTITY_ID) {
+            return AuditEvent::forGlobalExport(
+                entityType: (string)$row['entity_type'],
+                action: (string)$row['action'],
+                userId: $row['user_id'] !== null ? (int)$row['user_id'] : null,
+                userRole: (string)$row['user_role'],
+                userName: (string)$row['user_name'],
+                previousState: $prevState,
+                newState: $newState,
+                metadata: $metadata,
+                createdAt: (string)$row['created_at'],
+                id: $eventId
+            );
+        }
+
         return new AuditEvent(
-            id: (int)$row['id'],
+            id: $eventId,
             entityType: (string)$row['entity_type'],
-            entityId: (int)$row['entity_id'],
+            entityId: $entityId,
             action: (string)$row['action'],
             userId: $row['user_id'] !== null ? (int)$row['user_id'] : null,
             userRole: (string)$row['user_role'],
