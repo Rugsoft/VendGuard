@@ -15,7 +15,8 @@ declare(strict_types=1);
  *  - Nueve tarjetas KPI y tres tablas con scroll propio e insignias «Baja» y
  *    «Planograma sobredimensionado».
  *  - Dos `<canvas>` Chart.js reales, conmutadores €/Unidades y
- *    Rotura/Caducidad × Máquina/Producto.
+ *    Rotura/Caducidad × Máquina/Producto, con el eje Y del «Top 10» envuelto
+ *    en móvil para conservar el código y el nombre completo.
  *  - Regresión del «Top 10»: pasar de un criterio vacío a uno con datos pinta
  *    el gráfico en el primer clic.
  *  - Aviso térmico no segmentable al filtrar por reponedor.

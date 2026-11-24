@@ -10,7 +10,8 @@
  *  2. Filtros: cascada zona/sede que limpia `location_id` fuera de zona.
  *  3. Tarjetas KPI, tablas con badges y wrappers con scroll propio.
  *  4. Dos `<canvas>` Chart.js reales con datos y conmutadores €/Unidades y
- *     Rotura/Caducidad × Máquina/Producto.
+ *     Rotura/Caducidad × Máquina/Producto; el eje Y del «Top 10» envuelve
+ *     código y nombre completo a 360 px.
  *  5. Aviso térmico no segmentable al filtrar por reponedor (`D2`).
  *  6. Descarga CSV autenticada vía `fetch` + `Blob` con cabecera Bearer.
  *  7. Regresión del «Top 10»: un criterio vacío seguido de uno con datos se
@@ -662,8 +663,13 @@ function chartStateExpression() {
       },
       top: topChart === null ? null : {
         labels: Array.from(topChart.data.labels ?? []),
+        tickLabels: Array.from(topChart.scales?.y?.ticks ?? []).map((tick) => tick.label),
         values: Array.from(topChart.data.datasets?.[0]?.data ?? []),
         indexAxis: topChart.options?.indexAxis ?? 'x',
+        chartArea: topChart.chartArea === undefined ? null : {
+          left: Number(topChart.chartArea.left.toFixed(1)),
+          width: Number(topChart.chartArea.width.toFixed(1))
+        },
         rect: rectOf(topCanvas)
       }
     };
@@ -936,9 +942,19 @@ try {
     formatDetails(expiryState.top)
   );
 
+  assert(
+    '4.6 El eje Y del Top 10 muestra código y nombre en varias líneas a 360 px',
+    Array.isArray(expiryState.top?.tickLabels?.[0])
+      && expiryState.top.tickLabels[0][0] === 'SAND-MIXTO-01'
+      && expiryState.top.tickLabels[0].join(' ') === 'SAND-MIXTO-01 Sándwich Mixto Fresco'
+      && expiryState.top.labels[0] === 'SAND-MIXTO-01 · Sándwich Mixto Fresco'
+      && Number(expiryState.top.chartArea?.width) > 100,
+    formatDetails({ tickLabels: expiryState.top?.tickLabels, chartArea: expiryState.top?.chartArea })
+  );
+
   const chartDocument = await measureDocument(surface);
   assert(
-    '4.6 Con ambos gráficos repintados el documento sigue midiendo 360 px o menos',
+    '4.7 Con ambos gráficos repintados el documento sigue midiendo 360 px o menos',
     chartDocument.documentScrollWidth <= 360
       && chartDocument.bodyScrollWidth <= 360
       && chartDocument.offenders.length === 0,

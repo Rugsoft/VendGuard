@@ -687,6 +687,32 @@ async function runTests() {
     ].every((handler) => CoordinatorRestockingBiTab.template.includes(handler))
   );
 
+  const compactLabels = buildInstance();
+  compactLabels.report = buildReport();
+  compactLabels.topMetric = 'expiry';
+  compactLabels.topDimension = 'product';
+  compactLabels.$refs.topChartCanvas = { name: 'top-compact', clientWidth: 269 };
+  const compactTick = compactLabels.topTickLabel(0);
+  assert(
+    '5.12 El eje Y del Top 10 envuelve código y nombre en ancho móvil',
+    Array.isArray(compactTick)
+      && compactTick[0] === 'SAND-MIXTO-01'
+      && compactTick.join(' ') === 'SAND-MIXTO-01 Sándwich Mixto Fresco'
+      && compactLabels.topSeries.labels[0] === 'SAND-MIXTO-01 · Sándwich Mixto Fresco'
+      && compactLabels.topChartHeightPx === '320px',
+    `tick=${JSON.stringify(compactTick)}`
+  );
+
+  const wideLabels = buildInstance();
+  wideLabels.report = buildReport();
+  wideLabels.topMetric = 'expiry';
+  wideLabels.topDimension = 'product';
+  wideLabels.$refs.topChartCanvas = { name: 'top-wide', clientWidth: 1189 };
+  assert(
+    '5.13 En escritorio el eje Y conserva la etiqueta completa de una línea',
+    wideLabels.topTickLabel(0) === 'SAND-MIXTO-01 · Sándwich Mixto Fresco'
+  );
+
   // ───────────────────────────────────────────────────────────────────────
   // 6. Exportación y errores
   // ───────────────────────────────────────────────────────────────────────

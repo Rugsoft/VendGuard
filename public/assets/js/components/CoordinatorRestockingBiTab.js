@@ -68,6 +68,13 @@ const EMPTY_REPORT = () => ({
 
 const THERMAL_NOTICE = 'No segmentable por reponedor (ámbito máquina/SAT)';
 
+/** A partir de este ancho el eje Y admite la etiqueta completa en una línea. */
+const TOP_LABEL_COMPACT_WIDTH = 700;
+/** Longitud máxima de cada línea del nombre en el eje Y móvil. */
+const TOP_LABEL_LINE_CHARS = 18;
+const TOP_CHART_MIN_HEIGHT = 320;
+const TOP_CHART_ROW_HEIGHT = 64;
+
 function todayInMadrid() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid' }).format(new Date());
 }
@@ -321,6 +328,10 @@ export const CoordinatorRestockingBiTab = {
     },
     hasTopSeries() {
       return this.topSeries.values.length > 0;
+    },
+    /** Crece con el Top 10 para que las etiquetas multilínea no se solapen. */
+    topChartHeightPx() {
+      return `${Math.max(TOP_CHART_MIN_HEIGHT, this.topRows.length * TOP_CHART_ROW_HEIGHT)}px`;
     }
   },
   mounted() {
@@ -700,6 +711,49 @@ export const CoordinatorRestockingBiTab = {
       };
     },
 
+    /**
+     * Etiqueta del eje Y del Top 10. En móvil devuelve líneas separadas para
+     * conservar el código y el nombre; Chart.js mantiene el texto completo en
+     * `data.labels`, de modo que el tooltip no pierde información.
+     */
+    topTickLabel(index) {
+      const label = String(this.topSeries.labels[index] ?? '');
+      const width = Number(this.$refs?.topChartCanvas?.clientWidth ?? 0);
+
+      if (width === 0 || width >= TOP_LABEL_COMPACT_WIDTH) {
+        return label;
+      }
+
+      const separator = ' · ';
+      const separatorIndex = label.indexOf(separator);
+      const code = separatorIndex === -1 ? '' : label.slice(0, separatorIndex);
+      const name = separatorIndex === -1 ? label : label.slice(separatorIndex + separator.length);
+      const lines = code === '' ? [] : [code];
+
+      return [...lines, ...this.wrapTopLabelName(name)];
+    },
+    wrapTopLabelName(name) {
+      const words = String(name).trim().split(/\s+/).filter(Boolean);
+      const lines = [];
+      let current = '';
+
+      for (const word of words) {
+        const candidate = current === '' ? word : `${current} ${word}`;
+        if (current !== '' && candidate.length > TOP_LABEL_LINE_CHARS) {
+          lines.push(current);
+          current = word;
+        } else {
+          current = candidate;
+        }
+      }
+
+      if (current !== '') {
+        lines.push(current);
+      }
+
+      return lines.length > 0 ? lines : [String(name)];
+    },
+
     buildTopChartConfig() {
       const fontFamily = this.tokenFont();
       const muted = this.tokenColor('--color-ink-muted');
@@ -754,7 +808,12 @@ export const CoordinatorRestockingBiTab = {
               grid: { color: grid }
             },
             y: {
-              ticks: { color: muted, font: { family: fontFamily, size: 12 } },
+              ticks: {
+                color: muted,
+                font: { family: fontFamily, size: 12 },
+                autoSkip: false,
+                callback: (value) => this.topTickLabel(Number(value))
+              },
               grid: { display: false }
             }
           }
@@ -1013,7 +1072,7 @@ export const CoordinatorRestockingBiTab = {
           </div>
         </div>
 
-        <div v-if="hasTopSeries" data-testid="restocking-bi-top-chart" style="position: relative; width: 100%; height: 320px;">
+        <div v-if="hasTopSeries" data-testid="restocking-bi-top-chart" style="position: relative; width: 100%;" :style="{ height: topChartHeightPx }">
           <canvas ref="topChartCanvas" role="img" aria-label="Top 10 de máquinas o productos críticos" style="width: 100%; height: 100%;"></canvas>
         </div>
         <p v-else data-testid="restocking-bi-top-empty" style="margin: 0; font-size: 13px; color: var(--color-ink-muted);">
