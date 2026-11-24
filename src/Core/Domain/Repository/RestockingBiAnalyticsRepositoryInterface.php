@@ -111,6 +111,24 @@ interface RestockingBiAnalyticsRepositoryInterface
     public function fetchSlotItemsByMachineProduct(RestockingBiFilterDto $filter): array;
 
     /**
+     * Catálogo de productos con carriles auditados en la ventana (M32 + M34).
+     *
+     * Devuelve la identidad vigente del producto (SKU, nombre, categoría y
+     * estado) para que `by_product` y la Sección 4 del CSV no inventen etiquetas.
+     * Incluye los productos con baja lógica que conservan actividad, publicando
+     * `is_active = false` (`QA-4`, Art. III).
+     *
+     * @return list<array{
+     *   product_id: int,
+     *   sku: string,
+     *   name: string,
+     *   category: string,
+     *   is_active: bool
+     * }>
+     */
+    public function fetchProductCatalog(RestockingBiFilterDto $filter): array;
+
+    /**
      * Agregados de carriles por `restocker_id`, sin producto (M34, `RF-05`).
      *
      * @return list<array{

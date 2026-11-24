@@ -251,6 +251,8 @@ try {
     $productSnack = $insertProduct($pdo, $insertId, 'PATATAS-01', 'Patatas Fritas', 'SNACK', false, null, 1.50, 2.00);
     $productChocolate = $insertProduct($pdo, $insertId, 'CHOCOLATE-01', 'Chocolate con Leche', 'SNACK', false, null, 1.20, 1.80);
     $productDrink = $insertProduct($pdo, $insertId, 'AGUA-50', 'Agua Mineral 50cl', 'COLD_DRINK', false, null, 0.80, 1.20);
+    // Baja lógica con actividad: debe seguir publicándose en el catálogo (QA-4).
+    $pdo->exec("UPDATE vending_products SET is_active = FALSE WHERE id = {$productDrink}");
 
     $insertSlot = static function (
         PDO $pdo,
@@ -1103,6 +1105,25 @@ try {
             $repository->fetchMachineCatalog(new RestockingBiFilterDto('2026-11-07', '2026-11-20', $zoneNorth)),
             'machine_code'
         ) === ['MAQ-CEIP-01', 'MAQ-HOSP-02', 'MAQ-HOSP-03']
+    );
+
+    $products = $repository->fetchProductCatalog($filter);
+    $assert(
+        'El catálogo de productos solo publica los que tienen carriles auditados',
+        array_column($products, 'sku') === ['AGUA-50', 'CHOCOLATE-01', 'SAND-MIXTO-01'],
+        implode(',', array_column($products, 'sku'))
+    );
+    $assert(
+        'El catálogo de productos publica las claves del contrato',
+        array_keys($products[0]) === ['product_id', 'sku', 'name', 'category', 'is_active']
+    );
+    $drinkProduct = array_values(array_filter(
+        $products,
+        static fn(array $row): bool => $row['sku'] === 'AGUA-50'
+    ))[0];
+    $assert(
+        'El producto dado de baja con actividad se conserva con su estado real (QA-4)',
+        $drinkProduct['is_active'] === false && $drinkProduct['name'] === 'Agua Mineral 50cl'
     );
 
     // ─────────────────────────────────────────────────────────────────────

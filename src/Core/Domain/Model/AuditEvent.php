@@ -25,6 +25,16 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_USER     = 'USER';
 
     /**
+     * Identificador de los hechos globales sin entidad única.
+     *
+     * Solo lo admite `forGlobalExport()` para las exportaciones agregadas que
+     * el contrato audita con `entity_id = 0` (por ejemplo
+     * `EXPORT_RESTOCKING_BI_CSV`, `QA-1`). El constructor sigue rechazando
+     * cualquier identificador no positivo en el resto de escrituras.
+     */
+    public const GLOBAL_SCOPE_ENTITY_ID = 0;
+
+    /**
      * Entidades del módulo de reintegros (Módulo 08).
      *
      * 'REFUND_REQUEST' no puede reutilizarse como 'TICKET': el expediente de
@@ -285,6 +295,8 @@ class AuditEvent implements JsonSerializable
      * @param array $newState Estado o valores nuevos resultantes.
      * @param array|null $metadata Metadatos contextuales adicionales.
      * @param string|null $createdAt Marca de tiempo de inserción (formato Y-m-d H:i:s).
+     * @param bool $allowGlobalScopeEntityId Ámbito interno de `forGlobalExport()`; no
+     *   debe usarse directamente, porque salta la guarda de entidad positiva.
      */
     public function __construct(
         ?int $id,
@@ -297,7 +309,8 @@ class AuditEvent implements JsonSerializable
         ?array $previousState,
         array $newState,
         ?array $metadata = null,
-        ?string $createdAt = null
+        ?string $createdAt = null,
+        bool $allowGlobalScopeEntityId = false
     ) {
         if (!self::isValidEntityType($entityType)) {
             throw new InvalidArgumentException("Tipo de entidad de auditoría inválido: {$entityType}");
@@ -309,7 +322,11 @@ class AuditEvent implements JsonSerializable
         }
 
         if ($entityId <= 0) {
-            throw new InvalidArgumentException('El identificador de la entidad debe ser un entero positivo.');
+            if (!$allowGlobalScopeEntityId || $entityId !== self::GLOBAL_SCOPE_ENTITY_ID) {
+                throw new InvalidArgumentException('El identificador de la entidad debe ser un entero positivo.');
+            }
+        } elseif ($allowGlobalScopeEntityId) {
+            throw new InvalidArgumentException('El ámbito global solo admite el identificador cero.');
         }
 
         $this->id = $id;
@@ -329,6 +346,45 @@ class AuditEvent implements JsonSerializable
         // i.paused_at`— y la que data el historial del expediente (Contrato del Reloj Operativo, §1).
         $this->createdAt = $createdAt
             ?? (new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))->format('Y-m-d\TH:i:sP');
+    }
+
+    /**
+     * Evento global de exportación agregada (`QA-1`, Art. III.3).
+     *
+     * El hecho no pertenece a una entidad concreta —el CSV resume todo el
+     * parque— y el contrato exige `entity_id = 0`. Esta fábrica es la única
+     * puerta que admite ese valor: el constructor ordinario mantiene intacta la
+     * guarda de identificador positivo para el resto de la auditoría.
+     *
+     * @param array<string, mixed>|null $previousState
+     * @param array<string, mixed> $newState
+     * @param array<string, mixed>|null $metadata
+     */
+    public static function forGlobalExport(
+        string $entityType,
+        string $action,
+        ?int $userId,
+        string $userRole,
+        string $userName,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null,
+        ?string $createdAt = null
+    ): self {
+        return new self(
+            null,
+            $entityType,
+            self::GLOBAL_SCOPE_ENTITY_ID,
+            $action,
+            $userId,
+            $userRole,
+            $userName,
+            $previousState,
+            $newState,
+            $metadata,
+            $createdAt,
+            true
+        );
     }
 
     public function getId(): ?int

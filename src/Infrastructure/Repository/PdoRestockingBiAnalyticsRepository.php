@@ -237,6 +237,40 @@ final class PdoRestockingBiAnalyticsRepository implements RestockingBiAnalyticsR
     /**
      * {@inheritDoc}
      */
+    public function fetchProductCatalog(RestockingBiFilterDto $filter): array
+    {
+        $params = [$filter->fromAt()->format('Y-m-d H:i:sP'), $filter->toExclusiveAt()->format('Y-m-d H:i:sP')];
+        $conditions = $this->scopeConditions('l', 'mrv.restocker_id', $filter, $params);
+        $where = $conditions === [] ? '' : ' AND ' . implode(' AND ', $conditions);
+
+        $sql = "
+            SELECT DISTINCT vp.id AS product_id,
+                   vp.sku,
+                   vp.name,
+                   vp.category,
+                   vp.is_active
+              FROM vending_products vp
+              JOIN machine_restock_visit_items mvi ON mvi.product_id = vp.id
+              JOIN machine_restock_visits mrv ON mrv.id = mvi.visit_id
+              JOIN machines m ON m.id = mrv.machine_id
+              JOIN locations l ON l.id = m.location_id
+             WHERE mrv.status = 'COMPLETED'
+               AND mrv.completed_at >= ? AND mrv.completed_at < ?{$where}
+             ORDER BY vp.sku ASC
+        ";
+
+        return array_map(static fn(array $row): array => [
+            'product_id' => (int)$row['product_id'],
+            'sku' => (string)$row['sku'],
+            'name' => (string)$row['name'],
+            'category' => (string)$row['category'],
+            'is_active' => self::toBool($row['is_active']),
+        ], $this->fetchAll($sql, $params));
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function fetchSlotItemsByRestocker(RestockingBiFilterDto $filter): array
     {
         $params = [$filter->fromAt()->format('Y-m-d H:i:sP'), $filter->toExclusiveAt()->format('Y-m-d H:i:sP')];
