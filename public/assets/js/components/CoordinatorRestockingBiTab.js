@@ -562,14 +562,20 @@ export const CoordinatorRestockingBiTab = {
     },
 
     destroyCharts() {
-      if (this.spoilageChartInstance) {
-        this.spoilageChartInstance.destroy();
-        this.spoilageChartInstance = null;
-      }
+      // `stop()` cancela la animación viva antes de destruir: sin él, un frame
+      // ya encolado intenta dibujar sobre un contexto nulo al recrear el
+      // gráfico en el mismo canvas (excepción real en Chromium, T-RBI-07).
+      for (const key of ['spoilageChartInstance', 'topChartInstance']) {
+        const chart = this[key];
+        if (!chart) {
+          continue;
+        }
 
-      if (this.topChartInstance) {
-        this.topChartInstance.destroy();
-        this.topChartInstance = null;
+        if (typeof chart.stop === 'function') {
+          chart.stop();
+        }
+        chart.destroy();
+        this[key] = null;
       }
     },
 
@@ -635,6 +641,7 @@ export const CoordinatorRestockingBiTab = {
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          animation: false,
           plugins: {
             legend: { display: false },
             tooltip: {
@@ -697,6 +704,7 @@ export const CoordinatorRestockingBiTab = {
           indexAxis: 'y',
           responsive: true,
           maintainAspectRatio: false,
+          animation: false,
           plugins: {
             legend: { display: false },
             tooltip: {
