@@ -8,7 +8,8 @@
  *  1. Documento a 360 x 800 sin desbordamiento horizontal y sin la barra global
  *     de SAT duplicada (`QA-3`).
  *  2. Filtros: cascada zona/sede que limpia `location_id` fuera de zona.
- *  3. Tarjetas KPI, tablas con badges y wrappers con scroll propio.
+ *  3. Tarjetas KPI, tablas convertidas en tarjetas de campos a 360 px y
+ *     wrappers de scroll intactos en escritorio.
  *  4. Dos `<canvas>` Chart.js reales con datos y conmutadores €/Unidades y
  *     Rotura/Caducidad × Máquina/Producto; el eje Y del «Top 10» envuelve
  *     código y nombre completo a 360 px.
@@ -490,6 +491,23 @@ async function measureDocument(surface) {
       return false;
     };
 
+    const elementIsVisuallyHidden = (element) => {
+      let current = element;
+      while (current !== null && current !== document.body) {
+        const style = getComputedStyle(current);
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+          return true;
+        }
+        const hasClip = style.clip !== 'auto' && style.clip !== '' && style.clip !== 'rect(auto, auto, auto, auto)';
+        const hasClipPath = style.clipPath !== 'none' && style.clipPath !== '';
+        if (hasClip || hasClipPath) {
+          return true;
+        }
+        current = current.parentElement;
+      }
+      return false;
+    };
+
     const offenders = [...document.body.querySelectorAll('*')]
       .filter((element) => {
         const rect = element.getBoundingClientRect();
@@ -498,6 +516,7 @@ async function measureDocument(surface) {
         }
         return rect.right > viewportWidth + 0.5 || rect.left < -0.5;
       })
+      .filter((element) => !elementIsVisuallyHidden(element))
       .filter((element) => !elementIsInsideHorizontalScroller(element))
       .slice(0, 12)
       .map((element) => {
@@ -835,7 +854,7 @@ try {
   for (const [testId, label] of tableSelectors) {
     const table = await measureTable(surface, `[data-testid="${testId}"]`);
     assert(
-      `3.3 La tabla de ${label} queda contenida con scroll horizontal propio`,
+      `3.3 La tabla de ${label} queda contenida en su wrapper sin ensanchar el viewport`,
       table.found === true
         && table.rows === 3
         && table.wrapper !== null
@@ -847,6 +866,60 @@ try {
     );
   }
 
+  const cardTables = await surface.evaluate(`(() => {
+    const expected = {
+      'restocking-bi-machines-table': {
+        cells: 10,
+        labels: ['Máquina', 'Sede · Zona', 'Visitas', 'Disponibilidad', 'Rotura carril', 'Bajo umbral', 'Abortos térmicos', 'Merma comercial', 'Tasa caducidad', 'Insignias']
+      },
+      'restocking-bi-products-table': {
+        cells: 9,
+        labels: ['SKU', 'Producto', 'Estado', 'Carriles', 'Stockout', '% rotura', 'Bajo umbral', 'Merma comercial', 'Tasa caducidad']
+      },
+      'restocking-bi-restockers-table': {
+        cells: 11,
+        labels: ['Reponedor', 'Estado', 'Visitas', 'Turnos', 'Máq./turno', 'Parada media', 'L1 resueltas', 'Escaladas SAT', 'Arqueos OK / descuadre', 'Exactitud', 'Merma comercial']
+      }
+    };
+    const result = {};
+    for (const [testId, spec] of Object.entries(expected)) {
+      const table = document.querySelector('[data-testid="' + testId + '"]');
+      const wrapper = table?.parentElement ?? null;
+      const header = table?.querySelector('thead') ?? null;
+      const row = table?.querySelector('tbody tr') ?? null;
+      const cells = row === null ? [] : [...row.querySelectorAll('td')];
+      const labels = cells.map((cell) => getComputedStyle(cell, '::before').content.replace(/^["']|["']$/g, ''));
+      const locationCell = table?.querySelector('tbody tr td:nth-child(2)') ?? null;
+      result[testId] = {
+        found: table !== null,
+        cells: cells.length,
+        labels,
+        rowDisplay: row === null ? null : getComputedStyle(row).display,
+        headerPosition: header === null ? null : getComputedStyle(header).position,
+        maxRight: Number(cells.reduce((max, cell) => Math.max(max, cell.getBoundingClientRect().right), 0).toFixed(1)),
+        wrapperNoScroll: wrapper !== null && wrapper.scrollWidth === wrapper.clientWidth,
+        locationHeight: locationCell === null ? null : Number(locationCell.getBoundingClientRect().height.toFixed(1))
+      };
+    }
+    return { tables: result, expected };
+  })()`);
+  assert(
+    '3.4 Las tres tablas son tarjetas sin scroll horizontal y muestran todos sus campos a 360 px',
+    Object.entries(cardTables.expected).every(([testId, spec]) => {
+      const table = cardTables.tables[testId];
+      return table.found === true
+        && table.cells === spec.cells
+        && JSON.stringify(table.labels) === JSON.stringify(spec.labels)
+        && table.rowDisplay === 'grid'
+        && table.headerPosition === 'absolute'
+        && table.maxRight <= 360.5
+        && table.wrapperNoScroll === true;
+    })
+      && cardTables.tables['restocking-bi-machines-table'].locationHeight !== null
+      && cardTables.tables['restocking-bi-machines-table'].locationHeight < 72,
+    formatDetails(cardTables)
+  );
+
   const badges = await surface.evaluate(`(() => ({
     baja: [...document.querySelectorAll('[data-testid="restocking-bi-tab"] span')]
       .filter((span) => (span.textContent ?? '').trim() === 'Baja').length,
@@ -854,7 +927,7 @@ try {
       .filter((span) => (span.textContent ?? '').trim() === 'Planograma sobredimensionado').length
   }))()`);
   assert(
-    '3.4 Las insignias «Baja» y «Planograma sobredimensionado» se pintan en las tablas',
+    '3.5 Las insignias «Baja» y «Planograma sobredimensionado» se pintan en las tablas',
     badges.baja >= 2 && badges.oversized === 1,
     formatDetails(badges)
   );
@@ -872,7 +945,7 @@ try {
   })()`);
   const scrolledDocument = await measureDocument(surface);
   assert(
-    '3.5 Al desplazar las tres tablas, el documento no arrastra scroll horizontal',
+    '3.6 Al desplazar las tres tablas, el documento no arrastra scroll horizontal',
     scrollState.found === true
       && scrolledDocument.documentScrollWidth <= 360
       && scrolledDocument.bodyScrollWidth <= 360

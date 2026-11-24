@@ -12,8 +12,9 @@ declare(strict_types=1);
  *  - Documento `360 x 800` sin desbordamiento horizontal del documento ni del
  *    body, con `scrollWidth <= clientWidth` en cada superficie.
  *  - Cascada zona/sede que limpia `location_id` fuera de la demarcación.
- *  - Nueve tarjetas KPI y tres tablas con scroll propio e insignias «Baja» y
- *    «Planograma sobredimensionado».
+ *  - Nueve tarjetas KPI y tres tablas que en móvil pasan a tarjetas de campos
+ *    (sin scroll horizontal) y en escritorio conservan su wrapper de scroll,
+ *    con insignias «Baja» y «Planograma sobredimensionado».
  *  - Dos `<canvas>` Chart.js reales, conmutadores €/Unidades y
  *    Rotura/Caducidad × Máquina/Producto, con el eje Y del «Top 10» envuelto
  *    en móvil para conservar el código y el nombre completo.

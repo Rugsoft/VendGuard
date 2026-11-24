@@ -1093,7 +1093,7 @@ export const CoordinatorRestockingBiTab = {
         </p>
 
         <div v-else style="overflow-x: auto; max-width: 100%;">
-          <table data-testid="restocking-bi-machines-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <table class="vg-restocking-bi-table vg-restocking-bi-table--machines" data-testid="restocking-bi-machines-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
             <thead>
               <tr>
                 <th style="text-align: left; padding: 6px 8px; color: var(--color-ink-muted); border-bottom: 1px solid var(--color-hairline);">Máquina</th>
@@ -1153,7 +1153,7 @@ export const CoordinatorRestockingBiTab = {
         </p>
 
         <div v-else style="overflow-x: auto; max-width: 100%;">
-          <table data-testid="restocking-bi-products-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <table class="vg-restocking-bi-table vg-restocking-bi-table--products" data-testid="restocking-bi-products-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
             <thead>
               <tr>
                 <th style="text-align: left; padding: 6px 8px; color: var(--color-ink-muted); border-bottom: 1px solid var(--color-hairline);">SKU</th>
@@ -1205,7 +1205,7 @@ export const CoordinatorRestockingBiTab = {
         </p>
 
         <div v-else style="overflow-x: auto; max-width: 100%;">
-          <table data-testid="restocking-bi-restockers-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <table class="vg-restocking-bi-table vg-restocking-bi-table--restockers" data-testid="restocking-bi-restockers-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
             <thead>
               <tr>
                 <th style="text-align: left; padding: 6px 8px; color: var(--color-ink-muted); border-bottom: 1px solid var(--color-hairline);">Reponedor</th>

@@ -2167,6 +2167,134 @@ details.vg-guide-accordion__disclosure:not([open]) .vg-guide-accordion__body {
 }
 
 /*
+ * M38 · Tablas de reposición en móvil y tablet.
+ *
+ * A 360/640 px las diez columnas se comprimían en filas de 130 px y la sede se
+ * partía en 6-7 líneas. Por debajo de 840 px cada fila es una tarjeta de dos o
+ * tres columnas: la cabecera sigue disponible para lectores de pantalla y las
+ * etiquetas visuales salen del ::before de cada celda.
+ */
+@media (max-width: 840px) {
+  .vg-restocking-bi-table {
+    display: block;
+    width: 100%;
+    border-collapse: separate;
+    font-size: 12px;
+  }
+
+  .vg-restocking-bi-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .vg-restocking-bi-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .vg-restocking-bi-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 14px;
+    padding: 12px;
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-card);
+    background-color: var(--color-canvas);
+  }
+
+  .vg-restocking-bi-table tbody td {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    text-align: left !important;
+    overflow-wrap: anywhere;
+  }
+
+  .vg-restocking-bi-table tbody td::before {
+    content: '';
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--color-ink-muted);
+  }
+
+  .vg-restocking-bi-table tbody td:first-child {
+    grid-column: 1 / -1;
+    padding-bottom: 6px !important;
+    border-bottom: 1px solid var(--color-hairline) !important;
+  }
+
+  .vg-restocking-bi-table tbody td:first-child::before {
+    display: none;
+  }
+
+  .vg-restocking-bi-table tbody td:first-child strong {
+    font-size: 14px;
+  }
+
+  .vg-restocking-bi-table--machines tbody td:nth-child(2),
+  .vg-restocking-bi-table--machines tbody td:nth-child(10),
+  .vg-restocking-bi-table--products tbody td:nth-child(2) {
+    grid-column: 1 / -1;
+  }
+
+  .vg-restocking-bi-table--machines tbody td:nth-child(10):not(:has(span)) {
+    display: none;
+  }
+
+  .vg-restocking-bi-table--machines tbody td:nth-child(1)::before { content: 'Máquina'; }
+  .vg-restocking-bi-table--machines tbody td:nth-child(2)::before { content: 'Sede · Zona'; }
+  .vg-restocking-bi-table--machines tbody td:nth-child(3)::before { content: 'Visitas'; }
+  .vg-restocking-bi-table--machines tbody td:nth-child(4)::before { content: 'Disponibilidad'; }
+  .vg-restocking-bi-table--machines tbody td:nth-child(5)::before { content: 'Rotura carril'; }
+  .vg-restocking-bi-table--machines tbody td:nth-child(6)::before { content: 'Bajo umbral'; }
+  .vg-restocking-bi-table--machines tbody td:nth-child(7)::before { content: 'Abortos térmicos'; }
+  .vg-restocking-bi-table--machines tbody td:nth-child(8)::before { content: 'Merma comercial'; }
+  .vg-restocking-bi-table--machines tbody td:nth-child(9)::before { content: 'Tasa caducidad'; }
+  .vg-restocking-bi-table--machines tbody td:nth-child(10)::before { content: 'Insignias'; }
+
+  .vg-restocking-bi-table--products tbody td:nth-child(1)::before { content: 'SKU'; }
+  .vg-restocking-bi-table--products tbody td:nth-child(2)::before { content: 'Producto'; }
+  .vg-restocking-bi-table--products tbody td:nth-child(3)::before { content: 'Estado'; }
+  .vg-restocking-bi-table--products tbody td:nth-child(4)::before { content: 'Carriles'; }
+  .vg-restocking-bi-table--products tbody td:nth-child(5)::before { content: 'Stockout'; }
+  .vg-restocking-bi-table--products tbody td:nth-child(6)::before { content: '% rotura'; }
+  .vg-restocking-bi-table--products tbody td:nth-child(7)::before { content: 'Bajo umbral'; }
+  .vg-restocking-bi-table--products tbody td:nth-child(8)::before { content: 'Merma comercial'; }
+  .vg-restocking-bi-table--products tbody td:nth-child(9)::before { content: 'Tasa caducidad'; }
+
+  .vg-restocking-bi-table--restockers tbody td:nth-child(1)::before { content: 'Reponedor'; }
+  .vg-restocking-bi-table--restockers tbody td:nth-child(2)::before { content: 'Estado'; }
+  .vg-restocking-bi-table--restockers tbody td:nth-child(3)::before { content: 'Visitas'; }
+  .vg-restocking-bi-table--restockers tbody td:nth-child(4)::before { content: 'Turnos'; }
+  .vg-restocking-bi-table--restockers tbody td:nth-child(5)::before { content: 'Máq./turno'; }
+  .vg-restocking-bi-table--restockers tbody td:nth-child(6)::before { content: 'Parada media'; }
+  .vg-restocking-bi-table--restockers tbody td:nth-child(7)::before { content: 'L1 resueltas'; }
+  .vg-restocking-bi-table--restockers tbody td:nth-child(8)::before { content: 'Escaladas SAT'; }
+  .vg-restocking-bi-table--restockers tbody td:nth-child(9)::before { content: 'Arqueos OK / descuadre'; }
+  .vg-restocking-bi-table--restockers tbody td:nth-child(10)::before { content: 'Exactitud'; }
+  .vg-restocking-bi-table--restockers tbody td:nth-child(11)::before { content: 'Merma comercial'; }
+}
+
+@media (min-width: 560px) and (max-width: 840px) {
+  .vg-restocking-bi-table tbody tr {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/*
  * Portal de sede · Pestañas de sección.
  *
  * A 360 px los tres botones se encogían y el texto se partía dentro de los
