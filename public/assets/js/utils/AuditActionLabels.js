@@ -257,6 +257,10 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'RESTOCKER_VAN_STOCK_ADJUSTED', label: 'Ajuste Manual de Lote en Furgoneta', tone: 'warning', group: 'restock' },
   { code: 'RESTOCKER_VAN_STOCK_RECONCILED', label: 'Liquidación de Stock de Furgoneta', tone: 'info', group: 'restock' },
   { code: 'RESTOCK_VISIT_COMPLETED', label: 'Visita de Reposición Completada', tone: 'success', group: 'restock' },
+  // Módulo 38: la descarga del cuadro de mando de reposición se audita con
+  // `entity_id = 0` bajo `MACHINE_RESTOCK_VISIT`; sin etiqueta el visor
+  // mostraría el código crudo (`QA-1`, Art. III.3).
+  { code: 'EXPORT_RESTOCKING_BI_CSV', label: 'Exportación CSV de Métricas de Carga y Reposición', tone: 'neutral', group: 'restock' },
   // Módulo 37: la revocación automática del desvío por cierre de turno, ausencia
   // o baja del receptor se audita con acción propia (`QA-3`, `C1`).
   { code: 'RESTOCK_ROUTE_REASSIGNMENT_AUTO_REVOKED', label: 'Revocación Automática de Desvío de Ruta', tone: 'warning', group: 'restock' },
