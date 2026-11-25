@@ -2328,7 +2328,7 @@ details.vg-guide-accordion__disclosure:not([open]) .vg-guide-accordion__body {
   display: flex;
   gap: 6px;
   margin-bottom: 14px;
-  background: #e5f2fc;
+  background: var(--color-primary-subtle);
   padding: 4px;
   border-radius: 8px;
 }
