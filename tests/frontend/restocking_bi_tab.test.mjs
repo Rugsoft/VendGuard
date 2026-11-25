@@ -9,7 +9,7 @@
  *   4. Tres tablas con insignias «Baja» y «Planograma sobredimensionado».
  *   5. Dos gráficos Chart.js con tokens computados, recreación y degradación.
  *   6. Integración en `CoordinatorMetricsView` con la barra global oculta.
- *   7. Etiqueta de auditoría, precache `v33` y cero hexadecimales.
+ *   7. Etiqueta de auditoría, precache `v34` y cero hexadecimales.
  *
  * Dogma Vanilla: Node.js ESM nativo, sin dependencias externas ni red.
  */
@@ -782,9 +782,9 @@ async function runTests() {
     )
   );
   assert(
-    '7.6 El Service Worker precachea el componente y sube la caché a v33',
+    '7.6 El Service Worker precachea el componente y sube la caché a v34',
     swSource.includes('/assets/js/components/CoordinatorRestockingBiTab.js')
-      && /const CACHE_NAME = 'vendguard-app-shell-v33'/.test(swSource)
+      && /const CACHE_NAME = 'vendguard-app-shell-v34'/.test(swSource)
   );
   assert(
     '7.7 El fichero precacheado existe en disco',

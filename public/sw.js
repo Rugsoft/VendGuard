@@ -22,7 +22,7 @@
 'use strict';
 
 /** Nombre de caché versionado (contratos §2.2). Subirlo es lo que invalida el shell. */
-const CACHE_NAME = 'vendguard-app-shell-v33';
+const CACHE_NAME = 'vendguard-app-shell-v34';
 
 /** Prefijo de la superficie HTTP que jamás entra en caché (Art. V.4). */
 const API_PATH_PREFIX = '/api/';
@@ -60,6 +60,8 @@ const APP_SHELL_ASSETS = [
   // Utilidades
   '/assets/js/utils/AuditActionLabels.js',
   '/assets/js/utils/DateTimeFormat.js',
+  '/assets/js/utils/DexAuditOfflineQueue.js',
+  '/assets/js/utils/EvaDtsClientPreview.js',
   '/assets/js/utils/IncidentStatusPermissions.js',
   '/assets/js/utils/MapZoomPan.js',
   '/assets/js/utils/Mercator.js',
