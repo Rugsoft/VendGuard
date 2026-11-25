@@ -67,10 +67,13 @@ flowchart LR
   - **Verificación:** `php tests/unit/EvaDtsParserAndCatalogTest.php`
   - **Cierre (2026-11-25):** `EvaDtsParserAndCatalogTest.php` · **45/45 aserciones · `exit=0`**. Creados `DexAuditValidationException` (`422`, código funcional y detalle) y `DexAuditConflictException` (`409`, código funcional y detalle), `EvaDtsEventCatalog` (prelación térmica `EG*`/`TEMP_*`/`REFR_*`/`COOL_*`/`DEFROST_*`/`EA1_TEMP*`/`EA2_TEMP*`/`E_TEMP*` → `THERMAL_REFRIGERATION` `CRITICAL`; `EA*`/`EB*`/`EC*`/`EJ*` y alias → `PAYMENT_MDB`; `EF*`/`EH*` y alias → `MECHANICAL_VEND`; `ED*`/`EE*` y alias → `POWER_CONTROLLER`; resto `OTHER` `INFO`) y `EvaDtsParser` con tope de 1 MB, rechazo de `\0` y controles peligrosos, conversión Windows-1252 → UTF-8, normalización CRLF/CR y espacios finales, envoltorio `DXS*`..`DXE*`, `VA1` obligatorio, duplicados `VA1`/`CA3`/`ID4` y `PA101`, escala `ID4` 0..4 (defecto 2), decimal explícito, cotas no negativas, `ID1` + aviso de identidad, `CA3` opcional, emparejamiento `PA1`+`PA2`, `EA1`/`EA2` con `EA202`/`EA203`/`EA205`, conteo de desconocidos y SHA-256 sobre el texto normalizado. Siguiente tarea pendiente: **T-DEX-05**.
 
-- [ ] **T-DEX-05 · Crear `DexSelectionMatcher` (`C4`) y `DexAuditValidator` (`D3`, `C1`, `C2`, `C6`, `QA-1`, `QA-2`, `Art. II.2`, `Art. V.1`)**
+- [x] **T-DEX-05 · Crear `DexSelectionMatcher` (`C4`) y `DexAuditValidator` (`D3`, `C1`, `C2`, `C6`, `QA-1`, `QA-2`, `Art. II.2`, `Art. V.1`)**
   - **Requisitos:** `RF-02.2`, `RF-03.1`, `RF-04.1`, `RF-04.2`, `RF-07.2`, `C1`, `C2`, `C4`, `C6`, `QA-1`, `QA-2`.
   - **Ficheros:** `src/Core/Service/DexSelectionMatcher.php`, `src/Core/Service/DexAuditValidator.php`, `tests/unit/DexSelectionMatcherAndValidatorTest.php` (crear).
   - **Verificación:** `php tests/unit/DexSelectionMatcherAndValidatorTest.php`
+  - **Cierre (2026-11-25):** `DexSelectionMatcherAndValidatorTest.php` · **49/49 aserciones · `exit=0`**. Creados `DexSelectionMatcher` (modo `HOT_DRINKS` informativo; pasos exacto y ceros a la izquierda con `'0'` preservado; `AMBIGUOUS` por carriles duplicados o por colisión de dos `PA1` sobre el mismo `slot_id`; `UNMAPPED`; carriles inactivos excluidos; copia enriquecida sin mutar la entrada) y `DexAuditValidator` (máquina activa/no borrada, perímetro `403` de Reponedor y Técnico, `409 SANITARY_DEX_BLOCKED` en cuarentena o avería `TEMPERATURE_COLD` abierta solo para Reponedor, `INITIAL_BASELINE`/`PREVIOUS_AUDIT`/`RESET_FALLBACK`/`UNAVAILABLE` con redondeo y `out_of_order_sync`, motivo de anulación `20..500` con tres bloques alfanuméricos, estado terminal `DEX_AUDIT_ALREADY_VOIDED` y neutralización CSV de `= + - @ \t \r`). Se añadió `DexAuditForbiddenException` (`403`) para expresar el rechazo de perímetro que exige `RF-03.1`. Siguiente tarea pendiente: **T-DEX-06**.
+
+---
 
 ---
 
