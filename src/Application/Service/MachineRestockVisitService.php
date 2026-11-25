@@ -81,6 +81,8 @@ final class MachineRestockVisitService
 
     private ?RestockRouteReadModelInterface $routeReadModel;
 
+    private ?DexAuditLinker $dexAuditLinks;
+
     public function __construct(
         MachineRestockVisitRepositoryInterface $visits,
         MachinePlanogramRepositoryInterface $planograms,
@@ -91,7 +93,8 @@ final class MachineRestockVisitService
         ?LocalFileUploader $uploader = null,
         ?CashCollectionRegistrarInterface $cashCollections = null,
         ?RestockRoutePlannerGatewayInterface $routeGateway = null,
-        ?RestockRouteReadModelInterface $routeReadModel = null
+        ?RestockRouteReadModelInterface $routeReadModel = null,
+        ?DexAuditLinker $dexAuditLinks = null
     ) {
         $this->visits = $visits;
         $this->planograms = $planograms;
@@ -103,6 +106,7 @@ final class MachineRestockVisitService
         $this->cashCollections = $cashCollections;
         $this->routeGateway = $routeGateway;
         $this->routeReadModel = $routeReadModel;
+        $this->dexAuditLinks = $dexAuditLinks;
     }
 
     /**
@@ -120,6 +124,10 @@ final class MachineRestockVisitService
     {
         $restockerId = $this->requireRestocker($actor);
         $mutationId = trim((string)($payload['client_mutation_id'] ?? ''));
+        $dexAuditId = DexAuditLinker::parseOptionalId($payload['dex_audit_id'] ?? null);
+        if ($dexAuditId !== null) {
+            $this->requireDexAuditLinks()->assertCompatible($dexAuditId, $machineId);
+        }
 
         if ($mutationId !== '') {
             $existing = $this->visits->findByClientMutationId($restockerId, $mutationId, false);
@@ -128,7 +136,7 @@ final class MachineRestockVisitService
             }
         }
 
-        return $this->transactions->runInTransaction(function () use ($machineId, $payload, $actor, $restockerId, $mutationId): array {
+        return $this->transactions->runInTransaction(function () use ($machineId, $payload, $actor, $restockerId, $mutationId, $dexAuditId): array {
             $context = $this->gateway->lockMachineContext($machineId, $restockerId);
             if ($context === null) {
                 throw MachineRestockVisitValidationException::machineNotFound($machineId);
@@ -262,6 +270,10 @@ final class MachineRestockVisitService
                 throw new \RuntimeException('La visita se insertó sin devolver una clave primaria.');
             }
 
+            if ($dexAuditId !== null) {
+                $this->requireDexAuditLinks()->linkToRestockVisit($dexAuditId, $machineId, $visitId);
+            }
+
             if ($status->isCompleted()) {
                 foreach ($lines as $line) {
                     if (($line['persist'] ?? false) !== true) {
@@ -331,6 +343,10 @@ final class MachineRestockVisitService
 
             if ($cashCollection !== null) {
                 $response['cash_collection'] = $cashCollection;
+            }
+
+            if ($dexAuditId !== null) {
+                $response['dex_audit_id'] = $dexAuditId;
             }
 
             return $response;
@@ -849,6 +865,15 @@ final class MachineRestockVisitService
      *
      * @return array<string, mixed>|null
      */
+    private function requireDexAuditLinks(): DexAuditLinker
+    {
+        if ($this->dexAuditLinks === null) {
+            throw new \LogicException('La visita declara dex_audit_id pero el enlazador de auditorías no está configurado.');
+        }
+
+        return $this->dexAuditLinks;
+    }
+
     private function cashCollectionPayload(array $payload): ?array
     {
         if (!array_key_exists('cash_collection', $payload) || $payload['cash_collection'] === null) {

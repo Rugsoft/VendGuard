@@ -52,15 +52,19 @@ final class RestockerSatSynergyService
 
     private LocalFileUploader $uploader;
 
+    private ?DexAuditLinker $dexAuditLinks;
+
     public function __construct(
         private readonly RestockerSatSynergyGatewayInterface $gateway,
         ?callable $technicianResolver = null,
         ?callable $notifier = null,
-        ?LocalFileUploader $uploader = null
+        ?LocalFileUploader $uploader = null,
+        ?DexAuditLinker $dexAuditLinks = null
     ) {
         $this->technicianResolver = $technicianResolver;
         $this->notifier = $notifier;
         $this->uploader = $uploader ?? new LocalFileUploader();
+        $this->dexAuditLinks = $dexAuditLinks;
     }
 
     /**
@@ -222,6 +226,16 @@ final class RestockerSatSynergyService
             throw new InvalidArgumentException('La máquina del escalado no es válida.');
         }
 
+        $dexAuditId = DexAuditLinker::parseOptionalId($payload['dex_audit_id'] ?? null);
+        if ($dexAuditId !== null) {
+            if ($this->dexAuditLinks === null) {
+                throw new \LogicException('El escalado declara dex_audit_id pero el enlazador de auditorías no está configurado.');
+            }
+            // Se valida antes de crear el expediente: un vínculo imposible no puede
+            // dejar un ticket SAT huérfano por un error del cliente (QA-5).
+            $this->dexAuditLinks->assertCompatible($dexAuditId, $machineId);
+        }
+
         // El contrato HTTP habla de `workshop_internal_note`; la clave corta se
         // conserva para los llamadores internos y ambas viajan al gateway.
         $rawNote = $payload['workshop_internal_note'] ?? $payload['internal_note'] ?? null;
@@ -261,6 +275,13 @@ final class RestockerSatSynergyService
         }
 
         $result = $this->gateway->escalateToSat($machineId, $actor, $payload, $mutation);
+        if ($dexAuditId !== null
+            && ($result['ok'] ?? false) === true
+            && (int)($result['incident_id'] ?? 0) > 0) {
+            $this->dexAuditLinks->linkToIncident($dexAuditId, $machineId, (int)$result['incident_id']);
+            $result['dex_audit_id'] = $dexAuditId;
+        }
+
         // C2: un reenvío idempotente ya encoló su aviso la primera vez; repetirlo
         // duplicaría la notificación al técnico y al reponedor.
         if (($result['ok'] ?? false) === true

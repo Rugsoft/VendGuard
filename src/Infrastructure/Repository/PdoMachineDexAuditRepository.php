@@ -555,6 +555,101 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
     /**
      * {@inheritdoc}
      */
+    public function findLinkTargetForUpdate(int $auditId): ?array
+    {
+        if ($auditId <= 0) {
+            return null;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT id, machine_id, status, restock_visit_id, cash_collection_id, incident_id
+             FROM machine_dex_audits
+             WHERE id = :audit_id
+             FOR UPDATE'
+        );
+        $stmt->bindValue(':audit_id', $auditId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : [
+            'id' => (int)$row['id'],
+            'machine_id' => (int)$row['machine_id'],
+            'status' => (string)$row['status'],
+            'restock_visit_id' => $row['restock_visit_id'] === null ? null : (int)$row['restock_visit_id'],
+            'cash_collection_id' => $row['cash_collection_id'] === null ? null : (int)$row['cash_collection_id'],
+            'incident_id' => $row['incident_id'] === null ? null : (int)$row['incident_id'],
+        ];
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function linkToRestockVisit(int $auditId, int $restockVisitId): void
+    {
+        $this->linkColumn($auditId, 'restock_visit_id', $restockVisitId);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function linkToCashCollection(int $auditId, int $cashCollectionId): void
+    {
+        $this->linkColumn($auditId, 'cash_collection_id', $cashCollectionId);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function linkToIncident(int $auditId, int $incidentId): void
+    {
+        $this->linkColumn($auditId, 'incident_id', $incidentId);
+    }
+
+    private function linkColumn(int $auditId, string $column, int $targetId): void
+    {
+        $allowed = ['restock_visit_id', 'cash_collection_id', 'incident_id'];
+        if ($auditId <= 0 || $targetId <= 0 || !in_array($column, $allowed, true)) {
+            throw new \InvalidArgumentException('El vínculo del volcado no es válido.');
+        }
+
+        try {
+            $stmt = $this->pdo->prepare(sprintf(
+                "UPDATE machine_dex_audits
+                 SET %s = :target_id, updated_at = NOW()
+                 WHERE id = :audit_id AND status = 'ACTIVE' AND %s IS NULL",
+                $column,
+                $column
+            ));
+            $stmt->bindValue(':target_id', $targetId, PDO::PARAM_INT);
+            $stmt->bindValue(':audit_id', $auditId, PDO::PARAM_INT);
+            $stmt->execute();
+        } catch (PDOException $exception) {
+            if (($exception->getCode() === '23505' || (int)($exception->errorInfo[1] ?? 0) === 23505)) {
+                throw new DexAuditConflictException(
+                    'El volcado ya está vinculado a otro registro operativo.',
+                    'DEX_AUDIT_ALREADY_LINKED',
+                    ['dex_audit_id' => $auditId, 'target' => $column, 'target_id' => $targetId],
+                    409,
+                    $exception
+                );
+            }
+
+            throw $exception;
+        }
+
+        if ($stmt->rowCount() === 0) {
+            throw new DexAuditConflictException(
+                'El volcado ya está vinculado a otro registro operativo.',
+                'DEX_AUDIT_ALREADY_LINKED',
+                ['dex_audit_id' => $auditId, 'target' => $column, 'target_id' => $targetId],
+                409
+            );
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function void(
         int $auditId,
         string $reason,

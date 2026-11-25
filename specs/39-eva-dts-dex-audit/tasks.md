@@ -100,10 +100,11 @@ flowchart LR
 
 ---
 
-- [ ] **T-DEX-08 · Integrar enlace opcional `dex_audit_id` con validación estricta (`404`/`409`/`422`, `QA-5`) en `MachineRestockVisitService`, `MachineCashCollectionService` y `RestockerSatSynergyService` sin alterar DDL ni mutar existencias**
+- [x] **T-DEX-08 · Integrar enlace opcional `dex_audit_id` con validación estricta (`404`/`409`/`422`, `QA-5`) en `MachineRestockVisitService`, `MachineCashCollectionService` y `RestockerSatSynergyService` sin alterar DDL ni mutar existencias**
   - **Requisitos:** `RF-04.3`, `RF-05.2`, `D1`, `D4`, `D5`, `C5`, `QA-5`.
   - **Ficheros:** `src/Application/Service/MachineRestockVisitService.php`, `src/Application/Service/MachineCashCollectionService.php`, `src/Application/Service/RestockerSatSynergyService.php`, más `tests/unit/DexAuditServiceIntegrationsTest.php` (crear).
   - **Verificación:** `php tests/unit/DexAuditServiceIntegrationsTest.php`
+  - **Cierre (2026-11-25):** `DexAuditServiceIntegrationsTest.php` · **19/19 aserciones · `exit=0`**. Creado `DexAuditLinker` con validación explícita `422 DEX_AUDIT_ID_INVALID`, `404 DEX_AUDIT_NOT_FOUND`, `422 DEX_AUDIT_MACHINE_MISMATCH`, `409 DEX_AUDIT_VOIDED` y `409 DEX_AUDIT_ALREADY_LINKED`, repetición idempotente del mismo destino y escritura limitada a `restock_visit_id`, `cash_collection_id` o `incident_id` bajo `FOR UPDATE`, sin tocar DDL, existencias ni `current_estimated_qty`. Los tres servicios aceptan `dex_audit_id` opcional y lo pre-validan antes de escribir: M34 enlaza la visita dentro de su transacción (404 sin insertar), M35 enlaza la bolsa tras el alta (404 sin insertar) y M36 valida antes de crear el ticket SAT y enlaza el expediente resultante. Se añadieron `findLinkTargetForUpdate`, `linkToRestockVisit`, `linkToCashCollection` y `linkToIncident` al repositorio PDO, con traducción de `23505` a `409`; `PdoMachineDexAuditRepositoryTest` **40/40 · residuo 0**. Regresiones: `MachineRestockVisitServiceTest` **67/67**, `MachineCashCollectionServiceTest` **40/40**, `RestockerSatSynergyServiceTest` **40/40** y `MachineDexAuditServiceTest` **29/29**, todas `exit=0`. Siguiente tarea pendiente: **T-DEX-09**.
 
 ---
 

@@ -257,6 +257,38 @@ final class Dex07FakeRepository implements MachineDexAuditRepositoryInterface
         ];
     }
 
+    public function findLinkTargetForUpdate(int $auditId): ?array
+    {
+        if (!isset($this->audits[$auditId])) {
+            return null;
+        }
+        $audit = $this->audits[$auditId];
+
+        return [
+            'id' => $auditId,
+            'machine_id' => (int)$audit['machine_id'],
+            'status' => (string)$audit['status'],
+            'restock_visit_id' => isset($audit['restock_visit_id']) ? (int)$audit['restock_visit_id'] : null,
+            'cash_collection_id' => isset($audit['cash_collection_id']) ? (int)$audit['cash_collection_id'] : null,
+            'incident_id' => isset($audit['incident_id']) ? (int)$audit['incident_id'] : null,
+        ];
+    }
+
+    public function linkToRestockVisit(int $auditId, int $restockVisitId): void
+    {
+        $this->audits[$auditId]['restock_visit_id'] = $restockVisitId;
+    }
+
+    public function linkToCashCollection(int $auditId, int $cashCollectionId): void
+    {
+        $this->audits[$auditId]['cash_collection_id'] = $cashCollectionId;
+    }
+
+    public function linkToIncident(int $auditId, int $incidentId): void
+    {
+        $this->audits[$auditId]['incident_id'] = $incidentId;
+    }
+
     public function void(int $auditId, string $reason, int $voidedBy, string $voidedByName, string $voidedAt): array
     {
         $this->audits[$auditId]['status'] = 'VOIDED';

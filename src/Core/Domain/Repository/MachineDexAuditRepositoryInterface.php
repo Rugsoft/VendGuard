@@ -114,6 +114,28 @@ interface MachineDexAuditRepositoryInterface
     public function kpisForCoordinator(array $filters = []): array;
 
     /**
+     * Cabecera mínima del volcado bajo cerrojo, para validar y enlazar M34/M35/M36 (QA-5).
+     *
+     * @return array{id:int, machine_id:int, status:string, restock_visit_id:int|null, cash_collection_id:int|null, incident_id:int|null}|null
+     */
+    public function findLinkTargetForUpdate(int $auditId): ?array;
+
+    /**
+     * Enlaza el volcado con una visita M34 si el vínculo sigue libre.
+     */
+    public function linkToRestockVisit(int $auditId, int $restockVisitId): void;
+
+    /**
+     * Enlaza el volcado con una recaudación M35 si el vínculo sigue libre.
+     */
+    public function linkToCashCollection(int $auditId, int $cashCollectionId): void;
+
+    /**
+     * Enlaza el volcado con un expediente M36 si el vínculo sigue libre.
+     */
+    public function linkToIncident(int $auditId, int $incidentId): void;
+
+    /**
      * Anula lógicamente un volcado `ACTIVE` y devuelve el detalle resultante.
      *
      * @return array<string, mixed>

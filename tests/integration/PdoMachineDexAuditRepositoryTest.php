@@ -524,6 +524,33 @@ try {
     $auditB = $repository->create($makeAudit('DEX-2026-0002', '2026-11-19 10:00:00+00', $payloadB));
     $auditBId = (int)$auditB->getId();
 
+    $linkTarget = $repository->findLinkTargetForUpdate($auditBId);
+    $assert(
+        '3.9 findLinkTargetForUpdate entrega la cabecera bajo cerrojo sin vínculos',
+        $linkTarget !== null
+            && $linkTarget['machine_id'] === $machineId
+            && $linkTarget['status'] === 'ACTIVE'
+            && $linkTarget['restock_visit_id'] === null
+            && $linkTarget['cash_collection_id'] === null
+            && $linkTarget['incident_id'] === null
+    );
+
+    $repository->linkToRestockVisit($auditBId, $visit1);
+    $repository->linkToCashCollection($auditBId, $collection1);
+    $repository->linkToIncident($auditBId, $incidentId);
+    $linkedB = $repository->findById($auditBId);
+    $assert(
+        '3.10 Los tres vínculos M34/M35/M36 se persisten en el volcado',
+        $linkedB !== null
+            && $linkedB['restock_visit_id'] === $visit1
+            && $linkedB['cash_collection_id'] === $collection1
+            && $linkedB['incident_id'] === $incidentId
+    );
+    $assert(
+        '3.11 Un segundo vínculo del mismo tipo responde 409 DEX_AUDIT_ALREADY_LINKED',
+        $expectConflict(static fn () => $repository->linkToRestockVisit($auditBId, $visit2), 'DEX_AUDIT_ALREADY_LINKED')
+    );
+
     $payloadC = "DXS*COMM-DEX06*VA*DEX 6.0\nVA1*4550*51\nEA1*EG01*20261121*091500\nDXE*FIN";
     $auditC = $repository->create(
         $makeAudit(
