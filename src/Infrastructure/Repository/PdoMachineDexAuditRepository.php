@@ -314,6 +314,33 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
     /**
      * {@inheritdoc}
      */
+    public function findByActorMutation(int $importedBy, string $clientMutationId): ?array
+    {
+        $mutation = trim($clientMutationId);
+        if ($importedBy <= 0 || $mutation === '') {
+            return null;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT id, machine_id, status FROM machine_dex_audits
+             WHERE imported_by = :imported_by AND client_mutation_id = :client_mutation_id
+             LIMIT 1'
+        );
+        $stmt->bindValue(':imported_by', $importedBy, PDO::PARAM_INT);
+        $stmt->bindValue(':client_mutation_id', $mutation, PDO::PARAM_STR);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : [
+            'id' => (int)$row['id'],
+            'machine_id' => (int)$row['machine_id'],
+            'status' => (string)$row['status'],
+        ];
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function findPreviousActive(int $machineId, string $capturedAt, ?int $excludeAuditId = null): ?array
     {
         if ($machineId <= 0 || trim($capturedAt) === '') {

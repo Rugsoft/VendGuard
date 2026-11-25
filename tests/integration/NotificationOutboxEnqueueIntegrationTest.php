@@ -791,6 +791,7 @@ $expectedBusinessTemplates = array_values(array_filter(
         NotificationTemplate::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT->value,
         NotificationTemplate::INCIDENT_REOPENED_IN_SITU_SITE->value,
         NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT->value,
+        NotificationTemplate::DEX_THERMAL_EVENT_ALERT->value,
     ], true)
 ));
 $observedTemplates = array_map(
@@ -801,8 +802,8 @@ sort($expectedBusinessTemplates);
 sort($observedTemplates);
 
 $assert(
-    'T-NOTIF-10: el catálogo cerrado mantiene exactamente 22 plantillas',
-    count(NotificationTemplate::cases()) === 22
+    'T-NOTIF-10: el catálogo cerrado mantiene exactamente 23 plantillas',
+    count(NotificationTemplate::cases()) === 23
 );
 $assert(
     'T-NOTIF-10: los 17 eventos de negocio del catálogo quedan encolados por esta suite',

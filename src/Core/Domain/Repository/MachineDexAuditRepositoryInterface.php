@@ -71,6 +71,13 @@ interface MachineDexAuditRepositoryInterface
     public function findActiveIdByHash(int $machineId, string $sha256Hash): ?int;
 
     /**
+     * Volcado de un actor con esa mutación de cliente, para el replay Offline (C5).
+     *
+     * @return array{id:int, machine_id:int, status:string}|null
+     */
+    public function findByActorMutation(int $importedBy, string $clientMutationId): ?array;
+
+    /**
      * Último `ACTIVE` de la máquina con `captured_at <= $capturedAt` (QA-2).
      *
      * `$excludeAuditId` permite calcular el predecesor efectivo de un volcado ya

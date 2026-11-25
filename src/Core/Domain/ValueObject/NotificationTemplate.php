@@ -46,6 +46,9 @@ enum NotificationTemplate: string
     // 5. Relevo de fin de turno (Módulo 21)
     case TELEGRAM_INCIDENT_ASSIGNMENT              = 'TELEGRAM_INCIDENT_ASSIGNMENT';
 
+    // 6. Auditoría local EVA-DTS (Módulo 39, QA-4, Art. II)
+    case DEX_THERMAL_EVENT_ALERT                   = 'DEX_THERMAL_EVENT_ALERT';
+
     /**
      * Etiqueta descriptiva en castellano.
      */
@@ -74,6 +77,7 @@ enum NotificationTemplate: string
             self::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT => 'Alerta a Coordinación por Posponer una Parada Crítica de Frío',
             self::INCIDENT_REOPENED_IN_SITU_SITE => 'Aviso a Sede de Reapertura In Situ',
             self::TELEGRAM_INCIDENT_ASSIGNMENT => 'Aviso Prioritario de Relevo al Técnico',
+            self::DEX_THERMAL_EVENT_ALERT => 'Alerta Térmica en Volcado EVA-DTS (.dex)',
         };
     }
 
@@ -90,6 +94,7 @@ enum NotificationTemplate: string
             self::SLA_IMMINENCE_2H_UNASSIGNED,
             self::SLA_IMMINENCE_3H_UNSTARTED,
             self::CHRONIC_BREAKDOWN_ALERT,
+            self::DEX_THERMAL_EVENT_ALERT,
             self::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT => NotificationPriority::CRITICAL_SANITARY,
             self::TELEGRAM_INCIDENT_ASSIGNMENT => NotificationPriority::PRIORITY,
             default => NotificationPriority::STANDARD,

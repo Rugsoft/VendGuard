@@ -92,10 +92,13 @@ flowchart LR
 
 ### Fase 4 · Capa de Aplicación e Integraciones M34 / M35 / M36
 
-- [ ] **T-DEX-07 · Implementar `MachineDexAuditService` (importación en 3 puertas, deltas `QA-2`, cruces `QA-3`, alerta térmica Outbox anti-spam `QA-4`, sugerencia M36/M16, anulación `VOIDED`, volcado Offline y CSV UTF-8 BOM)**
+- [x] **T-DEX-07 · Implementar `MachineDexAuditService` (importación en 3 puertas, deltas `QA-2`, cruces `QA-3`, alerta térmica Outbox anti-spam `QA-4`, sugerencia M36/M16, anulación `VOIDED`, volcado Offline y CSV UTF-8 BOM)**
   - **Requisitos:** `RF-02`–`RF-07`, `RNF-01`–`RNF-04`, `D1`–`D6`, `C1`–`C6`, `QA-1`–`QA-5`, `Art. II`, `Art. III.3`, `Art. V.1`, `Art. V.4`.
   - **Ficheros:** `src/Application/Service/MachineDexAuditService.php`, `tests/unit/MachineDexAuditServiceTest.php` (crear).
   - **Verificación:** `php tests/unit/MachineDexAuditServiceTest.php`
+  - **Cierre (2026-11-25):** `MachineDexAuditServiceTest.php` · **29/29 aserciones · `exit=0`**. Creado `MachineDexAuditService` con importación en las tres puertas (origen ↔ rol, perímetro y primacía sanitaria vía `DexAuditValidator`), parseo y emparejamiento `PA1`, deltas `QA-2` con `out_of_order_sync`, delta por carril y fallback de reseteo, replay idempotente por `(actor, client_mutation_id)` y `409` en máquina distinta, duplicado de huella `409`, alerta `DEX_THERMAL_EVENT_ALERT` solo en `PERISHABLE_FOOD`/`COMBO` y solo ante evento nuevo o `count_since_init` incrementado, con `dedup_key = dex_thermal:{machineId}:{auditId}`, sugerencia M36/M16 con códigos y Nota Interna, anulación lógica validada y CSV UTF-8 BOM con `;`, fechas `Europe/Madrid` y neutralización de fórmulas. Se completó el catálogo PHP con `NotificationTemplate::DEX_THERMAL_EVENT_ALERT` (23 plantillas) y su renderizado, y se añadió `findByActorMutation` al repositorio PDO. Siguiente tarea pendiente: **T-DEX-08**.
+
+---
 
 - [ ] **T-DEX-08 · Integrar enlace opcional `dex_audit_id` con validación estricta (`404`/`409`/`422`, `QA-5`) en `MachineRestockVisitService`, `MachineCashCollectionService` y `RestockerSatSynergyService` sin alterar DDL ni mutar existencias**
   - **Requisitos:** `RF-04.3`, `RF-05.2`, `D1`, `D4`, `D5`, `C5`, `QA-5`.

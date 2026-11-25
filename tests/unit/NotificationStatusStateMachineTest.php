@@ -132,7 +132,7 @@ $assert('3.6 NotificationPriority ordena sanitaria < prioritaria < ordinaria',
     NotificationPriority::CRITICAL_SANITARY->rank() < NotificationPriority::PRIORITY->rank()
     && NotificationPriority::PRIORITY->rank() < NotificationPriority::STANDARD->rank());
 
-$assert('3.7 NotificationTemplate declara las 22 plantillas cerradas', count(NotificationTemplate::cases()) === 22);
+$assert('3.7 NotificationTemplate declara las 22 plantillas cerradas', count(NotificationTemplate::cases()) === 23);
 $assert('3.8 COLD_CHAIN_IMMEDIATE_ALERT asigna prioridad crítica sanitaria por defecto', NotificationTemplate::COLD_CHAIN_IMMEDIATE_ALERT->defaultPriority() === NotificationPriority::CRITICAL_SANITARY);
 $assert('3.9 INCIDENT_OPENED_SITE asigna prioridad estándar por defecto', NotificationTemplate::INCIDENT_OPENED_SITE->defaultPriority() === NotificationPriority::STANDARD);
 $assert('3.10 TELEGRAM_INCIDENT_ASSIGNMENT asigna prioridad operativa prioritaria',

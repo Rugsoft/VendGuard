@@ -549,6 +549,23 @@ final class NotificationMessageRenderer
                 ),
                 note: 'Aviso prioritario de relevo. La nota interna de taller permanece en el expediente y no se incluye en este mensaje.',
             ),
+
+            NotificationTemplate::DEX_THERMAL_EVENT_ALERT => $this->draft(
+                subject: '🌡️ Alerta térmica en volcado .dex' . $ticketSuffix,
+                eyebrow: 'ALERTA TÉRMICA · EVA-DTS',
+                title: 'Evento de refrigeración nuevo o incrementado',
+                intro: 'Un volcado EVA-DTS ha detectado un evento térmico nuevo o incrementado en una máquina de frío. '
+                    . 'Revise la cadena de frío en la próxima visita; este aviso no abre tickets ni cuarentenas automáticamente.',
+                details: $this->mergeRows(
+                    $this->dossierRows($payload, false),
+                    [
+                        $this->row('Códigos EA1/EA2', $this->text($payload, 'event_codes')),
+                        $this->row('Capturado', $this->dateText($payload, 'captured_at')),
+                    ]
+                ),
+                warning: 'Aviso sanitario preventivo. La máquina no se bloquea de forma desatendida (Art. II).',
+                warningTone: 'critical',
+            ),
         };
 
         $audience = $this->trackingLinks->audienceFor($template);

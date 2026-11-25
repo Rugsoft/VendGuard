@@ -1,0 +1,618 @@
+<?php
+
+declare(strict_types=1);
+
+namespace VendGuard\Application\Service;
+
+use DateTimeImmutable;
+use DateTimeZone;
+use VendGuard\Core\Domain\Enum\DexAuditStatus;
+use VendGuard\Core\Domain\Enum\DexImportSource;
+use VendGuard\Core\Domain\Exception\DexAuditConflictException;
+use VendGuard\Core\Domain\Exception\DexAuditForbiddenException;
+use VendGuard\Core\Domain\Exception\DexAuditValidationException;
+use VendGuard\Core\Domain\Model\MachineDexAudit;
+use VendGuard\Core\Domain\Model\NotificationOutboxItem;
+use VendGuard\Core\Domain\Repository\MachineDexAuditGatewayInterface;
+use VendGuard\Core\Domain\Repository\MachineDexAuditRepositoryInterface;
+use VendGuard\Core\Domain\Repository\NotificationOutboxRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\NotificationChannel;
+use VendGuard\Core\Domain\ValueObject\NotificationPriority;
+use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
+use VendGuard\Core\Service\DexAuditValidator;
+use VendGuard\Core\Service\DexSelectionMatcher;
+use VendGuard\Core\Service\EvaDtsParser;
+
+/**
+ * MachineDexAuditService
+ *
+ * Orquestación del Módulo 39 (RF-02–RF-07, RNF-01–RNF-04, D1–D6, C1–C6,
+ * QA-1–QA-5, Art. II, Art. III.3, Art. V.1 y Art. V.4).
+ *
+ * **Importación en tres puertas.** El origen declarado manda: `RESTOCKER_ROUTE`
+ * solo lo usa un Reponedor, `TECHNICIAN_ROUTE` un Técnico y
+ * `COORDINATOR_CONSOLE` Coordinación. La máquina se bloquea con
+ * `lockMachineContext()`, se aplican perímetro y primacía sanitaria y solo
+ * después se parsea, se emparejan las selecciones y se calculan deltas.
+ *
+ * **Deltas y desorden (QA-2, C1).** El predecesor es el último `ACTIVE` con
+ * `captured_at <=`; `out_of_order_sync` se marca si ya existe uno posterior. Un
+ * retroceso usa los parciales `VA103`/`VA104`/`PA203` o queda `UNAVAILABLE`.
+ *
+ * **Offline idempotente (C5).** La misma `(imported_by, client_mutation_id)` en
+ * la misma máquina devuelve el volcado existente con `idempotent_replay = true`;
+ * en otra máquina es `409 CLIENT_MUTATION_ID_ALREADY_USED`.
+ *
+ * **Alerta térmica anti-spam (QA-4, Art. II).** Solo en `PERISHABLE_FOOD` o
+ * `COMBO`, y solo si el evento térmico es nuevo o su `count_since_init`
+ * incrementa respecto al predecesor, se encola `DEX_THERMAL_EVENT_ALERT` con
+ * `dedup_key = dex_thermal:{machineId}:{auditId}`. Nunca crea tickets ni cambia
+ * `sanitary_status`.
+ *
+ * **Sugerencia en un toque (D4).** Los eventos `CRITICAL`/`WARNING` generan
+ * `suggested_escalation_payload` con la categoría de avería, la nota interna con
+ * los códigos y la acción de UI según el rol.
+ *
+ * **Anulación y CSV (C6, Art. V.1).** `voidAudit()` valida el motivo y delega la
+ * transición terminal; `exportCsv()` emite BOM UTF-8, separador `;`, fechas en
+ * `Europe/Madrid` y celdas neutralizadas contra fórmulas.
+ *
+ * El servicio no escribe SQL ni conoce PDO: compone los puertos de dominio.
+ *
+ * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas.
+ * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
+ */
+final class MachineDexAuditService
+{
+    public const ACTION_ESCALATE_TO_SAT = 'ESCALATE_TO_SAT';
+    public const ACTION_OPEN_OPPORTUNISTIC_INCIDENT = 'OPEN_OPPORTUNISTIC_INCIDENT';
+    public const ACTION_VIEW_IN_COORDINATION = 'VIEW_IN_COORDINATION';
+    public const THERMAL_DEDUP_PREFIX = 'dex_thermal:';
+    public const COLD_CHAIN_MACHINE_TYPES = ['PERISHABLE_FOOD', 'COMBO'];
+    public const MAX_CSV_ROWS = 500;
+
+    /** Puerta de entrada → rol autorizado (RF-03.1). */
+    private const SOURCE_ROLE_MAP = [
+        'RESTOCKER_ROUTE' => 'RESTOCKER',
+        'TECHNICIAN_ROUTE' => 'TECHNICIAN',
+        'COORDINATOR_CONSOLE' => 'COORDINATOR',
+    ];
+
+    /** Familia de evento → categoría de avería sugerida (D4). */
+    private const CATEGORY_TO_INCIDENT = [
+        'THERMAL_REFRIGERATION' => 'TEMPERATURE_COLD',
+        'PAYMENT_MDB' => 'PAYMENT_SYSTEM',
+        'MECHANICAL_VEND' => 'PRODUCT_JAM',
+        'POWER_CONTROLLER' => 'ELECTRICAL_OFF',
+        'OTHER' => 'OTHER',
+    ];
+
+    public function __construct(
+        private readonly MachineDexAuditRepositoryInterface $repository,
+        private readonly MachineDexAuditGatewayInterface $gateway,
+        private readonly EvaDtsParser $parser,
+        private readonly DexSelectionMatcher $matcher,
+        private readonly DexAuditValidator $validator,
+        private readonly NotificationOutboxRepositoryInterface $outbox
+    ) {
+    }
+
+    /**
+     * Importa un `.dex` por cualquiera de las tres puertas.
+     *
+     * Claves obligatorias: `machine_id`, `actor_id`, `import_source`,
+     * `raw_payload`, `original_filename`, `captured_at`. Opcionales:
+     * `expected_machine_code`, `client_mutation_id`, `restock_visit_id`,
+     * `cash_collection_id`, `incident_id`.
+     *
+     * @param array<string, mixed> $request
+     * @return array{
+     *     audit: array<string, mixed>,
+     *     idempotent_replay: bool,
+     *     has_thermal_alert: bool,
+     *     thermal_alert_enqueued: bool,
+     *     suggested_escalation_payload: array<string, mixed>|null,
+     *     prefill_sales_counter_reading_eur: float|null
+     * }
+     */
+    public function importDex(array $request): array
+    {
+        $machineId = (int)($request['machine_id'] ?? 0);
+        $actorId = (int)($request['actor_id'] ?? 0);
+        $rawPayload = (string)($request['raw_payload'] ?? '');
+        $originalFilename = trim((string)($request['original_filename'] ?? ''));
+        $capturedAt = trim((string)($request['captured_at'] ?? ''));
+        $source = DexImportSource::tryFrom(strtoupper(trim((string)($request['import_source'] ?? ''))));
+
+        if ($machineId <= 0 || $actorId <= 0 || $rawPayload === ''
+            || $originalFilename === '' || $capturedAt === '' || $source === null) {
+            throw new DexAuditValidationException(
+                'La solicitud de importación .dex no trae máquina, actor, origen, fichero ni instante de captura válidos.',
+                'DEX_INVALID_IMPORT_REQUEST'
+            );
+        }
+
+        $context = $this->gateway->lockMachineContext($machineId, $actorId);
+        if ($context === null) {
+            throw new DexAuditValidationException(
+                'La máquina destino no existe, no está activa o el actor no existe.',
+                'MACHINE_NOT_FOUND',
+                ['machine_id' => $machineId, 'actor_id' => $actorId]
+            );
+        }
+
+        $role = strtoupper((string)($context['actor_role'] ?? ''));
+        if (($context['actor_is_active'] ?? false) !== true) {
+            throw new DexAuditForbiddenException(
+                'El usuario que intenta importar el .dex no está activo.',
+                'DEX_ACTOR_INACTIVE',
+                ['actor_id' => $actorId]
+            );
+        }
+
+        $expectedRole = self::SOURCE_ROLE_MAP[$source->value] ?? null;
+        if ($expectedRole === null || $expectedRole !== $role) {
+            throw new DexAuditForbiddenException(
+                sprintf('El origen %s no corresponde al rol %s.', $source->value, $role !== '' ? $role : 'desconocido'),
+                'DEX_IMPORT_SOURCE_ROLE_MISMATCH',
+                ['import_source' => $source->value, 'role' => $role]
+            );
+        }
+
+        $coversTerritory = match ($role) {
+            'RESTOCKER' => (bool)($context['is_covered_restocker'] ?? false),
+            'TECHNICIAN' => (bool)($context['is_covered_technician'] ?? false),
+            default => true,
+        };
+        $this->validator->assertImportAuthorized(
+            $role,
+            $coversTerritory,
+            (string)($context['sanitary_status'] ?? 'OK'),
+            (bool)($context['has_open_thermal_breakdown'] ?? false)
+        );
+
+        $parsed = $this->parser->parse($rawPayload, (string)($request['expected_machine_code'] ?? ($context['machine_code'] ?? '')));
+
+        $mutationId = isset($request['client_mutation_id']) && trim((string)$request['client_mutation_id']) !== ''
+            ? trim((string)$request['client_mutation_id'])
+            : null;
+
+        if ($mutationId !== null) {
+            $existing = $this->repository->findByActorMutation($actorId, $mutationId);
+            if ($existing !== null) {
+                if ($existing['machine_id'] !== $machineId) {
+                    throw new DexAuditConflictException(
+                        'El identificador de mutación ya se usó en otra máquina.',
+                        'CLIENT_MUTATION_ID_ALREADY_USED',
+                        ['client_mutation_id' => $mutationId, 'machine_id' => $machineId]
+                    );
+                }
+
+                $detail = $this->repository->findById($existing['id']);
+                if ($detail === null) {
+                    throw new DexAuditConflictException(
+                        'El volcado del replay no pudo releerse.',
+                        'DEX_AUDIT_NOT_FOUND',
+                        ['audit_id' => $existing['id']]
+                    );
+                }
+
+                return [
+                    'audit' => $detail,
+                    'idempotent_replay' => true,
+                    'has_thermal_alert' => (bool)($detail['has_thermal_alert'] ?? false),
+                    'thermal_alert_enqueued' => false,
+                    'suggested_escalation_payload' => null,
+                    'prefill_sales_counter_reading_eur' => $role === 'RESTOCKER'
+                        ? (float)($detail['va1_total_sales_eur'] ?? 0.0)
+                        : null,
+                ];
+            }
+        }
+
+        $existingId = $this->repository->findActiveIdByHash($machineId, $parsed['sha256_hash']);
+        if ($existingId !== null) {
+            throw new DexAuditConflictException(
+                'Ese mismo fichero ya está importado como volcado vigente en esta máquina.',
+                'DEX_DUPLICATE_HASH',
+                ['audit_id' => $existingId]
+            );
+        }
+
+        $previous = $this->repository->findPreviousActive($machineId, $capturedAt);
+        $previousDetail = $previous !== null ? $this->repository->findById((int)$previous['id']) : null;
+        $hasLater = $this->repository->hasLaterActive($machineId, $capturedAt);
+
+        $deltas = $this->validator->resolveDeltas(
+            (float)$parsed['va1_total_sales_eur'],
+            (int)$parsed['va1_total_vend_units'],
+            $parsed['va1_reset_sales_eur'],
+            $parsed['va1_reset_vend_units'],
+            $previous === null ? null : [
+                'id' => (int)$previous['id'],
+                'va1_total_sales_eur' => (float)$previous['va1_total_sales_eur'],
+                'va1_total_vend_units' => (int)$previous['va1_total_vend_units'],
+            ],
+            $hasLater
+        );
+
+        $matchedSelections = $this->matcher->match(
+            (string)($context['machine_type'] ?? ''),
+            $this->gateway->findActivePlanogramSlots($machineId),
+            $parsed['selections']
+        );
+        $matchedSelections = $this->applySelectionDeltas(
+            $matchedSelections,
+            $previousDetail['selections'] ?? [],
+            $deltas['counter_reset_detected']
+        );
+
+        $auditCode = $this->repository->reserveAuditCode(new DateTimeImmutable($capturedAt));
+        $audit = new MachineDexAudit(
+            id: null,
+            auditCode: $auditCode,
+            machineId: $machineId,
+            machineCodeSnapshot: (string)$context['machine_code'],
+            machineTypeSnapshot: (string)$context['machine_type'],
+            importedBy: $actorId,
+            importerRoleSnapshot: $role,
+            importerNameSnapshot: (string)($context['actor_name'] ?? 'Usuario'),
+            importSource: $source,
+            originalFilename: $originalFilename,
+            fileSizeBytes: (int)$parsed['byte_size'],
+            sha256Hash: (string)$parsed['sha256_hash'],
+            rawPayload: (string)$parsed['raw_payload_normalized'],
+            va1TotalSalesEur: (float)$parsed['va1_total_sales_eur'],
+            va1TotalVendUnits: (int)$parsed['va1_total_vend_units'],
+            deltaSource: (string)$deltas['delta_source'],
+            capturedAt: $capturedAt,
+            dxsCommId: $parsed['dxs_comm_id'],
+            dxsVersion: $parsed['dxs_version'],
+            dexMachineIdentifier: $parsed['dex_machine_identifier'],
+            identityMismatchWarning: (bool)$parsed['identity_mismatch_warning'],
+            id4DecimalPlaces: (int)$parsed['id4_decimal_places'],
+            ignoredUnknownLinesCount: (int)$parsed['ignored_unknown_lines_count'],
+            va1ResetSalesEur: $parsed['va1_reset_sales_eur'],
+            va1ResetVendUnits: $parsed['va1_reset_vend_units'],
+            ca3CashboxEur: $parsed['ca3_cashbox_eur'],
+            ca3CoinTubesEur: $parsed['ca3_coin_tubes_eur'],
+            ca3BillsInEur: $parsed['ca3_bills_in_eur'],
+            previousAuditId: $deltas['previous_audit_id'],
+            counterResetDetected: (bool)$deltas['counter_reset_detected'],
+            outOfOrderSync: (bool)$deltas['out_of_order_sync'],
+            deltaSalesEur: $deltas['delta_sales_eur'],
+            deltaVendUnits: $deltas['delta_vend_units'],
+            clientMutationId: $mutationId,
+            status: DexAuditStatus::ACTIVE,
+            restockVisitId: isset($request['restock_visit_id']) ? (int)$request['restock_visit_id'] : null,
+            cashCollectionId: isset($request['cash_collection_id']) ? (int)$request['cash_collection_id'] : null,
+            incidentId: isset($request['incident_id']) ? (int)$request['incident_id'] : null
+        );
+
+        $persisted = $this->repository->create($audit, $matchedSelections, $parsed['events']);
+        $auditId = (int)$persisted->getId();
+        $detail = $this->repository->findById($auditId) ?? [
+            'id' => $auditId,
+            'audit_code' => $auditCode,
+            'status' => 'ACTIVE',
+            'va1_total_sales_eur' => (float)$parsed['va1_total_sales_eur'],
+            'has_thermal_alert' => false,
+        ];
+
+        $thermal = $this->assessThermal(
+            (string)$context['machine_type'],
+            $previousDetail['events'] ?? [],
+            $parsed['events']
+        );
+
+        $enqueued = false;
+        if ($thermal['novel'] && $thermal['has_alert']) {
+            $enqueued = $this->enqueueThermalAlert($auditId, $auditCode, $machineId, $context, $thermal, $capturedAt, $parsed);
+        }
+
+        return [
+            'audit' => $detail,
+            'idempotent_replay' => false,
+            'has_thermal_alert' => $thermal['has_alert'],
+            'thermal_alert_enqueued' => $enqueued,
+            'suggested_escalation_payload' => $this->buildEscalationPayload($role, $auditId, $auditCode, $parsed['events']),
+            'prefill_sales_counter_reading_eur' => $role === 'RESTOCKER'
+                ? (float)$parsed['va1_total_sales_eur']
+                : null,
+        ];
+    }
+
+    /**
+     * Anula lógicamente un volcado con motivo real (C6, Art. V.1).
+     *
+     * @return array<string, mixed>
+     */
+    public function voidAudit(
+        int $auditId,
+        string $reason,
+        int $voidedBy,
+        string $voidedByName,
+        string $voidedAt
+    ): array {
+        $detail = $this->repository->findById($auditId);
+        if ($detail === null) {
+            throw new DexAuditConflictException(
+                'El volcado que se pretende anular no existe.',
+                'DEX_AUDIT_NOT_FOUND',
+                ['audit_id' => $auditId]
+            );
+        }
+
+        $this->validator->assertVoidable((string)$detail['status']);
+        $cleanReason = $this->validator->validateVoidReason($reason);
+        $cleanName = trim($voidedByName);
+        if ($voidedBy <= 0 || $cleanName === '' || trim($voidedAt) === '') {
+            throw new DexAuditValidationException(
+                'La anulación exige autor, nombre y fecha válidos.',
+                'DEX_INVALID_VOID_ACTOR',
+                ['audit_id' => $auditId]
+            );
+        }
+
+        return $this->repository->void($auditId, $cleanReason, $voidedBy, $cleanName, $voidedAt);
+    }
+
+    /**
+     * Exporta el listado filtrado a CSV UTF-8 BOM con separador `;` (RF-07.2).
+     *
+     * @param array<string, mixed> $filters
+     */
+    public function exportCsv(array $filters = []): string
+    {
+        $rows = $this->repository->listForCoordinator($filters, self::MAX_CSV_ROWS, 0);
+
+        $headers = [
+            'audit_code', 'machine_code', 'captured_at', 'status', 'import_source',
+            'va1_total_sales_eur', 'va1_total_vend_units', 'ca3_cashbox_eur',
+            'delta_sales_eur', 'delta_vend_units', 'identity_mismatch_warning',
+            'counter_reset_detected', 'out_of_order_sync', 'has_thermal_alert',
+        ];
+        $lines = [implode(';', $headers)];
+
+        foreach ($rows as $row) {
+            $values = [
+                (string)($row['audit_code'] ?? ''),
+                (string)($row['machine_code_snapshot'] ?? ''),
+                $this->formatCapturedAt((string)($row['captured_at'] ?? '')),
+                (string)($row['status'] ?? ''),
+                (string)($row['import_source'] ?? ''),
+                $this->decimal($row['va1_total_sales_eur'] ?? null),
+                (string)($row['va1_total_vend_units'] ?? ''),
+                $this->decimal($row['ca3_cashbox_eur'] ?? null),
+                $this->decimal($row['delta_sales_eur'] ?? null),
+                $this->decimal($row['delta_vend_units'] ?? null),
+                !empty($row['identity_mismatch_warning']) ? 'SI' : 'NO',
+                !empty($row['counter_reset_detected']) ? 'SI' : 'NO',
+                !empty($row['out_of_order_sync']) ? 'SI' : 'NO',
+                !empty($row['has_thermal_alert']) ? 'SI' : 'NO',
+            ];
+            $lines[] = implode(';', array_map(fn (string $value): string => $this->csvCell($value), $values));
+        }
+
+        return "\xEF\xBB\xBF" . implode("\r\n", $lines) . "\r\n";
+    }
+
+    /**
+     * @param list<array<string, mixed>> $selections
+     * @param list<array<string, mixed>> $previousSelections
+     * @return list<array<string, mixed>>
+     */
+    private function applySelectionDeltas(array $selections, array $previousSelections, bool $resetDetected): array
+    {
+        $previousByCode = [];
+        foreach ($previousSelections as $line) {
+            $code = (string)($line['normalized_selection_code'] ?? '');
+            if ($code !== '') {
+                $previousByCode[$code] = $line;
+            }
+        }
+
+        foreach ($selections as $index => $line) {
+            $selections[$index]['delta_vend_units'] = null;
+            $selections[$index]['delta_sales_eur'] = null;
+
+            if ($resetDetected) {
+                $selections[$index]['delta_vend_units'] = $line['reset_vend_units'] ?? null;
+                $selections[$index]['delta_sales_eur'] = $line['reset_sales_eur'] ?? null;
+                continue;
+            }
+
+            $previous = $previousByCode[(string)($line['normalized_selection_code'] ?? '')] ?? null;
+            if ($previous === null) {
+                continue;
+            }
+
+            $currentUnits = (int)($line['total_vend_units'] ?? 0);
+            $previousUnits = (int)($previous['total_vend_units'] ?? 0);
+            $currentSales = (float)($line['total_sales_eur'] ?? 0.0);
+            $previousSales = (float)($previous['total_sales_eur'] ?? 0.0);
+            if ($currentUnits < $previousUnits || $currentSales < $previousSales) {
+                continue;
+            }
+
+            $selections[$index]['delta_vend_units'] = $currentUnits - $previousUnits;
+            $selections[$index]['delta_sales_eur'] = round($currentSales - $previousSales, 2);
+        }
+
+        return $selections;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $previousEvents
+     * @param list<array<string, mixed>> $newEvents
+     * @return array{has_alert: bool, novel: bool, codes: list<string>, severity: string}
+     */
+    private function assessThermal(string $machineType, array $previousEvents, array $newEvents): array
+    {
+        $thermal = array_values(array_filter(
+            $newEvents,
+            static fn (array $event): bool => ($event['is_thermal_alert'] ?? false) === true
+        ));
+        if ($thermal === []) {
+            return ['has_alert' => false, 'novel' => false, 'codes' => [], 'severity' => 'INFO'];
+        }
+
+        $codes = array_values(array_unique(array_map(
+            static fn (array $event): string => (string)($event['event_code'] ?? ''),
+            $thermal
+        )));
+        $hasAlert = in_array(strtoupper(trim($machineType)), self::COLD_CHAIN_MACHINE_TYPES, true);
+        if (!$hasAlert) {
+            return ['has_alert' => false, 'novel' => false, 'codes' => $codes, 'severity' => 'CRITICAL'];
+        }
+
+        $previousThermal = array_values(array_filter(
+            $previousEvents,
+            static fn (array $event): bool => ($event['is_thermal_alert'] ?? false) === true
+        ));
+
+        if ($previousThermal === []) {
+            return ['has_alert' => true, 'novel' => true, 'codes' => $codes, 'severity' => 'CRITICAL'];
+        }
+
+        $previousByCode = [];
+        foreach ($previousThermal as $event) {
+            $code = (string)($event['event_code'] ?? '');
+            $previousByCode[$code] = max(
+                (int)($event['count_since_init'] ?? 0),
+                (int)($event['count_since_reset'] ?? 0)
+            );
+        }
+
+        foreach ($thermal as $event) {
+            $code = (string)($event['event_code'] ?? '');
+            if (!array_key_exists($code, $previousByCode)) {
+                return ['has_alert' => true, 'novel' => true, 'codes' => $codes, 'severity' => 'CRITICAL'];
+            }
+            $currentCount = (int)($event['count_since_init'] ?? 0);
+            if ($currentCount > $previousByCode[$code]) {
+                return ['has_alert' => true, 'novel' => true, 'codes' => $codes, 'severity' => 'CRITICAL'];
+            }
+        }
+
+        return ['has_alert' => true, 'novel' => false, 'codes' => $codes, 'severity' => 'CRITICAL'];
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     * @param array{has_alert: bool, novel: bool, codes: list<string>, severity: string} $thermal
+     * @param array<string, mixed> $parsed
+     */
+    private function enqueueThermalAlert(
+        int $auditId,
+        string $auditCode,
+        int $machineId,
+        array $context,
+        array $thermal,
+        string $capturedAt,
+        array $parsed
+    ): bool {
+        $item = new NotificationOutboxItem(
+            id: null,
+            incidentId: null,
+            channel: NotificationChannel::WEBHOOK,
+            priority: NotificationPriority::CRITICAL_SANITARY,
+            template: NotificationTemplate::DEX_THERMAL_EVENT_ALERT,
+            recipient: 'coordinacion@vendguard.es',
+            recipientRole: 'COORDINATOR',
+            recipientUserId: null,
+            recipientLocationId: null,
+            subject: 'Alerta térmica .dex · ' . $auditCode,
+            payload: [
+                'audit_id' => $auditId,
+                'audit_code' => $auditCode,
+                'machine_id' => $machineId,
+                'machine_code' => (string)($context['machine_code'] ?? ''),
+                'captured_at' => $capturedAt,
+                'event_codes' => implode(', ', $thermal['codes']),
+                'severity' => $thermal['severity'],
+                'id4_decimal_places' => (int)$parsed['id4_decimal_places'],
+            ],
+            dedupKey: self::THERMAL_DEDUP_PREFIX . $machineId . ':' . $auditId
+        );
+
+        return $this->outbox->enqueue($item) !== null;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $events
+     * @return array<string, mixed>|null
+     */
+    private function buildEscalationPayload(string $role, int $auditId, string $auditCode, array $events): ?array
+    {
+        $actionable = array_values(array_filter(
+            $events,
+            static fn (array $event): bool => in_array(
+                strtoupper((string)($event['severity'] ?? '')),
+                ['CRITICAL', 'WARNING'],
+                true
+            )
+        ));
+        if ($actionable === []) {
+            return null;
+        }
+
+        $codes = array_values(array_unique(array_map(
+            static fn (array $event): string => (string)($event['event_code'] ?? ''),
+            $actionable
+        )));
+        $hasCritical = false;
+        foreach ($actionable as $event) {
+            if (strtoupper((string)($event['severity'] ?? '')) === 'CRITICAL') {
+                $hasCritical = true;
+                break;
+            }
+        }
+
+        $firstCategory = strtoupper((string)($actionable[0]['event_category'] ?? 'OTHER'));
+        $action = match ($role) {
+            'RESTOCKER' => self::ACTION_ESCALATE_TO_SAT,
+            'TECHNICIAN' => self::ACTION_OPEN_OPPORTUNISTIC_INCIDENT,
+            default => self::ACTION_VIEW_IN_COORDINATION,
+        };
+
+        return [
+            'action' => $action,
+            'breakdown_category' => self::CATEGORY_TO_INCIDENT[$firstCategory] ?? 'OTHER',
+            'urgency' => $hasCritical ? 'CRITICAL' : 'HIGH',
+            'internal_note' => sprintf('[DEX %s] Códigos EA1/EA2: %s', $auditCode, implode(', ', $codes)),
+            'dex_audit_id' => $auditId,
+            'is_internal' => true,
+        ];
+    }
+
+    private function formatCapturedAt(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        try {
+            return (new DateTimeImmutable($value))
+                ->setTimezone(new DateTimeZone('Europe/Madrid'))
+                ->format('d/m/Y H:i');
+        } catch (\Exception) {
+            return $value;
+        }
+    }
+
+    private function decimal(mixed $value): string
+    {
+        return $value === null || $value === '' ? '' : number_format((float)$value, 2, '.', '');
+    }
+
+    private function csvCell(string $value): string
+    {
+        $safe = $this->validator->sanitizeCsvCell($value);
+        if (strpbrk($safe, ";\"\n\r") !== false) {
+            return '"' . str_replace('"', '""', $safe) . '"';
+        }
+
+        return $safe;
+    }
+}
