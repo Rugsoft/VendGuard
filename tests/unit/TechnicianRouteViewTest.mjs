@@ -24,6 +24,7 @@ globalThis.localStorage = {
 globalThis.sessionStorage = { ...globalThis.localStorage };
 
 // 2. Import components and store
+import { readFileSync } from 'node:fs';
 import { TechnicianRouteView } from '../../public/assets/js/views/TechnicianRouteView.js';
 import { api, ApiError } from '../../public/assets/js/api.js';
 import { TechnicianResolutionRefundBlock } from '../../public/assets/js/components/TechnicianResolutionRefundBlock.js';
@@ -31,6 +32,8 @@ import { store, setInternalSession, clearSession } from '../../public/assets/js/
 import { PendingInfoPauseModal } from '../../public/assets/js/components/PendingInfoPauseModal.js';
 import { AMBER_TECHNICAL_TOKENS } from '../../public/assets/js/utils/IncidentStatusPermissions.js';
 import { OfflineStorage } from '../../public/assets/js/utils/OfflineStorage.js';
+
+const stylesSource = readFileSync(new URL('../../public/assets/css/styles.css', import.meta.url), 'utf8');
 
 console.log('======================================================================');
 console.log(' VendGuard: Frontend Test Suite - TechnicianRouteView (T-38)');
@@ -287,6 +290,18 @@ assert('2.9 Quick guide is a native anchor to the printable static asset (Dogma 
   TechnicianRouteView.template.includes('href="/docs/guia_rapida_taller_repuestos_a4.html"') &&
   TechnicianRouteView.template.includes('target="_blank"') &&
   TechnicianRouteView.template.includes('rel="noopener"')
+);
+
+assert('2.10 La barra de pestañas del técnico usa una clase propia',
+  TechnicianRouteView.template.includes('class="vg-technician-tabs"')
+);
+
+assert('2.11 A ≤660 px la barra reserva el pasillo del lanzador y envuelve las pestañas',
+  /@media\s*\(max-width:\s*660px\)\s*\{[\s\S]*?\.vg-technician-tabs\s*\{[^}]*flex-wrap:\s*wrap;[^}]*padding-right:\s*80px;/.test(stylesSource)
+);
+
+assert('2.12 Cada pestaña móvil conserva un ancho mínimo que permite dos filas',
+  /\.vg-technician-tabs\s*>\s*button\s*\{[^}]*flex:\s*1 1 100px;/.test(stylesSource)
 );
 
 // ---------------------------------------------------------------------

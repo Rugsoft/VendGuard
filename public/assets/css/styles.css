@@ -2315,3 +2315,35 @@ details.vg-guide-accordion__disclosure:not([open]) .vg-guide-accordion__body {
   flex: 0 0 auto;
   white-space: nowrap;
 }
+
+/*
+ * Vista del técnico · Barra de pestañas frente al lanzador del chat.
+ *
+ * A 360 px el lanzador fijo de 64 px cubría 64 px de los 99,7 px de «Mis
+ * Métricas» y 32,7 px de su alto. La tira reserva 80 px a la derecha —el
+ * ancho del lanzador más su margen— y envuelve a dos filas cuando no caben
+ * tres pestañas, de modo que ninguna queda debajo de la burbuja.
+ */
+.vg-technician-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  background: #e5f2fc;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.vg-technician-tabs > button {
+  flex: 1 1 0;
+}
+
+@media (max-width: 660px) {
+  .vg-technician-tabs {
+    flex-wrap: wrap;
+    padding-right: 80px;
+  }
+
+  .vg-technician-tabs > button {
+    flex: 1 1 100px;
+  }
+}

@@ -3954,11 +3954,11 @@ export const TechnicianRouteView = {
         </div>
 
         <!-- Barra de Navegación Móvil del Técnico (RF-07, RF-04, RF-PREV-02) -->
-        <div style="display: flex; gap: 6px; margin-bottom: 14px; background: #e5f2fc; padding: 4px; border-radius: 8px;">
+        <div class="vg-technician-tabs">
           <button
             type="button"
             @click="activeSection = 'route'"
-            :style="{ flex: 1, padding: '8px 8px', fontSize: '12px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'route' ? '#2560ff' : 'transparent', color: activeSection === 'route' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
+            :style="{ padding: '8px 8px', fontSize: '12px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'route' ? '#2560ff' : 'transparent', color: activeSection === 'route' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
             data-testid="tech-tab-route"
           >
             📍 Averías ({{ routeMetrics.total }})
@@ -3966,7 +3966,7 @@ export const TechnicianRouteView = {
           <button
             type="button"
             @click="activeSection = 'preventive'"
-            :style="{ flex: 1, padding: '8px 8px', fontSize: '12px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'preventive' ? '#2560ff' : 'transparent', color: activeSection === 'preventive' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
+            :style="{ padding: '8px 8px', fontSize: '12px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'preventive' ? '#2560ff' : 'transparent', color: activeSection === 'preventive' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
             data-testid="tech-tab-preventive"
           >
             🛡️ Preventivo
@@ -3974,7 +3974,7 @@ export const TechnicianRouteView = {
           <button
             type="button"
             @click="activeSection = 'metrics'"
-            :style="{ flex: 1, padding: '8px 8px', fontSize: '12px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'metrics' ? '#2560ff' : 'transparent', color: activeSection === 'metrics' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
+            :style="{ padding: '8px 8px', fontSize: '12px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'metrics' ? '#2560ff' : 'transparent', color: activeSection === 'metrics' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
             data-testid="tech-tab-metrics"
           >
             📈 Mis Métricas
