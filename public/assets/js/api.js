@@ -2367,6 +2367,33 @@ export class ApiClient {
       return this.post(`/restocker/machines/${encodeURIComponent(machineId)}/escalate-to-sat`, payload);
     },
 
+    /**
+     * Importa un volcado EVA-DTS `.dex` de una máquina de ruta (Módulo 39,
+     * RF-03.2, D1/D2). El servidor es el único parser autoritativo y devuelve
+     * la proyección sin CA3 ni importes por carril.
+     * @param {number|string} machineId
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    importDexAudit: (machineId, payload) => {
+      return this.post(`/restocker/machines/${encodeURIComponent(machineId)}/dex-audits`, payload);
+    },
+
+    /**
+     * Historial de auditorías `.dex` de una máquina, en unidades y sin euros
+     * por carril (Módulo 39, RF-04.3, Art. V.4).
+     * @param {number|string} machineId
+     * @returns {Promise<Object>}
+     */
+    getDexAudits: (machineId) => {
+      return this.get(`/restocker/machines/${encodeURIComponent(machineId)}/dex-audits`);
+    },
+
+    /** Archiva un `.dex` offline rechazado sin borrar la evidencia (Módulo 39, C5). */
+    dumpDexAuditConflict: (payload) => {
+      return this.post('/restocker/dex-audits/conflict-dump', payload);
+    },
+
     /** Archiva en auditoría una operación offline rechazada (C2, Art. III.3). */
     dumpIncidentConflict: (payload) => {
       return this.post('/restocker/incidents/conflict-dump', payload);
@@ -2492,6 +2519,32 @@ export class ApiClient {
      */
     assumeOpportunisticIncident: (incidentId, payload = {}) => {
       return this.post(`/technician/opportunistic/incidents/${encodeURIComponent(incidentId)}/assume`, payload);
+    },
+
+    /**
+     * Importa un volcado EVA-DTS `.dex` de una parada del técnico (Módulo 39,
+     * RF-03.2, D1/D2). El prefill económico nunca viaja a este rol.
+     * @param {number|string} machineId
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    importDexAudit: (machineId, payload) => {
+      return this.post(`/technician/machines/${encodeURIComponent(machineId)}/dex-audits`, payload);
+    },
+
+    /**
+     * Historial `.dex` de la máquina en unidades, sin euros ni CA3
+     * (Módulo 39, RF-04.3, Art. V.4).
+     * @param {number|string} machineId
+     * @returns {Promise<Object>}
+     */
+    getDexAudits: (machineId) => {
+      return this.get(`/technician/machines/${encodeURIComponent(machineId)}/dex-audits`);
+    },
+
+    /** Archiva un `.dex` offline rechazado sin borrar la evidencia (Módulo 39, C5). */
+    dumpDexAuditConflict: (payload) => {
+      return this.post('/technician/dex-audits/conflict-dump', payload);
     },
 
     /**

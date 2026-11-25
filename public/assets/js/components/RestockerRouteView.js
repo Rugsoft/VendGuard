@@ -52,6 +52,12 @@ import {
 } from '../utils/RestockRouteOverrideOfflineQueue.js';
 import { RestockerRouteMapModal } from './RestockerRouteMapModal.js';
 import { LEVEL1_ISSUE_TYPES } from '../utils/IncidentStatusPermissions.js';
+import {
+  DexAuditOfflineQueue,
+  DEX_AUDIT_CONFLICT,
+  DEX_AUDIT_PENDING
+} from '../utils/DexAuditOfflineQueue.js';
+import { previewDexFile, DEX_PREVIEW_ROLES } from '../utils/EvaDtsClientPreview.js';
 
 const HYGIENE_ITEMS = [
   { key: 'coffee_grounds_emptied', label: 'Cajón de posos vaciado', scope: 'hot' },
@@ -113,7 +119,8 @@ const blankCashForm = () => ({
   receptionist_name: '',
   linked_refund_request_id: null,
   route_notes: '',
-  collected_at: ''
+  collected_at: '',
+  dex_audit_id: null
 });
 
 const blankCashRouteSummary = () => ({
@@ -132,7 +139,8 @@ const blankVisitForm = () => ({
   photo_evidence_url: '',
   internal_notes: '',
   hygiene_checklist: {},
-  items: []
+  items: [],
+  dex_audit_id: null
 });
 
 const ROUTE_BLOCKS = Object.freeze([
@@ -250,7 +258,7 @@ export const RestockerRouteView = {
       showEscalateModal: false,
       escalateMachine: null,
       escalateIncident: null,
-      escalateForm: { category: 'ELECTRICAL_OFF', workshop_internal_note: '', photo_evidence_url: '', client_mutation_id: '' },
+      escalateForm: { category: 'ELECTRICAL_OFF', workshop_internal_note: '', photo_evidence_url: '', client_mutation_id: '', dex_audit_id: null },
       escalatePhotoFile: null,
       escalatePhotoName: '',
       escalateError: '',
@@ -261,6 +269,30 @@ export const RestockerRouteView = {
       isSyncingIncidents: false,
       incidentSyncMessage: '',
       incidentSyncError: '',
+
+      // Auditorías EVA-DTS `.dex` online/offline (Módulo 39, T-DEX-12)
+      showDexModal: false,
+      dexMachine: null,
+      dexFromVisit: false,
+      dexFile: null,
+      dexFileName: '',
+      dexRawPayload: '',
+      dexPreview: null,
+      dexHistory: [],
+      dexLoading: false,
+      dexSubmitting: false,
+      dexError: '',
+      dexSuccess: '',
+      dexThermalAudit: null,
+      dexSuggestedEscalation: null,
+      dexQueue: null,
+      pendingDexMutations: [],
+      dexQueueSequence: 0,
+      isSyncingDex: false,
+      dexSyncMessage: '',
+      dexSyncError: '',
+      pendingDexPrefillByMachine: {},
+      cashSalesCounterTouched: false,
 
       // Consulta de solo lectura del planograma (T-PLN-13, D2, QA 2, Art. V.4)
       showPlanogramModal: false,
@@ -679,6 +711,7 @@ export const RestockerRouteView = {
       this.loadPendingVisitQueue();
       this.loadPendingCashQueue();
       this.loadPendingIncidentQueue();
+      this.loadPendingDexQueue();
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       this.visitOnlineHandler = () => {
@@ -688,6 +721,7 @@ export const RestockerRouteView = {
         this.syncPendingVisits().then(() => this.syncPendingRouteOverrides());
         this.syncPendingCashCollections();
         this.syncPendingIncidentMutations();
+        this.syncPendingDexAudits();
       };
       window.addEventListener('online', this.visitOnlineHandler);
     }
@@ -1924,6 +1958,9 @@ export const RestockerRouteView = {
       if (this.visitCashEnabled && !this.visitIsThermalAbort) {
         payload.cash_collection = this.buildCashCollectionPayload(this.visitCashForm);
       }
+      if (Number(this.visitForm.dex_audit_id || 0) > 0) {
+        payload.dex_audit_id = Number(this.visitForm.dex_audit_id);
+      }
 
       return payload;
     },
@@ -2156,14 +2193,15 @@ export const RestockerRouteView = {
       }
     },
 
-    openEscalate(machine, incident = null) {
+    openEscalate(machine, incident = null, options = {}) {
       this.escalateMachine = machine;
       this.escalateIncident = incident;
       this.escalateForm = {
-        category: incident?.category || 'ELECTRICAL_OFF',
-        workshop_internal_note: '',
+        category: options.category || incident?.category || 'ELECTRICAL_OFF',
+        workshop_internal_note: options.internalNote || '',
         photo_evidence_url: '',
-        client_mutation_id: createClientMutationId()
+        client_mutation_id: createClientMutationId(),
+        dex_audit_id: Number(options.dexAuditId || 0) || null
       };
       this.escalatePhotoFile = null;
       this.escalatePhotoName = '';
@@ -2205,6 +2243,9 @@ export const RestockerRouteView = {
         workshop_internal_note: String(this.escalateForm.workshop_internal_note).trim(),
         client_mutation_id: this.escalateForm.client_mutation_id
       };
+      if (Number(this.escalateForm.dex_audit_id || 0) > 0) {
+        payload.dex_audit_id = Number(this.escalateForm.dex_audit_id);
+      }
       try {
         if (!this.navigatorOnline) {
           await this.enqueueIncidentOperation(
@@ -2830,6 +2871,7 @@ export const RestockerRouteView = {
       this.cashMachine = target;
       this.cashError = '';
       this.cashSuccess = '';
+      this.cashSalesCounterTouched = false;
 
       if (this.cashContext === 'VISIT' && String(this.visitCashForm?.bag_seal_code || '').trim() !== '') {
         this.cashForm = { ...this.visitCashForm };
@@ -2840,6 +2882,13 @@ export const RestockerRouteView = {
       }
       if (!this.cashForm.client_mutation_id) this.cashForm.client_mutation_id = createClientMutationId();
       if (!this.cashForm.collected_at) this.cashForm.collected_at = new Date().toISOString();
+
+      const prefill = this.pendingDexPrefillByMachine?.[Number(target.id)];
+      if (prefill && Number.isFinite(Number(prefill.value))
+        && String(this.cashForm.sales_counter_reading ?? '') === '') {
+        this.cashForm.sales_counter_reading = Number(prefill.value);
+        this.cashForm.dex_audit_id = Number(prefill.dex_audit_id || 0) || null;
+      }
       this.showCashModal = true;
     },
 
@@ -2880,7 +2929,8 @@ export const RestockerRouteView = {
         receptionist_name: reception > 0 ? String(form?.receptionist_name || '').trim() : null,
         linked_refund_request_id: refundId,
         route_notes: String(form?.route_notes || '').trim() || null,
-        collected_at: form?.collected_at || new Date().toISOString()
+        collected_at: form?.collected_at || new Date().toISOString(),
+        dex_audit_id: Number(form?.dex_audit_id || 0) || null
       };
     },
 
@@ -3162,6 +3212,359 @@ export const RestockerRouteView = {
     printCashReceipt() {
       if (typeof window !== 'undefined' && typeof window.print === 'function') {
         window.print();
+      }
+    },
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Auditorías EVA-DTS `.dex` online/offline (Módulo 39, T-DEX-12)
+    // ─────────────────────────────────────────────────────────────────────
+
+    async openDexModal(machine, options = {}) {
+      const target = machine || null;
+      if (!target?.id) return;
+
+      this.dexMachine = target;
+      this.dexFromVisit = options.fromVisit === true;
+      this.dexFile = null;
+      this.dexFileName = '';
+      this.dexRawPayload = '';
+      this.dexPreview = null;
+      this.dexHistory = [];
+      this.dexError = '';
+      this.dexSuccess = '';
+      this.dexThermalAudit = null;
+      this.dexSuggestedEscalation = null;
+      this.showDexModal = true;
+
+      await Promise.all([
+        this.loadDexHistory(target.id),
+        this.loadPendingDexQueue()
+      ]);
+    },
+
+    closeDexModal() {
+      this.showDexModal = false;
+      this.dexMachine = null;
+      this.dexFromVisit = false;
+      this.dexFile = null;
+      this.dexFileName = '';
+      this.dexRawPayload = '';
+      this.dexPreview = null;
+      this.dexError = '';
+      this.dexSuccess = '';
+    },
+
+    async handleDexFile(event) {
+      const file = event?.target?.files?.[0] ?? null;
+      this.dexError = '';
+      this.dexSuccess = '';
+      this.dexPreview = null;
+      this.dexFileName = file?.name || '';
+      this.dexFile = file;
+      if (!file) return;
+
+      try {
+        const preview = await previewDexFile(file, { role: DEX_PREVIEW_ROLES.RESTOCKER });
+        if (!preview?.ok) {
+          this.dexError = preview?.errors?.[0]?.message || 'El fichero .dex no supera el pre-filtro.';
+          this.dexFile = null;
+          return;
+        }
+        this.dexPreview = preview;
+      } catch (error) {
+        this.dexFile = null;
+        this.dexError = error?.message || 'No se pudo leer el fichero .dex.';
+      }
+    },
+
+    buildDexImportPayload(clientMutationId, rawPayload) {
+      return {
+        raw_payload: rawPayload,
+        original_filename: this.dexFileName || 'volcado.dex',
+        captured_at: new Date().toISOString(),
+        client_mutation_id: clientMutationId
+      };
+    },
+
+    async submitDexAudit() {
+      if (!this.dexMachine?.id || !this.dexFile || this.dexSubmitting) return;
+      if (!this.dexPreview?.ok) {
+        this.dexError = 'Selecciona un volcado .dex válido antes de importarlo.';
+        return;
+      }
+      const restockerId = Number(this.visitRestockerId || 0);
+      if (!(restockerId > 0)) {
+        this.dexError = 'Inicia sesión como reponedor para importar auditorías .dex.';
+        return;
+      }
+
+      this.dexSubmitting = true;
+      this.dexError = '';
+      this.dexSuccess = '';
+      const clientMutationId = createClientMutationId();
+      const machineId = Number(this.dexMachine.id);
+      let queuedPayload = null;
+
+      try {
+        const rawPayload = await this.dexFile.text();
+        const preview = await previewDexFile(this.dexFile, { role: DEX_PREVIEW_ROLES.RESTOCKER });
+        if (!preview?.ok) {
+          this.dexError = preview?.errors?.[0]?.message || 'El fichero .dex no supera el pre-filtro.';
+          return;
+        }
+        const payload = this.buildDexImportPayload(clientMutationId, rawPayload);
+        queuedPayload = {
+          client_mutation_id: clientMutationId,
+          machine_id: machineId,
+          machine_code: this.dexMachine.code || this.dexMachine.machine_code || null,
+          captured_at: payload.captured_at,
+          raw_payload: rawPayload,
+          original_filename: payload.original_filename
+        };
+
+        if (!this.navigatorOnline) {
+          await this.enqueueDexAudit(queuedPayload);
+          this.dexSuccess = 'Volcado .dex guardado en el dispositivo: pendiente de sincronizar.';
+          await this.loadPendingDexQueue();
+          return;
+        }
+
+        const response = await api.restocker.importDexAudit(machineId, payload);
+        const data = this.normalizeApiData(response);
+        this.applyDexImportResult(data, machineId);
+      } catch (error) {
+        if (queuedPayload && this.isRetryableSyncFailure(error)) {
+          await this.enqueueDexAudit(queuedPayload);
+          this.dexSuccess = 'Sin conexión con el servidor: el volcado .dex queda en la cola local.';
+          await this.loadPendingDexQueue();
+        } else {
+          this.dexError = error?.message || 'No se pudo importar el volcado .dex.';
+        }
+      } finally {
+        this.dexSubmitting = false;
+      }
+    },
+
+    applyDexImportResult(data, machineId) {
+      const audit = data?.audit || data || {};
+      const auditId = Number(audit.id || 0);
+      this.dexThermalAudit = null;
+      this.dexSuggestedEscalation = null;
+      if (auditId > 0 && this.dexFromVisit) {
+        this.visitForm.dex_audit_id = auditId;
+      }
+
+      if (data?.has_thermal_alert === true || audit.has_thermal_alert === true) {
+        this.dexThermalAudit = audit;
+        this.dexSuggestedEscalation = data?.suggested_escalation_payload || null;
+      }
+
+      const prefill = Number(data?.prefill_sales_counter_reading_eur);
+      if (Number.isFinite(prefill) && prefill >= 0) {
+        this.applyDexPrefill(machineId, prefill, audit);
+      }
+
+      this.dexSuccess = data?.idempotent_replay === true
+        ? 'Volcado ya registrado: replay idempotente confirmado.'
+        : 'Auditoría .dex importada correctamente.';
+      this.loadDexHistory(machineId);
+    },
+
+    applyDexPrefill(machineId, value, audit) {
+      const id = Number(machineId);
+      if (!(id > 0) || !Number.isFinite(Number(value))) return;
+
+      this.pendingDexPrefillByMachine = {
+        ...this.pendingDexPrefillByMachine,
+        [id]: {
+          value: Number(value),
+          dex_audit_id: Number(audit?.id || 0) || null,
+          audit_code: audit?.audit_code || null
+        }
+      };
+
+      if (this.showCashModal && Number(this.cashMachine?.id) === id && this.cashSalesCounterTouched !== true) {
+        this.cashForm.sales_counter_reading = Number(value);
+        this.cashForm.dex_audit_id = Number(audit?.id || 0) || null;
+      }
+      if (this.visitCashForm && Number(this.visitMachine?.id) === id
+        && String(this.visitCashForm.sales_counter_reading ?? '') === '') {
+        this.visitCashForm.sales_counter_reading = Number(value);
+        this.visitCashForm.dex_audit_id = Number(audit?.id || 0) || null;
+      }
+    },
+
+    async loadDexHistory(machineId) {
+      const id = Number(machineId);
+      if (!(id > 0)) return;
+      if (!this.navigatorOnline) return;
+
+      this.dexLoading = true;
+      try {
+        const response = await api.restocker.getDexAudits(id);
+        const data = this.normalizeApiData(response);
+        this.dexHistory = Array.isArray(data?.audits) ? data.audits : [];
+      } catch (error) {
+        if (!this.isRetryableSyncFailure(error)) {
+          this.dexError = error?.message || 'No se pudo cargar el historial .dex.';
+        }
+      } finally {
+        this.dexLoading = false;
+      }
+    },
+
+    dexAuditUnits(audit) {
+      const value = Number(audit?.va1_total_vend_units);
+      return Number.isFinite(value) ? value : 0;
+    },
+
+    dexAuditDeltaUnits(audit) {
+      const value = Number(audit?.delta_vend_units);
+      return Number.isFinite(value) ? value : 0;
+    },
+
+    dexAuditHasThermal(audit) {
+      return audit?.has_thermal_alert === true;
+    },
+
+    dexThermalCodes(audit) {
+      return (Array.isArray(audit?.events) ? audit.events : [])
+        .filter((event) => ['CRITICAL', 'WARNING'].includes(String(event?.severity || '').toUpperCase()))
+        .map((event) => String(event?.event_code || ''))
+        .filter((code) => code !== '');
+    },
+
+    dexSuggestedFor(audit) {
+      const codes = this.dexThermalCodes(audit);
+      return {
+        breakdown_category: 'TEMPERATURE_COLD',
+        internal_note: `[DEX ${audit?.audit_code || 'SIN-CÓDIGO'}] Códigos EA1/EA2: ${codes.join(', ') || 'ALERTA_TERMICA'}`
+      };
+    },
+
+    openDexEscalation(audit) {
+      const target = audit || this.dexThermalAudit;
+      if (!target || !this.dexMachine) return;
+      const suggestion = this.dexSuggestedEscalation || this.dexSuggestedFor(target);
+      this.showDexModal = false;
+      this.openEscalate(this.dexMachine, null, {
+        category: suggestion?.breakdown_category || 'TEMPERATURE_COLD',
+        internalNote: suggestion?.internal_note || this.dexSuggestedFor(target).internal_note,
+        dexAuditId: target.id
+      });
+    },
+
+    ensureDexQueue() {
+      if (!this.dexQueue) {
+        this.dexQueue = new DexAuditOfflineQueue();
+      }
+      return this.dexQueue;
+    },
+
+    async loadPendingDexQueue() {
+      const restockerId = Number(this.visitRestockerId || 0);
+      if (!(restockerId > 0)) {
+        this.pendingDexMutations = [];
+        return;
+      }
+      try {
+        this.pendingDexMutations = await this.ensureDexQueue().list(restockerId);
+      } catch (error) {
+        this.pendingDexMutations = [];
+        this.dexSyncError = error?.message || 'No se pudo leer la cola offline de auditorías .dex.';
+      }
+    },
+
+    async enqueueDexAudit(record) {
+      const restockerId = Number(this.visitRestockerId || 0);
+      if (!(restockerId > 0)) {
+        throw new Error('Inicia sesión como reponedor para guardar la auditoría .dex.');
+      }
+      const sequence = Date.now() * 1000 + (Number(this.dexQueueSequence || 0) % 1000);
+      this.dexQueueSequence = (Number(this.dexQueueSequence || 0) + 1) % 1000;
+      return this.ensureDexQueue().enqueue({
+        actor_id: restockerId,
+        actor_role: DEX_PREVIEW_ROLES.RESTOCKER,
+        sequence_order: sequence,
+        ...record
+      });
+    },
+
+    async syncPendingDexAudits() {
+      const restockerId = Number(this.visitRestockerId || 0);
+      if (!(restockerId > 0)) return;
+      if (!this.navigatorOnline) {
+        this.dexSyncError = 'Sin conexión. Las auditorías .dex seguirán guardadas en la cola offline.';
+        return;
+      }
+      if (this.isSyncingDex) return;
+
+      this.isSyncingDex = true;
+      this.dexSyncError = '';
+      this.dexSyncMessage = '';
+      try {
+        const summary = await this.ensureDexQueue().replay(restockerId, (item) => api.restocker.importDexAudit(
+          item.machine_id,
+          {
+            raw_payload: item.raw_payload,
+            original_filename: item.original_filename,
+            captured_at: item.captured_at,
+            client_mutation_id: item.client_mutation_id,
+            ...item.local_links
+          }
+        ), {
+          onNotice: (notice) => {
+            this.dexSyncMessage = notice.message;
+          }
+        });
+
+        const parts = [];
+        if (summary.applied > 0) parts.push(`${summary.applied} importada(s)`);
+        if (summary.replayed > 0) parts.push(`${summary.replayed} replay(s)`);
+        if (summary.duplicates > 0) parts.push(`${summary.duplicates} duplicada(s)`);
+        if (summary.conflicts > 0) parts.push(`${summary.conflicts} conflicto(s)`);
+        if (summary.interrupted) {
+          this.dexSyncError = this.syncRetryMessage(summary.interrupted, 'auditorías .dex');
+        }
+        if (parts.length > 0) {
+          this.dexSyncMessage = `${parts.join(', ')}.`;
+        } else if (!this.dexSyncError) {
+          this.dexSyncMessage = 'No hay auditorías .dex pendientes de sincronizar.';
+        }
+        await this.loadPendingDexQueue();
+        if (this.dexMachine?.id) {
+          await this.loadDexHistory(this.dexMachine.id);
+        }
+      } catch (error) {
+        this.dexSyncError = error?.message || 'No se pudo sincronizar la cola offline de auditorías .dex.';
+      } finally {
+        this.isSyncingDex = false;
+      }
+    },
+
+    async archiveDexConflict(item) {
+      if (!item?.client_mutation_id || this.isSyncingDex) return;
+      this.isSyncingDex = true;
+      this.dexSyncError = '';
+      this.dexSyncMessage = '';
+      try {
+        await this.ensureDexQueue().dumpConflict(item.client_mutation_id, (queued) => (
+          api.restocker.dumpDexAuditConflict({
+            machine_id: queued.machine_id,
+            client_mutation_id: queued.client_mutation_id,
+            reason: queued.conflict_reason || queued.conflict?.message || 'El volcado .dex offline ya no puede aplicarse.',
+            original_filename: queued.original_filename || null,
+            captured_at: queued.captured_at || null,
+            error_code: queued.conflict?.code || null,
+            http_status: Number(queued.conflict?.http_status || 0)
+          })
+        ));
+        await this.loadPendingDexQueue();
+        this.dexSyncMessage = 'Conflicto .dex archivado en auditoría. La cola local queda limpia.';
+      } catch (error) {
+        this.dexSyncError = error?.message || 'No se pudo archivar el conflicto .dex.';
+      } finally {
+        this.isSyncingDex = false;
       }
     },
 
@@ -3926,6 +4329,13 @@ export const RestockerRouteView = {
                       <button
                         type="button"
                         class="vg-btn vg-btn-secondary vg-btn-sm"
+                        data-testid="btn-route-open-dex"
+                        :data-machine-id="machine.machine_id"
+                        @click="openDexModal(routeMachineAsMachine(machine, stop))"
+                      >📄 .dex</button>
+                      <button
+                        type="button"
+                        class="vg-btn vg-btn-secondary vg-btn-sm"
                         data-testid="btn-route-skip-stop"
                         :data-machine-id="machine.machine_id"
                         @click="openSkipRouteModal(machine, stop, $event)"
@@ -4112,6 +4522,15 @@ export const RestockerRouteView = {
                   @click="openCashCollection(machine)"
                 >
                   🪙 Recaudación / Cambio
+                </button>
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary vg-btn-sm"
+                  data-testid="btn-open-dex-audit"
+                  :data-machine-id="machine.id"
+                  @click="openDexModal(machine)"
+                >
+                  📄 Importar .dex
                 </button>
               </div>
               <div
@@ -4678,6 +5097,7 @@ export const RestockerRouteView = {
                 <input
                   v-model.number="cashForm.sales_counter_reading"
                   type="number"
+                  @input="cashSalesCounterTouched = true"
                   step="0.01"
                   min="0"
                   max="9999999.99"
@@ -4887,6 +5307,20 @@ export const RestockerRouteView = {
               >
                 Cerrar
               </button>
+            </div>
+
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;">
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary vg-btn-sm"
+                data-testid="btn-open-dex-from-visit"
+                @click="openDexModal(visitMachine, { fromVisit: true })"
+              >
+                📄 Importar volcado .dex
+              </button>
+              <span v-if="visitForm.dex_audit_id" data-testid="visit-dex-linked" style="font-size: 11px; color: var(--color-success-text); align-self: center;">
+                ✓ DEX #{{ visitForm.dex_audit_id }} vinculado a esta visita
+              </span>
             </div>
 
             <p v-if="visitLoading" style="font-size: 13px; color: var(--color-ink-muted); margin-top: 12px;">
@@ -5495,6 +5929,100 @@ export const RestockerRouteView = {
               {{ isSkippingRoute ? 'Guardando…' : 'Confirmar omisión' }}
             </button>
           </div>
+        </div>
+      </div>
+
+      <!-- MODAL AUDITORÍA EVA-DTS: prefill M35, historial en unidades y escalado M36 (Módulo 39, T-DEX-12) -->
+      <div
+        v-if="showDexModal"
+        data-testid="restocker-dex-modal"
+        style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 90; padding: 0;"
+        @click.self="closeDexModal"
+      >
+        <div style="background-color: var(--color-surface-card); width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; border-radius: var(--radius-card) var(--radius-card) 0 0; padding: 18px 16px; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); box-sizing: border-box;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <h2 style="font-family: var(--font-display); font-size: 17px; margin: 0 0 4px 0;">📄 Auditoría EVA-DTS</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
+                {{ dexMachine?.code || dexMachine?.machine_code || 'Máquina' }} · volcado .dex
+              </p>
+            </div>
+            <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-dex" @click="closeDexModal">Cerrar</button>
+          </div>
+
+          <p v-if="dexError" role="alert" data-testid="restocker-dex-error" style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;">⚠️ {{ dexError }}</p>
+          <p v-if="dexSuccess" data-testid="restocker-dex-success" style="font-size: 12px; color: var(--color-success-text); background-color: var(--color-success-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;">✓ {{ dexSuccess }}</p>
+
+          <label style="display: block; font-size: 12px; font-weight: 600; margin: 14px 0 4px 0;">Volcado EVA-DTS (.dex, máx. 1 MB)</label>
+          <input type="file" accept=".dex,text/plain" class="vg-input" data-testid="restocker-dex-file" @change="handleDexFile" />
+          <p v-if="dexFileName" style="font-size: 11px; color: var(--color-ink-muted); margin: 4px 0 0 0;">📄 {{ dexFileName }}</p>
+
+          <div v-if="dexPreview" data-testid="restocker-dex-preview" style="margin-top: 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 9px 10px; font-size: 12px;">
+            <div style="display: flex; justify-content: space-between; gap: 8px;">
+              <span>Unidades vendidas (VA1)</span>
+              <strong>{{ dexPreview.va1_total_vend_units ?? '—' }}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; gap: 8px; margin-top: 4px;">
+              <span>Pre-relleno M35 (VA1)</span>
+              <strong data-testid="restocker-dex-prefill">{{ dexPreview.va1_total_sales_eur !== null && dexPreview.va1_total_sales_eur !== undefined ? formatPrice(dexPreview.va1_total_sales_eur) : '—' }}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; gap: 8px; margin-top: 4px;">
+              <span>Eventos EA1/EA2</span>
+              <strong>{{ dexPreview.events?.length || 0 }}</strong>
+            </div>
+            <p style="font-size: 10px; color: var(--color-ink-muted); margin: 5px 0 0 0;">Solo unidades y pre-relleno; nunca CA3 ni importes por carril (Art. V.4).</p>
+          </div>
+
+          <div v-if="dexThermalAudit" data-testid="restocker-dex-thermal-banner" style="margin-top: 10px; border-left: 3px solid var(--color-error-text); background-color: var(--color-error-bg); color: var(--color-error-text); border-radius: var(--radius-interactive); padding: 9px 10px; font-size: 12px;">
+            <strong style="display: block;">🌡️ Alerta térmica · {{ dexThermalAudit.audit_code || 'DEX' }}</strong>
+            <span>El volcado registra una rotura de frío. Escala al SAT con la nota interna y los códigos detectados.</span>
+            <div style="margin-top: 7px;">
+              <button type="button" class="vg-btn vg-btn-primary vg-btn-sm" data-testid="restocker-dex-escalate" @click="openDexEscalation(dexThermalAudit)">⚡ Escalar al SAT en un toque</button>
+            </div>
+          </div>
+
+          <div style="margin-top: 12px;">
+            <button type="button" class="vg-btn vg-btn-primary w-100" data-testid="btn-import-dex" :disabled="!dexFile || !dexPreview || dexSubmitting" @click="submitDexAudit">
+              {{ dexSubmitting ? 'Importando…' : (navigatorOnline ? 'Importar y vincular .dex' : 'Guardar .dex sin conexión') }}
+            </button>
+          </div>
+
+          <div style="margin-top: 16px;">
+            <h3 style="font-family: var(--font-display); font-size: 13px; margin: 0 0 6px 0;">Historial de auditorías</h3>
+            <p v-if="dexLoading" style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">Cargando historial…</p>
+            <p v-else-if="dexHistory.length === 0" data-testid="restocker-dex-history-empty" style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">Sin auditorías .dex registradas en esta máquina.</p>
+            <ul v-else data-testid="restocker-dex-history" style="list-style: none; padding: 0; margin: 0; display: grid; gap: 6px;">
+              <li v-for="audit in dexHistory" :key="audit.id" style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 7px 8px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; gap: 6px;">
+                  <strong>{{ audit.audit_code || ('DEX #' + audit.id) }}</strong>
+                  <span style="color: var(--color-ink-muted);">{{ audit.captured_at || '' }}</span>
+                </div>
+                <div style="margin-top: 3px; color: var(--color-slate);">
+                  VA1 {{ dexAuditUnits(audit) }} u · Δ {{ dexAuditDeltaUnits(audit) }} u · {{ audit.delta_source || '—' }}
+                </div>
+                <div v-if="dexAuditHasThermal(audit)" style="margin-top: 5px;">
+                  <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm" data-testid="restocker-dex-history-escalate" @click="openDexEscalation(audit)">⚡ Escalar alerta térmica</button>
+                </div>
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="pendingDexMutations.length" data-testid="restocker-dex-queue" style="margin-top: 14px;">
+            <h3 style="font-family: var(--font-display); font-size: 13px; margin: 0 0 6px 0;">Cola offline .dex</h3>
+            <div v-for="item in pendingDexMutations" :key="item.client_mutation_id" style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 7px 8px; margin-bottom: 6px; font-size: 11px;">
+              <div style="display: flex; justify-content: space-between; gap: 6px;">
+                <strong>{{ item.original_filename || 'volcado.dex' }}</strong>
+                <span>{{ item.status }}</span>
+              </div>
+              <div v-if="item.conflict_reason" style="color: var(--color-error-text); margin-top: 3px;">{{ item.conflict_reason }}</div>
+              <div v-if="item.status === 'CONFLICT'" style="margin-top: 5px;">
+                <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm" @click="archiveDexConflict(item)">Archivar conflicto</button>
+              </div>
+            </div>
+            <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm" data-testid="btn-sync-dex" :disabled="isSyncingDex" @click="syncPendingDexAudits">{{ isSyncingDex ? 'Sincronizando…' : 'Sincronizar .dex pendientes' }}</button>
+          </div>
+          <p v-if="dexSyncMessage" style="font-size: 11px; color: var(--color-success-text); margin-top: 8px;">{{ dexSyncMessage }}</p>
+          <p v-if="dexSyncError" style="font-size: 11px; color: var(--color-error-text); margin-top: 8px;">{{ dexSyncError }}</p>
         </div>
       </div>
 
