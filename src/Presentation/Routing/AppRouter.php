@@ -352,6 +352,11 @@ class AppRouter
         // el informe para que `/work-hours/export` no se interprete como otra ruta.
         $router->get('/api/coordinator/metrics/work-hours/export', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'exportWorkHoursCsv'], [$coordinatorAuth]);
         $router->get('/api/coordinator/metrics/work-hours', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'workHoursReport'], [$coordinatorAuth]);
+        // Cuadro de Reposición, Roturas y Mermas (Módulo 38). La descarga se
+        // declara antes que el informe: el router evalúa en orden de registro y
+        // `/restocking/export` caería de otro modo en la ruta del informe.
+        $router->get('/api/coordinator/metrics/restocking/export', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'exportRestockingBiCsv'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/metrics/restocking', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getRestockingBi'], [$coordinatorAuth]);
         $router->get('/api/coordinator/audit-log', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getAuditLog'], [$coordinatorAuth]);
         $router->get('/api/coordinator/audit-log/export', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'exportAuditLog'], [$coordinatorAuth]);
 

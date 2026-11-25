@@ -1025,6 +1025,73 @@ export class ApiClient {
     );
   }
 
+  /**
+   * Cuadro de Mando de Reposición, Roturas y Mermas (Módulo 38, contrato §2).
+   *
+   * Envía únicamente los filtros con valor: `URLSearchParams` convertiría un
+   * `undefined` en la cadena "undefined" y el validador lo rechazaría como un
+   * identificador no entero. Sin fechas, el servidor aplica los últimos 30 días.
+   *
+   * @param {{from?: string, to?: string, zone_id?: number|string|null,
+   *   location_id?: number|string|null, restocker_id?: number|string|null}} [filters={}]
+   * @returns {Promise<Object>}
+   */
+  getRestockingBi(filters = {}) {
+    const params = {};
+    const pairs = [
+      ['from', filters.from],
+      ['to', filters.to],
+      ['zone_id', filters.zone_id ?? filters.zoneId],
+      ['location_id', filters.location_id ?? filters.locationId],
+      ['restocker_id', filters.restocker_id ?? filters.restockerId]
+    ];
+
+    for (const [key, value] of pairs) {
+      if (value !== null && value !== undefined && String(value).trim() !== '') {
+        params[key] = String(value).trim();
+      }
+    }
+
+    const q = new URLSearchParams(params).toString();
+
+    return this.get(`/coordinator/metrics/restocking${q ? `?${q}` : ''}`);
+  }
+
+  /**
+   * Descarga autenticada del CSV de cinco secciones (Módulo 38, RF-06.3).
+   *
+   * Usa `fetch` + `Blob` a través de `downloadFile`: el token viaja en la
+   * cabecera `Authorization`, nunca en la URL, y el nombre definitivo lo impone
+   * el `Content-Disposition` del servidor.
+   *
+   * @param {{from?: string, to?: string, zone_id?: number|string|null,
+   *   location_id?: number|string|null, restocker_id?: number|string|null}} [filters={}]
+   * @returns {Promise<boolean>}
+   */
+  downloadRestockingBiCsv(filters = {}) {
+    const today = new Date().toISOString().slice(0, 10);
+    const params = {};
+    const pairs = [
+      ['from', filters.from],
+      ['to', filters.to],
+      ['zone_id', filters.zone_id ?? filters.zoneId],
+      ['location_id', filters.location_id ?? filters.locationId],
+      ['restocker_id', filters.restocker_id ?? filters.restockerId]
+    ];
+
+    for (const [key, value] of pairs) {
+      if (value !== null && value !== undefined && String(value).trim() !== '') {
+        params[key] = String(value).trim();
+      }
+    }
+
+    return this.downloadFile(
+      '/coordinator/metrics/restocking/export',
+      `vendguard_restocking_bi_${today}.csv`,
+      params
+    );
+  }
+
   // =========================================================================
   // HIGH-LEVEL DOMAIN METHODS (VendGuard REST Contracts)
   // =========================================================================

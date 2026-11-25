@@ -341,6 +341,51 @@ function extractAuditActions(string $source, string $relativePath): array
         $literals[$analysis['plain']] = $literals[$analysis['plain']] ?? $site;
     }
 
+    // Fábricas globales: `AuditEvent::forGlobalExport(...)` compone un evento con
+    // `entity_id = 0` (Módulo 38) y no pasa por `new AuditEvent` ni por una firma
+    // de `AuditLogger` con la acción en segunda posición. Sin esta pasada, las
+    // acciones globales quedaban invisibles para la extracción y el visor las
+    // ofrecía como filtros fantasma.
+    for ($i = 0; $i < $count; $i++) {
+        $token = $tokens[$i];
+        if (!is_array($token) || $token[0] !== T_STRING || $token[1] !== 'forGlobalExport') {
+            continue;
+        }
+
+        $operator = $i - 1;
+        while ($operator >= 0 && $isSkippable($tokens[$operator])) {
+            $operator--;
+        }
+        if ($operator < 0 || (is_array($tokens[$operator]) ? $tokens[$operator][1] : $tokens[$operator]) !== '::') {
+            continue;
+        }
+
+        $open = $i + 1;
+        while ($open < $count && $isSkippable($tokens[$open])) {
+            $open++;
+        }
+        if ($open >= $count || $tokens[$open] !== '(') {
+            continue;
+        }
+
+        $site = $relativePath . '::AuditEvent::forGlobalExport';
+        // Firma: entityType, action, entityId, userId, userRole, userName, ...
+        $expression = resolveActionArgument(splitCallArguments($tokens, $open), 1);
+        if ($expression === null) {
+            continue;
+        }
+
+        // Igual que en `new AuditEvent`: `$row['action']` es hidratación del
+        // repositorio, no una escritura; solo una acción literal o una constante
+        // del propio fichero enumera vocabulario nuevo.
+        $analysis = analyseActionExpression($expression, $constants);
+        if ($analysis['plain'] === null) {
+            continue;
+        }
+
+        $literals[$analysis['plain']] = $literals[$analysis['plain']] ?? $site;
+    }
+
     // Acciones transportadas por el parámetro interno `auditAction:`.
     // `ShiftHandoverService::executeClose()` recibe el código y lo entrega a
     // `new AuditEvent(action: $auditAction)`; sin esta pasada, CLOSE_TECHNICIAN_SHIFT

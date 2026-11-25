@@ -25,6 +25,7 @@ import { AuditLogViewer } from '../components/AuditLogViewer.js';
 import { ExecutiveReportModal } from '../components/ExecutiveReportModal.js';
 import { CoordinatorWorkHoursTab } from '../components/CoordinatorWorkHoursTab.js';
 import { CoordinatorRootCauseParetoTab } from '../components/CoordinatorRootCauseParetoTab.js';
+import { CoordinatorRestockingBiTab } from '../components/CoordinatorRestockingBiTab.js';
 
 export const CoordinatorMetricsView = {
   name: 'CoordinatorMetricsView',
@@ -34,11 +35,12 @@ export const CoordinatorMetricsView = {
     AuditLogViewer,
     ExecutiveReportModal,
     CoordinatorWorkHoursTab,
-    CoordinatorRootCauseParetoTab
+    CoordinatorRootCauseParetoTab,
+    CoordinatorRestockingBiTab
   },
   data() {
     return {
-      activeSubTab: 'kpis', // 'kpis' | 'breakdown' | 'cause-pareto' | 'audit' | 'csat' | 'work-hours'
+      activeSubTab: 'kpis', // 'kpis' | 'breakdown' | 'cause-pareto' | 'audit' | 'csat' | 'work-hours' | 'restocking-bi'
       selectedPeriod: 'last_30_days', // 'last_7_days' | 'last_30_days' | 'current_month' | 'last_month' | 'custom'
       customFrom: '',
       customTo: '',
@@ -227,8 +229,9 @@ export const CoordinatorMetricsView = {
   template: `
     <div class="vg-coordinator-metrics-view" style="display: flex; flex-direction: column; gap: 20px;">
       
-      <!-- Barra Superior de Control y Período -->
-      <div style="background: #ffffff; border-radius: 8px; border: 1px solid #c8cfda; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px;">
+      <!-- Barra Superior de Control y Período: se oculta en la pestaña de
+           reposición, que trae su propia barra de filtros y su CSV (QA-3). -->
+      <div v-if="activeSubTab !== 'restocking-bi'" style="background: #ffffff; border-radius: 8px; border: 1px solid #c8cfda; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px;">
         
         <!-- Selector de Período -->
         <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
@@ -349,6 +352,17 @@ export const CoordinatorMetricsView = {
           data-testid="tab-work-hours"
         >
           ⏱️ Registro de Jornada y Horas
+        </button>
+
+        <!-- Módulo 38: Cuadro de Mando de Reposición, Roturas y Mermas (D4) -->
+        <button
+          type="button"
+          class="vg-btn vg-btn-tab"
+          :class="{ 'vg-btn-tab-active': activeSubTab === 'restocking-bi' }"
+          @click="activeSubTab = 'restocking-bi'"
+          data-testid="tab-restocking-bi"
+        >
+          📦 Métricas de Carga y Reposición
         </button>
       </div>
 
@@ -520,6 +534,11 @@ export const CoordinatorMetricsView = {
           :from-date="customFrom"
           :to-date="customTo"
         />
+      </div>
+
+      <!-- SUBPESTAÑA 7: Métricas de Carga, Reposición y Mermas (Módulo 38, D4) -->
+      <div v-else-if="activeSubTab === 'restocking-bi'" data-testid="restocking-bi-block">
+        <CoordinatorRestockingBiTab />
       </div>
 
       <!-- Modal de Informe Resumen Ejecutivo Imprimible (RF-06, EARS 6.3) -->

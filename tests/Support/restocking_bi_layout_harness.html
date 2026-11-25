@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>VendGuard · sonda de layout M38 · Métricas de Carga y Reposición</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/css/design-tokens.css">
+  <link rel="stylesheet" href="/assets/css/styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; min-height: 100%; scrollbar-width: none; }
+    html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; width: 0; height: 0; }
+    body { background: var(--color-canvas); font-family: var(--font-body); color: var(--color-slate); }
+    #app { min-width: 0; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="/assets/js/vendor/chart.umd.min.js"></script>
+  <script type="module">
+    import * as Vue from '/assets/js/vendor/vue.esm-browser.prod.js';
+    const { api } = await import('/assets/js/api.js');
+    const { CoordinatorMetricsView } = await import('/assets/js/views/CoordinatorMetricsView.js');
+
+    window.__requests = [];
+    window.__downloads = [];
+    window.__consoleErrors = [];
+    window.__harnessScenario = null;
+
+    const nativeAnchorClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function clickHarnessAnchor() {
+      if (typeof this.download === 'string' && this.download !== '') {
+        window.__downloads.push({ download: this.download, href: String(this.href) });
+        return;
+      }
+
+      return nativeAnchorClick.call(this);
+    };
+
+    const jsonResponse = (payload) => new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' }
+    });
+
+    const requestUrl = (input) => (typeof input === 'string' ? input : input.url);
+    const requestHeaders = (init) => {
+      if (init?.headers instanceof Headers) {
+        return Object.fromEntries(init.headers.entries());
+      }
+      return { ...(init?.headers ?? {}) };
+    };
+
+    const zoneFilter = (report, zoneId) => {
+      if (zoneId === null) return report;
+      return {
+        ...report,
+        filters: { ...report.filters, zone_id: Number(zoneId) }
+      };
+    };
+
+    const restockerVariant = (report) => ({
+      ...report,
+      filters: { ...report.filters, restocker_id: 7 },
+      summary: {
+        ...report.summary,
+        thermal_spoilage_eur: null,
+        thermal_spoilage_units: null,
+        total_spoilage_eur: null
+      },
+      spoilage_comparison: {
+        ...report.spoilage_comparison,
+        thermal_haccp: {
+          segmentable: false,
+          non_segmentable_reason: 'NOT_SEGMENTABLE_BY_RESTOCKER',
+          non_segmentable_message: 'No segmentable por reponedor (ámbito máquina/SAT)',
+          records_count: null,
+          units: null,
+          loss_eur: null
+        }
+      },
+      charts: {
+        ...report.charts,
+        spoilage_bars: {
+          ...report.charts.spoilage_bars,
+          labels: ['Caducidad FEFO', 'Dañado en ruta'],
+          keys: ['commercial_fefo_expired', 'commercial_damaged'],
+          eur_values: [34.8, 7.5],
+          unit_values: [15, 3],
+          thermal_segmentable: false
+        }
+      }
+    });
+
+    const emptyStockoutVariant = (report) => ({
+      ...report,
+      charts: {
+        ...report.charts,
+        top_critical_stockout: { by_machine: [], by_product: [] }
+      }
+    });
+
+    const buildReport = () => ({
+      filters: {
+        from: '2026-10-26',
+        to: '2026-11-24',
+        zone_id: null,
+        location_id: null,
+        restocker_id: null,
+        timezone: 'Europe/Madrid'
+      },
+      available_filters: {
+        zones: [
+          { id: 1, code: 'ZN-NORTE', name: 'Zona Norte · Barcelona Litoral', is_active: true },
+          { id: 2, code: 'ZN-HIST', name: 'Zona Antigua · Histórico Metropolitano', is_active: false }
+        ],
+        locations: [
+          { id: 3, site_code: 'HOSP-01', name: 'Hospital Universitario Central · Ala Este', zone_id: 1, is_active: true },
+          { id: 8, site_code: 'EXT-04', name: 'Sede Sin Zona · Centro Comercial Diagonal', zone_id: null, is_active: true },
+          { id: 9, site_code: 'OLD-01', name: 'Sede Antigua · Residencial Norte', zone_id: 2, is_active: false }
+        ],
+        restockers: [
+          { id: 7, operator_code: 'REP-01', name: 'Lucía Navarro de la Fuente', is_active: true },
+          { id: 12, operator_code: null, name: 'Carlos Méndez Ruiz', is_active: false },
+          { id: 13, operator_code: 'REP-13', name: 'Marta Reponedora de Rutas Periódicas', is_active: true }
+        ]
+      },
+      summary: {
+        completed_visits_count: 20,
+        clean_in_stock_visits_count: 17,
+        stockout_visits_count: 3,
+        visit_in_stock_rate_pct: 85.0,
+        visit_stockout_rate_pct: 15.0,
+        thermal_aborted_visits_count: 1,
+        audited_slots_count: 64,
+        stockout_slots_count: 5,
+        slot_stockout_rate_pct: 7.81,
+        low_threshold_slots_count: 9,
+        oversized_machines_count: 1,
+        commercial_spoilage_eur: 42.3,
+        commercial_spoilage_units: 18,
+        thermal_spoilage_eur: 31.5,
+        thermal_spoilage_units: 9,
+        total_spoilage_eur: 73.8,
+        cash_reconciled_ok_count: 15,
+        cash_discrepancy_flagged_count: 1,
+        cash_reconciled_count: 16,
+        cash_pending_audit_count: 2,
+        cash_accuracy_rate_pct: 93.75,
+        l1_resolved_count: 4,
+        escalated_to_sat_count: 2
+      },
+      spoilage_comparison: {
+        commercial_fefo_expired: { units: 15, loss_eur: 34.8 },
+        commercial_damaged: { units: 3, loss_eur: 7.5 },
+        commercial_total: { units: 18, loss_eur: 42.3 },
+        thermal_haccp: {
+          segmentable: true,
+          non_segmentable_reason: null,
+          non_segmentable_message: null,
+          records_count: 2,
+          units: 9,
+          loss_eur: 31.5
+        }
+      },
+      charts: {
+        spoilage_bars: {
+          labels: ['Caducidad FEFO', 'Dañado en ruta', 'Avería Térmica APPCC'],
+          keys: ['commercial_fefo_expired', 'commercial_damaged', 'thermal_haccp'],
+          eur_values: [34.8, 7.5, 31.5],
+          unit_values: [15, 3, 9],
+          thermal_segmentable: true
+        },
+        top_critical_stockout: {
+          by_machine: [
+            { id: 5, code: 'MAQ-HOSP-02', label: 'MAQ-HOSP-02 · Hospital Universitario Central · Ala Este', is_active: false, stockout_slots_count: 3, audited_slots_count: 12, slot_stockout_rate_pct: 25.0 },
+            { id: 6, code: 'MAQ-DIAG-17', label: 'MAQ-DIAG-17 · Centro Comercial Diagonal · Planta -1', is_active: true, stockout_slots_count: 4, audited_slots_count: 20, slot_stockout_rate_pct: 20.0 },
+            { id: 7, code: 'MAQ-NORTE-03', label: 'MAQ-NORTE-03 · Sede Norte · Oficinas y laboratorio', is_active: true, stockout_slots_count: 2, audited_slots_count: 12, slot_stockout_rate_pct: 16.67 }
+          ],
+          by_product: [
+            { id: 3, code: 'SAND-MIXTO-01', label: 'SAND-MIXTO-01 · Sándwich Mixto Fresco', is_active: true, stockout_slots_count: 3, audited_slots_count: 10, slot_stockout_rate_pct: 30.0 },
+            { id: 4, code: 'ENSALADA-CESAR-02', label: 'ENSALADA-CESAR-02 · Ensalada César con pollo', is_active: true, stockout_slots_count: 2, audited_slots_count: 8, slot_stockout_rate_pct: 25.0 },
+            { id: 5, code: 'BOCADILLO-SERRANO-03', label: 'BOCADILLO-SERRANO-03 · Bocadillo de jamón serrano', is_active: true, stockout_slots_count: 1, audited_slots_count: 6, slot_stockout_rate_pct: 16.67 }
+          ]
+        },
+        top_critical_expiry: {
+          by_machine: [
+            { id: 5, code: 'MAQ-HOSP-02', label: 'MAQ-HOSP-02 · Hospital Universitario Central · Ala Este', is_active: false, expired_units: 9, added_units: 36, expiry_rate_pct: 20.0, is_oversized_planogram: true },
+            { id: 6, code: 'MAQ-DIAG-17', label: 'MAQ-DIAG-17 · Centro Comercial Diagonal · Planta -1', is_active: true, expired_units: 4, added_units: 40, expiry_rate_pct: 9.09, is_oversized_planogram: false },
+            { id: 7, code: 'MAQ-NORTE-03', label: 'MAQ-NORTE-03 · Sede Norte · Oficinas y laboratorio', is_active: true, expired_units: 3, added_units: 30, expiry_rate_pct: 9.09, is_oversized_planogram: false }
+          ],
+          by_product: [
+            { id: 3, code: 'SAND-MIXTO-01', label: 'SAND-MIXTO-01 · Sándwich Mixto Fresco', is_active: true, expired_units: 9, added_units: 36, expiry_rate_pct: 20.0 },
+            { id: 4, code: 'ENSALADA-CESAR-02', label: 'ENSALADA-CESAR-02 · Ensalada César con pollo', is_active: true, expired_units: 3, added_units: 18, expiry_rate_pct: 14.29 },
+            { id: 5, code: 'BOCADILLO-SERRANO-03', label: 'BOCADILLO-SERRANO-03 · Bocadillo de jamón serrano', is_active: true, expired_units: 1, added_units: 20, expiry_rate_pct: 4.76 }
+          ]
+        }
+      },
+      by_machine: [
+        {
+          machine_id: 5, machine_code: 'MAQ-HOSP-02', machine_type: 'PERISHABLE_FOOD',
+          location_id: 3, location_name: 'Hospital Universitario Central · Ala Este',
+          zone_id: 1, zone_name: 'Zona Norte · Barcelona Litoral', is_active: false,
+          completed_visits_count: 6, clean_in_stock_visits_count: 4, visit_in_stock_rate_pct: 66.67,
+          thermal_aborted_visits_count: 1, audited_slots_count: 12, stockout_slots_count: 3,
+          slot_stockout_rate_pct: 25.0, low_threshold_slots_count: 2, added_units: 36,
+          expired_units: 9, damaged_units: 1, expired_loss_eur: 22.5, damaged_loss_eur: 2.5,
+          commercial_spoilage_loss_eur: 25.0, expiry_rate_pct: 20.0, is_oversized_planogram: true,
+          thermal_spoilage_units: 9, thermal_spoilage_loss_eur: 31.5
+        },
+        {
+          machine_id: 6, machine_code: 'MAQ-DIAG-17', machine_type: 'PERISHABLE_FOOD',
+          location_id: 8, location_name: 'Sede Sin Zona · Centro Comercial Diagonal',
+          zone_id: null, zone_name: null, is_active: true,
+          completed_visits_count: 8, clean_in_stock_visits_count: 7, visit_in_stock_rate_pct: 87.5,
+          thermal_aborted_visits_count: 0, audited_slots_count: 20, stockout_slots_count: 4,
+          slot_stockout_rate_pct: 20.0, low_threshold_slots_count: 3, added_units: 40,
+          expired_units: 4, damaged_units: 0, expired_loss_eur: 10.0, damaged_loss_eur: 0.0,
+          commercial_spoilage_loss_eur: 10.0, expiry_rate_pct: 9.09, is_oversized_planogram: false,
+          thermal_spoilage_units: 0, thermal_spoilage_loss_eur: 0
+        },
+        {
+          machine_id: 7, machine_code: 'MAQ-NORTE-03', machine_type: 'COLD_DRINKS',
+          location_id: 9, location_name: 'Sede Antigua · Residencial Norte',
+          zone_id: 2, zone_name: 'Zona Antigua · Histórico Metropolitano', is_active: true,
+          completed_visits_count: 2, clean_in_stock_visits_count: 2, visit_in_stock_rate_pct: 100.0,
+          thermal_aborted_visits_count: 0, audited_slots_count: 12, stockout_slots_count: 2,
+          slot_stockout_rate_pct: 16.67, low_threshold_slots_count: 4, added_units: 30,
+          expired_units: 3, damaged_units: 1, expired_loss_eur: 7.3, damaged_loss_eur: 1.2,
+          commercial_spoilage_loss_eur: 8.5, expiry_rate_pct: 9.09, is_oversized_planogram: false,
+          thermal_spoilage_units: 0, thermal_spoilage_loss_eur: 0
+        }
+      ],
+      by_product: [
+        {
+          product_id: 3, sku: 'SAND-MIXTO-01', name: 'Sándwich Mixto Fresco de pavo y queso',
+          category: 'PERISHABLE_FOOD', is_active: true, audited_slots_count: 10,
+          stockout_slots_count: 3, slot_stockout_rate_pct: 30.0, low_threshold_slots_count: 1,
+          added_units: 36, expired_units: 9, damaged_units: 0, expired_loss_eur: 22.5,
+          damaged_loss_eur: 0.0, commercial_spoilage_loss_eur: 22.5, expiry_rate_pct: 20.0
+        },
+        {
+          product_id: 4, sku: 'ENSALADA-CESAR-02', name: 'Ensalada César con pollo y picatostes',
+          category: 'PERISHABLE_FOOD', is_active: false, audited_slots_count: 8,
+          stockout_slots_count: 2, slot_stockout_rate_pct: 25.0, low_threshold_slots_count: 2,
+          added_units: 18, expired_units: 3, damaged_units: 1, expired_loss_eur: 6.9,
+          damaged_loss_eur: 2.1, commercial_spoilage_loss_eur: 9.0, expiry_rate_pct: 14.29
+        },
+        {
+          product_id: 5, sku: 'BOCADILLO-SERRANO-03', name: 'Bocadillo de jamón serrano con tomate',
+          category: 'PERISHABLE_FOOD', is_active: true, audited_slots_count: 6,
+          stockout_slots_count: 1, slot_stockout_rate_pct: 16.67, low_threshold_slots_count: 1,
+          added_units: 20, expired_units: 1, damaged_units: 0, expired_loss_eur: 2.4,
+          damaged_loss_eur: 0.0, commercial_spoilage_loss_eur: 2.4, expiry_rate_pct: 4.76
+        }
+      ],
+      by_restocker: [
+        {
+          restocker_id: 7, operator_code: 'REP-01', name: 'Lucía Navarro de la Fuente', is_active: true,
+          completed_visits_count: 14, thermal_aborted_visits_count: 1, valid_shifts_count: 5,
+          machines_per_shift: 2.8, machines_per_shift_na_reason: null, avg_stop_duration_minutes: 18.5,
+          l1_resolved_count: 3, escalated_to_sat_count: 1, reconciled_ok_count: 11,
+          discrepancy_flagged_count: 1, pending_audit_count: 1, cash_accuracy_rate_pct: 91.67,
+          total_abs_discrepancy_eur: 2.4, expired_units: 10, damaged_units: 2, commercial_spoilage_loss_eur: 27.8
+        },
+        {
+          restocker_id: 13, operator_code: 'REP-13', name: 'Marta Reponedora de Rutas Periódicas', is_active: true,
+          completed_visits_count: 6, thermal_aborted_visits_count: 0, valid_shifts_count: 3,
+          machines_per_shift: 2.0, machines_per_shift_na_reason: null, avg_stop_duration_minutes: 22.0,
+          l1_resolved_count: 1, escalated_to_sat_count: 1, reconciled_ok_count: 4,
+          discrepancy_flagged_count: 0, pending_audit_count: 1, cash_accuracy_rate_pct: 100.0,
+          total_abs_discrepancy_eur: 0, expired_units: 2, damaged_units: 1, commercial_spoilage_loss_eur: 5.2
+        },
+        {
+          restocker_id: 12, operator_code: null, name: 'Carlos Méndez Ruiz', is_active: false,
+          completed_visits_count: 0, thermal_aborted_visits_count: 0, valid_shifts_count: 0,
+          machines_per_shift: null, machines_per_shift_na_reason: 'NO_VALID_SHIFTS', avg_stop_duration_minutes: null,
+          l1_resolved_count: 0, escalated_to_sat_count: 0, reconciled_ok_count: 0,
+          discrepancy_flagged_count: 0, pending_audit_count: 0, cash_accuracy_rate_pct: null,
+          total_abs_discrepancy_eur: 0, expired_units: 0, damaged_units: 0, commercial_spoilage_loss_eur: 0
+        }
+      ]
+    });
+
+    const csvBody = '\uFEFFDOCUMENTO INTERNO DE COORDINACIÓN — CONFIDENCIAL ART. V.4: PROHIBIDA SU DISTRIBUCIÓN A SEDES CLIENTE\r\nPeriodo;2026-10-26;2026-11-24\r\n';
+
+    window.fetch = async (input, init = {}) => {
+      const url = requestUrl(input);
+      const method = (init.method ?? 'GET').toUpperCase();
+      const headers = requestHeaders(init);
+      window.__requests.push({ url, method, headers });
+
+      if (url.includes('/coordinator/metrics/restocking/export')) {
+        return new Response(csvBody, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/csv; charset=UTF-8',
+            'Content-Disposition': 'attachment; filename="vendguard_restocking_bi_2026-10-26_2026-11-24.csv"'
+          }
+        });
+      }
+
+      if (url.includes('/coordinator/metrics/restocking')) {
+        const parsed = new URL(url, window.location.origin);
+        const restockerId = parsed.searchParams.get('restocker_id');
+        const base = buildReport();
+        let data = restockerId === null ? zoneFilter(base, parsed.searchParams.get('zone_id')) : restockerVariant(base);
+        if (window.__harnessScenario === 'stockout-empty') {
+          data = emptyStockoutVariant(data);
+        }
+        return jsonResponse({ success: true, data });
+      }
+
+      if (url.includes('/coordinator/metrics/breakdown')) {
+        return jsonResponse({ success: true, data: { by_location: [] } });
+      }
+
+      if (url.includes('/coordinator/metrics/csat')) {
+        return jsonResponse({ success: true, data: { summary: { responses: 0, average: null, distribution: {} }, by_site: [], by_technician: [], monthly_trend: [] } });
+      }
+
+      if (url.includes('/coordinator/metrics')) {
+        return jsonResponse({ success: true, data: { total_incidents: 12, resolved_incidents: 9, avg_resolution_hours: 4.2 } });
+      }
+
+      return jsonResponse({ success: true, data: {} });
+    };
+
+    api.setToken('harness-coordinator-token');
+
+    const app = Vue.createApp(CoordinatorMetricsView);
+    const vm = app.mount('#app');
+    window.__vm = vm;
+
+    vm.activeSubTab = 'restocking-bi';
+    await vm.$nextTick();
+
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      const canvases = [...document.querySelectorAll('[data-testid="restocking-bi-tab"] canvas')];
+      const chartsReady = canvases.length >= 2 && typeof window.Chart === 'function'
+        && canvases.every((canvas) => window.Chart.getChart(canvas) !== undefined);
+      if (chartsReady) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    await document.fonts.ready;
+    await vm.$nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    window.__harnessState = {
+      activeSubTab: vm.activeSubTab,
+      canvases: document.querySelectorAll('[data-testid="restocking-bi-tab"] canvas').length,
+      charts: document.querySelectorAll('[data-testid="restocking-bi-tab"] canvas').length,
+      requests: window.__requests.length,
+      blockPresent: document.querySelector('[data-testid="restocking-bi-tab"]') !== null,
+      globalBarPresent: document.querySelector('select option[value="last_30_days"]') !== null
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
