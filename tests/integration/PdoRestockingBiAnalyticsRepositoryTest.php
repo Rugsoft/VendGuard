@@ -130,7 +130,7 @@ try {
     echo "\n--- Inventario del esquema aislado (cero DDL) ---\n";
 
     $tables = PostgresFixtureBuilder::tables($pdo);
-    $assert('El esquema canónico conserva 51 tablas de dominio', count($tables) === 51, 'contadas ' . count($tables));
+    $assert('El esquema canónico conserva 54 tablas de dominio', count($tables) === 54, 'contadas ' . count($tables));
     $assert('La tabla de visitas M34 existe sin cambios', in_array('machine_restock_visits', $tables, true));
     $assert('La tabla de actas M29 existe sin cambios', in_array('sanitary_spoilage_records', $tables, true));
 

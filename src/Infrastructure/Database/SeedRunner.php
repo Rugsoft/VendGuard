@@ -3605,6 +3605,272 @@ class SeedRunner
     }
 
     /**
+     * Auditorías locales EVA-DTS de demostración (Módulo 39 · D1–D5, QA-1–QA-5).
+     *
+     * Siembra cuatro volcados `.dex` que cubren el ciclo completo del módulo: la
+     * importación del Reponedor vinculada a una visita in situ (M34), la del
+     * Técnico SAT sobre una máquina de café con selecciones informativas
+     * `HOT_DRINKS_SELECTION`, la de Coordinación con un evento térmico `EG01` y
+     * una anulación lógica `VOIDED` con motivo real (Art. V.1).
+     *
+     * La cabecera es inmutable desde el `INSERT` (Art. III.3): la semilla solo
+     * inserta, nunca actualiza ni reactiva un volcado anulado. Las referencias se
+     * resuelven por `audit_code`, `machine_code`, `email_key`, `visit_code` y
+     * `slot_code`, nunca por identificadores de secuencia. El Reponedor no siembra
+     * sobre una máquina en cuarentena o con avería térmica abierta: la guarda
+     * sanitaria del Art. II.2 también muerde en la semilla.
+     *
+     * @return int Volcados canónicos vivos tras sembrar.
+     */
+    public function seedMachineDexAudits(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+
+        $insert = $this->pdo->prepare(sprintf(
+            'INSERT INTO machine_dex_audits (
+                audit_code, machine_id, machine_code_snapshot, machine_type_snapshot,
+                imported_by, importer_role_snapshot, importer_name_snapshot,
+                import_source, status, restock_visit_id, cash_collection_id, incident_id,
+                original_filename, file_size_bytes, sha256_hash, raw_payload,
+                dxs_comm_id, dxs_version, dex_machine_identifier,
+                identity_mismatch_warning, id4_decimal_places, ignored_unknown_lines_count,
+                va1_total_sales_eur, va1_total_vend_units, va1_reset_sales_eur, va1_reset_vend_units,
+                ca3_cashbox_eur, ca3_coin_tubes_eur, ca3_bills_in_eur,
+                previous_audit_id, counter_reset_detected, out_of_order_sync, delta_source,
+                delta_sales_eur, delta_vend_units, client_mutation_id, captured_at,
+                void_reason, voided_by, voided_by_name_snapshot, voided_at,
+                created_at, updated_at
+            ) VALUES (
+                :audit_code,
+                (SELECT id FROM machines WHERE code = :machine_code LIMIT 1),
+                :machine_code_snapshot,
+                (SELECT machine_type FROM machines WHERE code = :machine_type_code LIMIT 1),
+                (SELECT id FROM users WHERE %1$s = :importer_email LIMIT 1),
+                (SELECT role FROM users WHERE %1$s = :importer_role_email LIMIT 1),
+                (SELECT name FROM users WHERE %1$s = :importer_name_email LIMIT 1),
+                CAST(:import_source AS dex_import_source),
+                CAST(:status AS dex_audit_status),
+                (SELECT id FROM machine_restock_visits WHERE visit_code = :visit_code LIMIT 1),
+                NULL,
+                NULL,
+                :original_filename,
+                :file_size_bytes,
+                :sha256_hash,
+                :raw_payload,
+                :dxs_comm_id,
+                :dxs_version,
+                :dex_machine_identifier,
+                %2$s,
+                :id4_decimal_places,
+                :ignored_unknown_lines_count,
+                :va1_total_sales_eur,
+                :va1_total_vend_units,
+                NULL,
+                NULL,
+                :ca3_cashbox_eur,
+                :ca3_coin_tubes_eur,
+                :ca3_bills_in_eur,
+                NULL,
+                %2$s,
+                %2$s,
+                :delta_source,
+                NULL,
+                NULL,
+                :client_mutation_id,
+                :captured_at,
+                :void_reason,
+                (SELECT id FROM users WHERE %1$s = :voided_by_email LIMIT 1),
+                (SELECT name FROM users WHERE %1$s = :voided_by_name_email LIMIT 1),
+                :voided_at,
+                :created_at,
+                :created_at
+            ) %3$s',
+            $identityColumn,
+            $this->dialect->booleanLiteral(false),
+            $this->dialect->upsertDoNothing(['audit_code'])
+        ));
+
+        // La guarda sanitaria del Art. II.2 se declara también aquí: la semilla no
+        // puede imponer un estado que el disparador rechazaría en producción.
+        $restockerGuard = $this->pdo->prepare(
+            "SELECT 1
+               FROM machines m
+              WHERE m.code = :machine_code
+                AND m.is_active = TRUE
+                AND m.sanitary_status <> 'QUARANTINE'
+                AND NOT EXISTS (
+                    SELECT 1 FROM incidents i
+                     WHERE i.machine_id = m.id
+                       AND i.category = 'TEMPERATURE_COLD'
+                       AND i.status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED')
+                )"
+        );
+
+        foreach (self::canonicalMachineDexAuditRows() as $audit) {
+            if ($audit['importer_role'] === 'RESTOCKER') {
+                $restockerGuard->execute([':machine_code' => $audit['machine_code']]);
+                if ($restockerGuard->fetchColumn() === false) {
+                    continue;
+                }
+            }
+
+            $capturedAt = date('Y-m-d H:i:s', time() + $audit['captured_offset_hours'] * 3600);
+            $voidedAt = $audit['voided_offset_hours'] === null
+                ? null
+                : date('Y-m-d H:i:s', time() + $audit['voided_offset_hours'] * 3600);
+
+            $insert->bindValue(':audit_code', $audit['audit_code'], PDO::PARAM_STR);
+            $insert->bindValue(':machine_code', $audit['machine_code'], PDO::PARAM_STR);
+            $insert->bindValue(':machine_code_snapshot', $audit['machine_code'], PDO::PARAM_STR);
+            $insert->bindValue(':machine_type_code', $audit['machine_code'], PDO::PARAM_STR);
+            $insert->bindValue(':importer_email', $audit['importer_email'], PDO::PARAM_STR);
+            $insert->bindValue(':importer_role_email', $audit['importer_email'], PDO::PARAM_STR);
+            $insert->bindValue(':importer_name_email', $audit['importer_email'], PDO::PARAM_STR);
+            $insert->bindValue(':import_source', $audit['import_source'], PDO::PARAM_STR);
+            $insert->bindValue(':status', $audit['status'], PDO::PARAM_STR);
+            $insert->bindValue(
+                ':visit_code',
+                $audit['visit_code'],
+                $audit['visit_code'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(':original_filename', $audit['audit_code'] . '.dex', PDO::PARAM_STR);
+            $insert->bindValue(':file_size_bytes', strlen($audit['raw_payload']), PDO::PARAM_INT);
+            $insert->bindValue(':sha256_hash', hash('sha256', $audit['raw_payload']), PDO::PARAM_STR);
+            $insert->bindValue(':raw_payload', $audit['raw_payload'], PDO::PARAM_STR);
+            $insert->bindValue(':dxs_comm_id', 'VENDGUARD-DEX-1', PDO::PARAM_STR);
+            $insert->bindValue(':dxs_version', '1.0', PDO::PARAM_STR);
+            $insert->bindValue(':dex_machine_identifier', $audit['machine_code'], PDO::PARAM_STR);
+            $insert->bindValue(':id4_decimal_places', 2, PDO::PARAM_INT);
+            $insert->bindValue(':ignored_unknown_lines_count', 0, PDO::PARAM_INT);
+            $insert->bindValue(':va1_total_sales_eur', $audit['va1_total_sales_eur'], PDO::PARAM_STR);
+            $insert->bindValue(':va1_total_vend_units', $audit['va1_total_vend_units'], PDO::PARAM_INT);
+            foreach (['ca3_cashbox_eur', 'ca3_coin_tubes_eur', 'ca3_bills_in_eur'] as $column) {
+                $insert->bindValue(
+                    ':' . $column,
+                    $audit[$column],
+                    $audit[$column] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+                );
+            }
+            $insert->bindValue(':delta_source', 'INITIAL_BASELINE', PDO::PARAM_STR);
+            $insert->bindValue(':client_mutation_id', $audit['client_mutation_id'], PDO::PARAM_STR);
+            $insert->bindValue(':captured_at', $capturedAt, PDO::PARAM_STR);
+            $insert->bindValue(
+                ':void_reason',
+                $audit['void_reason'],
+                $audit['void_reason'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(
+                ':voided_by_email',
+                $audit['void_reason'] === null ? null : 'coordinacion@vendguard.internal',
+                $audit['void_reason'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(
+                ':voided_by_name_email',
+                $audit['void_reason'] === null ? null : 'coordinacion@vendguard.internal',
+                $audit['void_reason'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $insert->bindValue(':voided_at', $voidedAt, $voidedAt === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $insert->bindValue(':created_at', $capturedAt, PDO::PARAM_STR);
+            $insert->execute();
+        }
+
+        $lineInsert = $this->pdo->prepare(sprintf(
+            'INSERT INTO machine_dex_selection_lines (
+                dex_audit_id, line_sequence, raw_selection_code, normalized_selection_code,
+                matched_slot_id, matched_slot_code_snapshot, match_status, unit_price_eur,
+                total_vend_units, total_sales_eur, reset_vend_units, reset_sales_eur,
+                delta_vend_units, delta_sales_eur
+            ) VALUES (
+                (SELECT id FROM machine_dex_audits WHERE audit_code = :audit_code LIMIT 1),
+                :line_sequence, :raw_selection_code, :normalized_selection_code,
+                (SELECT s.id
+                   FROM machine_planogram_slots s
+                   INNER JOIN machines m ON m.id = s.machine_id
+                  WHERE m.code = :machine_code AND s.slot_code = :slot_code LIMIT 1),
+                :matched_slot_code_snapshot,
+                CAST(:match_status AS dex_selection_match_status),
+                :unit_price_eur, :total_vend_units, :total_sales_eur,
+                NULL, NULL, NULL, NULL
+            ) %s',
+            $this->dialect->upsertDoNothing(['dex_audit_id', 'normalized_selection_code'])
+        ));
+
+        foreach (self::canonicalMachineDexSelectionRows() as $line) {
+            $lineInsert->bindValue(':audit_code', $line['audit_code'], PDO::PARAM_STR);
+            $lineInsert->bindValue(':line_sequence', $line['line_sequence'], PDO::PARAM_INT);
+            $lineInsert->bindValue(':raw_selection_code', $line['raw_selection_code'], PDO::PARAM_STR);
+            $lineInsert->bindValue(':normalized_selection_code', $line['normalized_selection_code'], PDO::PARAM_STR);
+            $lineInsert->bindValue(':machine_code', $line['machine_code'], PDO::PARAM_STR);
+            $lineInsert->bindValue(
+                ':slot_code',
+                $line['slot_code'],
+                $line['slot_code'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $lineInsert->bindValue(
+                ':matched_slot_code_snapshot',
+                $line['slot_code'],
+                $line['slot_code'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $lineInsert->bindValue(':match_status', $line['match_status'], PDO::PARAM_STR);
+            $lineInsert->bindValue(':unit_price_eur', $line['unit_price_eur'], PDO::PARAM_STR);
+            $lineInsert->bindValue(':total_vend_units', $line['total_vend_units'], PDO::PARAM_INT);
+            $lineInsert->bindValue(':total_sales_eur', $line['total_sales_eur'], PDO::PARAM_STR);
+            $lineInsert->execute();
+        }
+
+        $eventInsert = $this->pdo->prepare(sprintf(
+            'INSERT INTO machine_dex_event_lines (
+                dex_audit_id, line_sequence, source_block, event_code, event_category,
+                severity, occurrence_count, count_since_reset, count_since_init,
+                is_active_flag, event_occurred_at_raw, description_es, is_thermal_alert
+            ) VALUES (
+                (SELECT id FROM machine_dex_audits WHERE audit_code = :audit_code LIMIT 1),
+                :line_sequence, :source_block, :event_code,
+                CAST(:event_category AS dex_event_category),
+                CAST(:severity AS dex_event_severity),
+                :occurrence_count, :count_since_reset, :count_since_init,
+                :is_active_flag, :event_occurred_at_raw, :description_es, :is_thermal_alert
+            ) %s',
+            $this->dialect->upsertDoNothing(['dex_audit_id', 'line_sequence'])
+        ));
+
+        foreach (self::canonicalMachineDexEventRows() as $event) {
+            $eventInsert->bindValue(':audit_code', $event['audit_code'], PDO::PARAM_STR);
+            $eventInsert->bindValue(':line_sequence', $event['line_sequence'], PDO::PARAM_INT);
+            $eventInsert->bindValue(':source_block', $event['source_block'], PDO::PARAM_STR);
+            $eventInsert->bindValue(':event_code', $event['event_code'], PDO::PARAM_STR);
+            $eventInsert->bindValue(':event_category', $event['event_category'], PDO::PARAM_STR);
+            $eventInsert->bindValue(':severity', $event['severity'], PDO::PARAM_STR);
+            $eventInsert->bindValue(':occurrence_count', $event['occurrence_count'], PDO::PARAM_INT);
+            foreach (['count_since_reset', 'count_since_init'] as $column) {
+                $eventInsert->bindValue(
+                    ':' . $column,
+                    $event[$column],
+                    $event[$column] === null ? PDO::PARAM_NULL : PDO::PARAM_INT
+                );
+            }
+            $eventInsert->bindValue(':is_active_flag', $event['is_active_flag'], PDO::PARAM_BOOL);
+            $eventInsert->bindValue(
+                ':event_occurred_at_raw',
+                $event['event_occurred_at_raw'],
+                $event['event_occurred_at_raw'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR
+            );
+            $eventInsert->bindValue(':description_es', $event['description_es'], PDO::PARAM_STR);
+            $eventInsert->bindValue(':is_thermal_alert', $event['is_thermal_alert'], PDO::PARAM_BOOL);
+            $eventInsert->execute();
+        }
+
+        $verify = $this->pdo->prepare('SELECT COUNT(*) FROM machine_dex_audits WHERE audit_code = :audit_code');
+        $count = 0;
+        foreach (self::canonicalMachineDexAuditRows() as $audit) {
+            $verify->execute([':audit_code' => $audit['audit_code']]);
+            $count += (int)$verify->fetchColumn();
+        }
+
+        return $count;
+    }
+
+    /**
      * Stock de producto por lote en las furgonetas de reposición (Módulo 33 · D2, D4).
      *
      * El saldo se identifica por `(restocker_id, product_id, batch_code)`: dos lotes
@@ -4262,6 +4528,135 @@ class SeedRunner
     }
 
     /**
+     * Los cuatro volcados `.dex` canónicos del Módulo 39.
+     *
+     * Cada payload es un texto EVA-DTS fijo y completo (`DXS`..`DXE`, `ID1`,
+     * `ID4`, `VA1`, `CA3` cuando existe, bloques `PA1`/`PA2` y eventos `EA1`/
+     * `EA2`). La huella se calcula en el sembrador sobre esa misma cadena, así
+     * que `sha256_hash` y `file_size_bytes` siempre describen el contenido real
+     * del volcado y no un valor inventado.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalMachineDexAuditRows(): array
+    {
+        return [
+            [
+                'audit_code' => 'DEX-2026-0001',
+                'machine_code' => 'VEND-0101',
+                'importer_email' => 'lucia.repostaje@vendguard.internal',
+                'importer_role' => 'RESTOCKER',
+                'import_source' => 'RESTOCKER_ROUTE',
+                'status' => 'ACTIVE',
+                'visit_code' => 'MRV-2026-0001',
+                'raw_payload' => "DXS*VendGuard*DEX*1*\nID1*VEND-0101\nID4*2\nVA1*24580*118*0*0\nCA3*18350*4200*9800\nPA1*11*115\nPA2*46*5290*0*0\nPA1*013*38\nPA2*72*2736*0*0\nEA2*EA201*3*7*1\nDXE*1*1",
+                'va1_total_sales_eur' => '245.80',
+                'va1_total_vend_units' => 118,
+                'ca3_cashbox_eur' => '183.50',
+                'ca3_coin_tubes_eur' => '42.00',
+                'ca3_bills_in_eur' => '98.00',
+                'captured_offset_hours' => -24,
+                'void_reason' => null,
+                'voided_offset_hours' => null,
+                'client_mutation_id' => 'seed-mutation-dex-0001',
+            ],
+            [
+                'audit_code' => 'DEX-2026-0002',
+                'machine_code' => 'VEND-0102',
+                'importer_email' => 'jordi.ruta@vendguard.internal',
+                'importer_role' => 'TECHNICIAN',
+                'import_source' => 'TECHNICIAN_ROUTE',
+                'status' => 'ACTIVE',
+                'visit_code' => null,
+                'raw_payload' => "DXS*VendGuard*DEX*1*\nID1*VEND-0102\nID4*2\nVA1*15720*96*0*0\nPA1*01*60\nPA2*42*2520*0*0\nPA1*02*60\nPA2*31*1860*0*0\nPA1*03*70\nPA2*23*1610*0*0\nEA2*EA203*2*4*0\nDXE*1*1",
+                'va1_total_sales_eur' => '157.20',
+                'va1_total_vend_units' => 96,
+                'ca3_cashbox_eur' => null,
+                'ca3_coin_tubes_eur' => null,
+                'ca3_bills_in_eur' => null,
+                'captured_offset_hours' => -120,
+                'void_reason' => null,
+                'voided_offset_hours' => null,
+                'client_mutation_id' => 'seed-mutation-dex-0002',
+            ],
+            [
+                'audit_code' => 'DEX-2026-0003',
+                'machine_code' => 'VEND-0701',
+                'importer_email' => 'coordinacion@vendguard.internal',
+                'importer_role' => 'COORDINATOR',
+                'import_source' => 'COORDINATOR_CONSOLE',
+                'status' => 'ACTIVE',
+                'visit_code' => null,
+                'raw_payload' => "DXS*VendGuard*DEX*1*\nID1*VEND-0701\nID4*2\nVA1*9840*54*0*0\nPA1*11*115\nPA2*28*3220*0*0\nPA1*013*38\nPA2*26*988*0*0\nEA1*EG01*2026-11-21T04:12\nEA2*EG01*2*7*1\nDXE*1*1",
+                'va1_total_sales_eur' => '98.40',
+                'va1_total_vend_units' => 54,
+                'ca3_cashbox_eur' => '72.10',
+                'ca3_coin_tubes_eur' => '18.00',
+                'ca3_bills_in_eur' => '40.00',
+                'captured_offset_hours' => -48,
+                'void_reason' => null,
+                'voided_offset_hours' => null,
+                'client_mutation_id' => 'seed-mutation-dex-0003',
+            ],
+            [
+                'audit_code' => 'DEX-2026-0004',
+                'machine_code' => 'VEND-0501',
+                'importer_email' => 'lucia.repostaje@vendguard.internal',
+                'importer_role' => 'RESTOCKER',
+                'import_source' => 'RESTOCKER_ROUTE',
+                'status' => 'VOIDED',
+                'visit_code' => null,
+                'raw_payload' => "DXS*VendGuard*DEX*1*\nID1*VEND-0501\nID4*2\nVA1*7360*88*0*0\nPA1*12*95\nPA2*40*3800*0*0\nPA1*99*150\nPA2*9*1350*0*0\nEA2*EA205*1*2*0\nDXE*1*1",
+                'va1_total_sales_eur' => '73.60',
+                'va1_total_vend_units' => 88,
+                'ca3_cashbox_eur' => null,
+                'ca3_coin_tubes_eur' => null,
+                'ca3_bills_in_eur' => null,
+                'captured_offset_hours' => -72,
+                'void_reason' => 'Volcado subido por error a una máquina distinta de la parada del día.',
+                'voided_offset_hours' => -48,
+                'client_mutation_id' => 'seed-mutation-dex-0004',
+            ],
+        ];
+    }
+
+    /**
+     * Selecciones `PA1`/`PA2` de los volcados demo (Módulo 39 · C4, QA-4).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalMachineDexSelectionRows(): array
+    {
+        return [
+            ['audit_code' => 'DEX-2026-0001', 'line_sequence' => 1, 'raw_selection_code' => '11', 'normalized_selection_code' => '11', 'machine_code' => 'VEND-0101', 'slot_code' => '11', 'match_status' => 'EXACT_MATCH', 'unit_price_eur' => '1.15', 'total_vend_units' => 46, 'total_sales_eur' => '52.90'],
+            ['audit_code' => 'DEX-2026-0001', 'line_sequence' => 2, 'raw_selection_code' => '013', 'normalized_selection_code' => '13', 'machine_code' => 'VEND-0101', 'slot_code' => '13', 'match_status' => 'LEADING_ZERO_MATCH', 'unit_price_eur' => '0.38', 'total_vend_units' => 72, 'total_sales_eur' => '27.36'],
+            ['audit_code' => 'DEX-2026-0002', 'line_sequence' => 1, 'raw_selection_code' => '01', 'normalized_selection_code' => '01', 'machine_code' => 'VEND-0102', 'slot_code' => null, 'match_status' => 'HOT_DRINKS_SELECTION', 'unit_price_eur' => '0.60', 'total_vend_units' => 42, 'total_sales_eur' => '25.20'],
+            ['audit_code' => 'DEX-2026-0002', 'line_sequence' => 2, 'raw_selection_code' => '02', 'normalized_selection_code' => '02', 'machine_code' => 'VEND-0102', 'slot_code' => null, 'match_status' => 'HOT_DRINKS_SELECTION', 'unit_price_eur' => '0.60', 'total_vend_units' => 31, 'total_sales_eur' => '18.60'],
+            ['audit_code' => 'DEX-2026-0002', 'line_sequence' => 3, 'raw_selection_code' => '03', 'normalized_selection_code' => '03', 'machine_code' => 'VEND-0102', 'slot_code' => null, 'match_status' => 'HOT_DRINKS_SELECTION', 'unit_price_eur' => '0.70', 'total_vend_units' => 23, 'total_sales_eur' => '16.10'],
+            ['audit_code' => 'DEX-2026-0003', 'line_sequence' => 1, 'raw_selection_code' => '11', 'normalized_selection_code' => '11', 'machine_code' => 'VEND-0701', 'slot_code' => '11', 'match_status' => 'EXACT_MATCH', 'unit_price_eur' => '1.15', 'total_vend_units' => 28, 'total_sales_eur' => '32.20'],
+            ['audit_code' => 'DEX-2026-0003', 'line_sequence' => 2, 'raw_selection_code' => '013', 'normalized_selection_code' => '13', 'machine_code' => 'VEND-0701', 'slot_code' => '13', 'match_status' => 'LEADING_ZERO_MATCH', 'unit_price_eur' => '0.38', 'total_vend_units' => 26, 'total_sales_eur' => '9.88'],
+            ['audit_code' => 'DEX-2026-0004', 'line_sequence' => 1, 'raw_selection_code' => '12', 'normalized_selection_code' => '12', 'machine_code' => 'VEND-0501', 'slot_code' => '12', 'match_status' => 'EXACT_MATCH', 'unit_price_eur' => '0.95', 'total_vend_units' => 40, 'total_sales_eur' => '38.00'],
+            ['audit_code' => 'DEX-2026-0004', 'line_sequence' => 2, 'raw_selection_code' => '99', 'normalized_selection_code' => '99', 'machine_code' => 'VEND-0501', 'slot_code' => null, 'match_status' => 'UNMAPPED', 'unit_price_eur' => '1.50', 'total_vend_units' => 9, 'total_sales_eur' => '13.50'],
+        ];
+    }
+
+    /**
+     * Eventos `EA1`/`EA2` de los volcados demo (Módulo 39 · D4, QA-4).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalMachineDexEventRows(): array
+    {
+        return [
+            ['audit_code' => 'DEX-2026-0001', 'line_sequence' => 1, 'source_block' => 'EA2', 'event_code' => 'EA201', 'event_category' => 'PAYMENT_MDB', 'severity' => 'WARNING', 'occurrence_count' => 3, 'count_since_reset' => 3, 'count_since_init' => 7, 'is_active_flag' => false, 'event_occurred_at_raw' => null, 'description_es' => 'Fallo del monedero: rechazo intermitente de monedas de 0,50 €.', 'is_thermal_alert' => false],
+            ['audit_code' => 'DEX-2026-0002', 'line_sequence' => 1, 'source_block' => 'EA2', 'event_code' => 'ED201', 'event_category' => 'POWER_CONTROLLER', 'severity' => 'WARNING', 'occurrence_count' => 2, 'count_since_reset' => 2, 'count_since_init' => 4, 'is_active_flag' => false, 'event_occurred_at_raw' => null, 'description_es' => 'Reinicio inesperado de la placa VMC tras un microcorte de tensión.', 'is_thermal_alert' => false],
+            ['audit_code' => 'DEX-2026-0003', 'line_sequence' => 1, 'source_block' => 'EA1', 'event_code' => 'EG01', 'event_category' => 'THERMAL_REFRIGERATION', 'severity' => 'CRITICAL', 'occurrence_count' => 1, 'count_since_reset' => null, 'count_since_init' => null, 'is_active_flag' => false, 'event_occurred_at_raw' => '2026-11-21T04:12', 'description_es' => 'Fallo del grupo de frío: temperatura de cabina fuera del rango sanitario.', 'is_thermal_alert' => true],
+            ['audit_code' => 'DEX-2026-0003', 'line_sequence' => 2, 'source_block' => 'EA2', 'event_code' => 'EG01', 'event_category' => 'THERMAL_REFRIGERATION', 'severity' => 'CRITICAL', 'occurrence_count' => 2, 'count_since_reset' => 2, 'count_since_init' => 7, 'is_active_flag' => true, 'event_occurred_at_raw' => null, 'description_es' => 'Grupo de frío con dos fallos desde el último reseteo y siete desde el arranque.', 'is_thermal_alert' => true],
+            ['audit_code' => 'DEX-2026-0004', 'line_sequence' => 1, 'source_block' => 'EA2', 'event_code' => 'EF201', 'event_category' => 'MECHANICAL_VEND', 'severity' => 'WARNING', 'occurrence_count' => 1, 'count_since_reset' => 1, 'count_since_init' => 2, 'is_active_flag' => false, 'event_occurred_at_raw' => null, 'description_es' => 'Atasco detectado en la espiral del carril 12 antes de la retirada del volcado.', 'is_thermal_alert' => false],
+        ];
+    }
+
+    /**
      * Las tres líneas de desglose de las visitas demo (Módulo 34 · C1, QA 3).
      *
      * El carril 11 de `VEND-0101` retira las seis unidades caducadas (`L-SAND-2599`,
@@ -4382,6 +4777,11 @@ class SeedRunner
             // cuando las tres existen. Son hechos históricos inmutables que una
             // resemilla no reescribe ni duplica (Art. III.3).
             $cashCollectionCount = $this->seedMachineCashCollections();
+            // Las auditorías EVA-DTS (Módulo 39) cuelgan de la máquina, del actor y
+            // —en la vía integrada— de la visita del Módulo 34: entran cuando las
+            // tres existen. Son hechos históricos inmutables que una resemilla no
+            // reescribe ni duplica (Art. III.3).
+            $dexAuditCount = $this->seedMachineDexAudits();
             // El planificador de rutas (Módulo 37) cuelga de la máquina y del
             // coordinador ya sembrados: agendas versionadas por cadencia y una
             // excepción diaria histórica que no perturba la ruta de hoy.
@@ -4438,6 +4838,7 @@ class SeedRunner
                 'product_loading_orders' => $productLoadingOrderCount,
                 'machine_restock_visits' => $restockVisitCount,
                 'machine_cash_collections' => $cashCollectionCount,
+                'machine_dex_audits' => $dexAuditCount,
                 'machine_restock_schedules' => $restockScheduleCount,
                 'restock_route_daily_overrides' => $restockOverrideCount,
                 'troubleshooting_guides' => $troubleshootingGuideCount,

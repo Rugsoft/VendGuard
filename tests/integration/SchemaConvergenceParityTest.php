@@ -43,7 +43,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 51 tablas del contrato de correspondencia (§2.1, Módulos 14 a 37). */
+/** Las 54 tablas del contrato de correspondencia (§2.1, Módulos 14 a 39). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -89,6 +89,13 @@ const CONTRACT_TABLES = [
     // versionado inmutable de la agenda (Art. III.3, QA-2).
     'machine_restock_schedules',
     'restock_route_daily_overrides',
+    // Módulo 39 · auditoría local EVA-DTS: la cabecera inmutable del volcado y
+    // sus dos desgloses. Las tres declaran `prevent_hard_delete()` (Art. III.1),
+    // la inmutabilidad de las líneas y el ciclo por etapas de la cabecera
+    // (Art. III.3) y el cerrojo sanitario del Reponedor en `BEFORE INSERT`.
+    'machine_dex_audits',
+    'machine_dex_selection_lines',
+    'machine_dex_event_lines',
 ];
 
 /** Adiciones declaradas del motor nuevo (§5). */
@@ -286,7 +293,7 @@ try {
 
     $baseOnlyTables = $readTables($pgPdo, $schema);
     $assert(
-        'El DDL base crea las 51 tablas del contrato y ninguna más',
+        'El DDL base crea las 54 tablas del contrato y ninguna más',
         $sameSet($baseOnlyTables, CONTRACT_TABLES),
         'tablas: ' . count($baseOnlyTables) . ' · ' . $listSample(array_merge(array_diff($baseOnlyTables, CONTRACT_TABLES), array_diff(CONTRACT_TABLES, $baseOnlyTables)))
     );
@@ -341,6 +348,7 @@ try {
             '032_restocker_sat_synergy.sql',
             '033_restock_route_planner.sql',
             '034_restock_schedule_cadence_guard.sql',
+            '035_eva_dts_dex_audit.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -348,7 +356,7 @@ try {
     $runner->assertConverged();
     $convergedTables = $readTables($pgPdo, $schema);
     $assert(
-        'Tras la migración, el inventario converge al del repositorio (51 tablas + libro A-5)',
+        'Tras la migración, el inventario converge al del repositorio (54 tablas + libro A-5)',
         $sameSet($convergedTables, array_merge(CONTRACT_TABLES, [ADDITION_LEDGER])),
         'tablas: ' . count($convergedTables)
     );
@@ -389,6 +397,7 @@ try {
         '032_restocker_sat_synergy.sql',
         '033_restock_route_planner.sql',
         '034_restock_schedule_cadence_guard.sql',
+        '035_eva_dts_dex_audit.sql',
     ];
     $ledgerFiles = array_map(static fn (array $row): string => (string)$row['filename'], $ledgerRows);
     $ledgerChecksumsOk = true;
@@ -396,7 +405,7 @@ try {
         $ledgerChecksumsOk = $ledgerChecksumsOk && strlen((string)$ledgerRow['checksum']) === 64;
     }
     $assert(
-        'El libro registra las 34 migraciones, en orden, con su huella de 64 caracteres',
+        'El libro registra las 35 migraciones, en orden, con su huella de 64 caracteres',
         $ledgerFiles === $expectedLedgerFiles && $ledgerChecksumsOk,
         'registradas: ' . count($ledgerRows)
     );
@@ -421,15 +430,15 @@ try {
 
     $pgTables = $readTables($pgPdo, $schema);
     $assert(
-        'El motor único declara las 51 tablas canónicas del dominio',
+        'El motor único declara las 54 tablas canónicas del dominio',
         $sameSet(array_values(array_diff($pgTables, [ADDITION_LEDGER])), CONTRACT_TABLES),
         'tablas: ' . count($pgTables)
     );
 
     $pgColumns = $readColumnNames($pgPdo, $schema);
     $assert(
-        'Todas las 51 tablas tienen columnas declaradas en PostgreSQL',
-        count($pgColumns) >= 51
+        'Todas las 54 tablas tienen columnas declaradas en PostgreSQL',
+        count($pgColumns) >= 54
     );
     $assert(
         'incidents declara las 56 columnas del contrato (43 + 7 de taxonomía + 2 de SLA + 4 de Nivel 1)',
@@ -533,8 +542,8 @@ try {
         ]
     );
     $assert(
-        'El esquema declara los 56 conjuntos ENUM nativos del dominio (50 tipos)',
-        count($pgEnums) === 56,
+        'El esquema declara los 63 conjuntos ENUM nativos del dominio (55 tipos)',
+        count($pgEnums) === 63,
         'conjuntos: ' . count($pgEnums)
     );
 
@@ -598,8 +607,8 @@ try {
     $enumTypesStmt->execute([':schema' => $schema]);
     $enumTypeCount = (int)$enumTypesStmt->fetchColumn();
     $assert(
-        'El esquema declara los 50 tipos ENUM nativos distintos del contrato',
-        $enumTypeCount === 50,
+        'El esquema declara los 55 tipos ENUM nativos distintos del contrato',
+        $enumTypeCount === 55,
         'tipos: ' . $enumTypeCount
     );
 
@@ -625,8 +634,8 @@ try {
     $triggerStmt->execute([':schema' => $schema]);
     $pgTriggerTables = array_map(static fn (array $row): string => (string)$row['table_name'], $triggerStmt->fetchAll());
     $assert(
-        'A-4: las 51 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
-        count(array_unique($pgTriggerTables)) === 51 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
+        'A-4: las 54 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
+        count(array_unique($pgTriggerTables)) === 54 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
         'tablas con disparador: ' . count(array_unique($pgTriggerTables))
     );
 

@@ -17,8 +17,8 @@ declare(strict_types=1);
  *      baja lógica entran en el cálculo con `is_active = false`; la auditoría es
  *      append-only (`trg_no_delete_audit_log`) y la exportación deja su evento
  *      global con `entity_id = 0`.
- *   3. **Art. IV — cero DDL y cero dependencias.** El esquema conserva 51
- *      tablas, 50 tipos `ENUM`, 56 columnas `ENUM` y 34 migraciones; las fuentes
+ *   3. **Art. IV — cero DDL y cero dependencias.** El esquema conserva 54
+ *      tablas, 55 tipos `ENUM`, 63 columnas `ENUM` y 35 migraciones; las fuentes
  *      del módulo no contienen DDL ni imports fuera de `VendGuard\` y de las
  *      clases nativas permitidas.
  *   4. **Art. V.4 — perímetro y opacidad.** Coordinación es el único rol que
@@ -51,10 +51,10 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
 
-const RBI05_EXPECTED_TABLES = 51;
-const RBI05_EXPECTED_ENUMS = 50;
-const RBI05_EXPECTED_ENUM_COLUMNS = 56;
-const RBI05_EXPECTED_MIGRATIONS = 34;
+const RBI05_EXPECTED_TABLES = 54;
+const RBI05_EXPECTED_ENUMS = 55;
+const RBI05_EXPECTED_ENUM_COLUMNS = 63;
+const RBI05_EXPECTED_MIGRATIONS = 35;
 const RBI05_AUDIT_ACTION = 'EXPORT_RESTOCKING_BI_CSV';
 
 /** Huellas normalizadas (LF) de los ficheros que el Art. VI declara intactos. */
@@ -536,7 +536,7 @@ try {
     $tables = PostgresFixtureBuilder::tables($pdo);
     $assert(
         count($tables) === RBI05_EXPECTED_TABLES,
-        'El esquema conserva 51 tablas de dominio',
+        'El esquema conserva 54 tablas de dominio',
         'contadas ' . count($tables)
     );
 
@@ -546,7 +546,7 @@ try {
            JOIN pg_namespace n ON n.oid = t.typnamespace
           WHERE t.typtype = 'e' AND n.nspname = current_schema()"
     )->fetchColumn();
-    $assert($enumCount === RBI05_EXPECTED_ENUMS, 'El esquema conserva 50 tipos ENUM', 'contados ' . $enumCount);
+    $assert($enumCount === RBI05_EXPECTED_ENUMS, 'El esquema conserva 55 tipos ENUM', 'contados ' . $enumCount);
 
     $enumColumns = (int)$pdo->query(
         "SELECT COUNT(*)
@@ -556,14 +556,14 @@ try {
     )->fetchColumn();
     $assert(
         $enumColumns === RBI05_EXPECTED_ENUM_COLUMNS,
-        'El esquema conserva 56 columnas ENUM',
+        'El esquema conserva 63 columnas ENUM',
         'contadas ' . $enumColumns
     );
 
     $migrations = glob($projectRoot . '/database/supabase_migrations/*.sql') ?: [];
     $assert(
         count($migrations) === RBI05_EXPECTED_MIGRATIONS,
-        'El repositorio conserva 34 migraciones',
+        'El repositorio conserva 35 migraciones',
         'contadas ' . count($migrations)
     );
 

@@ -569,8 +569,8 @@ try {
 
     $tables = PostgresFixtureBuilder::tables($pgPdo);
     $assert(
-        'El Módulo 36 no añade tablas: el esquema declara hoy 51 tablas de dominio (Art. IV)',
-        count($tables) === 51,
+        'El Módulo 39 no añade tablas ajenas al dominio: el esquema declara hoy 54 tablas (Art. IV)',
+        count($tables) === 54,
         'tablas: ' . count($tables)
     );
 

@@ -784,8 +784,8 @@ try {
     $locationColumns = PostgresFixtureBuilder::columns($pgPdo, 'locations');
 
     $assert(
-        'El esquema declara exactamente 51 tablas de dominio y locations conserva sus 23 columnas',
-        count($tables) === 51
+        'El esquema declara exactamente 54 tablas de dominio y locations conserva sus 23 columnas',
+        count($tables) === 54
             && in_array('machine_restock_schedules', $tables, true)
             && in_array('restock_route_daily_overrides', $tables, true)
             && count($locationColumns) === 23,
