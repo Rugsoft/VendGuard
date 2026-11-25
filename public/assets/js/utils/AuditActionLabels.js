@@ -107,7 +107,11 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   // auditan con tipo propio y el filtro del visor debe cubrir el enumerado
   // completo (`Art. III.3`).
   MACHINE_RESTOCK_SCHEDULE: 'Agenda de Reposición Periódica',
-  RESTOCK_ROUTE_DAILY_OVERRIDE: 'Excepción Diaria de Ruta'
+  RESTOCK_ROUTE_DAILY_OVERRIDE: 'Excepción Diaria de Ruta',
+  // Entidad del Módulo 39: el alta del volcado `.dex`, su vinculación y su
+  // anulación se auditan con tipo propio; sin etiqueta el filtro del visor
+  // perdería las filas del contrato inmutable (`Art. III.3`).
+  MACHINE_DEX_AUDIT: 'Volcado EVA-DTS (.dex)'
 });
 
 /**

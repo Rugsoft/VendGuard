@@ -221,6 +221,16 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_RESTOCK_ROUTE_DAILY_OVERRIDE = 'RESTOCK_ROUTE_DAILY_OVERRIDE';
 
     /**
+     * Volcado EVA-DTS `.dex` (Módulo 39, Tabla 52).
+     *
+     * El alta, la vinculación a una visita o recaudación y la anulación lógica
+     * del volcado se auditan bajo este tipo propio; apuntar a `MACHINE` perdería
+     * la trazabilidad del fichero concreto y su anulación (Art. III.3). El valor
+     * existe en el enum desde la migración 035.
+     */
+    public const ENTITY_MACHINE_DEX_AUDIT = 'MACHINE_DEX_AUDIT';
+
+    /**
      * Whitelist completa de tipos de entidad admitidos por el dominio.
      *
      * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
@@ -257,6 +267,7 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_PRODUCT_LOADING_ORDER,
         self::ENTITY_MACHINE_RESTOCK_SCHEDULE,
         self::ENTITY_RESTOCK_ROUTE_DAILY_OVERRIDE,
+        self::ENTITY_MACHINE_DEX_AUDIT,
     ];
 
     /**
