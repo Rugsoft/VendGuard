@@ -740,6 +740,24 @@ final class MachineDexAudit implements JsonSerializable
         return $clone;
     }
 
+    /**
+     * Reintenta el alta con el siguiente correlativo anual tras una colisión
+     * concurrente de `audit_code` (T-DEX-10). El volcado conserva intactas sus
+     * demás columnas; solo cambia el código reservado antes del `INSERT`.
+     */
+    public function withAuditCode(string $auditCode): self
+    {
+        $cleanCode = trim($auditCode);
+        if (preg_match('/^DEX-[0-9]{4}-[0-9]{4,}$/', $cleanCode) !== 1) {
+            throw new InvalidArgumentException('El código del volcado no cumple el formato DEX-AAAA-NNNN.');
+        }
+
+        $clone = clone $this;
+        $clone->auditCode = $cleanCode;
+
+        return $clone;
+    }
+
     public function withLinkToRestockVisit(int $restockVisitId): self
     {
         return $this->withLink('restockVisitId', $restockVisitId, 'la visita de reposición');

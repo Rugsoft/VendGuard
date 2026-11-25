@@ -289,7 +289,26 @@ final class MachineDexAuditService
             incidentId: isset($request['incident_id']) ? (int)$request['incident_id'] : null
         );
 
-        $persisted = $this->repository->create($audit, $matchedSelections, $parsed['events']);
+        // El correlativo anual se reserva con un `MAX()` y el alta se confirma en
+        // otra transacción. Dos importaciones simultáneas pueden reservar el mismo
+        // `audit_code`; el índice único lo rechaza y aquí se reintenta con el
+        // siguiente código para que el conflicto visible sea el real (SHA-256 o
+        // `client_mutation_id`), no una colisión interna de correlativo.
+        $persisted = null;
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                $persisted = $this->repository->create($audit, $matchedSelections, $parsed['events']);
+                break;
+            } catch (DexAuditConflictException $conflict) {
+                if ($conflict->getErrorCode() !== 'DEX_DUPLICATE_AUDIT_CODE' || $attempt >= 5) {
+                    throw $conflict;
+                }
+
+                $audit = $audit->withAuditCode($this->repository->reserveAuditCode(new DateTimeImmutable($capturedAt)));
+            }
+        }
+
+        $auditCode = $persisted->getAuditCode();
         $auditId = (int)$persisted->getId();
         $detail = $this->repository->findById($auditId) ?? [
             'id' => $auditId,
