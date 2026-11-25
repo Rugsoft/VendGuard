@@ -79,11 +79,14 @@ flowchart LR
 
 ### Fase 3 · Capa de Infraestructura PDO
 
-- [ ] **T-DEX-06 · Implementar `MachineDexAuditRepositoryInterface`, `MachineDexAuditGatewayInterface`, `PdoMachineDexAuditRepository` y `PdoMachineDexAuditGateway`**
+- [x] **T-DEX-06 · Implementar `MachineDexAuditRepositoryInterface`, `MachineDexAuditGatewayInterface`, `PdoMachineDexAuditRepository` y `PdoMachineDexAuditGateway`**
   - **Requisitos:** `RF-01.1`, `RF-03.1`, `RF-04.1`, `RF-04.3`, `RF-07.1`, `RF-07.2`, `RNF-01`, `D1`, `C1`, `C3`, `C6`, `QA-1`, `QA-2`, `QA-3`.
   - **Ficheros:** `src/Core/Domain/Repository/MachineDexAuditRepositoryInterface.php`, `MachineDexAuditGatewayInterface.php`, `src/Infrastructure/Repository/PdoMachineDexAuditRepository.php`, `PdoMachineDexAuditGateway.php`, `tests/integration/PdoMachineDexAuditRepositoryTest.php` (crear).
   - **Notas técnicas:** Garantizar exclusión de `raw_payload` en todas las lecturas de listado/KPIs, bloqueo `FOR UPDATE` sobre `machines`, lectura del último volcado `ACTIVE` con `captured_at <= new.captured_at` (`QA-2`), detección de `out_of_order_sync`, comprobación de avería activa `TEMPERATURE_COLD` (`QA-1`), consultas de cruce M34/M35 en mismo día civil `Europe/Madrid` (`QA-3`), y descarga aislada de `raw_payload`.
   - **Verificación:** `php tests/integration/PdoMachineDexAuditRepositoryTest.php`
+  - **Cierre (2026-11-25):** `PdoMachineDexAuditRepositoryTest.php` · **37/37 aserciones · `exit=0` · residuo 0**. Creados `MachineDexAuditRepositoryInterface` (`reserveAuditCode`, `create`, `findById`, `findRawPayload`, `findActiveIdByHash`, `findPreviousActive(machine, capturedAt, excludeAuditId)`, `hasLaterActive`, `findSelectionsByAudit`, `listForCoordinator`, `kpisForCoordinator`, `void`) y `MachineDexAuditGatewayInterface` (`lockMachineContext` con `FOR UPDATE OF m` + coberturas Reponedor/Técnico + avería térmica; cerrojos M34/M35/M16; cruces del mismo día civil `Europe/Madrid`; cantidades por carril; carriles activos). `PdoMachineDexAuditRepository` inserta cabecera, selecciones y eventos en una transacción, excluye `raw_payload` de detalle/listado/KPIs, resuelve los cinco KPIs con desviación `CA3` frente a la recaudación más cercana del día (±1,00 €) y anula `ACTIVE → VOIDED` de forma terminal. `PdoMachineDexAuditGateway` entrega hechos bajo cerrojo y detecta `TEMPERATURE_COLD` abierta. Siguiente tarea pendiente: **T-DEX-07**.
+
+---
 
 ---
 
