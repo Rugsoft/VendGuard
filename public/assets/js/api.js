@@ -1951,6 +1951,34 @@ export class ApiClient {
     exportCashCollectionsCsv: (params = {}) => {
       return this.downloadFile('/coordinator/cash-collections/export-csv', 'recaudaciones.csv', params);
     },
+
+    // Libro EVA-DTS `.dex` (Módulo 39, RF-07.1/RF-07.2, C6, QA-2/QA-3/QA-5).
+    //
+    // La lectura financiera es exclusiva de Coordinación. El original solo
+    // abandona el servidor por `/raw`; el alta manual sella la puerta
+    // COORDINATOR_CONSOLE y la anulación es lógica, nunca un DELETE.
+    getDexAudits: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/dex-audits${q ? `?${q}` : ''}`);
+    },
+    getDexAudit: (auditId) => {
+      return this.get(`/coordinator/dex-audits/${encodeURIComponent(auditId)}`);
+    },
+    importDexAudit: (machineId, payload) => {
+      return this.post(`/coordinator/machines/${encodeURIComponent(machineId)}/dex-audits`, payload);
+    },
+    downloadDexAuditRaw: (auditId, auditCode = 'volcado') => {
+      return this.downloadFile(
+        `/coordinator/dex-audits/${encodeURIComponent(auditId)}/raw`,
+        `${auditCode}.dex`
+      );
+    },
+    voidDexAudit: (auditId, payload) => {
+      return this.post(`/coordinator/dex-audits/${encodeURIComponent(auditId)}/void`, payload);
+    },
+    exportDexAuditsCsv: (params = {}) => {
+      return this.downloadFile('/coordinator/dex-audits/export-csv', 'dex-audits.csv', params);
+    },
     adjustRestockerVanStock: (restockerId, payload) => {
       return this.put(`/coordinator/restocker-van-stocks/${encodeURIComponent(restockerId)}`, payload);
     },

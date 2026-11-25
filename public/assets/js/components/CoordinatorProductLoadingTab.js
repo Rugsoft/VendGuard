@@ -36,6 +36,7 @@ import { api } from '../api.js';
 import { formatDateTime } from '../utils/DateTimeFormat.js';
 import { ModalDialog } from './ModalDialog.js';
 import { CoordinatorRestockRoutePlannerSubTab } from './CoordinatorRestockRoutePlannerSubTab.js';
+import { CoordinatorDexAuditsSubTab } from './CoordinatorDexAuditsSubTab.js';
 
 const unwrap = (response) => (response && response.data !== undefined ? response.data : response);
 
@@ -97,7 +98,7 @@ const blankStockForm = () => ({
 
 export const CoordinatorProductLoadingTab = {
   name: 'CoordinatorProductLoadingTab',
-  components: { ModalDialog, CoordinatorRestockRoutePlannerSubTab },
+  components: { ModalDialog, CoordinatorRestockRoutePlannerSubTab, CoordinatorDexAuditsSubTab },
   emits: ['open-incident-detail'],
   data() {
     return {
@@ -1246,6 +1247,15 @@ export const CoordinatorProductLoadingTab = {
           >
             🗺️ Ruta del día y Agendas
           </button>
+          <button
+            type="button"
+            class="vg-btn"
+            :class="activeSection === 'dex' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            data-testid="product-loading-dex-section-button"
+            @click="activeSection = 'dex'"
+          >
+            📄 Auditorías .dex
+          </button>
         </div>
       </div>
 
@@ -1703,6 +1713,11 @@ export const CoordinatorProductLoadingTab = {
       <!-- Sub-vista 5: planificador de rutas periódicas -->
       <section v-else-if="activeSection === 'route-planner'" data-testid="product-loading-route-planner-section">
         <CoordinatorRestockRoutePlannerSubTab />
+      </section>
+
+      <!-- Sub-vista 6: libro EVA-DTS .dex -->
+      <section v-else-if="activeSection === 'dex'" data-testid="product-loading-dex-section">
+        <CoordinatorDexAuditsSubTab />
       </section>
 
       <!-- Expediente de visita in situ -->
