@@ -398,6 +398,157 @@ final class MachineDexAuditService
     }
 
     /**
+     * Listado de volcados `ACTIVE` de una máquina para la puerta móvil indicada.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listForRole(int $machineId, string $role, int $limit = 50): array
+    {
+        $rows = $this->repository->listForCoordinator(
+            ['machine_id' => $machineId, 'status' => 'ACTIVE'],
+            max(1, min($limit, 100)),
+            0
+        );
+
+        return array_values(array_map(
+            fn (array $row): array => $this->projectByRole($row, $role, false),
+            $rows
+        ));
+    }
+
+    /**
+     * Listado paginado de Coordinación con sus KPIs (RF-07.1).
+     *
+     * @param array<string, mixed> $filters
+     * @return array{audits: list<array<string, mixed>>, kpis: array<string, int>}
+     */
+    public function listForCoordinator(array $filters = [], int $limit = 100, int $offset = 0): array
+    {
+        return [
+            'audits' => $this->repository->listForCoordinator($filters, max(1, min($limit, 500)), max(0, $offset)),
+            'kpis' => $this->repository->kpisForCoordinator($filters),
+        ];
+    }
+
+    /**
+     * Detalle de un volcado con la proyección cerrada del rol consultante.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findForRole(int $auditId, string $role, ?int $machineId = null): ?array
+    {
+        $row = $this->repository->findById($auditId);
+        if ($row === null || ($machineId !== null && (int)$row['machine_id'] !== $machineId)) {
+            return null;
+        }
+
+        return $this->projectByRole($row, $role, false);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findRawPayload(int $auditId): ?array
+    {
+        return $this->repository->findRawPayload($auditId);
+    }
+
+    /**
+     * Proyecta el resultado del `POST` inmediato según la puerta de importación.
+     *
+     * @param array<string, mixed> $result
+     * @return array<string, mixed>
+     */
+    public function presentImportResult(array $result, string $role): array
+    {
+        $audit = is_array($result['audit'] ?? null) ? $result['audit'] : [];
+        $presented = [
+            'audit' => $this->projectByRole($audit, $role, $role === 'RESTOCKER'),
+            'idempotent_replay' => (bool)($result['idempotent_replay'] ?? false),
+            'has_thermal_alert' => (bool)($result['has_thermal_alert'] ?? false),
+            'thermal_alert_enqueued' => (bool)($result['thermal_alert_enqueued'] ?? false),
+            'suggested_escalation_payload' => $result['suggested_escalation_payload'] ?? null,
+        ];
+
+        if ($role === 'RESTOCKER') {
+            $presented['prefill_sales_counter_reading_eur'] = $result['prefill_sales_counter_reading_eur'] ?? null;
+        }
+
+        return $presented;
+    }
+
+    /**
+     * Proyecciones Art. V.4: el Reponedor y el Técnico nunca reciben euros.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function projectByRole(array $row, string $role, bool $immediatePrefill): array
+    {
+        $normalizedRole = strtoupper(trim($role));
+        if ($normalizedRole === 'COORDINATOR') {
+            $row['can_download_raw'] = true;
+
+            return $row;
+        }
+
+        $selections = [];
+        foreach ((array)($row['selections'] ?? []) as $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+            $selections[] = [
+                'normalized_selection_code' => $line['normalized_selection_code'] ?? null,
+                'matched_slot_code' => $line['matched_slot_code_snapshot'] ?? null,
+                'match_status' => $line['match_status'] ?? null,
+                'slot_current_estimated_qty' => $line['slot_current_estimated_qty'] ?? null,
+                'total_vend_units' => $line['total_vend_units'] ?? null,
+                'delta_vend_units' => $line['delta_vend_units'] ?? null,
+            ];
+        }
+
+        $events = [];
+        foreach ((array)($row['events'] ?? []) as $event) {
+            if (!is_array($event)) {
+                continue;
+            }
+            $events[] = [
+                'event_code' => $event['event_code'] ?? null,
+                'event_category' => $event['event_category'] ?? null,
+                'severity' => $event['severity'] ?? null,
+                'occurrence_count' => $event['occurrence_count'] ?? null,
+                'count_since_reset' => $event['count_since_reset'] ?? null,
+                'count_since_init' => $event['count_since_init'] ?? null,
+                'is_active_flag' => $event['is_active_flag'] ?? null,
+                'is_thermal_alert' => $event['is_thermal_alert'] ?? null,
+                'description_es' => $event['description_es'] ?? null,
+            ];
+        }
+
+        $projected = [
+            'id' => $row['id'] ?? null,
+            'audit_code' => $row['audit_code'] ?? null,
+            'machine_id' => $row['machine_id'] ?? null,
+            'machine_code' => $row['machine_code_snapshot'] ?? null,
+            'captured_at' => $row['captured_at'] ?? null,
+            'identity_mismatch_warning' => (bool)($row['identity_mismatch_warning'] ?? false),
+            'counter_reset_detected' => (bool)($row['counter_reset_detected'] ?? false),
+            'out_of_order_sync' => (bool)($row['out_of_order_sync'] ?? false),
+            'va1_total_vend_units' => $row['va1_total_vend_units'] ?? null,
+            'delta_vend_units' => $row['delta_vend_units'] ?? null,
+            'has_thermal_alert' => (bool)($row['has_thermal_alert'] ?? false),
+            'selections' => $selections,
+            'events' => $events,
+        ];
+
+        if ($normalizedRole === 'RESTOCKER' && $immediatePrefill && isset($row['va1_total_sales_eur'])) {
+            $projected['prefill_sales_counter_reading_eur'] = (float)$row['va1_total_sales_eur'];
+        }
+
+        return $projected;
+    }
+
+    /**
      * @param list<array<string, mixed>> $selections
      * @param list<array<string, mixed>> $previousSelections
      * @return list<array<string, mixed>>
