@@ -480,7 +480,9 @@ foreach ($srcFiles as $path) {
     if (stripos($source, 'refund') === false) {
         continue;
     }
-    if (preg_match('/\b(telemetr\w*|IoT|MDB|DEX|inventario de furgonetas)\b/i', $source) === 1) {
+    // El volcado local `.dex` ya es el Módulo 39 y no maquinaria futura: la
+    // guarda sigue prohibiendo la telemetría remota y el inventario de furgonetas.
+    if (preg_match('/\b(telemetr\w*|IoT|MDB|inventario de furgonetas)\b/i', $source) === 1) {
         $deferredPhase[] = basename($path);
     }
 }

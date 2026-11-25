@@ -244,10 +244,12 @@ $assert(
 // visita de reposición in situ y su desglose, inmutables y colgados de máquina,
 // reponedor y orden de carga. El Módulo 35 añade el corte de bolsa precintada,
 // colgado de la visita, la máquina y el reponedor. El Módulo 37 añade la excepción
-// diaria de ruta, colgada de la visita que la supera.
+// diaria de ruta, colgada de la visita que la supera. El Módulo 39 añade el libro
+// inmutable del volcado `.dex`: cabecera y sus dos tablas de líneas, que entran
+// antes que la cabecera por la FK RESTRICT y se drenan por la ventana de purga.
 $assert(
-    '2.7 El plan cubre las 39 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio + 1 de encuestas CSAT + 3 de ausencias/turnos/bitácora M21-M22 + 2 de órdenes de carga M23 + 1 del libro de sincronización M24 + 1 de la cadena de custodia M26 + 1 del bucle de taller M27 + 1 de actas de merma M29 + 1 del cuadrante de carga M31 + 1 de planograma M32 + 3 de stock y órdenes de carga M33 + 2 de visitas in situ M34 + 1 de recaudación de efectivo M35 + 1 de excepciones de ruta M37)',
-    count($order) === 39,
+    '2.7 El plan cubre las 42 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio + 1 de encuestas CSAT + 3 de ausencias/turnos/bitácora M21-M22 + 2 de órdenes de carga M23 + 1 del libro de sincronización M24 + 1 de la cadena de custodia M26 + 1 del bucle de taller M27 + 1 de actas de merma M29 + 1 del cuadrante de carga M31 + 1 de planograma M32 + 3 de stock y órdenes de carga M33 + 2 de visitas in situ M34 + 1 de recaudación de efectivo M35 + 1 de excepciones de ruta M37 + 3 del libro EVA-DTS M39)',
+    count($order) === 42,
     'obtenidas: ' . count($order)
 );
 

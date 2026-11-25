@@ -281,6 +281,11 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'RESTOCK_VISIT_ABORTED_THERMAL_BREACH', label: 'Visita Abortada por Rotura de Cadena de Frío', tone: 'danger', group: 'sanitary' },
   { code: 'OFFLINE_RESTOCK_VISIT_CONFLICT_DUMP', label: 'Conflicto Offline Archivado en Auditoría', tone: 'warning', group: 'restock' },
   { code: 'OFFLINE_CASH_COLLECTION_CONFLICT_DUMP', label: 'Conflicto Offline de Recaudación Archivado', tone: 'warning', group: 'restock' },
+  // Módulo 39: la anulación del volcado y el volcado de un conflicto Offline de
+  // auditoría `.dex` se escriben bajo la entidad propia y necesitan etiqueta y
+  // filtro, o el visor los mostraría como códigos crudos (Art. III.3).
+  { code: 'DEX_AUDIT_VOIDED', label: 'Volcado EVA-DTS Anulado', tone: 'danger', group: 'restock' },
+  { code: 'OFFLINE_DEX_AUDIT_CONFLICT_DUMP', label: 'Conflicto Offline de Auditoría EVA-DTS Archivado', tone: 'warning', group: 'restock' },
   // Módulo 35: el ciclo de vida de la bolsa precintada se audita con tres acciones
   // propias. Sin catálogo, el visor mostraba el código crudo y el filtro no permitía
   // localizar el sellado, la recepción en cámara ni el arqueo terminal (Art. III.3).

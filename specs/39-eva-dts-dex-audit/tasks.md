@@ -150,7 +150,8 @@ flowchart LR
 
 ### Fase 7 · Batería Global, Sincronización Documental y Cierre
 
-- [ ] **T-DEX-14 · Ejecutar batería global y canal `new_engine`, sincronizar `DocMetricsGuard`, redactar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
+- [x] **T-DEX-14 · Ejecutar batería global y canal `new_engine`, sincronizar `DocMetricsGuard`, redactar `traceability-matrix.md` y actualizar `docs/features_pendientes.md`**
   - **Requisitos:** `DoD 1`–`DoD 4`.
   - **Ficheros:** `specs/39-eva-dts-dex-audit/traceability-matrix.md` (crear), `docs/features_pendientes.md`, `README.md` (si aplica por `DocMetricsGuard`).
   - **Verificación:** `php tests/run_all.php && php tests/run_new_engine.php`
+  - **Cierre (2026-11-25):** `php tests/run_all.php` · **461 suites · 18.126 aserciones · 0 fallos · `DocMetricsGuard` COHERENTE · `exit=0`** y `php tests/run_new_engine.php` con `.env.docker-tls` · **84/84 suites · 2.881 aserciones · 0 fallos · `exit=0`**. Creada `traceability-matrix.md` con `RF-01`–`RF-07`, `RNF-01`–`RNF-04`, `D1`–`D6`, `C1`–`C6`, `QA-1`–`QA-5`, los artículos constitucionales y `DoD 1`–`DoD 4`, enlazados a las **13 suites propias (405 aserciones)**. `docs/features_pendientes.md` marca la Feature 33 como implementada y sincroniza el roadmap y las cifras; `README.md` actualiza insignia, frase canónica, resumen por fases y árbol. La corrida destapó y corrigió siete deudas reales de cierre: las acciones `DEX_AUDIT_VOIDED` y `OFFLINE_DEX_AUDIT_CONFLICT_DUMP` sin etiqueta en `AuditActionLabels.js`; `CoordinatorDexAuditsSubTab.js` fuera del App Shell (`v34`, ahora precacheada); el contrato de limpieza en 39 tablas frente a las 42 reales; la declaración del dialecto heredado de `PostgresDexAuditSchemaTest`; la guarda M08 que aún trataba `DEX` como fase futura; el recuento de plantillas del contrato M16 (24, con la alerta DEX) y la guarda M37 dependiente del día de la semana. **Módulo 39 cerrado; no quedan tareas pendientes.**
