@@ -35,14 +35,15 @@ Tras auditar el código fuente, la base de datos relacional y las suites de prue
 
 ## 📋 Catálogo de Funcionalidades Restantes (Ordenadas por Prioridad Operativa)
 
-Las funcionalidades del roadmap se estructuran en **5 bloques ordenados por valor de negocio, impacto operativo y urgencia de implementación** (con los Bloques 1, 2 y 3 concluidos al 100%, el nuevo **Bloque 4 de Cargadores y Reponedores** como prioridad operativa activa y el **Bloque 5 de Telemetría IoT** aparcado para fase futura):
+Las funcionalidades del roadmap se estructuran en **6 bloques ordenados por valor de negocio, impacto operativo y urgencia de implementación** (con los Bloques 1, 2, 3 y 4 concluidos al 100%, el nuevo **Bloque 6 de Evolución Operativa, Sanitaria, Económica y Auditoría Local sin Hardware IoT** en backlog propuesto post-M38 y el **Bloque 5 de Telemetría IoT** aparcado por dependencia de hardware físico):
 
 ```mermaid
 flowchart TD
     B1["Bloque 1: Comunicación y Protección de SLAs<br>✅ (Completado al 100% · Módulos 10, 11, 14, 15)"] --> B2["Bloque 2: Calidad de Servicio, Validación y Logística<br>✅ (Completado al 100% · Módulos 17–21, 23 y 24)"]
     B2 --> B3["Bloque 3: Trazabilidad Avanzada, Taller y Eficiencia Operativa<br>✅ (Completado al 100% · Módulos 22 y 25–30)"]
-    B3 --> B4["Bloque 4: Operativa de Carga, Reposición y Gestión de Reponedores<br>🟢 (Prioridad Operativa Activa · Features 21–28)"]
-    B4 --> B5["Bloque 5: Telemetría e Inteligencia Predictiva<br>🟣 (Fase Futura / IoT · Aparcada)"]
+    B3 --> B4["Bloque 4: Operativa de Carga, Reposición y Gestión de Reponedores<br>✅ (Completado al 100% · Módulos 31–38)"]
+    B4 --> B6["Bloque 6: Evolución Post-M38 sin Hardware IoT<br>🟠 (Backlog Propuesto · Features 29–33)"]
+    B6 --> B5["Bloque 5: Telemetría e Inteligencia Predictiva<br>🟣 (Fase Futura / Hardware IoT · Aparcada)"]
 ```
 
 ---
@@ -261,7 +262,7 @@ Refinamiento del análisis de averías, economía circular de taller, asistencia
 
 ---
 
-### 🟢 Bloque 4: Operativa de Carga, Reposición de Producto y Gestión de Reponedores (Prioridad Operativa Activa)
+### 🟢 Bloque 4: Operativa de Carga, Reposición de Producto y Gestión de Reponedores (Prioridad Operativa · ✅ Concluido al 100%)
 
 Segunda pata operativa de **VendGuard** para cubrir el ciclo integral de explotación de máquinas de vending: gestión de la plantilla de **Cargadores / Reponedores de Ruta**, planogramas de producto y consumibles, órdenes de carga de furgoneta desde almacén y cámara frigorífica, control sanitario FEFO de caducidades in situ (Art. II), arqueo de efectivo y carga de tubos de cambio bajo confidencialidad estricta (Art. V.4), y sinergia directa con el equipo de Técnicos SAT para resolver incidencias de primer nivel o escalar averías electromecánicas.
 
@@ -379,6 +380,70 @@ Ampliación a largo plazo para transformar el gestor de incidencias y reposició
 
 ---
 
+### 🟠 Bloque 6: Evolución Operativa, Trazabilidad APPCC, Rentabilidad y Auditoría Local (Sin Hardware IoT · Backlog Post-M38)
+
+Nuevas capacidades funcionales propuestas sobre los 38 módulos existentes para cerrar bucles sanitarios, económicos, B2B y de mantenimiento preventivo basado en uso real **sin requerir conectividad telemática ni hardware IoT externo**.
+
+#### 29. 🔧 Mantenimiento Preventivo por Desgaste Real y Ciclos Manuales de Venta (*Usage-Based Preventive Maintenance without IoT*)
+* **Estado:** 🆕 **PROPUESTA EN BACKLOG (Pendiente de Especificación SDD · Vía sin hardware de la Feature 19)**
+* **Propósito:** Evolucionar la programación preventiva por calendario fijo (Módulo 05) hacia un mantenimiento basado en desgaste real, aprovechando los contadores manuales y movimientos ya capturados en ruta sin esperar a sensores IoT.
+* **Componentes Técnicos:**
+  * Configuración de umbrales de ciclos por modelo y componente crítico (ej. grupo de café, molinillo, electroválvula o motores de extracción).
+  * Cruce en `PreventiveOrderSchedulerService` con el avance acumulado de `sales_counter_reading` (`machine_cash_collections`, Módulo 35) y las unidades repuestas/dispensadas derivadas de `machine_restock_visit_items` (Módulo 34).
+  * Generación automática y prioritaria de la orden preventiva al alcanzar el 90% del límite normativo de vida útil, priorizando calendario o ciclos según el primero en vencer.
+* **Tradeoffs y Consideraciones Constitucionales:**
+  * Resuelve el núcleo de la Feature 19 sin hardware adicional y sin dependencias externas (Art. IV); como contrapartida, la precisión de la detección depende de la cadencia de paso del reponedor por la máquina.
+* **Valor para el Negocio / Cliente:** Evita averías por fatiga mecánica en máquinas de alta rotación (hospitales, universidades) y optimiza visitas preventivas en equipos de baja demanda.
+* **Complejidad:** Media (2–2.5 días).
+
+#### 30. 🚨 Alerta y Retirada Sanitaria Transversal de Lotes (*HACCP Batch Recall & Automated Quarantine*)
+* **Estado:** 🆕 **PROPUESTA EN BACKLOG (Pendiente de Especificación SDD)**
+* **Propósito:** Ejecutar retiradas sanitarias de emergencia ante alertas alimentarias de proveedor o fabricante (ej. contaminación o defecto de fabricación en un lote concreto), localizando e inmovilizando en segundos todas las máquinas y furgonetas afectadas conforme al Art. II.
+* **Componentes Técnicos:**
+  * Consola de Alerta Sanitaria de Lotes en Coordinación con búsqueda instantánea por `batch_code` vivo en `machine_planogram_slots` (Módulo 34) y `restocker_van_product_stocks` (Módulo 33).
+  * Activación transaccional de `SANITARY_QUARANTINE` sobre todas las máquinas con stock activo del lote afectado, bloqueo de despacho de órdenes de carga que lo incluyan y prohibición de reposición in situ (`409 SANITARY_RESTOCK_BLOCKED`).
+  * Emisión prioritaria de alertas `CRITICAL_SANITARY` en `notification_outbox` (Módulo 14) y trazabilidad obligatoria de retirada mediante Acta Oficial de Merma y Destrucción del Módulo 29.
+* **Tradeoffs y Consideraciones Constitucionales:**
+  * Refuerza la primacía sanitaria absoluta del Art. II con mínimo impacto de esquema al reutilizar `batch_code`, cuarentenas y el outbox existente; exige coordinar con rigor las guardas concurrentes entre M29, M33 y M34.
+* **Valor para el Negocio / Cliente:** Blindaje jurídico-sanitario completo y capacidad de respuesta en minutos ante inspecciones de Salud Pública o alertas alimentarias de proveedores.
+* **Complejidad:** Media (2–2.5 días).
+
+#### 31. 💹 Cuenta de Explotación y Rentabilidad Real por Máquina y Sede (*Machine & Site Unit Economics BI*)
+* **Estado:** 🆕 **PROPUESTA EN BACKLOG (Pendiente de Especificación SDD · 0 Migraciones DDL)**
+* **Propósito:** Unificar los datos económicos dispersos en VendGuard para determinar la rentabilidad operativa neta real por máquina, modelo, sede y zona territorial, detectando puntos de venta deficitarios (*"máquinas vampiro"*).
+* **Componentes Técnicos:**
+  * Motor analítico de solo lectura en PHP 8.2 puro sobre las 51 tablas canónicas (mismo patrón minimalista del Módulo 38, sin nuevas tablas DDL): cruza ingresos arqueados en cámara (`vault_counted_eur`, Módulo 35) frente a coste de producto cargado (Módulos 32/34), mermas comerciales y térmicas (Módulos 29/34), coste congelado de repuestos instalados y ahorro neto de taller (Módulos 06/27).
+  * Sub-pestaña dedicada en Coordinación con ranking de margen operativo, detección de equipos deficitarios, sugerencias de reubicación o ajuste de planograma y exportación CSV UTF-8 BOM auditada.
+* **Tradeoffs y Consideraciones Constitucionales:**
+  * Máximo valor de negocio sin riesgo estructural sobre el esquema; requiere consultas agregadas bien indexadas para respetar el presupuesto de latencia y blindaje RBAC estricto para ocultar todo importe económico a Sede, Técnico y Reponedor (Art. V.4).
+* **Valor para el Negocio / Cliente:** Permite tomar decisiones basadas en margen neto real sobre renovación de contratos, retirada de máquinas no rentables y reajuste del surtido.
+* **Complejidad:** Media (2 días).
+
+#### 32. 🏛️ Archivo Histórico de Actuaciones, SLA y Albaranes A4 en el Portal de Sede (*B2B Site Service History & Signed Sheets Vault*)
+* **Estado:** 🆕 **PROPUESTA EN BACKLOG (Pendiente de Especificación SDD)**
+* **Propósito:** Cubrir la brecha de autoservicio B2B del Portal de Sede permitiendo al Responsable de Ubicación consultar su histórico cerrado de actuaciones, descargar o imprimir los Albaranes de Servicio A4 firmados en su centro (alcance diferido del Módulo 19) y supervisar el cumplimiento mensual de su SLA contractual (Módulo 30).
+* **Componentes Técnicos:**
+  * Nueva pestaña en `LocationPortalView.js` con listado paginado de expedientes cerrados (`CLOSED`, > 48 h) pertenecientes exclusivamente a la sede autenticada.
+  * Visor e impresión A4 de los Albaranes de Servicio (`signed_document` del Módulo 19) correspondientes a la sede, y panel resumen mensual de cumplimiento según su `sla_tier` vigente.
+  * Capa de proyección filtrada que excluye taxativamente notas internas (`is_internal`), costes de piezas, causa raíz interna, cadena de custodia e identidades personales de técnicos (Art. V.4).
+* **Tradeoffs y Consideraciones Constitucionales:**
+  * Reduce drásticamente las solicitudes administrativas hacia Coordinación en hospitales y grandes cuentas; exige cobertura exhaustiva de pruebas de segregación de datos bajo el Art. V.4.
+* **Valor para el Negocio / Cliente:** Transparencia contractual continua y respaldo documental inmediato para auditorías internas de clientes corporativos y administraciones públicas.
+* **Complejidad:** Baja-Media (1.5–2 días).
+
+#### 33. 📄 Auditoría Local mediante Importación de Ficheros Estándar EVA-DTS (`.dex`) en Ruta (*In-Situ EVA-DTS / DEX File Audit*)
+* **Estado:** 🆕 **PROPUESTA EN BACKLOG (Pendiente de Especificación SDD · Puente local a la Feature 18)**
+* **Propósito:** Incorporar telemetría real en parques sin módem 4G mediante la lectura y validación de ficheros estándar industriales EVA-DTS (`.dex`) extraídos en local por cable o puerto óptico durante las visitas de ruta.
+* **Componentes Técnicos:**
+  * Parser determinista en PHP 8.2+ puro conforme al estándar ASCII EVA-DTS (bloques `DXS`, `VA1`, `CA3`, `PA1`/`PA2`, `EA1`/`EA2`), sin librerías de terceros (Art. IV) ni simulaciones ficticias en producción (Art. I.3).
+  * Carga opcional del fichero `.dex` en la visita de reposición/recaudación (Módulos 34 y 35) para pre-rellenar `sales_counter_reading`, auditar ventas reales por selección frente al planograma y sugerir escalado automático al SAT (Módulo 36) si el volcado registra códigos de fallo MDB recientes.
+* **Tradeoffs y Consideraciones Constitucionales:**
+  * Sirve de puente real y auditable hacia la futura ingesta remota de la Feature 18 utilizando el estándar abierto del sector vending; conlleva mayor complejidad de especificación y validación frente a variantes de firmware de fabricantes.
+* **Valor para el Negocio / Cliente:** Elimina errores de transcripción manual de contadores, detecta descuadres exactos entre efectivo recaudado y ventas registradas por selección y anticipa averías ocultas en placa.
+* **Complejidad:** Media-Alta (3 días).
+
+---
+
 ## 🧭 Resumen de la Hoja de Ruta Sugerida
 
 ```
@@ -408,7 +473,7 @@ FASE DE TRAZABILIDAD AVANZADA, TALLER Y EFICIENCIA OPERATIVA (CONCLUIDA AL 100%)
  17. Perfiles de SLA Diferenciados por Tipo de Sede (Contratos Standard / Priority / 24x7) [✅ IMPLEMENTADO - Módulo 30]
  20. Registro de Jornada y Cómputo de Horas Efectivas (Time Tracking derivado de turnos) [✅ IMPLEMENTADO - Módulo 22]
 ------------------------------------------------------------------------------------
-FASE DE OPERATIVA DE CARGA, REPOSICIÓN Y GESTIÓN DE REPONEDORES (PRIORIDAD ACTIVA):
+FASE DE OPERATIVA DE CARGA, REPOSICIÓN Y GESTIÓN DE REPONEDORES (CONCLUIDA AL 100%):
  21. Rol de Cargador/Reponedor de Ruta (RESTOCKER), Zonificación de Carga y Control de Jornada [✅ IMPLEMENTADO - Módulo 31]
  22. Catálogo Maestro de Productos, Consumibles y Planograma por Máquina (Slot Matrix + Art. II) [✅ IMPLEMENTADO - Módulo 32]
  23. Órdenes de Carga de Furgoneta de Reposición y Picking con Trazabilidad de Frío [✅ IMPLEMENTADO - Módulo 33]
@@ -417,6 +482,13 @@ FASE DE OPERATIVA DE CARGA, REPOSICIÓN Y GESTIÓN DE REPONEDORES (PRIORIDAD ACT
  26. Sinergia Operativa Reponedor <-> Técnico SAT (Resolución de Nivel 1 y Escalado Técnico In Situ) [✅ IMPLEMENTADO - Módulo 36]
  27. Planificador de Rutas Periódicas de Carga y Priorización Dinámica por Demanda y Caducidad [✅ IMPLEMENTADO - Módulo 37]
  28. Cuadro de Mando de Reposición, Roturas de Stock (Stockout Rate) y Mermas Comerciales [✅ IMPLEMENTADO - Módulo 38]
+------------------------------------------------------------------------------------
+FASE DE EVOLUCIÓN POST-M38 SIN HARDWARE IOT (BACKLOG PROPUESTO):
+ 29. Mantenimiento Preventivo por Desgaste Real y Ciclos Manuales de Venta [🆕 PROPUESTA EN BACKLOG]
+ 30. Alerta y Retirada Sanitaria Transversal de Lotes (HACCP Batch Recall) [🆕 PROPUESTA EN BACKLOG]
+ 31. Cuenta de Explotación y Rentabilidad Real por Máquina y Sede (Unit Economics BI) [🆕 PROPUESTA EN BACKLOG]
+ 32. Archivo Histórico de Actuaciones, SLA y Albaranes A4 en el Portal de Sede [🆕 PROPUESTA EN BACKLOG]
+ 33. Auditoría Local mediante Importación de Ficheros Estándar EVA-DTS (.dex) en Ruta [🆕 PROPUESTA EN BACKLOG]
 ------------------------------------------------------------------------------------
 FASE FUTURA (Industria 4.0 / IoT · Aparcada):
  18. Ingesta Telemática IoT (MDB/DEX, Alarmas de Frío y Lectura Automática de Ventas/Carriles)
