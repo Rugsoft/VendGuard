@@ -140,6 +140,8 @@ try {
     );
     $machineStmt->execute([':location_id' => $locationId, ':code' => 'DEX9-FOOD-01']);
     $machineId = (int)$machineStmt->fetchColumn();
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'DEX9-FOOD-02']);
+    $secondMachineId = (int)$machineStmt->fetchColumn();
     $pdo->prepare(
         "INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
          VALUES (:restocker_id, :zone_id, 'PRIMARY', TRUE)"
@@ -482,6 +484,154 @@ try {
     $assert('6.1 El volcado de conflicto responde 200 CONFLICT_DUMPED', $dump->getStatusCode() === 200 && (($data($dump)['outcome_status'] ?? '') === 'CONFLICT_DUMPED'));
     $badDump = $call('POST', '/api/technician/dex-audits/conflict-dump', ['machine_id' => 0], $technicianToken);
     $assert('6.2 Un conflict-dump sin motivo responde 422', $badDump->getStatusCode() === 422);
+
+    echo "\n--- 7. Delta efectivo tras VOIDED (AUD-39-02, QA-2) ---\n";
+    $chainPayload = static fn (string $comm, int $salesCents, int $units): string =>
+        "DXS*{$comm}*VA*DEX 6.0\nID1*DEX9-FOOD-02\nID4*2\nVA1*{$salesCents}*{$units}\nDXE*FIN";
+    $importChain = static function (string $mutation, string $capturedAt, int $salesCents, int $units) use (
+        $call,
+        $coordinatorToken,
+        $secondMachineId,
+        $chainPayload
+    ): Response {
+        return $call('POST', '/api/coordinator/machines/' . $secondMachineId . '/dex-audits', [
+            'raw_payload' => $chainPayload('COMM-' . strtoupper($mutation), $salesCents, $units),
+            'original_filename' => $mutation . '.dex',
+            'captured_at' => $capturedAt,
+            'client_mutation_id' => $mutation,
+        ], $coordinatorToken);
+    };
+
+    $baseImport = $importChain('aud3902-base', '2026-11-20 08:00:00+00', 1000, 10);
+    $baseAudit = $data($baseImport)['audit'] ?? [];
+    $baseAuditId = (int)($baseAudit['id'] ?? 0);
+    $baseDetail = $data($call('GET', '/api/coordinator/dex-audits/' . $baseAuditId, [], $coordinatorToken));
+    $assert(
+        '7.1 La carga base nace sin predecesor y con el bloque efectivo explícito',
+        $baseImport->getStatusCode() === 201
+            && $baseAuditId > 0
+            && array_key_exists('previous_audit_id', $baseDetail)
+            && $baseDetail['previous_audit_id'] === null
+            && array_key_exists('previous_audit_voided', $baseDetail)
+            && $baseDetail['previous_audit_voided'] === false
+            && array_key_exists('effective_previous_audit_id', $baseDetail)
+            && $baseDetail['effective_previous_audit_id'] === null
+            && array_key_exists('effective_delta_sales_eur', $baseDetail)
+            && $baseDetail['effective_delta_sales_eur'] === null,
+        json_encode(['status' => $baseImport->getStatusCode(), 'audit' => $baseDetail])
+    );
+
+    $middleImport = $importChain('aud3902-middle', '2026-11-21 08:00:00+00', 1500, 15);
+    $middleAudit = $data($middleImport)['audit'] ?? [];
+    $middleAuditId = (int)($middleAudit['id'] ?? 0);
+    $assert(
+        '7.2 La carga intermedia enlaza la base con delta persistido',
+        $middleImport->getStatusCode() === 201
+            && $middleAuditId > 0
+            && ($middleAudit['previous_audit_id'] ?? 0) === $baseAuditId
+            && (float)($middleAudit['delta_sales_eur'] ?? 0) === 5.0
+            && ($middleAudit['delta_vend_units'] ?? 0) === 5,
+        json_encode(['status' => $middleImport->getStatusCode(), 'audit' => $middleAudit])
+    );
+
+    $lastImport = $importChain('aud3902-last', '2026-11-22 08:00:00+00', 2200, 22);
+    $lastAudit = $data($lastImport)['audit'] ?? [];
+    $lastAuditId = (int)($lastAudit['id'] ?? 0);
+    $assert(
+        '7.3 La carga final enlaza la intermedia con delta persistido',
+        $lastImport->getStatusCode() === 201
+            && $lastAuditId > 0
+            && ($lastAudit['previous_audit_id'] ?? 0) === $middleAuditId
+            && (float)($lastAudit['delta_sales_eur'] ?? 0) === 7.0
+            && ($lastAudit['delta_vend_units'] ?? 0) === 7,
+        json_encode(['status' => $lastImport->getStatusCode(), 'audit' => $lastAudit])
+    );
+
+    $lastBeforeVoid = $data($call('GET', '/api/coordinator/dex-audits/' . $lastAuditId, [], $coordinatorToken));
+    $assert(
+        '7.4 Antes de anular, la lectura no marca predecesor anulado',
+        $lastBeforeVoid !== []
+            && array_key_exists('previous_audit_voided', $lastBeforeVoid)
+            && $lastBeforeVoid['previous_audit_voided'] === false
+            && array_key_exists('effective_previous_audit_id', $lastBeforeVoid)
+            && $lastBeforeVoid['effective_previous_audit_id'] === null
+            && array_key_exists('effective_delta_sales_eur', $lastBeforeVoid)
+            && $lastBeforeVoid['effective_delta_sales_eur'] === null
+            && array_key_exists('effective_delta_vend_units', $lastBeforeVoid)
+            && $lastBeforeVoid['effective_delta_vend_units'] === null,
+        json_encode($lastBeforeVoid)
+    );
+
+    $snapshotStmt = $pdo->prepare(
+        'SELECT status, previous_audit_id, delta_source, delta_sales_eur, delta_vend_units,
+                va1_total_sales_eur, va1_total_vend_units
+         FROM machine_dex_audits WHERE id = :id'
+    );
+    $snapshot = static function (int $id) use ($snapshotStmt): array {
+        $snapshotStmt->execute([':id' => $id]);
+        return $snapshotStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    };
+    $beforeMiddle = $snapshot($middleAuditId);
+    $beforeLast = $snapshot($lastAuditId);
+
+    $voidMiddle = $call('POST', '/api/coordinator/dex-audits/' . $middleAuditId . '/void', [
+        'void_reason' => 'Anulación AUD-39-02 del volcado intermedio A',
+    ], $coordinatorToken);
+    $assert(
+        '7.5 La anulación del volcado intermedio responde 200 y VOIDED',
+        $voidMiddle->getStatusCode() === 200 && ($data($voidMiddle)['status'] ?? '') === 'VOIDED',
+        $errorCode($voidMiddle)
+    );
+
+    $lastAfterVoid = $data($call('GET', '/api/coordinator/dex-audits/' . $lastAuditId, [], $coordinatorToken));
+    $assert(
+        '7.6 La lectura recalcula el delta efectivo contra la base activa',
+        ($lastAfterVoid['previous_audit_voided'] ?? false) === true
+            && ($lastAfterVoid['effective_previous_audit_id'] ?? 0) === $baseAuditId
+            && (float)($lastAfterVoid['effective_delta_sales_eur'] ?? 0) === 12.0
+            && ($lastAfterVoid['effective_delta_vend_units'] ?? 0) === 12
+            && ($lastAfterVoid['previous_audit_id'] ?? 0) === $middleAuditId
+            && (float)($lastAfterVoid['delta_sales_eur'] ?? 0) === 7.0
+            && ($lastAfterVoid['delta_vend_units'] ?? 0) === 7,
+        json_encode($lastAfterVoid)
+    );
+
+    $afterMiddle = $snapshot($middleAuditId);
+    $afterLast = $snapshot($lastAuditId);
+    $middleBeforeBusiness = $beforeMiddle;
+    $middleAfterBusiness = $afterMiddle;
+    unset($middleBeforeBusiness['status'], $middleAfterBusiness['status']);
+    $assert(
+        '7.7 Las filas persistidas de A y B permanecen intactas (Art. III.3)',
+        ($afterMiddle['status'] ?? '') === 'VOIDED'
+            && $middleAfterBusiness === $middleBeforeBusiness
+            && $afterLast === $beforeLast,
+        json_encode(['before_middle' => $beforeMiddle, 'after_middle' => $afterMiddle, 'before_last' => $beforeLast, 'after_last' => $afterLast])
+    );
+
+    $voidBase = $call('POST', '/api/coordinator/dex-audits/' . $baseAuditId . '/void', [
+        'void_reason' => 'Anulación AUD-39-02 del volcado base A0',
+    ], $coordinatorToken);
+    $assert(
+        '7.8 La anulación de la base responde 200 y VOIDED',
+        $voidBase->getStatusCode() === 200 && ($data($voidBase)['status'] ?? '') === 'VOIDED',
+        $errorCode($voidBase)
+    );
+
+    $lastWithoutActive = $data($call('GET', '/api/coordinator/dex-audits/' . $lastAuditId, [], $coordinatorToken));
+    $assert(
+        '7.9 Sin predecesor activo, el delta efectivo queda nulo y explícito',
+        ($lastWithoutActive['previous_audit_voided'] ?? false) === true
+            && array_key_exists('effective_previous_audit_id', $lastWithoutActive)
+            && $lastWithoutActive['effective_previous_audit_id'] === null
+            && array_key_exists('effective_delta_sales_eur', $lastWithoutActive)
+            && $lastWithoutActive['effective_delta_sales_eur'] === null
+            && array_key_exists('effective_delta_vend_units', $lastWithoutActive)
+            && $lastWithoutActive['effective_delta_vend_units'] === null
+            && ($lastWithoutActive['previous_audit_id'] ?? 0) === $middleAuditId
+            && (float)($lastWithoutActive['delta_sales_eur'] ?? 0) === 7.0,
+        json_encode($lastWithoutActive)
+    );
 
     $exitCode = $failures === 0 ? 0 : 1;
 } catch (Throwable $exception) {

@@ -462,10 +462,95 @@ final class MachineDexAuditService
         }
 
         if (strtoupper(trim($role)) === 'COORDINATOR') {
-            $row = $this->attachCoordinatorCrossChecks($row);
+            $row = $this->attachCoordinatorReadModel($row);
         }
 
         return $this->projectByRole($row, $role, false);
+    }
+
+    /**
+     * Modelo de lectura de Coordinación: delta efectivo tras `VOIDED` y cruces
+     * M34/M35. No escribe en ninguna tabla (QA-2, QA-3, Art. III.3).
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function attachCoordinatorReadModel(array $row): array
+    {
+        $row = $this->attachEffectiveDeltaAfterVoid($row);
+        $row['m34_cross_check'] = $this->buildM34CrossCheck($row);
+        $row['m35_cross_check'] = $this->buildM35CrossCheck($row);
+
+        return $row;
+    }
+
+    /**
+     * Recalcula en lectura el delta efectivo cuando el predecesor persistido ya
+     * está `VOIDED` (QA-2).
+     *
+     * Se resuelve el último `ACTIVE` anterior a `captured_at` y se aplica la
+     * misma semántica de reset que en el alta (`RESET_FALLBACK`/`UNAVAILABLE`),
+     * sin reescribir la cabecera ni las líneas del volcado (Art. III.3).
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function attachEffectiveDeltaAfterVoid(array $row): array
+    {
+        $row['previous_audit_voided'] = false;
+        $row['effective_previous_audit_id'] = null;
+        $row['effective_delta_sales_eur'] = null;
+        $row['effective_delta_vend_units'] = null;
+
+        $previousAuditId = isset($row['previous_audit_id']) && $row['previous_audit_id'] !== null
+            ? (int)$row['previous_audit_id']
+            : null;
+        if ($previousAuditId === null || $previousAuditId <= 0) {
+            return $row;
+        }
+
+        $previous = $this->repository->findById($previousAuditId);
+        if ($previous === null || strtoupper((string)($previous['status'] ?? '')) !== 'VOIDED') {
+            return $row;
+        }
+
+        $row['previous_audit_voided'] = true;
+        $machineId = (int)($row['machine_id'] ?? 0);
+        $capturedAt = trim((string)($row['captured_at'] ?? ''));
+        $currentAuditId = isset($row['id']) ? (int)$row['id'] : null;
+        $effectivePrevious = $machineId > 0 && $capturedAt !== ''
+            ? $this->repository->findPreviousActive($machineId, $capturedAt, $currentAuditId)
+            : null;
+        if ($effectivePrevious === null) {
+            return $row;
+        }
+
+        $effectivePreviousId = (int)($effectivePrevious['id'] ?? 0);
+        if ($effectivePreviousId <= 0) {
+            return $row;
+        }
+
+        $resolved = $this->validator->resolveDeltas(
+            (float)($row['va1_total_sales_eur'] ?? 0.0),
+            (int)($row['va1_total_vend_units'] ?? 0),
+            isset($row['va1_reset_sales_eur']) && $row['va1_reset_sales_eur'] !== null
+                ? (float)$row['va1_reset_sales_eur']
+                : null,
+            isset($row['va1_reset_vend_units']) && $row['va1_reset_vend_units'] !== null
+                ? (int)$row['va1_reset_vend_units']
+                : null,
+            [
+                'id' => $effectivePreviousId,
+                'va1_total_sales_eur' => (float)($effectivePrevious['va1_total_sales_eur'] ?? 0.0),
+                'va1_total_vend_units' => (int)($effectivePrevious['va1_total_vend_units'] ?? 0),
+            ]
+        );
+
+        $row['effective_previous_audit_id'] = $effectivePreviousId;
+        $row['effective_delta_sales_eur'] = $resolved['delta_sales_eur'];
+        $row['effective_delta_vend_units'] = $resolved['delta_vend_units'];
+
+        return $row;
     }
 
     /**

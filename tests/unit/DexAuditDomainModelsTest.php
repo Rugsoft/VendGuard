@@ -530,6 +530,7 @@ $assert(
         && $coordinator['out_of_order_sync'] === false
         && $coordinator['can_download_raw'] === true
         && array_key_exists('previous_audit_voided', $coordinator)
+        && array_key_exists('effective_previous_audit_id', $coordinator)
         && array_key_exists('effective_delta_sales_eur', $coordinator)
         && array_key_exists('m34_cross_check', $coordinator)
         && array_key_exists('m35_cross_check', $coordinator)
@@ -554,18 +555,24 @@ $assert(
         && $audit->hasThermalAlert() === false
 );
 
-$withEffective = $auditWithLines->withPreviousAuditVoided(true, 12.75, 4);
+$withEffective = $auditWithLines->withPreviousAuditVoided(true, 12.75, 4, 77);
 $assert(
-    '5.12 La Coordinación lee deltas efectivos cuando el predecesor fue anulado (QA-2)',
+    '5.12 La Coordinación lee deltas efectivos y el predecesor resuelto (QA-2)',
     $withEffective->isPreviousAuditVoided()
+        && $withEffective->getEffectivePreviousAuditId() === 77
         && $withEffective->getEffectiveDeltaSalesEur() === 12.75
         && $withEffective->getEffectiveDeltaVendUnits() === 4
+        && $withEffective->toCoordinatorArray()['effective_previous_audit_id'] === 77
         && $withEffective->toCoordinatorArray()['effective_delta_sales_eur'] === 12.75
 );
-$expectFailure(
-    static fn () => $auditWithLines->withPreviousAuditVoided(true),
-    'delta efectivo',
-    '5.13 Declarar el predecesor anulado sin delta efectivo se rechaza'
+$withoutActive = $auditWithLines->withPreviousAuditVoided(true);
+$assert(
+    '5.13 Sin predecesor activo, el bloque efectivo queda nulo y explícito',
+    $withoutActive->isPreviousAuditVoided()
+        && $withoutActive->getEffectivePreviousAuditId() === null
+        && $withoutActive->getEffectiveDeltaSalesEur() === null
+        && $withoutActive->getEffectiveDeltaVendUnits() === null
+        && $withoutActive->toCoordinatorArray()['effective_previous_audit_id'] === null
 );
 $assert(
     '5.14 Los cruces M34/M35 se adjuntan sin mutar la fila',

@@ -139,6 +139,7 @@ final class MachineDexAudit implements JsonSerializable
     private array $events;
 
     private bool $previousAuditVoided;
+    private ?int $effectivePreviousAuditId;
     private ?float $effectiveDeltaSalesEur;
     private ?int $effectiveDeltaVendUnits;
     private ?array $m34CrossCheck;
@@ -437,6 +438,7 @@ final class MachineDexAudit implements JsonSerializable
         $this->selections = array_values($selections);
         $this->events = array_values($events);
         $this->previousAuditVoided = false;
+        $this->effectivePreviousAuditId = null;
         $this->effectiveDeltaSalesEur = null;
         $this->effectiveDeltaVendUnits = null;
         $this->m34CrossCheck = null;
@@ -687,6 +689,11 @@ final class MachineDexAudit implements JsonSerializable
         return $this->previousAuditVoided;
     }
 
+    public function getEffectivePreviousAuditId(): ?int
+    {
+        return $this->effectivePreviousAuditId;
+    }
+
     public function getEffectiveDeltaSalesEur(): ?float
     {
         return $this->effectiveDeltaSalesEur;
@@ -844,20 +851,25 @@ final class MachineDexAudit implements JsonSerializable
 
     /**
      * Delta efectivo calculado en lectura cuando el predecesor fue anulado.
+     *
+     * `$effectivePreviousAuditId` identifica el último `ACTIVE` anterior; queda
+     * `null` cuando no existe y, en ese caso, los deltas también son `null`.
      */
     public function withPreviousAuditVoided(
         bool $previousAuditVoided,
         ?float $effectiveDeltaSalesEur = null,
-        ?int $effectiveDeltaVendUnits = null
+        ?int $effectiveDeltaVendUnits = null,
+        ?int $effectivePreviousAuditId = null
     ): self {
-        if ($previousAuditVoided && $effectiveDeltaSalesEur === null && $effectiveDeltaVendUnits === null) {
-            throw new InvalidArgumentException(
-                'Si el volcado predecesor fue anulado, la lectura debe aportar el delta efectivo (monetario o en unidades).'
-            );
+        if (!$previousAuditVoided) {
+            $effectivePreviousAuditId = null;
+            $effectiveDeltaSalesEur = null;
+            $effectiveDeltaVendUnits = null;
         }
 
         $clone = clone $this;
         $clone->previousAuditVoided = $previousAuditVoided;
+        $clone->effectivePreviousAuditId = $effectivePreviousAuditId;
         $clone->effectiveDeltaSalesEur = self::roundMoney($effectiveDeltaSalesEur);
         $clone->effectiveDeltaVendUnits = $effectiveDeltaVendUnits;
 
@@ -972,6 +984,7 @@ final class MachineDexAudit implements JsonSerializable
             'delta_sales_eur' => $this->deltaSalesEur,
             'delta_vend_units' => $this->deltaVendUnits,
             'previous_audit_voided' => $this->previousAuditVoided,
+            'effective_previous_audit_id' => $this->effectivePreviousAuditId,
             'effective_delta_sales_eur' => $this->effectiveDeltaSalesEur,
             'effective_delta_vend_units' => $this->effectiveDeltaVendUnits,
             'm34_cross_check' => $this->m34CrossCheck,
