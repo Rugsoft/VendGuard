@@ -32,8 +32,12 @@ require_once __DIR__ . '/../Support/PostgresFixtureBuilder.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SqlScriptSplitter.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/PostgresMigrationRunner.php';
 
+use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\AuthService;
+use VendGuard\Application\Service\DexAuditLinker;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoMachineDexAuditRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -354,6 +358,7 @@ try {
     $invalidFilter = $call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['status' => 'BORRADO']);
     $assert('3.1.b Un filtro status fuera del contrato responde 422', $invalidFilter->getStatusCode() === 422 && $errorCode($invalidFilter) === 'VALIDATION_ERROR');
     $auditId = (int)($listData['audits'][0]['id'] ?? 0);
+    $auditCode = (string)($listData['audits'][0]['audit_code'] ?? '');
     $detail = $call('GET', '/api/coordinator/dex-audits/' . $auditId, [], $coordinatorToken);
     $detailData = $data($detail);
     $assert(
@@ -464,6 +469,7 @@ try {
     ], $coordinatorToken);
     $assert('5.2 Una segunda anulación responde 409 DEX_AUDIT_ALREADY_VOIDED', $again->getStatusCode() === 409 && $errorCode($again) === 'DEX_AUDIT_ALREADY_VOIDED');
     $manualAuditId = (int)($data($manual)['audit']['id'] ?? 0);
+    $manualAuditCode = (string)($data($manual)['audit']['audit_code'] ?? '');
     $shortVoid = $call('POST', '/api/coordinator/dex-audits/' . $manualAuditId . '/void', ['void_reason' => 'Corto'], $coordinatorToken);
     $assert('5.3 Un motivo corto responde 422 VOID_REASON_REQUIRED', $shortVoid->getStatusCode() === 422 && $errorCode($shortVoid) === 'VOID_REASON_REQUIRED');
 
@@ -631,6 +637,96 @@ try {
             && ($lastWithoutActive['previous_audit_id'] ?? 0) === $middleAuditId
             && (float)($lastWithoutActive['delta_sales_eur'] ?? 0) === 7.0,
         json_encode($lastWithoutActive)
+    );
+
+    echo "\n--- 8. Rastro MACHINE_DEX_AUDIT (AUD-39-03, Art. III.3) ---\n";
+    $findAuditRow = static function (string $action, string $entityType, int $entityId) use ($pdo): ?array {
+        $stmt = $pdo->prepare(
+            'SELECT entity_type, entity_id, action, user_id, user_role, user_name,
+                    previous_state, new_state, metadata
+             FROM audit_log
+             WHERE action = :action AND entity_type = :entity_type AND entity_id = :entity_id
+             ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute([
+            ':action' => $action,
+            ':entity_type' => $entityType,
+            ':entity_id' => $entityId,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+
+        foreach (['previous_state', 'new_state', 'metadata'] as $jsonColumn) {
+            $row[$jsonColumn] = $row[$jsonColumn] === null ? null : json_decode((string)$row[$jsonColumn], true);
+        }
+
+        return $row;
+    };
+
+    $importAuditRow = $findAuditRow('DEX_AUDIT_IMPORTED', 'MACHINE_DEX_AUDIT', $auditId);
+    $assert(
+        '8.1 El alta escribe MACHINE_DEX_AUDIT con actor, estado y metadatos',
+        $importAuditRow !== null
+            && (int)($importAuditRow['user_id'] ?? 0) === $restockerId
+            && ($importAuditRow['previous_state'] ?? null) === null
+            && ($importAuditRow['new_state']['status'] ?? '') === 'ACTIVE'
+            && ($importAuditRow['metadata']['audit_code'] ?? '') === $auditCode
+            && (int)($importAuditRow['metadata']['machine_id'] ?? 0) === $machineId,
+        json_encode($importAuditRow)
+    );
+
+    $linker = new DexAuditLinker(
+        new PdoMachineDexAuditRepository($pdo),
+        new AuditLogger(new PdoAuditLogRepository($pdo))
+    );
+    $linker->linkToRestockVisit(
+        $manualAuditId,
+        $machineId,
+        $previousVisitId,
+        ['id' => $coordinatorId, 'role' => 'COORDINATOR', 'name' => 'Coordinación DEX 09']
+    );
+    $linkAuditRow = $findAuditRow('DEX_AUDIT_LINKED', 'MACHINE_DEX_AUDIT', $manualAuditId);
+    $assert(
+        '8.2 El enlace escribe MACHINE_DEX_AUDIT con el destino y el actor',
+        $linkAuditRow !== null
+            && (int)($linkAuditRow['user_id'] ?? 0) === $coordinatorId
+            && array_key_exists('restock_visit_id', $linkAuditRow['previous_state'] ?? [])
+            && ($linkAuditRow['previous_state']['restock_visit_id'] ?? null) === null
+            && (int)($linkAuditRow['new_state']['restock_visit_id'] ?? 0) === $previousVisitId
+            && ($linkAuditRow['metadata']['audit_code'] ?? '') === $manualAuditCode
+            && ($linkAuditRow['metadata']['target'] ?? '') === 'restock_visit'
+            && (int)($linkAuditRow['metadata']['target_id'] ?? 0) === $previousVisitId,
+        json_encode($linkAuditRow)
+    );
+
+    $voidAuditRow = $findAuditRow('DEX_AUDIT_VOIDED', 'MACHINE_DEX_AUDIT', $auditId);
+    $assert(
+        '8.3 La anulación deja de firmarse como MACHINE y conserva estado y motivo',
+        $voidAuditRow !== null
+            && (int)($voidAuditRow['user_id'] ?? 0) === $coordinatorId
+            && ($voidAuditRow['previous_state']['status'] ?? '') === 'ACTIVE'
+            && ($voidAuditRow['new_state']['status'] ?? '') === 'VOIDED'
+            && ($voidAuditRow['metadata']['audit_code'] ?? '') === $auditCode
+            && ($voidAuditRow['metadata']['void_reason'] ?? '') !== '',
+        json_encode($voidAuditRow)
+    );
+
+    $csvAuditRow = $findAuditRow('EXPORT_DEX_AUDITS_CSV', 'MACHINE_DEX_AUDIT', 0);
+    $assert(
+        '8.4 La exportación CSV registra su acción global con el perímetro aplicado',
+        $csvAuditRow !== null
+            && (int)($csvAuditRow['user_id'] ?? 0) === $coordinatorId
+            && (int)($csvAuditRow['new_state']['machine_id'] ?? 0) === $machineId,
+        json_encode($csvAuditRow)
+    );
+
+    $conflictAuditRow = $findAuditRow('OFFLINE_DEX_AUDIT_CONFLICT_DUMP', 'MACHINE', $machineId);
+    $assert(
+        '8.5 El conflict-dump Offline conserva la entidad MACHINE de C5',
+        $conflictAuditRow !== null && (int)($conflictAuditRow['user_id'] ?? 0) === $restockerId,
+        json_encode($conflictAuditRow)
     );
 
     $exitCode = $failures === 0 ? 0 : 1;

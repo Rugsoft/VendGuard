@@ -95,7 +95,7 @@ final class CoordinatorDexAuditController
     public function exportCsv(Request $request): Response
     {
         return $this->execute(function () use ($request): Response {
-            $csv = $this->service()->exportCsv($this->filters($request));
+            $csv = $this->service()->exportCsv($this->filters($request), $this->actor($request));
 
             return new Response($csv, 200, [
                 'Content-Type' => 'text/csv; charset=utf-8',
@@ -148,28 +148,15 @@ final class CoordinatorDexAuditController
             $auditId = $this->positiveRouteId($request, 'id');
             $actor = $this->actor($request);
             $reason = (string)($request->getBodyParam('void_reason') ?? '');
-            $previous = $this->service()->findForRole($auditId, 'COORDINATOR');
-            if ($previous === null) {
-                return Response::error('DEX_AUDIT_NOT_FOUND', 'El volcado .dex no existe.', 404);
-            }
-
             $voided = $this->service()->voidAudit(
                 $auditId,
                 $reason,
                 (int)$actor['id'],
                 (string)$actor['name'],
-                (new \DateTimeImmutable('now'))->format('Y-m-d\TH:i:s.uP')
+                (new \DateTimeImmutable('now'))->format('Y-m-d\TH:i:s.uP'),
+                $actor
             );
             $voided['can_download_raw'] = true;
-
-            $this->audit()->logMachineEvent(
-                (int)$voided['machine_id'],
-                'DEX_AUDIT_VOIDED',
-                $actor,
-                ['status' => $previous['status'] ?? null],
-                ['status' => $voided['status'] ?? 'VOIDED', 'void_reason' => $reason],
-                ['dex_audit_id' => $auditId, 'audit_code' => $voided['audit_code'] ?? null]
-            );
 
             return Response::json($voided, 200, 'Volcado .dex anulado lógicamente.');
         });
@@ -334,7 +321,8 @@ final class CoordinatorDexAuditController
                 new EvaDtsParser(),
                 new DexSelectionMatcher(),
                 new DexAuditValidator(),
-                new PdoNotificationOutboxRepository($pdo)
+                new PdoNotificationOutboxRepository($pdo),
+                $this->audit()
             );
         }
 

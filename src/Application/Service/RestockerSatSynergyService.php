@@ -278,7 +278,7 @@ final class RestockerSatSynergyService
         if ($dexAuditId !== null
             && ($result['ok'] ?? false) === true
             && (int)($result['incident_id'] ?? 0) > 0) {
-            $this->dexAuditLinks->linkToIncident($dexAuditId, $machineId, (int)$result['incident_id']);
+            $this->dexAuditLinks->linkToIncident($dexAuditId, $machineId, (int)$result['incident_id'], $actor);
             $result['dex_audit_id'] = $dexAuditId;
         }
 

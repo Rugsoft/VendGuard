@@ -20,11 +20,13 @@ use VendGuard\Core\Domain\Repository\MachineDexAuditRepositoryInterface;
  * DEX_AUDIT_VOIDED`) y no estar enlazado a otro registro del mismo tipo (`409
  * DEX_AUDIT_ALREADY_LINKED`). Repetir el mismo destino es idempotente.
  *
- * **Solo vínculos.** La escritura toca exclusivamente `restock_visit_id`,
- * `cash_collection_id` o `incident_id` de `machine_dex_audits`; no altera DDL,
- * existencias, `current_estimated_qty` ni la captura inmutable. El repositorio
- * bloquea la cabecera con `FOR UPDATE` y los índices únicos parciales cierran la
- * carrera entre dos peticiones.
+ * **Solo vínculos.** La escritura de negocio toca exclusivamente
+ * `restock_visit_id`, `cash_collection_id` o `incident_id` de
+ * `machine_dex_audits`; no altera DDL, existencias, `current_estimated_qty` ni
+ * la captura inmutable. El enlace deja además su rastro en `audit_log` bajo
+ * `MACHINE_DEX_AUDIT` (Art. III.3). El repositorio bloquea la cabecera con
+ * `FOR UPDATE` y los índices únicos parciales cierran la carrera entre dos
+ * peticiones.
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -41,8 +43,10 @@ final class DexAuditLinker
         self::TARGET_INCIDENT => 'incident_id',
     ];
 
-    public function __construct(private readonly MachineDexAuditRepositoryInterface $audits)
-    {
+    public function __construct(
+        private readonly MachineDexAuditRepositoryInterface $audits,
+        private readonly ?AuditLogger $auditLogger = null
+    ) {
     }
 
     /**
@@ -156,26 +160,53 @@ final class DexAuditLinker
         return $audit;
     }
 
-    public function linkToRestockVisit(int $auditId, int $machineId, int $restockVisitId): void
-    {
-        $this->link($auditId, $machineId, self::TARGET_RESTOCK_VISIT, $restockVisitId);
+    /**
+     * @param array{id: int|null, role: string, name: string}|null $actor
+     */
+    public function linkToRestockVisit(
+        int $auditId,
+        int $machineId,
+        int $restockVisitId,
+        ?array $actor = null
+    ): void {
+        $this->link($auditId, $machineId, self::TARGET_RESTOCK_VISIT, $restockVisitId, $actor);
     }
 
-    public function linkToCashCollection(int $auditId, int $machineId, int $cashCollectionId): void
-    {
-        $this->link($auditId, $machineId, self::TARGET_CASH_COLLECTION, $cashCollectionId);
+    /**
+     * @param array{id: int|null, role: string, name: string}|null $actor
+     */
+    public function linkToCashCollection(
+        int $auditId,
+        int $machineId,
+        int $cashCollectionId,
+        ?array $actor = null
+    ): void {
+        $this->link($auditId, $machineId, self::TARGET_CASH_COLLECTION, $cashCollectionId, $actor);
     }
 
-    public function linkToIncident(int $auditId, int $machineId, int $incidentId): void
-    {
-        $this->link($auditId, $machineId, self::TARGET_INCIDENT, $incidentId);
+    /**
+     * @param array{id: int|null, role: string, name: string}|null $actor
+     */
+    public function linkToIncident(
+        int $auditId,
+        int $machineId,
+        int $incidentId,
+        ?array $actor = null
+    ): void {
+        $this->link($auditId, $machineId, self::TARGET_INCIDENT, $incidentId, $actor);
     }
 
     /**
      * @param self::TARGET_* $target
+     * @param array{id: int|null, role: string, name: string}|null $actor
      */
-    private function link(int $auditId, int $machineId, string $target, int $targetId): void
-    {
+    private function link(
+        int $auditId,
+        int $machineId,
+        string $target,
+        int $targetId,
+        ?array $actor = null
+    ): void {
         $audit = $this->assertLinkable($auditId, $machineId, $target, $targetId);
         $column = self::TARGET_COLUMNS[$target];
         if ($audit[$column] !== null) {
@@ -187,5 +218,23 @@ final class DexAuditLinker
             self::TARGET_CASH_COLLECTION => $this->audits->linkToCashCollection($auditId, $targetId),
             self::TARGET_INCIDENT => $this->audits->linkToIncident($auditId, $targetId),
         };
+
+        if ($this->auditLogger === null || $actor === null || (int)($actor['id'] ?? 0) <= 0) {
+            return;
+        }
+
+        $this->auditLogger->logMachineDexAuditEvent(
+            $auditId,
+            'DEX_AUDIT_LINKED',
+            $actor,
+            [$column => null],
+            [$column => $targetId],
+            [
+                'audit_code' => (string)($audit['audit_code'] ?? ''),
+                'machine_id' => $machineId,
+                'target' => $target,
+                'target_id' => $targetId,
+            ]
+        );
     }
 }

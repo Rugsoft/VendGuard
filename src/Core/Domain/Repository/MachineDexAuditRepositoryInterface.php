@@ -116,7 +116,7 @@ interface MachineDexAuditRepositoryInterface
     /**
      * Cabecera mínima del volcado bajo cerrojo, para validar y enlazar M34/M35/M36 (QA-5).
      *
-     * @return array{id:int, machine_id:int, status:string, restock_visit_id:int|null, cash_collection_id:int|null, incident_id:int|null}|null
+     * @return array{id:int, audit_code:string, machine_id:int, status:string, restock_visit_id:int|null, cash_collection_id:int|null, incident_id:int|null}|null
      */
     public function findLinkTargetForUpdate(int $auditId): ?array;
 

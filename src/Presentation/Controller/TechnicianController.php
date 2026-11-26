@@ -393,7 +393,8 @@ class TechnicianController
                 new \VendGuard\Core\Service\EvaDtsParser(),
                 new \VendGuard\Core\Service\DexSelectionMatcher(),
                 new \VendGuard\Core\Service\DexAuditValidator(),
-                new PdoNotificationOutboxRepository($pdo)
+                new PdoNotificationOutboxRepository($pdo),
+                new AuditLogger(new PdoAuditLogRepository($pdo))
             );
         }
 

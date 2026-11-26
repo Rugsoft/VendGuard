@@ -474,8 +474,8 @@ try {
     )->fetchColumn();
     $voidAudits = (int)$pdo->query(
         "SELECT COUNT(*) FROM audit_log
-          WHERE entity_type = 'MACHINE'
-            AND entity_id = " . $normalId . "
+          WHERE entity_type = 'MACHINE_DEX_AUDIT'
+            AND entity_id = " . $voidId . "
             AND action = 'DEX_AUDIT_VOIDED'
             AND user_id = " . $coordinatorId . "
             AND metadata->>'dex_audit_id' = '" . $voidId . "'"

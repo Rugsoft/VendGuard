@@ -271,7 +271,7 @@ final class MachineRestockVisitService
             }
 
             if ($dexAuditId !== null) {
-                $this->requireDexAuditLinks()->linkToRestockVisit($dexAuditId, $machineId, $visitId);
+                $this->requireDexAuditLinks()->linkToRestockVisit($dexAuditId, $machineId, $visitId, $actor);
             }
 
             if ($status->isCompleted()) {

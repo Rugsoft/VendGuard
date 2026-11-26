@@ -244,6 +244,85 @@ class AuditLogger
     }
 
     /**
+     * Registra un hecho del libro EVA-DTS `.dex` (Módulo 39, Art. III.3).
+     *
+     * El alta, el enlace posterior y la anulación lógica tienen espacio de
+     * identificadores propio: se firman contra `MACHINE_DEX_AUDIT` y no contra
+     * `MACHINE`, para que el visor pueda reconstruir el ciclo del volcado sin
+     * mezclarlo con el historial del parque.
+     *
+     * @param int $auditId Volcado afectado.
+     * @param string $action Acción del catálogo del módulo.
+     * @param array{id: int|null, role: string, name: string} $user Actor que firma.
+     * @param array<string, mixed>|null $previousState
+     * @param array<string, mixed> $newState
+     * @param array<string, mixed>|null $metadata
+     */
+    public function logMachineDexAuditEvent(
+        int $auditId,
+        string $action,
+        array $user,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_MACHINE_DEX_AUDIT,
+            entityId: $auditId,
+            action: strtoupper(trim($action)),
+            userId: $user['id'] ?? null,
+            userRole: $user['role'] ?? 'COORDINATOR',
+            userName: $user['name'] ?? 'Coordinación',
+            previousState: $previousState,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
+
+    /**
+     * Registra la exportación CSV agregada del libro EVA-DTS (Módulo 39, RF-07.2).
+     *
+     * El CSV resume el perímetro filtrado y no pertenece a un volcado concreto;
+     * por eso el evento usa `entity_id = 0` mediante `forGlobalExport()`, igual
+     * que el resto de exportaciones agregadas (QA-1, Art. III.3).
+     *
+     * @param int $scopeEntityId Ámbito global de la exportación; debe ser `0`.
+     * @param string $action Acción del catálogo del módulo.
+     * @param array{id: int|null, role: string, name: string} $user Actor que firma.
+     * @param array<string, mixed>|null $previousState
+     * @param array<string, mixed> $newState Perímetro aplicado y filas exportadas.
+     * @param array<string, mixed>|null $metadata
+     */
+    public function logMachineDexAuditExport(
+        int $scopeEntityId,
+        string $action,
+        array $user,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        if ($scopeEntityId !== AuditEvent::GLOBAL_SCOPE_ENTITY_ID) {
+            throw new InvalidArgumentException('La exportación agregada del libro EVA-DTS exige el ámbito global cero.');
+        }
+
+        $event = AuditEvent::forGlobalExport(
+            AuditEvent::ENTITY_MACHINE_DEX_AUDIT,
+            strtoupper(trim($action)),
+            $user['id'] ?? null,
+            $user['role'] ?? 'COORDINATOR',
+            $user['name'] ?? 'Coordinación',
+            $previousState,
+            $newState,
+            $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
+
+    /**
      * Registra un evento administrativo o maestro en una sede cliente (EARS 5.2).
      * 
      * @param int $locationId ID de la sede.

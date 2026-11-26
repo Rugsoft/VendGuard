@@ -1497,7 +1497,8 @@ final class RestockerRouteController
                 new EvaDtsParser(),
                 new DexSelectionMatcher(),
                 new DexAuditValidator(),
-                new PdoNotificationOutboxRepository($this->pdo)
+                new PdoNotificationOutboxRepository($this->pdo),
+                new AuditLogger(new PdoAuditLogRepository($this->pdo))
             );
         }
 

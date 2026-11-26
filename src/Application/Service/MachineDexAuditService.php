@@ -11,6 +11,7 @@ use VendGuard\Core\Domain\Enum\DexImportSource;
 use VendGuard\Core\Domain\Exception\DexAuditConflictException;
 use VendGuard\Core\Domain\Exception\DexAuditForbiddenException;
 use VendGuard\Core\Domain\Exception\DexAuditValidationException;
+use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\MachineDexAudit;
 use VendGuard\Core\Domain\Model\NotificationOutboxItem;
 use VendGuard\Core\Domain\Repository\MachineDexAuditGatewayInterface;
@@ -93,7 +94,8 @@ final class MachineDexAuditService
         private readonly EvaDtsParser $parser,
         private readonly DexSelectionMatcher $matcher,
         private readonly DexAuditValidator $validator,
-        private readonly NotificationOutboxRepositoryInterface $outbox
+        private readonly NotificationOutboxRepositoryInterface $outbox,
+        private readonly ?AuditLogger $auditLogger = null
     ) {
     }
 
@@ -318,6 +320,29 @@ final class MachineDexAuditService
             'has_thermal_alert' => false,
         ];
 
+        $this->auditLogger?->logMachineDexAuditEvent(
+            $auditId,
+            'DEX_AUDIT_IMPORTED',
+            [
+                'id' => $actorId,
+                'role' => $role,
+                'name' => (string)($context['actor_name'] ?? 'Usuario'),
+            ],
+            null,
+            [
+                'status' => 'ACTIVE',
+                'audit_code' => $auditCode,
+                'machine_id' => $machineId,
+                'import_source' => $source->value,
+            ],
+            [
+                'audit_code' => $auditCode,
+                'machine_id' => $machineId,
+                'import_source' => $source->value,
+                'original_filename' => $originalFilename,
+            ]
+        );
+
         $thermal = $this->assessThermal(
             (string)$context['machine_type'],
             $previousDetail['events'] ?? [],
@@ -351,7 +376,8 @@ final class MachineDexAuditService
         string $reason,
         int $voidedBy,
         string $voidedByName,
-        string $voidedAt
+        string $voidedAt,
+        ?array $actor = null
     ): array {
         $detail = $this->repository->findById($auditId);
         if ($detail === null) {
@@ -373,7 +399,30 @@ final class MachineDexAuditService
             );
         }
 
-        return $this->repository->void($auditId, $cleanReason, $voidedBy, $cleanName, $voidedAt);
+        $voided = $this->repository->void($auditId, $cleanReason, $voidedBy, $cleanName, $voidedAt);
+
+        $this->auditLogger?->logMachineDexAuditEvent(
+            $auditId,
+            'DEX_AUDIT_VOIDED',
+            [
+                'id' => (int)($actor['id'] ?? $voidedBy),
+                'role' => (string)($actor['role'] ?? 'COORDINATOR'),
+                'name' => (string)($actor['name'] ?? $cleanName),
+            ],
+            ['status' => (string)$detail['status']],
+            [
+                'status' => (string)($voided['status'] ?? 'VOIDED'),
+                'void_reason' => $cleanReason,
+            ],
+            [
+                'dex_audit_id' => $auditId,
+                'audit_code' => (string)($voided['audit_code'] ?? $detail['audit_code'] ?? ''),
+                'machine_id' => (int)($voided['machine_id'] ?? $detail['machine_id'] ?? 0),
+                'void_reason' => $cleanReason,
+            ]
+        );
+
+        return $voided;
     }
 
     /**
@@ -381,7 +430,7 @@ final class MachineDexAuditService
      *
      * @param array<string, mixed> $filters
      */
-    public function exportCsv(array $filters = []): string
+    public function exportCsv(array $filters = [], ?array $actor = null): string
     {
         $rows = $this->repository->listForCoordinator($filters, self::MAX_CSV_ROWS, 0);
 
@@ -411,6 +460,25 @@ final class MachineDexAuditService
                 !empty($row['has_thermal_alert']) ? 'SI' : 'NO',
             ];
             $lines[] = implode(';', array_map(fn (string $value): string => $this->csvCell($value), $values));
+        }
+
+        $exportedAt = (new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))->format('Y-m-d\TH:i:sP');
+        if ($this->auditLogger !== null && $actor !== null && (int)($actor['id'] ?? 0) > 0) {
+            $this->auditLogger->logMachineDexAuditExport(
+                AuditEvent::GLOBAL_SCOPE_ENTITY_ID,
+                'EXPORT_DEX_AUDITS_CSV',
+                $actor,
+                null,
+                array_merge($filters, [
+                    'row_count' => count($rows),
+                    'exported_at' => $exportedAt,
+                ]),
+                [
+                    'filters' => $filters,
+                    'row_count' => count($rows),
+                    'exported_at' => $exportedAt,
+                ]
+            );
         }
 
         return "\xEF\xBB\xBF" . implode("\r\n", $lines) . "\r\n";

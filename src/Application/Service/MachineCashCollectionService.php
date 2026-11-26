@@ -305,7 +305,7 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                 if ($collectionId === null) {
                     throw new \RuntimeException('La recaudación se insertó sin devolver una clave primaria.');
                 }
-                $this->requireDexAuditLinks()->linkToCashCollection($dexAuditId, $machineId, $collectionId);
+                $this->requireDexAuditLinks()->linkToCashCollection($dexAuditId, $machineId, $collectionId, $actor);
             }
 
             if ($refundId !== null) {

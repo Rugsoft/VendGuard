@@ -284,7 +284,10 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   // Módulo 39: la anulación del volcado y el volcado de un conflicto Offline de
   // auditoría `.dex` se escriben bajo la entidad propia y necesitan etiqueta y
   // filtro, o el visor los mostraría como códigos crudos (Art. III.3).
+  { code: 'DEX_AUDIT_IMPORTED', label: 'Volcado EVA-DTS Importado', tone: 'success', group: 'restock' },
+  { code: 'DEX_AUDIT_LINKED', label: 'Volcado EVA-DTS Vinculado', tone: 'info', group: 'restock' },
   { code: 'DEX_AUDIT_VOIDED', label: 'Volcado EVA-DTS Anulado', tone: 'danger', group: 'restock' },
+  { code: 'EXPORT_DEX_AUDITS_CSV', label: 'Exportación CSV de Auditorías EVA-DTS', tone: 'neutral', group: 'restock' },
   { code: 'OFFLINE_DEX_AUDIT_CONFLICT_DUMP', label: 'Conflicto Offline de Auditoría EVA-DTS Archivado', tone: 'warning', group: 'restock' },
   // Módulo 35: el ciclo de vida de la bolsa precintada se audita con tres acciones
   // propias. Sin catálogo, el visor mostraba el código crudo y el filtro no permitía

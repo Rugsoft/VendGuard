@@ -91,6 +91,10 @@ const AUDIT_WRITER_METHODS = [
     // Módulo 34: la visita in situ tiene entidad propia y un único escritor de
     // auditoría; sin esta firma sus tres acciones serían invisibles para el visor.
     'logMachineRestockVisitEvent',
+    // Módulo 39: alta, enlace y anulación del volcado `.dex` se firman contra su
+    // entidad propia; la exportación CSV usa la variante global con el perímetro.
+    'logMachineDexAuditEvent',
+    'logMachineDexAuditExport',
     // Módulo 16: firma de los seis hechos de la avería oportunista in situ.
     'logOpportunisticEvent',
     // Módulo 25: el catálogo maestro construye su `AuditEvent` en un único punto

@@ -562,7 +562,7 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
         }
 
         $stmt = $this->pdo->prepare(
-            'SELECT id, machine_id, status, restock_visit_id, cash_collection_id, incident_id
+            'SELECT id, audit_code, machine_id, status, restock_visit_id, cash_collection_id, incident_id
              FROM machine_dex_audits
              WHERE id = :audit_id
              FOR UPDATE'
@@ -573,6 +573,7 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
 
         return $row === false ? null : [
             'id' => (int)$row['id'],
+            'audit_code' => (string)$row['audit_code'],
             'machine_id' => (int)$row['machine_id'],
             'status' => (string)$row['status'],
             'restock_visit_id' => $row['restock_visit_id'] === null ? null : (int)$row['restock_visit_id'],
