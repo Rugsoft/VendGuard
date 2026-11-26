@@ -9,9 +9,9 @@
 - **Fecha de auditoría:** 2026-11-26
 - **Rama:** `feat/eva-dts-dex-audit`
 - **Base auditada:** `ffeed2f3c4821837f21dcee46c700ac2f0d6293b` (árbol limpio, sin push)
-- **Alcance:** revisión de `RF-01`–`RF-07` y sus criterios EARS, `RNF-01`–`RNF-04`, `D1`–`D6`, `C1`–`C6`, `QA-1`–`QA-5`, los 10 casos límite de §7, las 12 rutas de §6, el Fuera de Alcance de §8, los 4 criterios de Definition of Done y las 17 tareas `T-DEX-01`–`T-DEX-17`, con ejecución real de las suites en los dos canales.
+- **Alcance:** revisión de `RF-01`–`RF-07` y sus criterios EARS, `RNF-01`–`RNF-04`, `D1`–`D6`, `C1`–`C6`, `QA-1`–`QA-5`, los 10 casos límite de §7, las 12 rutas de §6, el Fuera de Alcance de §8, los 4 criterios de Definition of Done y las 18 tareas `T-DEX-01`–`T-DEX-18`, con ejecución real de las suites en los dos canales.
 
-> Este documento es un acta de hallazgos abiertos. La batería está en verde, las 17 tareas figuran cerradas y **`AUD-39-01`, `AUD-39-02` y `AUD-39-03` quedaron cerradas el 2026-11-26**, pero **la Spec 39 no puede certificarse al 100 %** hasta cerrar `AUD-39-04` y corregir la matriz (`AUD-39-05`).
+> Este documento es un acta de hallazgos abiertos. La batería está en verde, las 18 tareas figuran cerradas y **`AUD-39-01`, `AUD-39-02` y `AUD-39-03` quedaron cerradas el 2026-11-26**, pero **la Spec 39 no puede certificarse al 100 %** hasta cerrar `AUD-39-04` y corregir la matriz (`AUD-39-05`).
 
 ---
 
@@ -21,7 +21,7 @@
 
 1. **Cerrada · Los cruces M34/M35 del detalle de Coordinación no se componían en producción** (`RF-04.3.3`, `QA-3`, `RF-07.1`, `D5`). Las consultas primitivas existían y estaban probadas, pero ningún servicio las invocaba; el detalle nunca devolvía `m34_cross_check`/`m35_cross_check`. `T-DEX-15` los compone en `MachineDexAuditService::findForRole()` y los certifica con `DexAuditApiTest`.
 2. **Cerrada · El delta efectivo tras un predecesor `VOIDED` no se calculaba en lectura** (`RF-04.1.2`, `QA-2`). El método de dominio existía, pero solo lo llamaba un test unitario. `T-DEX-16` resuelve el último `ACTIVE` en lectura y expone `effective_previous_audit_id` y los deltas efectivos sin reescribir las filas.
-3. **Cerrada · La auditoría `MACHINE_DEX_AUDIT` estaba incompleta** (`Art. III.3`, `RF-01.5`, `RF-07.2`, `C6`): el alta y la vinculación no escribían en `audit_log`, la anulación se registraba con entidad `MACHINE` y la exportación CSV no se auditaba. `T-DEX-17` firma los cuatro hechos bajo `MACHINE_DEX_AUDIT` y lo certifica con `DexAuditApiTest` 8.1–8.5.
+3. **Cerrada · La auditoría `MACHINE_DEX_AUDIT` estaba incompleta** (`Art. III.3`, `RF-01.5`, `RF-07.2`, `C6`): el alta y la vinculación no escribían en `audit_log`, la anulación se registraba con entidad `MACHINE` y la exportación CSV no se auditaba. `T-DEX-17` firma los cuatro hechos bajo `MACHINE_DEX_AUDIT` y lo certifica con `DexAuditApiTest` 8.1–8.5; `T-DEX-18` cablea el enlazador en las rutas reales M34/M35/M36 y lo certifica con la sección 9.
 4. **`RNF-01` no mide los 250 ms** de parseo/transacción. Solo se verifica el tope de 1 MB y la exclusión de `raw_payload`.
 
 Consecuencia directa: **el DoD 2 sigue sin cumplirse** por `AUD-39-04` (latencia sin medir), no por los cruces M34/M35, el delta efectivo ni la auditoría ya compuestos; la matriz mantiene pendiente la separación documental de `AUD-39-05`.
@@ -52,18 +52,18 @@ source deploy/local/postgres/.env.docker-tls && php tests/run_new_engine.php
 Suites: 84 · Fuera de la batería hermética (RNF-04)
 Suites evaluadas    : 84
 Suites en verde     : 84
-Aserciones          : 2893
+Aserciones          : 2902
 RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 exit=0
 ```
 
-- **13 suites propias · 422/422 aserciones verdes** (37 → 42 en `DexAuditApiTest` tras `T-DEX-17`; cifra idéntica a la declarada en la matriz).
+- **13 suites propias · 426/426 aserciones verdes** (37 → 42 → 46 en `DexAuditApiTest` tras `T-DEX-17` y `T-DEX-18`; cifra idéntica a la declarada en la matriz).
 - **Residuo 0**: ninguna de las dos bases (`vendguard_battery`, `vendguard_pg_test`) conserva esquemas no estándar; las semillas DEX quedan intactas en **4 auditorías / 9 selecciones / 5 eventos**.
 - **Esquema**: 54 tablas, 55 tipos `ENUM`, 54 disparadores de borrado, 415 sentencias DDL y 35 migraciones (`SchemaConvergenceParityTest` 42/42, `PostgresSchemaTest` 168/168, `PostgresConstitutionalTest` 91/91, `SeedRunnerSingleEngineTest` 26/26).
 - **Diseño y PWA**: `DexAuditLayoutBrowserTest` 25/25 en Chromium real a `360 × 800` y `1440 × 900`, sin scroll horizontal del documento; `DesignTokensTest` 14/14; guardas de botones, paleta heredada y deuda de tokens en verde; `OfflinePwaAssetsAndUiGuardTest` 45/45.
 - **Fuera de alcance (§8, Art. VI)**: sin Web Serial/Bluetooth/IoT, sin mantenimiento por desgaste, sin escandallos, sin CRUD del catálogo `EA1`/`EA2`, sin escrituras en `current_estimated_qty` y sin exposición en Sede/QR/A4 (`DexAuditConstitutionalTest` 1.1–1.2).
-- **Las 12 rutas de §6** están registradas en `AppRouter.php` (176–181, 535–537, 627–629) y ejercitadas en `DexAuditApiTest` 37/37.
-- **Las 17 tareas** `T-DEX-01`–`T-DEX-17` están marcadas `[x]` en `tasks.md` y completadas en el ODD.
+- **Las 12 rutas de §6** están registradas en `AppRouter.php` (176–181, 535–537, 627–629) y ejercitadas en `DexAuditApiTest` 46/46, incluida la vinculación M34/M35/M36 por HTTP.
+- **Las 18 tareas** `T-DEX-01`–`T-DEX-18` están marcadas `[x]` en `tasks.md` y completadas en el ODD.
 
 ---
 
@@ -73,7 +73,7 @@ exit=0
 |---:|---|---|---|---|---|
 | **1** | **AUD-39-01** | **P1 · Bloqueante funcional** | El detalle de Coordinación no componía los cruces M34/M35: `observed_consumption_units`, `cash_comparison`, `comparison_basis`, `diff_eur` y umbral ±1,00 € no se calculaban ni se devolvían | `RF-04.3.3`, `QA-3`, `RF-07.1`, `D5` | **Cerrada (2026-11-26 · `T-DEX-15`)** |
 | **2** | **AUD-39-02** | **P1 · Bloqueante funcional / Art. III.3** | El delta efectivo en lectura cuando el predecesor pasó a `VOIDED` no se calculaba: `previous_audit_voided` y `effective_delta_*` no llegaban al cliente | `RF-04.1.2`, `QA-2`, `C6` | **Cerrada (2026-11-26 · `T-DEX-16`)** |
-| **3** | **AUD-39-03** | **P2 · Constitucional / auditoría** | `audit_log` no registraba el alta ni la vinculación; la anulación se registraba como `MACHINE` y no como `MACHINE_DEX_AUDIT`; el CSV no se auditaba | `Art. III.3`, `RF-01.5`, `RF-07.2`, `C6` | **Cerrada (2026-11-26 · `T-DEX-17`)** |
+| **3** | **AUD-39-03** | **P2 · Constitucional / auditoría** | `audit_log` no registraba el alta ni la vinculación; la anulación se registraba como `MACHINE` y no como `MACHINE_DEX_AUDIT`; el CSV no se auditaba | `Art. III.3`, `RF-01.5`, `RF-07.2`, `C6` | **Cerrada (2026-11-26 · `T-DEX-17`/`T-DEX-18`)** |
 | **4** | **AUD-39-04** | **P2 · Verificación RNF** | No existe medición de los 250 ms de parseo/transacción de `RNF-01`; solo se comprueba el tope de 1 MB | `RNF-01`, DoD 2 | **Abierta** |
 | **5** | **AUD-39-05** | **P3 · Documental** | La matriz de trazabilidad atribuye a tests de primitivas una funcionalidad no cableada y declara `RF-04.3`/`QA-2`/`Art. III.3` cubiertos | DoD 4, matriz, ODD | **Abierta** |
 
@@ -174,7 +174,7 @@ La spec exige que **todo alta, vinculación posterior y anulación** quede regis
 3. El conflict-dump Offline mantiene la entidad `MACHINE` que exige `C5` (no se cambia).
 4. Nuevas aserciones de integración consultan `audit_log` tras importar, enlazar, anular y exportar; deben fallar si la fila no existe o si la entidad no es la correcta.
 
-**Cierre (2026-11-26).** `T-DEX-17` añadió `AuditLogger::logMachineDexAuditEvent()` y `logMachineDexAuditExport()`, y conectó los cuatro caminos: el alta firma `DEX_AUDIT_IMPORTED`, el enlace `DEX_AUDIT_LINKED` con `audit_code`, máquina, tipo y destino, la anulación `DEX_AUDIT_VOIDED` con `ACTIVE → VOIDED` y motivo —ya sin `logMachineEvent`— y el CSV `EXPORT_DEX_AUDITS_CSV` como exportación global `entity_id = 0` con el perímetro aplicado. `MachineDexAuditService` recibe el logger y `DexAuditLinker` propaga el actor desde M34/M35/M36; `findLinkTargetForUpdate()` devuelve `audit_code` sin cambiar DDL. El test de integración se escribió primero y falló en 8.1–8.4; 8.5 ya exigía `MACHINE` para el conflict-dump y se mantuvo. Después quedó **42/42**: alta del Reponedor, enlace real de una auditoría de Coordinación a una visita M34, anulación con actor y estados, CSV con perímetro y conflict-dump bajo `MACHINE` (C5). Regresiones: 13 suites DEX **422/422**; global **461 suites · 18.126 aserciones · 0 fallos**; `new_engine` **84/84 · 2.898 aserciones · 0 fallos**. Sin DDL ni rutas nuevas.
+**Cierre (2026-11-26).** `T-DEX-17` añadió `AuditLogger::logMachineDexAuditEvent()` y `logMachineDexAuditExport()`, y conectó los cuatro caminos: el alta firma `DEX_AUDIT_IMPORTED`, el enlace `DEX_AUDIT_LINKED` con `audit_code`, máquina, tipo y destino, la anulación `DEX_AUDIT_VOIDED` con `ACTIVE → VOIDED` y motivo —ya sin `logMachineEvent`— y el CSV `EXPORT_DEX_AUDITS_CSV` como exportación global `entity_id = 0` con el perímetro aplicado. `MachineDexAuditService` recibe el logger y `DexAuditLinker` propaga el actor desde M34/M35/M36; `findLinkTargetForUpdate()` devuelve `audit_code` sin cambiar DDL. El test de integración se escribió primero y falló en 8.1–8.4; 8.5 ya exigía `MACHINE` para el conflict-dump y se mantuvo. Después quedó **42/42**: alta del Reponedor, enlace de una auditoría de Coordinación a una visita M34, anulación con actor y estados, CSV con perímetro y conflict-dump bajo `MACHINE` (C5). `T-DEX-18` detectó que `RestockerRouteController` construía M34/M35/M36 sin `DexAuditLinker`, por lo que cualquier `dex_audit_id` devolvía 500 antes de crear la visita, la bolsa o el ticket. El cableado mínimo inyecta una instancia única del enlazador con `PdoMachineDexAuditRepository` y `AuditLogger` en los tres servicios. La sección 9 se escribió primero y falló en 9.1–9.3 con 500; después certifica **46/46**, los tres vínculos persistidos y `DEX_AUDIT_LINKED` por HTTP bajo `MACHINE_DEX_AUDIT` con actor y destino. Regresiones: 13 suites DEX **426/426**; global **461 suites · 18.126 aserciones · 0 fallos**; `new_engine` **84/84 · 2.902 aserciones · 0 fallos**. Sin DDL ni rutas nuevas.
 
 ---
 
@@ -207,19 +207,19 @@ La spec exige que **todo alta, vinculación posterior y anulación** quede regis
 
 **Qué falta.**
 
-La matriz ya refleja los flujos de `RF-04` y `QA-2` con `DexAuditApiTest` 37/37, pero sigue sin distinguir entre «primitiva probada» y «flujo cableado y probado de extremo a extremo» para `Art. III.3`, que producción aún no ejecuta. La matriz debe separar ambas categorías.
+La matriz ya refleja los flujos de `RF-04`, `QA-2` y `Art. III.3` con `DexAuditApiTest` 46/46, incluida la vinculación M34/M35/M36 por HTTP de la sección 9; el resto de la cobertura sigue sin distinguir entre «primitiva probada» y «flujo cableado y probado de extremo a extremo». La matriz debe separar ambas categorías.
 
 **Evidencia.**
 
 - `specs/39-eva-dts-dex-audit/traceability-matrix.md`, filas `Art. III.1 / III.2 / III.3`; `RF-04` y `QA-2` ya están corregidas.
 - `PdoMachineDexAuditRepositoryTest` 2.1–2.5 sigue probando el gateway en aislamiento; el flujo de detalle se cubre en `DexAuditApiTest` 3.7–3.9 (cruces) y 7.1–7.9 (delta efectivo tras `VOIDED`).
-- La cobertura de `audit_log` para alta, enlace, anulación y CSV ya existe en `DexAuditApiTest` 8.1–8.5 tras `AUD-39-03`; queda separar en la matriz «primitiva» de «flujo de producción».
+- La cobertura de `audit_log` para alta, enlace, anulación y CSV ya existe en `DexAuditApiTest` 8.1–8.5 y 9.1–9.3 tras `T-DEX-17`/`T-DEX-18`; el enlace ya se ejecuta por HTTP. Queda separar en la matriz «primitiva» de «flujo de producción».
 
 **Criterio de cierre.**
 
 1. Actualizar la matriz con una columna o nota que separe «primitiva» de «flujo de producción».
 2. Enlazar cada criterio EARS a la aserción de integración que lo recorre de extremo a extremo.
-3. Mantener el recuento de suites propias en **422/422** tras `T-DEX-15`–`T-DEX-17`, y recalcularlo si se añaden nuevas pruebas.
+3. Mantener el recuento de suites propias en **426/426** tras `T-DEX-15`–`T-DEX-18`, y recalcularlo si se añaden nuevas pruebas.
 
 ---
 
@@ -228,9 +228,9 @@ La matriz ya refleja los flujos de `RF-04` y `QA-2` con `DexAuditApiTest` 37/37,
 | DoD | Estado | Motivo |
 |---|---|---|
 | **DoD 1** · Migración, convergencia, tipos, tablas, índices y triggers sin alterar DDL previo | ✅ Cumplido | 415 sentencias, 35 migraciones, 54 tablas, 55 ENUM, 8 disparadores DEX, ningún `ALTER TABLE` sobre tablas previas |
-| **DoD 2** · Parser, servicio, deltas, anti-spam, cruces M34-M35, anulación, CSV y proyecciones al 100 % | ❌ **No cumplido** | Solo queda `AUD-39-04` (latencia sin medir); los cruces M34-M35, el delta efectivo tras `VOIDED` y la auditoría `MACHINE_DEX_AUDIT` ya están compuestos y probados por `T-DEX-15`–`T-DEX-17` |
-| **DoD 3** · Integración móvil, consola de Coordinación y cola Offline PWA | ✅ Cumplido | 262/262 + 31/31 + 42/42 + 25/25 + 45/45 |
-| **DoD 4** · Batería global, `new_engine`, navegador real y matriz | ⚠️ **Parcial** | Batería y navegador en verde (461/18.126 y 84/2.898), pero la matriz mantiene pendiente la separación «primitiva/flujo» (`AUD-39-05`) |
+| **DoD 2** · Parser, servicio, deltas, anti-spam, cruces M34-M35, anulación, CSV y proyecciones al 100 % | ❌ **No cumplido** | Solo queda `AUD-39-04` (latencia sin medir); los cruces M34-M35, el delta efectivo tras `VOIDED` y la auditoría `MACHINE_DEX_AUDIT` ya están compuestos y probados por `T-DEX-15`–`T-DEX-18` |
+| **DoD 3** · Integración móvil, consola de Coordinación y cola Offline PWA | ✅ Cumplido | 262/262 + 31/31 + 46/46 + 25/25 + 45/45 |
+| **DoD 4** · Batería global, `new_engine`, navegador real y matriz | ⚠️ **Parcial** | Batería y navegador en verde (461/18.126 y 84/2.902), pero la matriz mantiene pendiente la separación «primitiva/flujo» (`AUD-39-05`) |
 
 ---
 
@@ -247,10 +247,11 @@ Orden recomendado, respetando el ciclo SDD (primero la prueba que falla, despué
    - Escribir el escenario A0→A→B→anular A→leer B, y después anular A0 para el caso sin predecesor.
    - Resolver el predecesor `ACTIVE` en lectura y aplicar `withPreviousAuditVoided`.
    - **Resultado:** `DexAuditApiTest` 7.1–7.9 en verde (**37/37**); 13 suites DEX **417/417**; global **461/18.126/0**; `new_engine` **84/2.893/0**.
-3. ✅ **`AUD-39-03` · Auditoría `MACHINE_DEX_AUDIT` — cerrada el 2026-11-26 por `T-DEX-17`**
+3. ✅ **`AUD-39-03` · Auditoría `MACHINE_DEX_AUDIT` — cerrada el 2026-11-26 por `T-DEX-17` y `T-DEX-18`**
    - Añadir la escritura de `audit_log` en alta, enlace, anulación y CSV; corregir la entidad de la anulación.
    - Añadir aserciones que consulten `audit_log`.
-   - **Resultado:** `DexAuditApiTest` 8.1–8.5 en verde (**42/42**); 13 suites DEX **422/422**; global **461/18.126/0**; `new_engine` **84/2.898/0**.
+   - Cablear `DexAuditLinker` en las rutas M34/M35/M36 y certificarlo por HTTP.
+   - **Resultado:** `DexAuditApiTest` 8.1–8.5 y 9.1–9.3 en verde (**46/46**); 13 suites DEX **426/426**; global **461/18.126/0**; `new_engine` **84/2.902/0**.
 4. **`AUD-39-04` · Latencia `RNF-01`**
    - Medir con una suite propia o enmendar la spec con aprobación del Product Owner.
 5. **`AUD-39-05` · Matriz y ODD**

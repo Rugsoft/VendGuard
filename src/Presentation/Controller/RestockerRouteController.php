@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use PDO;
 use Throwable;
 use VendGuard\Application\Service\AuditLogger;
+use VendGuard\Application\Service\DexAuditLinker;
 use VendGuard\Application\Service\MachinePlanogramService;
 use VendGuard\Application\Service\MachineCashCollectionService;
 use VendGuard\Application\Service\MachineDexAuditService;
@@ -170,12 +171,17 @@ final class RestockerRouteController
         $productRepository = new PdoVendingProductRepository($pdo);
 
         $this->visitRepository = $visitRepository ?? new PdoMachineRestockVisitRepository($pdo);
+        $dexAuditLinks = new DexAuditLinker(
+            new PdoMachineDexAuditRepository($pdo),
+            new AuditLogger(new PdoAuditLogRepository($pdo))
+        );
         $this->cashCollections = $cashCollections ?? new MachineCashCollectionService(
             new PdoMachineCashCollectionRepository($pdo),
             new PdoMachineCashCollectionGateway($pdo),
             new PdoRefundRequestRepository($pdo),
             new PdoTransactionManager($pdo),
-            new AuditLogger()
+            new AuditLogger(),
+            $dexAuditLinks
         );
 
         $this->planogramService = $planogramService ?? new MachinePlanogramService(
@@ -204,7 +210,7 @@ final class RestockerRouteController
             $pdo
         );
 
-        $this->synergyService = $synergyService ?? $this->buildSynergyService($pdo);
+        $this->synergyService = $synergyService ?? $this->buildSynergyService($pdo, $dexAuditLinks);
 
         $routeGateway = new PdoRestockRoutePlannerGateway($pdo);
         $routeReadModel = new PdoRestockRouteReadModel($pdo);
@@ -232,7 +238,8 @@ final class RestockerRouteController
             null,
             $this->cashCollections,
             $routeGateway,
-            $routeReadModel
+            $routeReadModel,
+            $dexAuditLinks
         );
     }
 
@@ -240,7 +247,7 @@ final class RestockerRouteController
      * Compone el escalado real: resuelve el técnico con el recomendador de
      * siempre y encola el aviso en el outbox de notificaciones.
      */
-    private function buildSynergyService(PDO $pdo): RestockerSatSynergyService
+    private function buildSynergyService(PDO $pdo, DexAuditLinker $dexAuditLinks): RestockerSatSynergyService
     {
         $suggestions = new SuggestedTechniciansService(
             new PdoTechnicianSuggestionRepository($pdo)
@@ -398,7 +405,9 @@ final class RestockerRouteController
         return new RestockerSatSynergyService(
             new PdoRestockerSatSynergyGateway($pdo),
             $resolver,
-            $notifier
+            $notifier,
+            null,
+            $dexAuditLinks
         );
     }
 

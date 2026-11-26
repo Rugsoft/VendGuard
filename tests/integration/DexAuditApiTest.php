@@ -729,11 +729,132 @@ try {
         json_encode($conflictAuditRow)
     );
 
+    echo "\n--- 9. Cableado real de M34/M35/M36 (AUD-39-03) ---\n";
+    $evidenceDir = $projectRoot . '/public/uploads/incidents';
+    if (!is_dir($evidenceDir) && !mkdir($evidenceDir, 0777, true) && !is_dir($evidenceDir)) {
+        throw new RuntimeException('No se pudo preparar la evidencia de la sección 9.');
+    }
+    $evidenceFile = $evidenceDir . '/aud3903_escalation.png';
+    file_put_contents(
+        $evidenceFile,
+        hex2bin('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082')
+    );
+
+    $importProductionAudit = static function (string $mutation, string $capturedAt, string $comm) use (
+        $call,
+        $coordinatorToken,
+        $machineId,
+        $data
+    ): int {
+        $response = $call('POST', '/api/coordinator/machines/' . $machineId . '/dex-audits', [
+            'raw_payload' => "DXS*{$comm}*VA*DEX 6.0\nID1*DEX9-FOOD-01\nID4*2\nVA1*3000*60\nDXE*FIN",
+            'original_filename' => $mutation . '.dex',
+            'captured_at' => $capturedAt,
+            'client_mutation_id' => $mutation,
+        ], $coordinatorToken);
+
+        return $response->getStatusCode() === 201 ? (int)($data($response)['audit']['id'] ?? 0) : 0;
+    };
+
+    $m34AuditId = $importProductionAudit('aud3903-m34', '2026-11-24 14:00:00+00', 'COMM-AUD3903-M34');
+    $m35AuditId = $importProductionAudit('aud3903-m35', '2026-11-24 15:00:00+00', 'COMM-AUD3903-M35');
+    $m36AuditId = $importProductionAudit('aud3903-m36', '2026-11-24 16:00:00+00', 'COMM-AUD3903-M36');
+    $assert(
+        '9.0 Las tres auditorías de producción se importan ACTIVE',
+        $m34AuditId > 0 && $m35AuditId > 0 && $m36AuditId > 0,
+        json_encode(['m34' => $m34AuditId, 'm35' => $m35AuditId, 'm36' => $m36AuditId])
+    );
+
+    $linkedTarget = static function (string $column, int $auditId) use ($pdo): ?int {
+        if (!in_array($column, ['restock_visit_id', 'cash_collection_id', 'incident_id'], true)) {
+            throw new InvalidArgumentException('Columna de vínculo no permitida en el test.');
+        }
+        $stmt = $pdo->prepare("SELECT {$column} FROM machine_dex_audits WHERE id = :id");
+        $stmt->execute([':id' => $auditId]);
+        $value = $stmt->fetchColumn();
+
+        return $value === false || $value === null ? null : (int)$value;
+    };
+
+    $m34Visit = $call('POST', '/api/restocker/machines/' . $machineId . '/visits', [
+        'status' => 'COMPLETED',
+        'cabin_temp_celsius' => 3.0,
+        'client_mutation_id' => 'aud3903-m34-visit',
+        'hygiene_checklist_json' => [
+            'dispensing_tray_and_glass_cleaned' => true,
+            'cabin_spills_checked' => true,
+        ],
+        'items' => [],
+        'dex_audit_id' => $m34AuditId,
+    ], $restockerToken);
+    $m34VisitId = (int)($data($m34Visit)['id'] ?? 0);
+    $m34LinkAudit = $findAuditRow('DEX_AUDIT_LINKED', 'MACHINE_DEX_AUDIT', $m34AuditId);
+    $assert(
+        '9.1 M34 enlaza la visita y firma DEX_AUDIT_LINKED por HTTP',
+        $m34Visit->getStatusCode() === 201
+            && $m34VisitId > 0
+            && $linkedTarget('restock_visit_id', $m34AuditId) === $m34VisitId
+            && $m34LinkAudit !== null
+            && (int)($m34LinkAudit['user_id'] ?? 0) === $restockerId
+            && ($m34LinkAudit['metadata']['target'] ?? '') === 'restock_visit'
+            && (int)($m34LinkAudit['metadata']['target_id'] ?? 0) === $m34VisitId,
+        json_encode(['status' => $m34Visit->getStatusCode(), 'error' => $errorCode($m34Visit), 'audit' => $m34LinkAudit])
+    );
+
+    $m35Collection = $call('POST', '/api/restocker/machines/' . $machineId . '/cash-collections', [
+        'client_mutation_id' => 'aud3903-m35-cash',
+        'bag_seal_code' => 'bag-aud3903-m35',
+        'sales_counter_reading' => 120.00,
+        'change_tubes_loaded_eur' => 10.00,
+        'reception_cash_delivered_eur' => 5.00,
+        'receptionist_name' => 'Conserje AUD 3903',
+        'dex_audit_id' => $m35AuditId,
+    ], $restockerToken);
+    $m35CollectionId = (int)($data($m35Collection)['id'] ?? 0);
+    $m35LinkAudit = $findAuditRow('DEX_AUDIT_LINKED', 'MACHINE_DEX_AUDIT', $m35AuditId);
+    $assert(
+        '9.2 M35 enlaza la recaudación y firma DEX_AUDIT_LINKED por HTTP',
+        $m35Collection->getStatusCode() === 201
+            && $m35CollectionId > 0
+            && $linkedTarget('cash_collection_id', $m35AuditId) === $m35CollectionId
+            && $m35LinkAudit !== null
+            && (int)($m35LinkAudit['user_id'] ?? 0) === $restockerId
+            && ($m35LinkAudit['metadata']['target'] ?? '') === 'cash_collection'
+            && (int)($m35LinkAudit['metadata']['target_id'] ?? 0) === $m35CollectionId,
+        json_encode(['status' => $m35Collection->getStatusCode(), 'error' => $errorCode($m35Collection), 'audit' => $m35LinkAudit])
+    );
+
+    $m36Escalation = $call('POST', '/api/restocker/machines/' . $machineId . '/escalate-to-sat', [
+        'category' => 'PRODUCT_JAM',
+        'workshop_internal_note' => 'El carril queda bloqueado y la espiral no gira al pulsar el botón.',
+        'photo_path' => '/uploads/incidents/aud3903_escalation.png',
+        'urgency' => 'HIGH',
+        'client_mutation_id' => 'aud3903-m36-escalation',
+        'client_occurred_at' => '2026-11-24 16:00:00+00',
+        'dex_audit_id' => $m36AuditId,
+    ], $restockerToken);
+    $m36IncidentId = (int)($data($m36Escalation)['incident_id'] ?? 0);
+    $m36LinkAudit = $findAuditRow('DEX_AUDIT_LINKED', 'MACHINE_DEX_AUDIT', $m36AuditId);
+    $assert(
+        '9.3 M36 enlaza el expediente SAT y firma DEX_AUDIT_LINKED por HTTP',
+        $m36Escalation->getStatusCode() === 201
+            && $m36IncidentId > 0
+            && $linkedTarget('incident_id', $m36AuditId) === $m36IncidentId
+            && $m36LinkAudit !== null
+            && (int)($m36LinkAudit['user_id'] ?? 0) === $restockerId
+            && ($m36LinkAudit['metadata']['target'] ?? '') === 'incident'
+            && (int)($m36LinkAudit['metadata']['target_id'] ?? 0) === $m36IncidentId,
+        json_encode(['status' => $m36Escalation->getStatusCode(), 'error' => $errorCode($m36Escalation), 'audit' => $m36LinkAudit])
+    );
+
     $exitCode = $failures === 0 ? 0 : 1;
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");
     $exitCode = 1;
 } finally {
+    if (isset($evidenceFile) && is_file($evidenceFile)) {
+        @unlink($evidenceFile);
+    }
     if ($schemaReady) {
         try {
             PostgresFixtureBuilder::dropIsolationSchema($pdo, DEX09_API_SCHEMA);
