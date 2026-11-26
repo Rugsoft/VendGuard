@@ -48,6 +48,7 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
     private const DEFAULT_LIMIT = 100;
     private const MAX_LIMIT = 500;
     private const OPERATIONAL_TIMEZONE = 'Europe/Madrid';
+    private const LINE_INSERT_BATCH_SIZE = 2000;
 
     private const HEADER_SELECT = "
         a.id,
@@ -723,42 +724,45 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
             return;
         }
 
-        $stmt = $this->pdo->prepare('
-            INSERT INTO machine_dex_selection_lines (
-                dex_audit_id, line_sequence, raw_selection_code, normalized_selection_code,
-                matched_slot_id, matched_slot_code_snapshot, match_status,
-                unit_price_eur, total_vend_units, total_sales_eur,
-                reset_vend_units, reset_sales_eur, delta_vend_units, delta_sales_eur
-            ) VALUES (
-                :dex_audit_id, :line_sequence, :raw_selection_code, :normalized_selection_code,
-                :matched_slot_id, :matched_slot_code_snapshot, :match_status,
-                :unit_price_eur, :total_vend_units, :total_sales_eur,
-                :reset_vend_units, :reset_sales_eur, :delta_vend_units, :delta_sales_eur
-            )
-        ');
-
+        $rows = [];
         foreach ($lines as $line) {
             $status = $line['match_status'] ?? null;
             $statusValue = is_object($status) && property_exists($status, 'value')
                 ? (string)$status->value
                 : strtoupper((string)$status);
+            $snapshot = $line['matched_slot_code_snapshot'] ?? null;
+            $snapshot = $snapshot === null || trim((string)$snapshot) === '' ? null : (string)$snapshot;
+            $unitPrice = $line['unit_price_eur'] ?? null;
+            $resetSales = $line['reset_sales_eur'] ?? null;
+            $deltaSales = $line['delta_sales_eur'] ?? null;
 
-            $stmt->bindValue(':dex_audit_id', $auditId, PDO::PARAM_INT);
-            $stmt->bindValue(':line_sequence', (int)($line['line_sequence'] ?? 1), PDO::PARAM_INT);
-            $stmt->bindValue(':raw_selection_code', (string)($line['raw_selection_code'] ?? ''), PDO::PARAM_STR);
-            $stmt->bindValue(':normalized_selection_code', (string)($line['normalized_selection_code'] ?? ''), PDO::PARAM_STR);
-            $this->bindNullableInt($stmt, ':matched_slot_id', isset($line['matched_slot_id']) ? (int)$line['matched_slot_id'] : null);
-            $this->bindNullableText($stmt, ':matched_slot_code_snapshot', $line['matched_slot_code_snapshot'] ?? null);
-            $stmt->bindValue(':match_status', $statusValue, PDO::PARAM_STR);
-            $this->bindNullableFloat($stmt, ':unit_price_eur', $line['unit_price_eur'] ?? null);
-            $stmt->bindValue(':total_vend_units', (int)($line['total_vend_units'] ?? 0), PDO::PARAM_INT);
-            $stmt->bindValue(':total_sales_eur', (string)(float)($line['total_sales_eur'] ?? 0.0), PDO::PARAM_STR);
-            $this->bindNullableInt($stmt, ':reset_vend_units', $line['reset_vend_units'] ?? null);
-            $this->bindNullableFloat($stmt, ':reset_sales_eur', $line['reset_sales_eur'] ?? null);
-            $this->bindNullableInt($stmt, ':delta_vend_units', $line['delta_vend_units'] ?? null);
-            $this->bindNullableFloat($stmt, ':delta_sales_eur', $line['delta_sales_eur'] ?? null);
-            $stmt->execute();
+            $rows[] = implode("\t", [
+                (string)$auditId,
+                (string)(int)($line['line_sequence'] ?? 1),
+                self::copyText((string)($line['raw_selection_code'] ?? '')),
+                self::copyText((string)($line['normalized_selection_code'] ?? '')),
+                self::copyText(isset($line['matched_slot_id']) ? (int)$line['matched_slot_id'] : null),
+                self::copyText($snapshot),
+                self::copyText($statusValue),
+                self::copyText($unitPrice === null ? null : (string)(float)$unitPrice),
+                (string)(int)($line['total_vend_units'] ?? 0),
+                (string)(float)($line['total_sales_eur'] ?? 0.0),
+                self::copyText(isset($line['reset_vend_units']) ? (int)$line['reset_vend_units'] : null),
+                self::copyText($resetSales === null ? null : (string)(float)$resetSales),
+                self::copyText(isset($line['delta_vend_units']) ? (int)$line['delta_vend_units'] : null),
+                self::copyText($deltaSales === null ? null : (string)(float)$deltaSales),
+            ]);
         }
+
+        $columns = 'dex_audit_id, line_sequence, raw_selection_code, normalized_selection_code, '
+            . 'matched_slot_id, matched_slot_code_snapshot, match_status, unit_price_eur, '
+            . 'total_vend_units, total_sales_eur, reset_vend_units, reset_sales_eur, '
+            . 'delta_vend_units, delta_sales_eur';
+
+        foreach (array_chunk($rows, self::LINE_INSERT_BATCH_SIZE) as $chunk) {
+            $this->copyRows('machine_dex_selection_lines', $columns, $chunk);
+        }
+
     }
 
     /**
@@ -770,20 +774,7 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
             return;
         }
 
-        $stmt = $this->pdo->prepare('
-            INSERT INTO machine_dex_event_lines (
-                dex_audit_id, line_sequence, source_block, event_code,
-                event_category, severity, occurrence_count, count_since_reset,
-                count_since_init, is_active_flag, event_occurred_at_raw,
-                description_es, is_thermal_alert
-            ) VALUES (
-                :dex_audit_id, :line_sequence, :source_block, :event_code,
-                :event_category, :severity, :occurrence_count, :count_since_reset,
-                :count_since_init, :is_active_flag, :event_occurred_at_raw,
-                :description_es, :is_thermal_alert
-            )
-        ');
-
+        $rows = [];
         foreach ($lines as $line) {
             $category = $line['event_category'] ?? null;
             $severity = $line['severity'] ?? null;
@@ -793,21 +784,32 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
             $severityValue = is_object($severity) && property_exists($severity, 'value')
                 ? (string)$severity->value
                 : strtoupper((string)$severity);
+            $occurredAtRaw = $line['event_occurred_at_raw'] ?? null;
+            $occurredAtRaw = $occurredAtRaw === null || trim((string)$occurredAtRaw) === '' ? null : (string)$occurredAtRaw;
 
-            $stmt->bindValue(':dex_audit_id', $auditId, PDO::PARAM_INT);
-            $stmt->bindValue(':line_sequence', (int)($line['line_sequence'] ?? 1), PDO::PARAM_INT);
-            $stmt->bindValue(':source_block', (string)($line['source_block'] ?? 'EA1'), PDO::PARAM_STR);
-            $stmt->bindValue(':event_code', (string)($line['event_code'] ?? ''), PDO::PARAM_STR);
-            $stmt->bindValue(':event_category', $categoryValue, PDO::PARAM_STR);
-            $stmt->bindValue(':severity', $severityValue, PDO::PARAM_STR);
-            $stmt->bindValue(':occurrence_count', max(1, (int)($line['occurrence_count'] ?? 1)), PDO::PARAM_INT);
-            $this->bindNullableInt($stmt, ':count_since_reset', $line['count_since_reset'] ?? null);
-            $this->bindNullableInt($stmt, ':count_since_init', $line['count_since_init'] ?? null);
-            $stmt->bindValue(':is_active_flag', self::boolParam((bool)($line['is_active_flag'] ?? false)));
-            $this->bindNullableText($stmt, ':event_occurred_at_raw', $line['event_occurred_at_raw'] ?? null);
-            $stmt->bindValue(':description_es', (string)($line['description_es'] ?? ''), PDO::PARAM_STR);
-            $stmt->bindValue(':is_thermal_alert', self::boolParam((bool)($line['is_thermal_alert'] ?? false)));
-            $stmt->execute();
+            $rows[] = implode("\t", [
+                (string)$auditId,
+                (string)(int)($line['line_sequence'] ?? 1),
+                self::copyText((string)($line['source_block'] ?? 'EA1')),
+                self::copyText((string)($line['event_code'] ?? '')),
+                self::copyText($categoryValue),
+                self::copyText($severityValue),
+                (string)max(1, (int)($line['occurrence_count'] ?? 1)),
+                self::copyText(isset($line['count_since_reset']) ? (int)$line['count_since_reset'] : null),
+                self::copyText(isset($line['count_since_init']) ? (int)$line['count_since_init'] : null),
+                (bool)($line['is_active_flag'] ?? false) ? 't' : 'f',
+                self::copyText($occurredAtRaw),
+                self::copyText((string)($line['description_es'] ?? '')),
+                (bool)($line['is_thermal_alert'] ?? false) ? 't' : 'f',
+            ]);
+        }
+
+        $columns = 'dex_audit_id, line_sequence, source_block, event_code, event_category, '
+            . 'severity, occurrence_count, count_since_reset, count_since_init, is_active_flag, '
+            . 'event_occurred_at_raw, description_es, is_thermal_alert';
+
+        foreach (array_chunk($rows, self::LINE_INSERT_BATCH_SIZE) as $chunk) {
+            $this->copyRows('machine_dex_event_lines', $columns, $chunk);
         }
     }
 
@@ -1005,7 +1007,7 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
         return null;
     }
 
-    private function bindNullableText(PDOStatement $stmt, string $param, mixed $value): void
+    private function bindNullableText(PDOStatement $stmt, int|string $param, mixed $value): void
     {
         if ($value === null || trim((string)$value) === '') {
             $stmt->bindValue($param, null, PDO::PARAM_NULL);
@@ -1014,7 +1016,7 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
         $stmt->bindValue($param, (string)$value, PDO::PARAM_STR);
     }
 
-    private function bindNullableInt(PDOStatement $stmt, string $param, mixed $value): void
+    private function bindNullableInt(PDOStatement $stmt, int|string $param, mixed $value): void
     {
         if ($value === null) {
             $stmt->bindValue($param, null, PDO::PARAM_NULL);
@@ -1023,7 +1025,7 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
         $stmt->bindValue($param, (int)$value, PDO::PARAM_INT);
     }
 
-    private function bindNullableFloat(PDOStatement $stmt, string $param, mixed $value): void
+    private function bindNullableFloat(PDOStatement $stmt, int|string $param, mixed $value): void
     {
         if ($value === null) {
             $stmt->bindValue($param, null, PDO::PARAM_NULL);
@@ -1035,6 +1037,53 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
     private static function boolParam(bool $value): string
     {
         return $value ? 'true' : 'false';
+    }
+
+    /**
+     * Inserta líneas con `COPY FROM STDIN`, el camino masivo nativo de PostgreSQL.
+     *
+     * `COPY` participa en la transacción abierta por `create()`: si una línea
+     * incumple una restricción, el alta completa se revierte igual que con los
+     * `INSERT` fila a fila. El coste fijo evita que 2.000 selecciones conviertan
+     * la importación en miles de viajes al motor (RNF-01).
+     *
+     * @param list<string> $rows Filas ya serializadas en formato de texto de COPY.
+     */
+    private function copyRows(string $table, string $columns, array $rows): void
+    {
+        if ($rows === []) {
+            return;
+        }
+
+        if (!method_exists($this->pdo, 'pgsqlCopyFromArray')) {
+            throw new \RuntimeException('El motor no expone COPY FROM STDIN para persistir las líneas DEX.');
+        }
+
+        if (!$this->pdo->pgsqlCopyFromArray($table, $rows, "\t", "\\\\N", $columns)) {
+            $error = $this->pdo->errorInfo();
+            throw new PDOException((string)($error[2] ?? 'COPY FROM STDIN falló sin detalle del motor.'));
+        }
+    }
+
+    private static function copyText(mixed $value): string
+    {
+        if ($value === null) {
+            return "\\N";
+        }
+        if (is_bool($value)) {
+            return $value ? 't' : 'f';
+        }
+
+        $text = (string)$value;
+        if (strpbrk($text, "\\\t\n\r") === false) {
+            return $text;
+        }
+
+        return str_replace(
+            ["\\", "\t", "\n", "\r"],
+            ["\\\\", "\\t", "\\n", "\\r"],
+            $text
+        );
     }
 
     private static function toBool(mixed $value): bool

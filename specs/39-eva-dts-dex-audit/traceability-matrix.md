@@ -4,9 +4,9 @@
 
 **Esquema de referencia canónico:** `RF-01` esquema inmutable y tipos #51–#55 · `RF-02` parser determinista e identidad · `RF-03` RBAC, perímetro y primacía sanitaria · `RF-04` deltas y cruces no destructivos M34/M35 · `RF-05` catálogo de eventos, asistencia y alerta térmica · `RF-06` cola Offline y aislamiento de conflictos · `RF-07` consola de Coordinación, anulación y CSV.
 
-**Corrida de certificación:** 2026-11-26 · batería global **461 suites · 18.126 aserciones · 0 fallos** (`DocMetricsGuard` coherente) · canal `new_engine`: **84 evaluadas · 84 verdes · 2.902 aserciones · 0 fallos** · PostgreSQL 16.15 local con TLS (`vendguard_battery` y `vendguard_pg_test`).
+**Corrida de certificación:** 2026-11-26 · batería global **461 suites · 18.126 aserciones · 0 fallos** (`DocMetricsGuard` coherente) · canal `new_engine`: **85 evaluadas · 85 verdes · 2.905 aserciones · 0 fallos** · PostgreSQL 16.15 local con TLS (`vendguard_battery` y `vendguard_pg_test`).
 
-**Estado:** ✅ Módulo 39 cerrado funcionalmente · **18/18 tareas** (`T-DEX-01` a `T-DEX-18`, incluidas las correctivas `AUD-39-01`–`AUD-39-03` y el cierre de cableado `T-DEX-18`) · **13 suites propias con 426 aserciones verdes** + regresiones de esquema, servicios, rutas y superficies · **DoD 1, 2 y 3 cumplidos; DoD 4 parcial** por la corrección documental `AUD-39-05` · DDL previo intacto. `AUD-39-01`, `AUD-39-02` y `AUD-39-03` cerradas el 2026-11-26; el acta de brechas mantiene abiertas `AUD-39-04` y la documental `AUD-39-05`.
+**Estado:** ✅ Módulo 39 cerrado funcionalmente · **19/19 tareas** (`T-DEX-01` a `T-DEX-19`, incluidas las correctivas `AUD-39-01`–`AUD-39-04` y los cierres de cableado y latencia `T-DEX-18`/`T-DEX-19`) · **14 suites propias con 429 aserciones verdes** + regresiones de esquema, servicios, rutas y superficies · **DoD 1, 2 y 3 cumplidos; DoD 4 parcial** por la corrección documental `AUD-39-05` · DDL previo intacto. `AUD-39-01`, `AUD-39-02`, `AUD-39-03` y `AUD-39-04` cerradas el 2026-11-26; el acta de brechas mantiene abierta la documental `AUD-39-05`.
 
 ---
 
@@ -36,10 +36,11 @@
 | `DexAuditApiTest` | [`tests/integration/DexAuditApiTest.php`](../../tests/integration/DexAuditApiTest.php) | 46/46 · incluye M34/M35/M36 por HTTP |
 | `DexAuditConstitutionalTest` | [`tests/integration/DexAuditConstitutionalTest.php`](../../tests/integration/DexAuditConstitutionalTest.php) | 14/14 |
 | `DexAuditConcurrencyTest` | [`tests/integration/DexAuditConcurrencyTest.php`](../../tests/integration/DexAuditConcurrencyTest.php) | 6/6 |
+| `DexAuditPerformanceTest` | [`tests/integration/DexAuditPerformanceTest.php`](../../tests/integration/DexAuditPerformanceTest.php) | 3/3 · p95 **202,7 ms** con 20 muestras y `.dex` de ~1 MB |
 | `eva_dts_offline_queue.test.mjs` | [`tests/unit/eva_dts_offline_queue.test.mjs`](../../tests/unit/eva_dts_offline_queue.test.mjs) | 25/25 |
 | `coordinator_dex_audits_tab.test.mjs` | [`tests/frontend/coordinator_dex_audits_tab.test.mjs`](../../tests/frontend/coordinator_dex_audits_tab.test.mjs) | 31/31 |
 | `DexAuditLayoutBrowserTest` | [`tests/integration/DexAuditLayoutBrowserTest.php`](../../tests/integration/DexAuditLayoutBrowserTest.php) | 25/25 · Chromium real `360 × 800` y `1440 × 900` |
-| **Total propio** | **13 suites** | **426/426** |
+| **Total propio** | **14 suites** | **429/429** |
 | `PostgresSchemaTest` | [`tests/integration/PostgresSchemaTest.php`](../../tests/integration/PostgresSchemaTest.php) | 168/168 |
 | `PostgresConstitutionalTest` | [`tests/integration/PostgresConstitutionalTest.php`](../../tests/integration/PostgresConstitutionalTest.php) | 91/91 |
 | `TestDataCleanerIsolationTest` | [`tests/integration/TestDataCleanerIsolationTest.php`](../../tests/integration/TestDataCleanerIsolationTest.php) | 50/50 |
@@ -56,10 +57,10 @@
 
 | Requisito | Regla verificada | Evidencia |
 | :--- | :--- | :--- |
-| **RNF-01** · Rendimiento y presupuesto de memoria/latencia | 54 tablas y 55 tipos; `raw_payload` excluido de listados, KPIs y proyecciones móviles; tope de 1 MB; descarga solo en `/raw` de Coordinación | `PostgresDexAuditSchemaTest` **38/38**; `PdoMachineDexAuditRepositoryTest` **40/40**; `DexAuditApiTest` **46/46**; `DexAuditConstitutionalTest` **14/14** |
+| **RNF-01** · Rendimiento y presupuesto de memoria/latencia | 54 tablas y 55 tipos; `raw_payload` excluido de listados, KPIs y proyecciones móviles; tope de 1 MB; descarga solo en `/raw` de Coordinación; importación local con **p95 < 250 ms** | `PostgresDexAuditSchemaTest` **38/38**; `PdoMachineDexAuditRepositoryTest` **40/40**; `DexAuditApiTest` **46/46**; `DexAuditConstitutionalTest` **14/14**; `DexAuditPerformanceTest` **3/3** · p95 **202,7 ms** |
 | **RNF-02** · Integridad SQL y defensa en profundidad | Triggers de no borrado e inmutabilidad por etapas; guarda sanitaria SQL; `CHECK` de motivo real y contadores; proyecciones por rol; `nosniff` + `attachment` | `PostgresDexAuditSchemaTest` **38/38**; `PostgresConstitutionalTest` **91/91**; `DexAuditConstitutionalTest` **14/14**; `DexAuditDomainModelsTest` **59/59**; `DexAuditApiTest` **46/46** |
 | **RNF-03** · Dogma Vanilla y diseño visual | PHP 8.2+ y Vue 3 ESM sin dependencias; tokens de diseño; `360 × 800` y `1440 × 900` sin scroll horizontal del documento | `DexAuditLayoutBrowserTest` **25/25**; `coordinator_dex_audits_tab.test.mjs` **31/31**; `FrontendTemplateCompileTest.mjs` **15/15**; `OfflinePwaAssetsAndUiGuardTest.mjs` **45/45** |
-| **RNF-04** · Zona horaria, codificación y canal `new_engine` | Fechas `Europe/Madrid`, persistencia `TIMESTAMPTZ`, JSON UTF-8; suite de esquema ejecutable en PostgreSQL y registrada en el canal `new_engine` | `PostgresDexAuditSchemaTest` **38/38**; `DexAuditConcurrencyTest` **6/6**; canal `new_engine` **84/84 suites · 2.902 aserciones · 0 fallos**; `exit=0` |
+| **RNF-04** · Zona horaria, codificación y canal `new_engine` | Fechas `Europe/Madrid`, persistencia `TIMESTAMPTZ`, JSON UTF-8; suite de esquema ejecutable en PostgreSQL y registrada en el canal `new_engine` | `PostgresDexAuditSchemaTest` **38/38**; `DexAuditConcurrencyTest` **6/6**; canal `new_engine` **85/85 suites · 2.905 aserciones · 0 fallos**; `exit=0` |
 
 ---
 
@@ -98,9 +99,9 @@
 | DoD | Criterio | Evidencia |
 | :--- | :--- | :--- |
 | **DoD 1** | Migración `035`, convergencia de `supabase_init.sql`, tipos #51–#55, Tablas 52–54, índices y triggers sin alterar DDL previo | `PostgresDexAuditSchemaTest` **38/38**; `PostgresSchemaTest` **168/168**; `PostgresConstitutionalTest` **91/91**; `TestDataCleanerIsolationTest` **50/50** |
-| **DoD 2** | Parser, validador, servicio, deltas, anti-spam, cruces, anulación, CSV y proyecciones por rol al 100 % | ✅ Cumplido (la latencia de `RNF-01` queda en `AUD-39-04`) · `DexAuditDomainModelsTest` **59/59**; `EvaDtsParserAndCatalogTest` **45/45**; `DexSelectionMatcherAndValidatorTest` **49/49**; `MachineDexAuditServiceTest` **29/29**; `DexAuditApiTest` **46/46**; `DexAuditServiceIntegrationsTest` **19/19**; `PdoMachineDexAuditRepositoryTest` **40/40** |
+| **DoD 2** | Parser, validador, servicio, deltas, anti-spam, cruces, anulación, CSV y proyecciones por rol al 100 % | ✅ Cumplido, incluida la latencia de `RNF-01` · `DexAuditDomainModelsTest` **59/59**; `EvaDtsParserAndCatalogTest` **45/45**; `DexSelectionMatcherAndValidatorTest` **49/49**; `MachineDexAuditServiceTest` **29/29**; `DexAuditApiTest` **46/46**; `DexAuditServiceIntegrationsTest` **19/19**; `PdoMachineDexAuditRepositoryTest` **40/40**; `DexAuditPerformanceTest` **3/3** |
 | **DoD 3** | Integración móvil, consola de Coordinación y cola Offline PWA con conflictos | `DexAuditApiTest` **46/46**; `eva_dts_offline_queue.test.mjs` **25/25**; `coordinator_dex_audits_tab.test.mjs` **31/31**; `restocker_route_view.test.mjs` **262/262**; `OfflinePwaAssetsAndUiGuardTest.mjs` **45/45** |
-| **DoD 4** | Batería global, canal `new_engine` y navegador real al 100 % en verde, con matriz de trazabilidad | ⚠️ Parcial por `AUD-39-05` · Global **461/461 suites · 18.126 aserciones · 0 fallos**; `new_engine` **84/84 suites · 2.902 aserciones · 0 fallos**; `DexAuditLayoutBrowserTest` **25/25**; `DocMetricsGuard` coherente; matriz publicada |
+| **DoD 4** | Batería global, canal `new_engine` y navegador real al 100 % en verde, con matriz de trazabilidad | ⚠️ Parcial por `AUD-39-05` · Global **461/461 suites · 18.126 aserciones · 0 fallos**; `new_engine` **85/85 suites · 2.905 aserciones · 0 fallos**; `DexAuditLayoutBrowserTest` **25/25**; `DocMetricsGuard` coherente; matriz publicada |
 
 ---
 
@@ -112,7 +113,7 @@ php tests/run_all.php
 
 source deploy/local/postgres/.env.docker-tls
 php tests/run_new_engine.php
-# 84 suites · 2.902 aserciones · 0 fallos · exit=0
+# 85 suites · 2.905 aserciones · 0 fallos · exit=0
 ```
 
 **Regresiones directas de la corrida global:** `restocker_route_view.test.mjs` **262/262**, `coordinator_product_loading_tab.test.mjs` **80/80**, `coordinator_restock_route_planner.test.mjs` **43/43**, `AuditActionCatalogTest` **27/27**, `AuditEntityTypesTest` **41/41**, `OfflinePwaAssetsAndUiGuardTest` **45/45** y `TestDataCleanerIsolationTest` **50/50**.
