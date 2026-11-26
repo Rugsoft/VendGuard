@@ -49,11 +49,17 @@ interface MachineDexAuditGatewayInterface
     public function lockIncident(int $incidentId, int $machineId): ?array;
 
     /**
-     * Recaudación más cercana del mismo día civil `Europe/Madrid` (QA-3).
+     * Recaudación vinculada o, en su defecto, la más cercana del mismo día civil
+     * `Europe/Madrid` (QA-3). Incluye `expected_cashbox_eur` para el cruce
+     * `VA1_VS_EXPECTED`.
      *
      * @return array<string, mixed>|null
      */
-    public function findNearestCashCollectionSameDay(int $machineId, string $capturedAt): ?array;
+    public function findNearestCashCollectionSameDay(
+        int $machineId,
+        string $capturedAt,
+        ?int $linkedCashCollectionId = null
+    ): ?array;
 
     /**
      * Visita M34 `COMPLETED` vinculada o la más cercana del mismo día civil (QA-3).

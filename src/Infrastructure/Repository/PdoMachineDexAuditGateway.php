@@ -245,26 +245,40 @@ final class PdoMachineDexAuditGateway implements MachineDexAuditGatewayInterface
     /**
      * {@inheritdoc}
      */
-    public function findNearestCashCollectionSameDay(int $machineId, string $capturedAt): ?array
-    {
+    public function findNearestCashCollectionSameDay(
+        int $machineId,
+        string $capturedAt,
+        ?int $linkedCashCollectionId = null
+    ): ?array {
         if ($machineId <= 0 || trim($capturedAt) === '') {
             return null;
         }
 
-        $stmt = $this->pdo->prepare("
-            SELECT id, status, collected_at, vault_counted_eur, sales_counter_reading
-            FROM machine_cash_collections
-            WHERE machine_id = :machine_id
-              AND (collected_at AT TIME ZONE 'Europe/Madrid')::date
-                  = (:captured_at::timestamptz AT TIME ZONE 'Europe/Madrid')::date
-            ORDER BY ABS(EXTRACT(EPOCH FROM (collected_at - :captured_at_distance::timestamptz))) ASC,
-                     collected_at DESC,
-                     id DESC
-            LIMIT 1
-        ");
-        $stmt->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
-        $stmt->bindValue(':captured_at', $capturedAt, PDO::PARAM_STR);
-        $stmt->bindValue(':captured_at_distance', $capturedAt, PDO::PARAM_STR);
+        if ($linkedCashCollectionId !== null && $linkedCashCollectionId > 0) {
+            $stmt = $this->pdo->prepare(
+                'SELECT id, status, collected_at, vault_counted_eur, expected_cashbox_eur, sales_counter_reading
+                 FROM machine_cash_collections
+                 WHERE id = :collection_id AND machine_id = :machine_id
+                 LIMIT 1'
+            );
+            $stmt->bindValue(':collection_id', $linkedCashCollectionId, PDO::PARAM_INT);
+            $stmt->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
+        } else {
+            $stmt = $this->pdo->prepare("
+                SELECT id, status, collected_at, vault_counted_eur, expected_cashbox_eur, sales_counter_reading
+                FROM machine_cash_collections
+                WHERE machine_id = :machine_id
+                  AND (collected_at AT TIME ZONE 'Europe/Madrid')::date
+                      = (:captured_at::timestamptz AT TIME ZONE 'Europe/Madrid')::date
+                ORDER BY ABS(EXTRACT(EPOCH FROM (collected_at - :captured_at_distance::timestamptz))) ASC,
+                         collected_at DESC,
+                         id DESC
+                LIMIT 1
+            ");
+            $stmt->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
+            $stmt->bindValue(':captured_at', $capturedAt, PDO::PARAM_STR);
+            $stmt->bindValue(':captured_at_distance', $capturedAt, PDO::PARAM_STR);
+        }
         $stmt->execute();
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -273,6 +287,7 @@ final class PdoMachineDexAuditGateway implements MachineDexAuditGatewayInterface
             'status' => (string)$row['status'],
             'collected_at' => (string)$row['collected_at'],
             'vault_counted_eur' => $row['vault_counted_eur'] === null ? null : (float)$row['vault_counted_eur'],
+            'expected_cashbox_eur' => $row['expected_cashbox_eur'] === null ? null : (float)$row['expected_cashbox_eur'],
             'sales_counter_reading' => (float)$row['sales_counter_reading'],
         ];
     }

@@ -461,7 +461,182 @@ final class MachineDexAuditService
             return null;
         }
 
+        if (strtoupper(trim($role)) === 'COORDINATOR') {
+            $row = $this->attachCoordinatorCrossChecks($row);
+        }
+
         return $this->projectByRole($row, $role, false);
+    }
+
+    /**
+     * Cruces no destructivos con M34 y M35 en la lectura de Coordinación (QA-3).
+     *
+     * No escribe en `machine_planogram_slots`, en las visitas ni en las
+     * recaudaciones: toma los hechos del gateway y los proyecta. Si no hay visita
+     * o recaudación aplicable, el cruce correspondiente queda en `null`.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function attachCoordinatorCrossChecks(array $row): array
+    {
+        $row['m34_cross_check'] = $this->buildM34CrossCheck($row);
+        $row['m35_cross_check'] = $this->buildM35CrossCheck($row);
+
+        return $row;
+    }
+
+    /**
+     * Cruce financiero M35 (QA-3): prioriza `CA3_VS_VAULT` y cae a
+     * `VA1_VS_EXPECTED`; la desviación se marca por encima de ±1,00 €.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>|null
+     */
+    private function buildM35CrossCheck(array $row): ?array
+    {
+        $machineId = (int)($row['machine_id'] ?? 0);
+        $capturedAt = trim((string)($row['captured_at'] ?? ''));
+        if ($machineId <= 0 || $capturedAt === '') {
+            return null;
+        }
+
+        $linkedCashCollectionId = isset($row['cash_collection_id']) && $row['cash_collection_id'] !== null
+            ? (int)$row['cash_collection_id']
+            : null;
+        $collection = $this->gateway->findNearestCashCollectionSameDay($machineId, $capturedAt, $linkedCashCollectionId);
+        if ($collection === null) {
+            return null;
+        }
+
+        $ca3 = isset($row['ca3_cashbox_eur']) && $row['ca3_cashbox_eur'] !== null
+            ? (float)$row['ca3_cashbox_eur']
+            : null;
+        $vault = isset($collection['vault_counted_eur']) && $collection['vault_counted_eur'] !== null
+            ? (float)$collection['vault_counted_eur']
+            : null;
+        $expected = isset($collection['expected_cashbox_eur']) && $collection['expected_cashbox_eur'] !== null
+            ? (float)$collection['expected_cashbox_eur']
+            : null;
+
+        $deltaSales = null;
+        foreach (['effective_delta_sales_eur', 'delta_sales_eur'] as $deltaKey) {
+            if (isset($row[$deltaKey]) && $row[$deltaKey] !== null) {
+                $deltaSales = (float)$row[$deltaKey];
+                break;
+            }
+        }
+
+        $basis = null;
+        $diff = null;
+        if ($ca3 !== null && $vault !== null) {
+            $basis = 'CA3_VS_VAULT';
+            $diff = round($vault - $ca3, 2);
+        } elseif ($deltaSales !== null && $expected !== null) {
+            $basis = 'VA1_VS_EXPECTED';
+            $diff = round($expected - $deltaSales, 2);
+        }
+
+        return [
+            'cash_collection_id' => (int)$collection['id'],
+            'collected_at' => (string)($collection['collected_at'] ?? ''),
+            'comparison_basis' => $basis,
+            'ca3_cashbox_eur' => $ca3,
+            'vault_counted_eur' => $vault,
+            'expected_cashbox_eur' => $expected,
+            'delta_sales_eur' => $deltaSales,
+            'diff_eur' => $diff,
+            'tolerance_eur' => 1.00,
+            'is_deviation' => $diff !== null && abs($diff) > 1.00,
+        ];
+    }
+
+    /**
+     * Cruce de carril M34 (QA-3): consumo observado entre la visita vinculada o
+     * del día y su predecesora `COMPLETED` inmediata.
+     *
+     * `observed_consumption_units = prev_item.qty_after - curr_item.qty_before`.
+     * La diferencia frente a `delta_vend_units` queda en `null` si falta alguna
+     * de las dos visitas, el carril o el delta del volcado.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>|null
+     */
+    private function buildM34CrossCheck(array $row): ?array
+    {
+        $machineId = (int)($row['machine_id'] ?? 0);
+        $capturedAt = trim((string)($row['captured_at'] ?? ''));
+        if ($machineId <= 0 || $capturedAt === '') {
+            return null;
+        }
+
+        $linkedVisitId = isset($row['restock_visit_id']) && $row['restock_visit_id'] !== null
+            ? (int)$row['restock_visit_id']
+            : null;
+        $visit = $this->gateway->findCompletedRestockVisitSameDay($machineId, $capturedAt, $linkedVisitId);
+        if ($visit === null) {
+            return null;
+        }
+
+        $previous = $this->gateway->findPreviousCompletedRestockVisit($machineId, (int)$visit['id']);
+        $currentQuantities = $this->indexVisitQuantities(
+            $this->gateway->findVisitSlotQuantities((int)$visit['id'])
+        );
+        $previousQuantities = $previous === null
+            ? []
+            : $this->indexVisitQuantities(
+                $this->gateway->findVisitSlotQuantities((int)$previous['id'])
+            );
+
+        $lines = [];
+        foreach ((array)($row['selections'] ?? []) as $selection) {
+            if (!is_array($selection) || ($selection['matched_slot_id'] ?? null) === null) {
+                continue;
+            }
+
+            $slotId = (int)$selection['matched_slot_id'];
+            $current = $currentQuantities[$slotId] ?? null;
+            $previousItem = $previousQuantities[$slotId] ?? null;
+            $observed = ($current !== null && $previousItem !== null)
+                ? (int)$previousItem['qty_after'] - (int)$current['qty_before']
+                : null;
+            $deltaVendUnits = isset($selection['delta_vend_units']) && $selection['delta_vend_units'] !== null
+                ? (int)$selection['delta_vend_units']
+                : null;
+
+            $lines[] = [
+                'slot_id' => $slotId,
+                'slot_code' => (string)($selection['matched_slot_code_snapshot'] ?? ($current['slot_code'] ?? '')),
+                'total_vend_units' => (int)($selection['total_vend_units'] ?? 0),
+                'delta_vend_units' => $deltaVendUnits,
+                'observed_consumption_units' => $observed,
+                'difference_units' => ($observed !== null && $deltaVendUnits !== null)
+                    ? $deltaVendUnits - $observed
+                    : null,
+            ];
+        }
+
+        return [
+            'visit_id' => (int)$visit['id'],
+            'completed_at' => (string)($visit['completed_at'] ?? ''),
+            'previous_visit_id' => $previous !== null ? (int)$previous['id'] : null,
+            'previous_completed_at' => $previous !== null ? (string)($previous['completed_at'] ?? '') : null,
+            'lines' => $lines,
+        ];
+    }
+
+    /**
+     * @param list<array{slot_id:int, slot_code:string, qty_before:int, qty_after:int}> $quantities
+     * @return array<int, array{slot_id:int, slot_code:string, qty_before:int, qty_after:int}>
+     */
+    private function indexVisitQuantities(array $quantities): array
+    {
+        $indexed = [];
+        foreach ($quantities as $quantity) {
+            $indexed[(int)$quantity['slot_id']] = $quantity;
+        }
+
+        return $indexed;
     }
 
     /**

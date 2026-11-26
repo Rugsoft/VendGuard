@@ -339,8 +339,11 @@ final class Dex07FakeGateway implements MachineDexAuditGatewayInterface
         return null;
     }
 
-    public function findNearestCashCollectionSameDay(int $machineId, string $capturedAt): ?array
-    {
+    public function findNearestCashCollectionSameDay(
+        int $machineId,
+        string $capturedAt,
+        ?int $linkedCashCollectionId = null
+    ): ?array {
         return null;
     }
 

@@ -149,6 +149,123 @@ try {
          VALUES (:technician_id, :zone_id, TRUE)'
     )->execute([':technician_id' => $technicianId, ':zone_id' => $zoneId]);
 
+    // Hechos M34/M35 reales para el cruce del detalle (QA-3, RF-04.3.3):
+    // un carril A1, dos visitas COMPLETED del mismo día y dos recaudaciones.
+    $productId = (int)$pdo->query(
+        "INSERT INTO vending_products (sku, name, category, unit_type, requires_cold_chain, max_shelf_life_days, unit_cost_eur, sale_price_eur)
+         VALUES ('DEX9-YOGUR', 'Yogur DEX 09', 'PERISHABLE_FOOD', 'UNIT', TRUE, 30, 1.00, 2.00) RETURNING id"
+    )->fetchColumn();
+    $slotStmt = $pdo->prepare(
+        "INSERT INTO machine_planogram_slots (machine_id, slot_code, product_id, max_capacity, current_estimated_qty)
+         VALUES (:machine_id, 'A1', :product_id, 20, 10) RETURNING id"
+    );
+    $slotStmt->execute([':machine_id' => $machineId, ':product_id' => $productId]);
+    $slotId = (int)$slotStmt->fetchColumn();
+
+    $visitStmt = $pdo->prepare(
+        "INSERT INTO machine_restock_visits (visit_code, machine_id, restocker_id, status, started_at, completed_at, cabin_temp_celsius, client_mutation_id)
+         VALUES (:visit_code, :machine_id, :restocker_id, 'COMPLETED', :started_at, :completed_at, 4.0, :mutation) RETURNING id"
+    );
+    $visitStmt->execute([
+        ':visit_code' => 'MRV-2026-0001',
+        ':machine_id' => $machineId,
+        ':restocker_id' => $restockerId,
+        ':started_at' => '2026-11-24 06:30:00+00',
+        ':completed_at' => '2026-11-24 07:00:00+00',
+        ':mutation' => 'dex09-visit-0001',
+    ]);
+    $previousVisitId = (int)$visitStmt->fetchColumn();
+    $visitStmt->execute([
+        ':visit_code' => 'MRV-2026-0002',
+        ':machine_id' => $machineId,
+        ':restocker_id' => $restockerId,
+        ':started_at' => '2026-11-24 08:00:00+00',
+        ':completed_at' => '2026-11-24 08:30:00+00',
+        ':mutation' => 'dex09-visit-0002',
+    ]);
+    $currentVisitId = (int)$visitStmt->fetchColumn();
+    $visitStmt->execute([
+        ':visit_code' => 'MRV-2026-0003',
+        ':machine_id' => $machineId,
+        ':restocker_id' => $restockerId,
+        ':started_at' => '2026-11-24 09:15:00+00',
+        ':completed_at' => '2026-11-24 09:45:00+00',
+        ':mutation' => 'dex09-visit-0003',
+    ]);
+    $secondVisitId = (int)$visitStmt->fetchColumn();
+
+    $itemStmt = $pdo->prepare(
+        "INSERT INTO machine_restock_visit_items (visit_id, slot_id, slot_code, product_id, qty_before, qty_added, qty_after, loaded_batch_code)
+         VALUES (:visit_id, :slot_id, 'A1', :product_id, :qty_before, :qty_added, :qty_after, :loaded_batch)"
+    );
+    $itemStmt->execute([
+        ':visit_id' => $previousVisitId,
+        ':slot_id' => $slotId,
+        ':product_id' => $productId,
+        ':qty_before' => 12,
+        ':qty_added' => 0,
+        ':qty_after' => 12,
+        ':loaded_batch' => 'LOT-DEX9-001',
+    ]);
+    $itemStmt->execute([
+        ':visit_id' => $currentVisitId,
+        ':slot_id' => $slotId,
+        ':product_id' => $productId,
+        ':qty_before' => 5,
+        ':qty_added' => 10,
+        ':qty_after' => 15,
+        ':loaded_batch' => 'LOT-DEX9-002',
+    ]);
+    $itemStmt->execute([
+        ':visit_id' => $secondVisitId,
+        ':slot_id' => $slotId,
+        ':product_id' => $productId,
+        ':qty_before' => 8,
+        ':qty_added' => 0,
+        ':qty_after' => 8,
+        ':loaded_batch' => 'LOT-DEX9-003',
+    ]);
+
+    $cashStmt = $pdo->prepare(
+        "INSERT INTO machine_cash_collections
+         (collection_code, restock_visit_id, machine_id, machine_code_snapshot, restocker_id,
+          restocker_name_snapshot, restocker_code_snapshot, bag_seal_code, sales_counter_reading,
+          previous_sales_counter_reading, initial_baseline_reading_eur, expected_cashbox_eur,
+          status, collected_at, delivered_to_vault_at, delivered_to_vault_by, vault_counted_eur,
+          discrepancy_eur, vault_reconciled_by, vault_reconciled_by_name_snapshot, vault_reconciled_at,
+          discrepancy_justification, client_mutation_id)
+         VALUES ('MCC-2026-0001', :visit_id, :machine_id, 'DEX9-FOOD-01', :restocker_id,
+          'Reposición DEX 09', 'DX9-REPO', 'BAG-2026-001', 9.00, 0.00, 0.00, 9.00,
+          'DISCREPANCY_FLAGGED', '2026-11-24 09:30:00+00', '2026-11-24 11:00:00+00', :delivered_by, 10.50,
+          1.50, :reconciled_by, 'Coordinación DEX 09', '2026-11-24 12:00:00+00',
+          'Descuadre de prueba con tres bloques', :mutation) RETURNING id"
+    );
+    $cashStmt->execute([
+        ':visit_id' => $currentVisitId,
+        ':machine_id' => $machineId,
+        ':restocker_id' => $restockerId,
+        ':delivered_by' => $coordinatorId,
+        ':reconciled_by' => $coordinatorId,
+        ':mutation' => 'dex09-cash-0001',
+    ]);
+    $cashCollection1Id = (int)$cashStmt->fetchColumn();
+    $sealedStmt = $pdo->prepare(
+        "INSERT INTO machine_cash_collections
+         (collection_code, restock_visit_id, machine_id, machine_code_snapshot, restocker_id,
+          restocker_name_snapshot, restocker_code_snapshot, bag_seal_code, sales_counter_reading,
+          previous_sales_counter_reading, initial_baseline_reading_eur, expected_cashbox_eur,
+          status, collected_at, client_mutation_id)
+         VALUES ('MCC-2026-0002', NULL, :machine_id, 'DEX9-FOOD-01', :restocker_id,
+          'Reposición DEX 09', 'DX9-REPO', 'BAG-2026-002', 9.00, 0.00, 0.00, 9.00,
+          'SEALED_IN_ROUTE', '2026-11-24 09:45:00+00', :mutation) RETURNING id"
+    );
+    $sealedStmt->execute([
+        ':machine_id' => $machineId,
+        ':restocker_id' => $restockerId,
+        ':mutation' => 'dex09-cash-0002',
+    ]);
+    $cashCollection2Id = (int)$sealedStmt->fetchColumn();
+
     $userRepo = new PdoUserRepository($pdo);
     $authService = new AuthService(null, $userRepo);
     $coordinatorToken = $authService->generateInternalToken($userRepo->findById($coordinatorId));
@@ -188,6 +305,8 @@ try {
         'original_filename' => 'ruta.dex',
         'captured_at' => '2026-11-24 09:00:00+00',
         'client_mutation_id' => 'dex09-api-0001',
+        'restock_visit_id' => $currentVisitId,
+        'cash_collection_id' => $cashCollection1Id,
     ];
     $imported = $call('POST', '/api/restocker/machines/' . $machineId . '/dex-audits', $importPayload, $restockerToken);
     $importedData = $data($imported);
@@ -275,6 +394,48 @@ try {
             && count($data($technicianList)['audits'] ?? []) === 3
             && !in_array('prefill_sales_counter_reading_eur', $collectKeys($data($technicianList)), true)
             && !in_array('ca3_cashbox_eur', $collectKeys($data($technicianList)), true)
+    );
+
+    echo "\n--- 3.7. Cruces M34/M35 del detalle de Coordinación (QA-3) ---\n";
+    $assert(
+        '3.7 El detalle compone M35 con prioridad CA3_VS_VAULT y umbral ±1,00 €',
+        ($detailData['m35_cross_check']['cash_collection_id'] ?? 0) === $cashCollection1Id
+            && ($detailData['m35_cross_check']['comparison_basis'] ?? '') === 'CA3_VS_VAULT'
+            && ($detailData['m35_cross_check']['diff_eur'] ?? null) === 1.50
+            && ($detailData['m35_cross_check']['is_deviation'] ?? false) === true,
+        json_encode($detailData['m35_cross_check'] ?? null)
+    );
+    $assert(
+        '3.8 El detalle compone el consumo observado M34 y deja la diferencia nula sin delta',
+        ($detailData['m34_cross_check']['visit_id'] ?? 0) === $currentVisitId
+            && ($detailData['m34_cross_check']['previous_visit_id'] ?? 0) === $previousVisitId
+            && ($detailData['m34_cross_check']['lines'][0]['observed_consumption_units'] ?? null) === 7
+            && array_key_exists('difference_units', $detailData['m34_cross_check']['lines'][0] ?? [])
+            && $detailData['m34_cross_check']['lines'][0]['difference_units'] === null,
+        json_encode($detailData['m34_cross_check'] ?? null)
+    );
+
+    $secondImport = $call('POST', '/api/restocker/machines/' . $machineId . '/dex-audits', [
+        'raw_payload' => "DXS*COMM-DEX09*VA*DEX 6.0\nID1*DEX9-FOOD-01\nID4*2\nVA1*2000*40\nPA1*A1*200\nPA2*16*2000\nDXE*FIN",
+        'original_filename' => 'ruta-segunda.dex',
+        'captured_at' => '2026-11-24 10:00:00+00',
+        'client_mutation_id' => 'dex09-api-0005',
+        'restock_visit_id' => $secondVisitId,
+        'cash_collection_id' => $cashCollection2Id,
+    ], $restockerToken);
+    $secondAuditId = (int)($data($secondImport)['audit']['id'] ?? 0);
+    $secondDetail = $call('GET', '/api/coordinator/dex-audits/' . $secondAuditId, [], $coordinatorToken);
+    $secondData = $data($secondDetail);
+    $assert(
+        '3.9 La segunda carga cae a VA1_VS_EXPECTED y calcula la diferencia por carril',
+        $secondAuditId > 0
+            && ($secondData['m35_cross_check']['comparison_basis'] ?? '') === 'VA1_VS_EXPECTED'
+            && ($secondData['m35_cross_check']['diff_eur'] ?? null) === 1.50
+            && ($secondData['m35_cross_check']['is_deviation'] ?? false) === true
+            && ($secondData['m34_cross_check']['lines'][0]['delta_vend_units'] ?? null) === 6
+            && ($secondData['m34_cross_check']['lines'][0]['observed_consumption_units'] ?? null) === 7
+            && ($secondData['m34_cross_check']['lines'][0]['difference_units'] ?? null) === -1,
+        json_encode(['m35' => $secondData['m35_cross_check'] ?? null, 'm34' => $secondData['m34_cross_check'] ?? null])
     );
 
     echo "\n--- 4. Descarga segura del .dex original (QA-5) ---\n";
