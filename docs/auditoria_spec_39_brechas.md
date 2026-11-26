@@ -9,9 +9,9 @@
 - **Fecha de auditoría:** 2026-11-26
 - **Rama:** `feat/eva-dts-dex-audit`
 - **Base auditada:** `ffeed2f3c4821837f21dcee46c700ac2f0d6293b` (árbol limpio, sin push)
-- **Alcance:** revisión de `RF-01`–`RF-07` y sus criterios EARS, `RNF-01`–`RNF-04`, `D1`–`D6`, `C1`–`C6`, `QA-1`–`QA-5`, los 10 casos límite de §7, las 12 rutas de §6, el Fuera de Alcance de §8, los 4 criterios de Definition of Done y las 19 tareas `T-DEX-01`–`T-DEX-19`, con ejecución real de las suites en los dos canales.
+- **Alcance:** revisión de `RF-01`–`RF-07` y sus criterios EARS, `RNF-01`–`RNF-04`, `D1`–`D6`, `C1`–`C6`, `QA-1`–`QA-5`, los 10 casos límite de §7, las 12 rutas de §6, el Fuera de Alcance de §8, los 4 criterios de Definition of Done y las 20 tareas `T-DEX-01`–`T-DEX-20`, con ejecución real de las suites en los dos canales.
 
-> Este documento es un acta de hallazgos abiertos. La batería está en verde, las 19 tareas figuran cerradas y **`AUD-39-01`, `AUD-39-02`, `AUD-39-03` y `AUD-39-04` quedaron cerradas el 2026-11-26**, pero **la Spec 39 no puede certificarse al 100 %** hasta corregir la matriz (`AUD-39-05`).
+> Acta de cierre: la batería está en verde, las 20 tareas figuran cerradas y **`AUD-39-01` a `AUD-39-05` quedaron cerradas el 2026-11-26**. La matriz separa primitiva y flujo de producción y enlaza los 14 criterios EARS con su aserción de integración; **no quedan brechas abiertas** y la Spec 39 se certifica al 100 % (DoD 1–4).
 
 ---
 
@@ -24,7 +24,7 @@
 3. **Cerrada · La auditoría `MACHINE_DEX_AUDIT` estaba incompleta** (`Art. III.3`, `RF-01.5`, `RF-07.2`, `C6`): el alta y la vinculación no escribían en `audit_log`, la anulación se registraba con entidad `MACHINE` y la exportación CSV no se auditaba. `T-DEX-17` firma los cuatro hechos bajo `MACHINE_DEX_AUDIT` y lo certifica con `DexAuditApiTest` 8.1–8.5; `T-DEX-18` cablea el enlazador en las rutas reales M34/M35/M36 y lo certifica con la sección 9.
 4. **Cerrada · `RNF-01` no medía los 250 ms** de parseo/transacción; solo se verificaba el tope de 1 MB y la exclusión de `raw_payload`. `T-DEX-19` añade `DexAuditPerformanceTest` y optimiza la transacción de líneas con `COPY FROM STDIN`.
 
-Consecuencia directa: **el DoD 2 ya se cumple**, incluida la latencia de `RNF-01`; la matriz mantiene pendiente la separación documental de `AUD-39-05`.
+Consecuencia directa: **el DoD 2 ya se cumple**, incluida la latencia de `RNF-01`; `AUD-39-05` cierra la separación documental y el DoD 4 pasa a cumplido.
 
 ### 1.1. Lo que sí está verificado y en verde
 
@@ -63,7 +63,7 @@ exit=0
 - **Diseño y PWA**: `DexAuditLayoutBrowserTest` 25/25 en Chromium real a `360 × 800` y `1440 × 900`, sin scroll horizontal del documento; `DesignTokensTest` 14/14; guardas de botones, paleta heredada y deuda de tokens en verde; `OfflinePwaAssetsAndUiGuardTest` 45/45.
 - **Fuera de alcance (§8, Art. VI)**: sin Web Serial/Bluetooth/IoT, sin mantenimiento por desgaste, sin escandallos, sin CRUD del catálogo `EA1`/`EA2`, sin escrituras en `current_estimated_qty` y sin exposición en Sede/QR/A4 (`DexAuditConstitutionalTest` 1.1–1.2).
 - **Las 12 rutas de §6** están registradas en `AppRouter.php` (176–181, 535–537, 627–629) y ejercitadas en `DexAuditApiTest` 46/46, incluida la vinculación M34/M35/M36 por HTTP.
-- **Las 19 tareas** `T-DEX-01`–`T-DEX-19` están marcadas `[x]` en `tasks.md` y completadas en el ODD.
+- **Las 20 tareas** `T-DEX-01`–`T-DEX-20` están marcadas `[x]` en `tasks.md` y completadas en el ODD.
 
 ---
 
@@ -75,7 +75,7 @@ exit=0
 | **2** | **AUD-39-02** | **P1 · Bloqueante funcional / Art. III.3** | El delta efectivo en lectura cuando el predecesor pasó a `VOIDED` no se calculaba: `previous_audit_voided` y `effective_delta_*` no llegaban al cliente | `RF-04.1.2`, `QA-2`, `C6` | **Cerrada (2026-11-26 · `T-DEX-16`)** |
 | **3** | **AUD-39-03** | **P2 · Constitucional / auditoría** | `audit_log` no registraba el alta ni la vinculación; la anulación se registraba como `MACHINE` y no como `MACHINE_DEX_AUDIT`; el CSV no se auditaba | `Art. III.3`, `RF-01.5`, `RF-07.2`, `C6` | **Cerrada (2026-11-26 · `T-DEX-17`/`T-DEX-18`)** |
 | **4** | **AUD-39-04** | **P2 · Verificación RNF** | No existe medición de los 250 ms de parseo/transacción de `RNF-01`; solo se comprueba el tope de 1 MB | `RNF-01`, DoD 2 | **Cerrada (2026-11-26 · `T-DEX-19`)** |
-| **5** | **AUD-39-05** | **P3 · Documental** | La matriz de trazabilidad atribuye a tests de primitivas una funcionalidad no cableada y declara `RF-04.3`/`QA-2`/`Art. III.3` cubiertos | DoD 4, matriz, ODD | **Abierta** |
+| **5** | **AUD-39-05** | **P3 · Documental** | La matriz de trazabilidad atribuye a tests de primitivas una funcionalidad no cableada y declara `RF-04.3`/`QA-2`/`Art. III.3` cubiertos | DoD 4, matriz, ODD | **Cerrada (2026-11-26 · `T-DEX-20`)** |
 
 ---
 
@@ -182,7 +182,7 @@ La spec exige que **todo alta, vinculación posterior y anulación** quede regis
 
 **Estado:** **Cerrada (2026-11-26)** · **Prioridad:** P2 · **Requisitos:** `RNF-01`, DoD 2.
 
-**Qué falta.**
+**Qué faltaba.**
 
 `RNF-01` exige que el parseo y la transacción queden **por debajo de 250 ms** sobre Supavisor/PostgreSQL, además del tope de 1 MB. La auditoría confirma el tope y la exclusión de `raw_payload`, pero **no existe ninguna suite que mida la latencia**.
 
@@ -205,23 +205,25 @@ La spec exige que **todo alta, vinculación posterior y anulación** quede regis
 
 ### AUD-39-05 · La matriz de trazabilidad sobreestima la cobertura
 
-**Estado:** **Abierta** · **Prioridad:** P3 · **Requisitos:** DoD 4, `traceability-matrix.md`, ODD.
+**Estado:** **Cerrada (2026-11-26)** · **Prioridad:** P3 · **Requisitos:** DoD 4, `traceability-matrix.md`, ODD.
 
-**Qué falta.**
+**Qué faltaba.**
 
-La matriz ya refleja los flujos de `RF-04`, `QA-2` y `Art. III.3` con `DexAuditApiTest` 46/46, incluida la vinculación M34/M35/M36 por HTTP de la sección 9; el resto de la cobertura sigue sin distinguir entre «primitiva probada» y «flujo cableado y probado de extremo a extremo». La matriz debe separar ambas categorías.
+La matriz ya reflejaba los flujos de `RF-04`, `QA-2` y `Art. III.3` con `DexAuditApiTest` 46/46, incluida la vinculación M34/M35/M36 por HTTP de la sección 9; el resto de la cobertura no distinguía entre «primitiva probada» y «flujo cableado y probado de extremo a extremo». La matriz debía separar ambas categorías.
 
 **Evidencia.**
 
 - `specs/39-eva-dts-dex-audit/traceability-matrix.md`, filas `Art. III.1 / III.2 / III.3`; `RF-04` y `QA-2` ya están corregidas.
 - `PdoMachineDexAuditRepositoryTest` 2.1–2.5 sigue probando el gateway en aislamiento; el flujo de detalle se cubre en `DexAuditApiTest` 3.7–3.9 (cruces) y 7.1–7.9 (delta efectivo tras `VOIDED`).
-- La cobertura de `audit_log` para alta, enlace, anulación y CSV ya existe en `DexAuditApiTest` 8.1–8.5 y 9.1–9.3 tras `T-DEX-17`/`T-DEX-18`; el enlace ya se ejecuta por HTTP. Queda separar en la matriz «primitiva» de «flujo de producción».
+- La cobertura de `audit_log` para alta, enlace, anulación y CSV ya existe en `DexAuditApiTest` 8.1–8.5 y 9.1–9.3 tras `T-DEX-17`/`T-DEX-18`; el enlace ya se ejecuta por HTTP. `T-DEX-20` separó en la matriz «primitiva» de «flujo de producción».
 
 **Criterio de cierre.**
 
 1. Actualizar la matriz con una columna o nota que separe «primitiva» de «flujo de producción».
 2. Enlazar cada criterio EARS a la aserción de integración que lo recorre de extremo a extremo.
 3. Mantener el recuento de suites propias en **429/429** tras `T-DEX-15`–`T-DEX-19`, y recalcularlo si se añaden nuevas pruebas.
+
+**Cierre (2026-11-26).** `T-DEX-20` reestructuró la matriz en **14 filas EARS reales** (`01.1`, `02.1`–`02.2`, `03.1`–`03.2`, `04.1`–`04.3`, `05.1`–`05.2`, `06.1`–`06.2`, `07.1`–`07.2`) con columnas separadas de **primitiva** y **flujo de producción**, y una aserción de integración identificada por suite y número. Las ramas de parser sin HTTP y el encolado Outbox de `05.2` quedaron declarados como primitivos, sin promocionarlos a flujo; la clasificación de suites y la nota de §3 impiden que una prueba de repositorio o unidad acredite por sí sola un flujo. No se añadieron suites ni aserciones: se conservan **14/429**, `new_engine` **85/2.905/0** y global **461/18.126/0**. `NewEngineChannelDocumentationTest` **9/9 · `exit=0`**. Sin DDL ni rutas nuevas.
 
 ---
 
@@ -232,7 +234,7 @@ La matriz ya refleja los flujos de `RF-04`, `QA-2` y `Art. III.3` con `DexAuditA
 | **DoD 1** · Migración, convergencia, tipos, tablas, índices y triggers sin alterar DDL previo | ✅ Cumplido | 415 sentencias, 35 migraciones, 54 tablas, 55 ENUM, 8 disparadores DEX, ningún `ALTER TABLE` sobre tablas previas |
 | **DoD 2** · Parser, servicio, deltas, anti-spam, cruces M34-M35, anulación, CSV y proyecciones al 100 % | ✅ **Cumplido** | `T-DEX-15`–`T-DEX-19` cubren cruces, delta efectivo, auditoría y latencia: `DexAuditPerformanceTest` **3/3** con p95 **202,7 ms** |
 | **DoD 3** · Integración móvil, consola de Coordinación y cola Offline PWA | ✅ Cumplido | 262/262 + 31/31 + 46/46 + 25/25 + 45/45 |
-| **DoD 4** · Batería global, `new_engine`, navegador real y matriz | ⚠️ **Parcial** | Batería y navegador en verde (461/18.126 y 85/2.905), pero la matriz mantiene pendiente la separación «primitiva/flujo» (`AUD-39-05`) |
+| **DoD 4** · Batería global, `new_engine`, navegador real y matriz | ✅ **Cumplido** | Batería y navegador en verde (461/18.126 y 85/2.905); matriz EARS **14/14** con primitiva, flujo y aserción de integración; `DocMetricsGuard` coherente |
 
 ---
 
@@ -258,9 +260,10 @@ Orden recomendado, respetando el ciclo SDD (primero la prueba que falla, despué
    - Añadir `DexAuditPerformanceTest` con 20 muestras, `.dex` de ~1 MB y p95 < 250 ms.
    - Optimizar la transacción de líneas con `COPY FROM STDIN` en lotes; sin DDL ni rutas nuevas.
    - **Resultado:** rojo **p95 814,6 ms** y verde **p95 202,7 ms**; 14 suites DEX **429/429**; global **461/18.126/0**; `new_engine` **85/2.905/0**.
-5. **`AUD-39-05` · Matriz y ODD**
-   - Actualizar la matriz, `tasks.md` y el ODD con la tarea correctiva y las nuevas cifras.
-   - Reejecutar `php tests/run_all.php` y `php tests/run_new_engine.php`, y confirmar `DocMetricsGuard` coherente y residuo 0.
+5. ✅ **`AUD-39-05` · Matriz y ODD — cerrada el 2026-11-26 por `T-DEX-20`**
+   - Reestructurar la matriz en **14 filas EARS**, separando primitiva y flujo de producción y enlazando cada criterio con su aserción de integración.
+   - Declarar como primitivas las ramas de parser sin HTTP y el encolado Outbox de `05.2`; no promocionarlas a flujo.
+   - **Resultado:** `NewEngineChannelDocumentationTest` **9/9**; sin suites nuevas se conservan 14/429, 85/2.905 y 461/18.126; DoD 4 cumplido.
 
 **Comandos de verificación al cierre de cada paso:**
 

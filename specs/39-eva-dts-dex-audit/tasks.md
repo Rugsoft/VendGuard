@@ -2,7 +2,7 @@
 
 **Módulo:** `39-eva-dts-dex-audit` (Feature 33 de [`docs/features_pendientes.md`](../../docs/features_pendientes.md))  
 **Versión:** 1.1 (Alineado con `spec.md` v1.1 y `plan.md` v1.1; incorpora `QA-1`–`QA-5`)  
-**Estado:** Listo para Revisión Final del Product Owner y arranque en `T-DEX-01` tras confirmación  
+**Estado:** Módulo 39 cerrado · 20/20 tareas · `AUD-39-01`–`AUD-39-05` cerradas (2026-11-26)
 **Metodología:** SDD (Specification-Driven Development) · Clean Architecture · TDD / Guardas de Esquema y Diseño  
 **Ley Suprema:** [`constitution.md`](../../constitution.md), [`AGENTS.md`](../../AGENTS.md) y [`docs/design.md`](../../docs/design.md)
 
@@ -185,3 +185,9 @@ flowchart LR
   - **Ficheros:** `tests/integration/DexAuditPerformanceTest.php`, `src/Infrastructure/Repository/PdoMachineDexAuditRepository.php`, `specs/39-eva-dts-dex-audit/tasks.md`, `specs/39-eva-dts-dex-audit/traceability-matrix.md`, `odd/tasks/eva-dts-dex-audit.md`, `docs/auditoria_spec_39_brechas.md`.
   - **Verificación:** `source deploy/local/postgres/.env.docker-tls && php tests/integration/DexAuditPerformanceTest.php && php tests/run_all.php && php tests/run_new_engine.php`.
   - **Cierre (2026-11-26):** nueva suite `DexAuditPerformanceTest` con calentamiento y **20 muestras** sobre un `.dex` de ~1 MB y 500 selecciones `PA1`/`PA2`; mide parseo, transacción y relectura del detalle, y exige **p95 < 250 ms** por rango más cercano. El test se escribió primero y falló con **p95 = 814,6 ms**; tras sustituir las inserciones línea a línea por `COPY FROM STDIN` en lotes de 2.000 filas, el p95 quedó en **202,7 ms**. `DexAuditPerformanceTest` **3/3 · `exit=0`**; 14 suites DEX **429/429**; batería global **461 suites · 18.126 aserciones · 0 fallos** y `new_engine` **85/85 suites · 2.905 aserciones · 0 fallos**, ambas `exit=0`. El motor remoto/Supavisor se declara medido en su canal propio. Sin DDL ni rutas nuevas.
+
+- [x] **T-DEX-20 · Cerrar AUD-39-05: separar primitiva/flujo en la matriz y enlazar los 14 criterios EARS**
+  - **Requisitos:** `DoD 4`, `traceability-matrix.md`, ODD.
+  - **Ficheros:** `specs/39-eva-dts-dex-audit/traceability-matrix.md`, `specs/39-eva-dts-dex-audit/tasks.md`, `odd/tasks/eva-dts-dex-audit.md`, `docs/auditoria_spec_39_brechas.md`.
+  - **Verificación:** `php tests/unit/NewEngineChannelDocumentationTest.php`.
+  - **Cierre (2026-11-26):** la matriz pasa de 7 filas de requisito con evidencia mezclada a **14 filas EARS reales** (`01.1`, `02.1`–`02.2`, `03.1`–`03.2`, `04.1`–`04.3`, `05.1`–`05.2`, `06.1`–`06.2`, `07.1`–`07.2`), cada una con columnas separadas de **primitiva** y **flujo de producción**, y una aserción de integración identificada por suite y número. Las ramas de parser que solo tienen prueba unitaria y el encolado Outbox de `05.2` quedan declarados como primitivos, sin promocionarlos a flujo. No se añadieron suites ni aserciones: se conservan **14 suites / 429 aserciones**, global **461/18.126/0** y `new_engine` **85/2.905/0**. `NewEngineChannelDocumentationTest` **9/9 · `exit=0`**. Sin DDL ni rutas nuevas.
