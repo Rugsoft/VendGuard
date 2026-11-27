@@ -9,9 +9,9 @@
 | **HEAD revisado** | `305d7ac5` (`docs(eva-dts-dex-audit): sync certification metrics after the UI audit`) |
 | **Base** | `efd18fb8` (`main`) |
 | **Fecha de la revisión** | 2026-11-27 |
-| **Estado** | PR abierta, **no fusionada**. `PR25-01`, `PR25-02`, `PR25-03` y `PR25-04` cerrados en local el 2026-11-27; los cinco hallazgos restantes siguen abiertos. |
+| **Estado** | PR abierta, **no fusionada**. `PR25-01`, `PR25-02`, `PR25-03`, `PR25-04` y `PR25-05` cerrados en local el 2026-11-27; los cuatro hallazgos restantes siguen abiertos. |
 | **Alcance** | Diff `origin/main...HEAD` del Módulo 39: migración `035` y convergencia con `supabase_init.sql`, parser/validador, servicio, repositorio y gateway, RBAC/perímetro, controladores, consola de Coordinación, vistas móviles y cola Offline. Contraste con `specs/39-eva-dts-dex-audit/spec.md` y las suites del módulo. |
-| **Resultado** | **9 hallazgos**: 4 cerrados (`PR25-01`, `PR25-02`, `PR25-03` y `PR25-04`) y 5 abiertos (3 P2 y 2 P3). Las correcciones y sus regresiones están incluidas en esta rama local. |
+| **Resultado** | **9 hallazgos**: 5 cerrados (`PR25-01`, `PR25-02`, `PR25-03`, `PR25-04` y `PR25-05`) y 4 abiertos (2 P2 y 2 P3). Las correcciones y sus regresiones están incluidas en esta rama local. |
 
 > **Acta de cierre · `PR25-01` (2026-11-27):** cerrado en local. El historial móvil exige actor, resuelve la cobertura con `findMachineContext()` —lectura sin `FOR UPDATE`— y responde `404 MACHINE_NOT_FOUND` o `403 MACHINE_OUTSIDE_RESTOCKER_ZONES`/`MACHINE_OUTSIDE_TECHNICIAN_SCOPE`. La regresión `DexAuditApiTest` 1.5–1.8 cierra en verde (50/50 aserciones). La PR no se ha fusionado.
 
@@ -20,6 +20,8 @@
 > **Acta de cierre · `PR25-03` (2026-11-27):** cerrado en local. La importación contrasta siempre la identidad `ID1` contra `machines.code` de la máquina resuelta; el `expected_machine_code` del cliente se ignora y los controladores ya no lo reenvían. La regresión unitaria 1.11 y la HTTP 2.6 demuestran que un código esperado falsificado no suprime `identity_mismatch_warning`. `DexAuditApiTest` cierra 51/51 y el canal `DexAudit` 7/7 suites · 180 aserciones. La PR no se ha fusionado.
 
 > **Acta de cierre · `PR25-04` (2026-11-27):** cerrado en local. `MachineDexAuditService::normalizeCapturedAt()` valida una sola vez `captured_at` antes de la transacción: acepta ISO 8601 con offset/Z y `datetime-local` sin zona, interpreta este último como `Europe/Madrid`, normaliza a UTC y rechaza fechas futuras con una tolerancia de 300 s. Los errores de formato y de futuro responden `422` con código y campo. Las puertas móviles añaden un `catch (Throwable)` defensivo. La regresión cubre formato inválido, fecha futura, `Z` con milisegundos y una captura de Coordinación a las 23:30 que se persiste como 22:30 UTC. Unitarias 36/36, API 54/54 y canal `DexAudit` 7/7 suites · 183 aserciones. La PR no se ha fusionado.
+
+> **Acta de cierre · `PR25-05` (2026-11-27):** cerrado en local. `MachineDexAuditService::resolveLinkTargets()` valida y bloquea `restock_visit_id`, `cash_collection_id` e `incident_id` dentro de la transacción del alta: la visita debe existir, ser de la máquina y estar `COMPLETED`; en la puerta del Reponedor, visita y recaudación deben ser del propio actor. Los rechazos son `422 DEX_LINK_TARGET_NOT_FOUND`/`DEX_LINK_ID_INVALID` y `409 DEX_LINK_TARGET_NOT_ELIGIBLE`. El repositorio traduce `23503` de los tres vínculos y los índices únicos de visita/recaudación a `422`/`409 DEX_AUDIT_ALREADY_LINKED`, de modo que la cola Offline aísla el conflicto en lugar de reintentar un 500. Unitarias 45/45, API 58/58 y canal `DexAudit` 7/7 suites · 187 aserciones. La PR no se ha fusionado.
 
 > **Nota:** la batería global de la rama estaba en verde antes de esta revisión (461 suites · 18.140 aserciones · 0 fallos · `DocMetricsGuard` coherente; canal `new_engine` 85/85 · 2.905 aserciones). Ese verde no cubre los huecos descritos: no hay pruebas de perímetro en el listado móvil ni de vínculos operativos, entre otros. Tras las correcciones, `DexAuditApiTest`, `DexAuditConcurrencyTest` y el canal `DexAudit` cierran en verde.
 
@@ -32,10 +34,10 @@ El núcleo del Módulo 39 está bien construido: el parser es determinista, la m
 Los defectos se concentran en los bordes del contrato y en la confianza en datos del cliente:
 
 - **P1:** fuga de perímetro en los historiales `.dex` móviles, **cerrada** (`PR25-01`), y ausencia de una transacción real que haga efectivo el `FOR UPDATE` durante el cálculo de deltas, **cerrada** (`PR25-02`).
-- **P2:** vínculos M34/M35/M16 sin comprobar, `conflict-dump` sin perímetro y cola `.dex` que sobrevive al cierre de sesión.
+- **P2:** vínculos M34/M35/M16 sin comprobar, **cerrada** (`PR25-05`); `conflict-dump` sin perímetro y cola `.dex` que sobrevive al cierre de sesión siguen abiertos.
 - **P3:** correlativo anual que se bloquea al superar 9.999 y consola de Coordinación sin paginación ni filtros completos.
 
-**Recomendación:** no fusionar hasta corregir `PR25-05` a `PR25-06`. Esos hallazgos deberían entrar en la misma corrección por afectar a integridad, contrato HTTP y datos operativos. `PR25-01`, `PR25-02`, `PR25-03` y `PR25-04` ya están corregidos y verificados en local.
+**Recomendación:** no fusionar hasta corregir `PR25-06` a `PR25-09`. Esos hallazgos deberían entrar en la misma corrección por afectar a integridad, contrato HTTP y datos operativos. `PR25-01`, `PR25-02`, `PR25-03`, `PR25-04` y `PR25-05` ya están corregidos y verificados en local.
 
 ---
 
@@ -47,7 +49,7 @@ Los defectos se concentran en los bordes del contrato y en la confianza en datos
 | 2 | `PR25-02` | **P1 · Alta** | El `FOR UPDATE` no serializaba la importación completa | Dos altas concurrentes podían calcular deltas desde el mismo predecesor | ✅ Cerrado |
 | 3 | `PR25-03` | **P2 · Media-alta** | `expected_machine_code` permitía ocultar un DEX de otra máquina | Se suprimía el aviso de identidad y se contaminaban los contadores de la máquina destino | ✅ Cerrado |
 | 4 | `PR25-04` | **P2 · Media-alta** | `captured_at` no se valida: 500, fechas futuras y desfase horario | Error interno ante una fecha malformada y alteración del orden/deltas | ✅ Cerrado |
-| 5 | `PR25-05` | **P2 · Media-alta** | Vínculos M34/M35/M16 sin validar y violaciones únicas no traducidas | Vínculos cruzados, cruces nulos y 500 que la cola reintenta | Abierto |
+| 5 | `PR25-05` | **P2 · Media-alta** | Vínculos M34/M35/M16 sin validar y violaciones únicas no traducidas | Vínculos cruzados, cruces nulos y 500 que la cola reintenta | ✅ Cerrado |
 | 6 | `PR25-06` | **P2 · Media** | `conflict-dump` no comprueba existencia ni perímetro de la máquina | Cualquier operador puede escribir en `audit_log` para una máquina ajena o inexistente | Abierto |
 | 7 | `PR25-07` | **P2 · Media** | La cola `.dex` no se limpia al cerrar sesión | Los `.dex` crudos quedan en IndexedDB en un dispositivo compartido | Abierto |
 | 8 | `PR25-08` | **P3 · Baja** | El correlativo anual se bloquea al pasar de 9.999 | Las importaciones fallan hasta el siguiente año al superar 10.000 volcados | Abierto |
@@ -243,6 +245,8 @@ La prueba HTTP 2.9 compara la época Unix persistida con la de `2026-11-24T23:30
 
 **Prioridad:** P2 · **Requisitos afectados:** D1, RF-04.3, QA-5, contrato de vínculos.
 
+**Estado:** ✅ **Cerrado (2026-11-27)** · cerrojos de vínculo dentro de la transacción, propiedad/estado validados, `23503` y unicidad de visita/recaudación traducidos a errores de negocio.
+
 ### Evidencia
 
 - `src/Application/Service/MachineDexAuditService.php:289-291`: los vínculos se aceptan con un simple cast:
@@ -267,12 +271,23 @@ incidentId: isset($request['incident_id']) ? (int)$request['incident_id'] : null
 
 Se pueden crear vínculos cruzados entre máquinas y operaciones, dejar cruces M34/M35 en `null` y bloquear el vínculo legítimo de otra máquina. Los 500 se confunden con fallos de red/servidor y atascan la cola offline, en lugar de aislarse como conflicto de negocio.
 
-### Corrección propuesta
+### Corrección aplicada
 
-1. Dentro de la transacción de importación, validar cada vínculo con `lockRestockVisit($id, $machineId)`, `lockCashCollection($id, $machineId)` y `lockIncident($id, $machineId)`.
-2. Comprobar estado/ownership según corresponda (visita completada y del actor cuando aplique; incidencia de la máquina) y rechazar con `422`/`409`.
-3. Traducir `23503` y los índices únicos de visita/recaudación a errores de negocio (`422`/`409 DEX_AUDIT_ALREADY_LINKED`).
-4. Añadir pruebas de vínculo inexistente, de otra máquina y ya ocupado.
+1. `MachineDexAuditService::resolveLinkTargets()` se ejecuta dentro de la transacción del alta, tras el perímetro y la primacía sanitaria y antes de parsear el fichero. Lee los tres vínculos con `optionalLinkId()` —ausente o vacío es `null`; cualquier otro valor debe ser un entero positivo (`422 DEX_LINK_ID_INVALID`)— y los bloquea con `lockRestockVisit()`, `lockCashCollection()` e `lockIncident()`. El `FOR UPDATE` del gateway impide que el destino desaparezca o cambie de máquina entre la comprobación y el `INSERT`.
+2. La visita debe existir y pertenecer a la máquina (`422 DEX_LINK_TARGET_NOT_FOUND`) y estar `COMPLETED`; si no, `409 DEX_LINK_TARGET_NOT_ELIGIBLE`. En la puerta del Reponedor, la visita y la recaudación deben ser del propio actor; Técnico y Coordinación conservan el acceso forense. Los tres vínculos resueltos se pasan a la entidad, de modo que el alta persiste exactamente lo validado.
+3. La incidencia debe existir, pertenecer a la máquina y no estar borrada: `lockIncident()` añade `deleted_at IS NULL`. Una incidencia ajena o inexistente responde `422 DEX_LINK_TARGET_NOT_FOUND`.
+4. `PdoMachineDexAuditRepository::translateConstraintViolation()` —antes `translateUniqueViolation()`— traduce las violaciones `23503` de `fk_machine_dex_audits_restock_visit`, `fk_machine_dex_audits_cash_collection` y `fk_machine_dex_audits_incident` a `422 DEX_LINK_TARGET_NOT_FOUND`, y las claves únicas `uq_machine_dex_audits_visit`/`uq_machine_dex_audits_cash_collection` a `409 DEX_AUDIT_ALREADY_LINKED` con el campo culpable. La cola Offline recibe un conflicto de negocio que aísla, no un 500 que reintenta.
+5. La regresión añade las unitarias 6.1–6.9 (vínculo inexistente, de otra máquina, visita no completada, visita/recaudación de otro Reponedor, identificador no numérico, persistencia de los tres vínculos y acceso de Coordinación) y las HTTP 2.10–2.13 (vínculo inexistente, de otra máquina, visita ya vinculada y recaudación ya vinculada).
+
+### Verificación
+
+```text
+php tests/unit/MachineDexAuditServiceTest.php             → 45/45 aserciones · exit 0
+php tests/integration/DexAuditApiTest.php                → 58/58 aserciones · exit 0
+php tests/run_new_engine.php DexAudit                    → 7/7 suites · 187 aserciones · exit 0
+```
+
+Las pruebas HTTP 2.12 y 2.13 llegan al `INSERT` real y certifican la traducción de `23505`; 2.11 usa una visita `COMPLETED` de otra máquina de la misma sede. `php -l` y `git diff --check` también cierran sin errores.
 
 ---
 
@@ -389,11 +404,11 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 - Replay exacto idempotente y rechazo `409` de una mutación reutilizada con contenido distinto.
 - Identidad `ID1` contrastada contra la máquina resuelta aunque el cliente falsifique `expected_machine_code` (`PR25-03`, unitaria 1.11 y HTTP 2.6).
 - Validación y normalización de `captured_at` (`PR25-04`, unitarias 1.12–1.14 y HTTP 2.7–2.9): formato inválido, fecha futura, ISO 8601 móvil con `Z` y milisegundos, y captura local de Coordinación interpretada en `Europe/Madrid`.
+- Vínculos M34/M35/M16 (`PR25-05`, unitarias 6.1–6.9 y HTTP 2.10–2.13): inexistente, de otra máquina, visita no completada, visita/recaudación de otro Reponedor, identificador no numérico, persistencia de los tres vínculos y ocupación única de visita/recaudación traducida a `409`.
 - Parser, esquema, convergencia y rendimiento del canal `new_engine`.
 
 ### Lo que no cubre la suite existente
 
-- Vínculos inexistentes, de otra máquina o ya ocupados (`PR25-05`).
 - `conflict-dump` con máquina inexistente/fuera de zona (`PR25-06`).
 - Limpieza de IndexedDB al cerrar sesión (`PR25-07`).
 - Transición del correlativo `9999 → 10000 → 10001` (`PR25-08`).
@@ -401,4 +416,4 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 
 ### Límites
 
-La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest`, `PR25-02` con la carrera real de `DexAuditConcurrencyTest`, `PR25-03` con la regresión unitaria 1.11 y la HTTP 2.6, y `PR25-04` con las unitarias 1.12–1.14 y las HTTP 2.7–2.9, todos contra PostgreSQL aislado; los cinco hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.
+La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest`, `PR25-02` con la carrera real de `DexAuditConcurrencyTest`, `PR25-03` con la regresión unitaria 1.11 y la HTTP 2.6, `PR25-04` con las unitarias 1.12–1.14 y las HTTP 2.7–2.9, y `PR25-05` con las unitarias 6.1–6.9 y las HTTP 2.10–2.13, todos contra PostgreSQL aislado; los cuatro hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.

@@ -218,6 +218,16 @@ try {
         ':mutation' => 'dex09-visit-0003',
     ]);
     $secondVisitId = (int)$visitStmt->fetchColumn();
+    // Visita COMPLETED de otra máquina para el cruce de vínculos (PR25-05).
+    $visitStmt->execute([
+        ':visit_code' => 'MRV-2026-0004',
+        ':machine_id' => $secondMachineId,
+        ':restocker_id' => $restockerId,
+        ':started_at' => '2026-11-24 09:00:00+00',
+        ':completed_at' => '2026-11-24 09:30:00+00',
+        ':mutation' => 'dex09-visit-0004',
+    ]);
+    $foreignVisitId = (int)$visitStmt->fetchColumn();
 
     $itemStmt = $pdo->prepare(
         "INSERT INTO machine_restock_visit_items (visit_id, slot_id, slot_code, product_id, qty_before, qty_added, qty_after, loaded_batch_code)
@@ -450,6 +460,58 @@ try {
             && $localAuditId > 0
             && $storedCapturedEpoch === $expectedCaptured->getTimestamp(),
         json_encode(['status' => $localCaptured->getStatusCode(), 'stored_epoch' => $storedCapturedEpoch, 'expected_epoch' => $expectedCaptured->getTimestamp()])
+    );
+
+    $missingLink = $call('POST', '/api/restocker/machines/' . $machineId . '/dex-audits', [
+        'raw_payload' => "DXS*COMM-DEX09-LINK-MISSING*VA*DEX 6.0\nID4*2\nVA1*1300*26\nDXE*FIN",
+        'original_filename' => 'vinculo-inexistente.dex',
+        'captured_at' => '2026-11-24 13:00:00+00',
+        'client_mutation_id' => 'dex09-api-link-0001',
+        'restock_visit_id' => 999999,
+    ], $restockerToken);
+    $assert(
+        '2.10 Un vínculo inexistente responde 422 DEX_LINK_TARGET_NOT_FOUND',
+        $missingLink->getStatusCode() === 422 && $errorCode($missingLink) === 'DEX_LINK_TARGET_NOT_FOUND',
+        $errorCode($missingLink)
+    );
+
+    $foreignLink = $call('POST', '/api/restocker/machines/' . $machineId . '/dex-audits', [
+        'raw_payload' => "DXS*COMM-DEX09-LINK-FOREIGN*VA*DEX 6.0\nID4*2\nVA1*1301*26\nDXE*FIN",
+        'original_filename' => 'vinculo-ajeno.dex',
+        'captured_at' => '2026-11-24 13:05:00+00',
+        'client_mutation_id' => 'dex09-api-link-0002',
+        'restock_visit_id' => $foreignVisitId,
+    ], $restockerToken);
+    $assert(
+        '2.11 Un vínculo de otra máquina responde 422 DEX_LINK_TARGET_NOT_FOUND',
+        $foreignLink->getStatusCode() === 422 && $errorCode($foreignLink) === 'DEX_LINK_TARGET_NOT_FOUND',
+        $errorCode($foreignLink)
+    );
+
+    $occupiedVisit = $call('POST', '/api/restocker/machines/' . $machineId . '/dex-audits', [
+        'raw_payload' => "DXS*COMM-DEX09-LINK-VISIT*VA*DEX 6.0\nID4*2\nVA1*1302*26\nDXE*FIN",
+        'original_filename' => 'visita-ocupada.dex',
+        'captured_at' => '2026-11-24 13:10:00+00',
+        'client_mutation_id' => 'dex09-api-link-0003',
+        'restock_visit_id' => $currentVisitId,
+    ], $restockerToken);
+    $assert(
+        '2.12 Una visita ya vinculada responde 409 DEX_AUDIT_ALREADY_LINKED',
+        $occupiedVisit->getStatusCode() === 409 && $errorCode($occupiedVisit) === 'DEX_AUDIT_ALREADY_LINKED',
+        $errorCode($occupiedVisit)
+    );
+
+    $occupiedCash = $call('POST', '/api/restocker/machines/' . $machineId . '/dex-audits', [
+        'raw_payload' => "DXS*COMM-DEX09-LINK-CASH*VA*DEX 6.0\nID4*2\nVA1*1303*26\nDXE*FIN",
+        'original_filename' => 'recaudacion-ocupada.dex',
+        'captured_at' => '2026-11-24 13:15:00+00',
+        'client_mutation_id' => 'dex09-api-link-0004',
+        'cash_collection_id' => $cashCollection1Id,
+    ], $restockerToken);
+    $assert(
+        '2.13 Una recaudación ya vinculada responde 409 DEX_AUDIT_ALREADY_LINKED',
+        $occupiedCash->getStatusCode() === 409 && $errorCode($occupiedCash) === 'DEX_AUDIT_ALREADY_LINKED',
+        $errorCode($occupiedCash)
     );
 
     echo "\n--- 3. Consola de Coordinación, detalle y carga manual ---\n";

@@ -120,6 +120,9 @@ final class Dex07FakeRepository implements MachineDexAuditRepositoryInterface
             'identity_mismatch_warning' => $audit->hasIdentityMismatchWarning(),
             'has_thermal_alert' => false,
             'ca3_cashbox_eur' => $audit->getCa3CashboxEur(),
+            'restock_visit_id' => $audit->getRestockVisitId(),
+            'cash_collection_id' => $audit->getCashCollectionId(),
+            'incident_id' => $audit->getIncidentId(),
         ];
         $this->selections[$id] = $selectionLines;
         $this->events[$id] = $eventLines;
@@ -172,7 +175,7 @@ final class Dex07FakeRepository implements MachineDexAuditRepositoryInterface
     public function findByActorMutation(int $importedBy, string $clientMutationId): ?array
     {
         foreach ($this->audits as $id => $audit) {
-            if ((int)$audit['imported_by'] === $importedBy
+            if ((int)($audit['imported_by'] ?? 0) === $importedBy
                 && ($audit['client_mutation_id'] ?? null) === $clientMutationId) {
                 return ['id' => $id, 'machine_id' => (int)$audit['machine_id'], 'status' => (string)$audit['status']];
             }
@@ -319,6 +322,12 @@ final class Dex07FakeGateway implements MachineDexAuditGatewayInterface
     public array $contexts = [];
     /** @var array<int, list<array<string, mixed>>> */
     public array $slots = [];
+    /** @var array<int, array<string, mixed>> */
+    public array $visits = [];
+    /** @var array<int, array<string, mixed>> */
+    public array $cashCollections = [];
+    /** @var array<int, array<string, mixed>> */
+    public array $incidents = [];
 
     public function lockMachineContext(int $machineId, int $actorId): ?array
     {
@@ -332,17 +341,23 @@ final class Dex07FakeGateway implements MachineDexAuditGatewayInterface
 
     public function lockRestockVisit(int $visitId, int $machineId): ?array
     {
-        return null;
+        $visit = $this->visits[$visitId] ?? null;
+
+        return $visit !== null && (int)$visit['machine_id'] === $machineId ? $visit : null;
     }
 
     public function lockCashCollection(int $cashCollectionId, int $machineId): ?array
     {
-        return null;
+        $collection = $this->cashCollections[$cashCollectionId] ?? null;
+
+        return $collection !== null && (int)$collection['machine_id'] === $machineId ? $collection : null;
     }
 
     public function lockIncident(int $incidentId, int $machineId): ?array
     {
-        return null;
+        $incident = $this->incidents[$incidentId] ?? null;
+
+        return $incident !== null && (int)$incident['machine_id'] === $machineId ? $incident : null;
     }
 
     public function findNearestCashCollectionSameDay(
@@ -710,6 +725,72 @@ $csv = $service->exportCsv();
 $assert('5.4 El CSV lleva BOM UTF-8 y separador ;', str_starts_with($csv, "\xEF\xBB\xBF") && str_contains($csv, 'audit_code;machine_code;captured_at'));
 $assert('5.5 La fecha se presenta en Europe/Madrid', str_contains($csv, '20/11/2026 11:00'));
 $assert('5.6 Una celda con fórmula se neutraliza', str_contains($csv, "'=DEX-2026-9999"));
+
+echo "\n--- 6. Vínculos M34/M35/M16 del alta (PR25-05) ---\n";
+
+$gateway->contexts[15] = $context('COMBO', 'RESTOCKER');
+$gateway->contexts[16] = $context('COMBO', 'COORDINATOR');
+$gateway->visits[900] = ['id' => 900, 'machine_id' => 15, 'restocker_id' => 5, 'status' => 'COMPLETED'];
+$gateway->visits[901] = ['id' => 901, 'machine_id' => 16, 'restocker_id' => 5, 'status' => 'COMPLETED'];
+$gateway->visits[902] = ['id' => 902, 'machine_id' => 15, 'restocker_id' => 5, 'status' => 'IN_PROGRESS'];
+$gateway->visits[903] = ['id' => 903, 'machine_id' => 15, 'restocker_id' => 99, 'status' => 'COMPLETED'];
+$gateway->cashCollections[910] = ['id' => 910, 'machine_id' => 15, 'restocker_id' => 5, 'status' => 'SEALED_IN_ROUTE'];
+$gateway->cashCollections[911] = ['id' => 911, 'machine_id' => 16, 'restocker_id' => 5, 'status' => 'SEALED_IN_ROUTE'];
+$gateway->cashCollections[912] = ['id' => 912, 'machine_id' => 15, 'restocker_id' => 99, 'status' => 'SEALED_IN_ROUTE'];
+$gateway->incidents[920] = ['id' => 920, 'machine_id' => 15, 'status' => 'IN_PROGRESS'];
+$gateway->incidents[921] = ['id' => 921, 'machine_id' => 16, 'status' => 'IN_PROGRESS'];
+
+$assert('6.1 Una visita inexistente o de otra máquina es 422 DEX_LINK_TARGET_NOT_FOUND', $expect(
+    static fn () => $service->importDex($request(15, 5, 'RESTOCKER_ROUTE', $payload('1000*10'), ['restock_visit_id' => 901])),
+    'DEX_LINK_TARGET_NOT_FOUND',
+    422
+));
+$assert('6.2 Una recaudación de otra máquina es 422 DEX_LINK_TARGET_NOT_FOUND', $expect(
+    static fn () => $service->importDex($request(15, 5, 'RESTOCKER_ROUTE', $payload('1000*10'), ['cash_collection_id' => 911])),
+    'DEX_LINK_TARGET_NOT_FOUND',
+    422
+));
+$assert('6.3 Una incidencia de otra máquina es 422 DEX_LINK_TARGET_NOT_FOUND', $expect(
+    static fn () => $service->importDex($request(15, 5, 'RESTOCKER_ROUTE', $payload('1000*10'), ['incident_id' => 921])),
+    'DEX_LINK_TARGET_NOT_FOUND',
+    422
+));
+$assert('6.4 Una visita no completada es 409 DEX_LINK_TARGET_NOT_ELIGIBLE', $expect(
+    static fn () => $service->importDex($request(15, 5, 'RESTOCKER_ROUTE', $payload('1000*10'), ['restock_visit_id' => 902])),
+    'DEX_LINK_TARGET_NOT_ELIGIBLE',
+    409
+));
+$assert('6.5 Un Reponedor no puede enlazar la visita de otro Reponedor', $expect(
+    static fn () => $service->importDex($request(15, 5, 'RESTOCKER_ROUTE', $payload('1000*10'), ['restock_visit_id' => 903])),
+    'DEX_LINK_TARGET_NOT_ELIGIBLE',
+    409
+));
+$assert('6.6 Un Reponedor no puede enlazar la recaudación de otro Reponedor', $expect(
+    static fn () => $service->importDex($request(15, 5, 'RESTOCKER_ROUTE', $payload('1000*10'), ['cash_collection_id' => 912])),
+    'DEX_LINK_TARGET_NOT_ELIGIBLE',
+    409
+));
+$assert('6.7 Un identificador de vínculo no numérico es 422 DEX_LINK_ID_INVALID', $expect(
+    static fn () => $service->importDex($request(15, 5, 'RESTOCKER_ROUTE', $payload('1000*10'), ['incident_id' => 'abc'])),
+    'DEX_LINK_ID_INVALID',
+    422
+));
+$linked = $service->importDex($request(15, 5, 'RESTOCKER_ROUTE', $payload('1000*10'), [
+    'restock_visit_id' => 900,
+    'cash_collection_id' => 910,
+    'incident_id' => 920,
+    'client_mutation_id' => 'dex07-links-0001',
+]));
+$assert('6.8 Los tres vínculos válidos se persisten en el volcado',
+    ($linked['audit']['restock_visit_id'] ?? 0) === 900
+        && ($linked['audit']['cash_collection_id'] ?? 0) === 910
+        && ($linked['audit']['incident_id'] ?? 0) === 920);
+$coordinatorLinked = $service->importDex($request(16, 7, 'COORDINATOR_CONSOLE', $payload('1000*10'), [
+    'restock_visit_id' => 901,
+    'client_mutation_id' => 'dex07-links-0002',
+]));
+$assert('6.9 Coordinación puede enlazar una visita de otro operador de la misma máquina',
+    ($coordinatorLinked['audit']['restock_visit_id'] ?? 0) === 901);
 
 echo "\n======================================================================\n";
 echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";

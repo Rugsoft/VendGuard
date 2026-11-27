@@ -246,7 +246,7 @@ final class PdoMachineDexAuditGateway implements MachineDexAuditGatewayInterface
         $stmt = $this->pdo->prepare(
             'SELECT id, machine_id, assigned_technician_id, category, status
              FROM incidents
-             WHERE id = :incident_id AND machine_id = :machine_id
+             WHERE id = :incident_id AND machine_id = :machine_id AND deleted_at IS NULL
              FOR UPDATE'
         );
         $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);

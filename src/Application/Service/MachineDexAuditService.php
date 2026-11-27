@@ -64,6 +64,14 @@ use VendGuard\Core\Service\EvaDtsParser;
  * Se normaliza a UTC y se rechaza si supera el reloj del servidor en más de
  * `CAPTURED_AT_MAX_FUTURE_SECONDS`.
  *
+ * **Vínculos operativos (PR25-05).** `restock_visit_id`,
+ * `cash_collection_id` e `incident_id` se resuelven dentro de la transacción
+ * con los cerrojos del gateway: deben existir, pertenecer a la máquina y, en la
+ * puerta del Reponedor, ser de su propia visita o recaudación. Se rechazan con
+ * `422 DEX_LINK_TARGET_NOT_FOUND`/`DEX_LINK_ID_INVALID` y `409
+ * DEX_LINK_TARGET_NOT_ELIGIBLE`; un segundo volcado vigente sobre la misma
+ * visita o recaudación responde `409 DEX_AUDIT_ALREADY_LINKED`.
+ *
  * El servicio no escribe SQL ni conoce PDO: compone los puertos de dominio.
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas.
@@ -233,6 +241,8 @@ final class MachineDexAuditService
             (bool)($context['has_open_thermal_breakdown'] ?? false)
         );
 
+        $links = $this->resolveLinkTargets($request, $machineId, $role, $actorId);
+
         $parsed = $this->parser->parse($rawPayload, (string)($context['machine_code'] ?? ''));
 
         $mutationId = isset($request['client_mutation_id']) && trim((string)$request['client_mutation_id']) !== ''
@@ -358,9 +368,9 @@ final class MachineDexAuditService
             deltaVendUnits: $deltas['delta_vend_units'],
             clientMutationId: $mutationId,
             status: DexAuditStatus::ACTIVE,
-            restockVisitId: isset($request['restock_visit_id']) ? (int)$request['restock_visit_id'] : null,
-            cashCollectionId: isset($request['cash_collection_id']) ? (int)$request['cash_collection_id'] : null,
-            incidentId: isset($request['incident_id']) ? (int)$request['incident_id'] : null
+            restockVisitId: $links['restock_visit_id'],
+            cashCollectionId: $links['cash_collection_id'],
+            incidentId: $links['incident_id']
         );
 
         // El correlativo anual se reserva con un `MAX()` y el alta se confirma en
@@ -436,6 +446,129 @@ final class MachineDexAuditService
                 ? (float)$parsed['va1_total_sales_eur']
                 : null,
         ];
+    }
+
+    /**
+     * Resuelve y bloquea los vínculos M34/M35/M16 del alta (PR25-05).
+     *
+     * Los cerrojos se toman dentro de la misma transacción que el alta, de modo
+     * que la visita, la recaudación o la incidencia no pueden desaparecer ni
+     * cambiar de máquina entre la comprobación y el `INSERT`. Un Reponedor solo
+     * puede enlazar su propia visita o recaudación; Técnico y Coordinación
+     * conservan el acceso forense sobre cualquier operación de la máquina.
+     *
+     * @param array<string, mixed> $request
+     * @return array{restock_visit_id: int|null, cash_collection_id: int|null, incident_id: int|null}
+     */
+    private function resolveLinkTargets(array $request, int $machineId, string $role, int $actorId): array
+    {
+        $visitId = $this->optionalLinkId($request, 'restock_visit_id');
+        $collectionId = $this->optionalLinkId($request, 'cash_collection_id');
+        $incidentId = $this->optionalLinkId($request, 'incident_id');
+
+        if ($visitId !== null) {
+            $visit = $this->gateway->lockRestockVisit($visitId, $machineId);
+            if ($visit === null) {
+                throw new DexAuditValidationException(
+                    'La visita de reposición vinculada no existe o pertenece a otra máquina.',
+                    'DEX_LINK_TARGET_NOT_FOUND',
+                    ['field' => 'restock_visit_id', 'restock_visit_id' => $visitId, 'machine_id' => $machineId]
+                );
+            }
+            if (strtoupper((string)($visit['status'] ?? '')) !== 'COMPLETED') {
+                throw new DexAuditConflictException(
+                    'La visita de reposición vinculada no está completada.',
+                    'DEX_LINK_TARGET_NOT_ELIGIBLE',
+                    [
+                        'field' => 'restock_visit_id',
+                        'restock_visit_id' => $visitId,
+                        'status' => (string)($visit['status'] ?? ''),
+                        'expected_status' => 'COMPLETED',
+                    ]
+                );
+            }
+            if ($role === 'RESTOCKER' && (int)($visit['restocker_id'] ?? 0) !== $actorId) {
+                throw new DexAuditConflictException(
+                    'La visita de reposición vinculada pertenece a otro Reponedor.',
+                    'DEX_LINK_TARGET_NOT_ELIGIBLE',
+                    [
+                        'field' => 'restock_visit_id',
+                        'restock_visit_id' => $visitId,
+                        'restocker_id' => (int)($visit['restocker_id'] ?? 0),
+                        'actor_id' => $actorId,
+                    ]
+                );
+            }
+        }
+
+        if ($collectionId !== null) {
+            $collection = $this->gateway->lockCashCollection($collectionId, $machineId);
+            if ($collection === null) {
+                throw new DexAuditValidationException(
+                    'La recaudación vinculada no existe o pertenece a otra máquina.',
+                    'DEX_LINK_TARGET_NOT_FOUND',
+                    ['field' => 'cash_collection_id', 'cash_collection_id' => $collectionId, 'machine_id' => $machineId]
+                );
+            }
+            if ($role === 'RESTOCKER' && (int)($collection['restocker_id'] ?? 0) !== $actorId) {
+                throw new DexAuditConflictException(
+                    'La recaudación vinculada pertenece a otro Reponedor.',
+                    'DEX_LINK_TARGET_NOT_ELIGIBLE',
+                    [
+                        'field' => 'cash_collection_id',
+                        'cash_collection_id' => $collectionId,
+                        'restocker_id' => (int)($collection['restocker_id'] ?? 0),
+                        'actor_id' => $actorId,
+                    ]
+                );
+            }
+        }
+
+        if ($incidentId !== null && $this->gateway->lockIncident($incidentId, $machineId) === null) {
+            throw new DexAuditValidationException(
+                'La incidencia vinculada no existe, está borrada o pertenece a otra máquina.',
+                'DEX_LINK_TARGET_NOT_FOUND',
+                ['field' => 'incident_id', 'incident_id' => $incidentId, 'machine_id' => $machineId]
+            );
+        }
+
+        return [
+            'restock_visit_id' => $visitId,
+            'cash_collection_id' => $collectionId,
+            'incident_id' => $incidentId,
+        ];
+    }
+
+    /**
+     * Lee un vínculo opcional del cuerpo: ausente o vacío es `null` y cualquier
+     * otro valor debe ser un entero positivo (`422 DEX_LINK_ID_INVALID`).
+     *
+     * @param array<string, mixed> $request
+     */
+    private function optionalLinkId(array $request, string $field): ?int
+    {
+        if (!array_key_exists($field, $request) || $request[$field] === null) {
+            return null;
+        }
+
+        $raw = $request[$field];
+        if (is_string($raw)) {
+            $raw = trim($raw);
+        }
+        if ($raw === '') {
+            return null;
+        }
+
+        $id = is_int($raw) ? $raw : (is_string($raw) && ctype_digit($raw) ? (int)$raw : 0);
+        if ($id <= 0) {
+            throw new DexAuditValidationException(
+                sprintf('El campo %s debe ser un identificador positivo.', $field),
+                'DEX_LINK_ID_INVALID',
+                ['field' => $field, 'value' => $request[$field]]
+            );
+        }
+
+        return $id;
     }
 
     /**

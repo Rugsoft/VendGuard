@@ -6,11 +6,13 @@ namespace VendGuard\Infrastructure\Repository;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use DomainException;
 use PDO;
 use PDOException;
 use PDOStatement;
 use Throwable;
 use VendGuard\Core\Domain\Exception\DexAuditConflictException;
+use VendGuard\Core\Domain\Exception\DexAuditValidationException;
 use VendGuard\Core\Domain\Model\MachineDexAudit;
 use VendGuard\Core\Domain\Repository\MachineDexAuditRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -234,7 +236,7 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
             return $audit->withId($auditId);
         } catch (PDOException $exception) {
             $this->rollbackCreate($ownsTransaction, $savepoint);
-            $conflict = $this->translateUniqueViolation($exception);
+            $conflict = $this->translateConstraintViolation($exception);
             if ($conflict !== null) {
                 throw $conflict;
             }
@@ -1004,13 +1006,38 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
         return [implode(' AND ', $where), $params];
     }
 
-    private function translateUniqueViolation(PDOException $exception): ?DexAuditConflictException
+    /**
+     * Traduce las violaciones de integridad del alta a errores de negocio
+     * (PR25-05): claves únicas conocidas y claves foráneas de los vínculos
+     * M34/M35/M16, de modo que la cola Offline no reciba un 500 reintentable.
+     */
+    private function translateConstraintViolation(PDOException $exception): ?DomainException
     {
-        if ((string)$exception->getCode() !== '23505') {
+        $sqlState = (string)$exception->getCode();
+        $message = $exception->getMessage();
+
+        if ($sqlState === '23503') {
+            $field = match (true) {
+                str_contains($message, 'fk_machine_dex_audits_restock_visit') => 'restock_visit_id',
+                str_contains($message, 'fk_machine_dex_audits_cash_collection') => 'cash_collection_id',
+                str_contains($message, 'fk_machine_dex_audits_incident') => 'incident_id',
+                default => null,
+            };
+            if ($field === null) {
+                return null;
+            }
+
+            return new DexAuditValidationException(
+                'El vínculo operativo del volcado ya no existe en la base de datos.',
+                'DEX_LINK_TARGET_NOT_FOUND',
+                ['field' => $field]
+            );
+        }
+
+        if ($sqlState !== '23505') {
             return null;
         }
 
-        $message = $exception->getMessage();
         if (str_contains($message, 'uq_machine_dex_audits_machine_hash')) {
             return new DexAuditConflictException(
                 'Ese mismo fichero ya está importado como volcado vigente en esta máquina.',
@@ -1021,6 +1048,20 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
             return new DexAuditConflictException(
                 'El identificador de mutación ya se usó para otra importación.',
                 'CLIENT_MUTATION_ID_ALREADY_USED'
+            );
+        }
+        if (str_contains($message, 'uq_machine_dex_audits_visit')) {
+            return new DexAuditConflictException(
+                'Esa visita de reposición ya está vinculada a otro volcado vigente.',
+                'DEX_AUDIT_ALREADY_LINKED',
+                ['field' => 'restock_visit_id']
+            );
+        }
+        if (str_contains($message, 'uq_machine_dex_audits_cash_collection')) {
+            return new DexAuditConflictException(
+                'Esa recaudación ya está vinculada a otro volcado vigente.',
+                'DEX_AUDIT_ALREADY_LINKED',
+                ['field' => 'cash_collection_id']
             );
         }
         if (str_contains($message, 'uq_machine_dex_audits_code')) {
