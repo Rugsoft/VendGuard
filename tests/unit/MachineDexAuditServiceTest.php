@@ -607,6 +607,14 @@ $gateway->contexts[10] = $context('SNACKS', 'RESTOCKER');
 $snack = $service->importDex($request(10, 9, 'RESTOCKER_ROUTE', $payload('1000*10', "EA2*EG01*1*1*0*1\n")));
 $assert('3.3 Una máquina SNACKS no activa el aviso sanitario ni encola', $snack['has_thermal_alert'] === false && count($outbox->items) === $before + 1);
 
+$coordinatorDetail = $service->findForRole(100, 'COORDINATOR');
+$assert(
+    '3.4 El detalle de Coordinación publica machine_code desde la instantánea',
+    ($coordinatorDetail['machine_code'] ?? null) === 'VEND-DEX07'
+        && ($coordinatorDetail['machine_type'] ?? null) === 'COMBO',
+    json_encode(['machine_code' => $coordinatorDetail['machine_code'] ?? null, 'machine_type' => $coordinatorDetail['machine_type'] ?? null])
+);
+
 echo "\n--- 4. Reseteos y delta por carril (C1, QA-2) ---\n";
 
 $repository->seed(

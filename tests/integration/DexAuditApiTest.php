@@ -366,6 +366,8 @@ try {
         $detail->getStatusCode() === 200
             && ($detailData['va1_total_sales_eur'] ?? null) === 12.50
             && (float)($detailData['ca3_cashbox_eur'] ?? 0) === 9.0
+            && ($detailData['machine_code'] ?? '') !== ''
+            && ($detailData['machine_code'] ?? null) === ($detailData['machine_code_snapshot'] ?? null)
             && ($detailData['can_download_raw'] ?? false) === true
             && !in_array('raw_payload', $collectKeys($detailData), true),
         json_encode($detailData)

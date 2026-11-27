@@ -834,6 +834,10 @@ final class MachineDexAuditService
     {
         $normalizedRole = strtoupper(trim($role));
         if ($normalizedRole === 'COORDINATOR') {
+            // El repositorio entrega la instantánea de la máquina; la consola de
+            // Coordinación consume `machine_code`, igual que `toCoordinatorArray()`.
+            $row['machine_code'] = $row['machine_code_snapshot'] ?? $row['machine_code'] ?? null;
+            $row['machine_type'] = $row['machine_type_snapshot'] ?? $row['machine_type'] ?? null;
             $row['can_download_raw'] = true;
 
             return $row;

@@ -17,7 +17,7 @@
 
 No se detectó ningún fallo de bloqueo (`P1`) en la UI del Módulo 39. El flujo principal respondió bien: carga de vigentes, filtro de alertas, modal de detalle, apertura/cierre de modales, anulación sin confirmar, importación manual con zona vacía, CSV y descarga `.dex` devolvieron `200`; las APIs de producto fueron limpias y la consola del producto no mostró errores. Se detectaron **7 defectos de UI**, sin Pérdida de datos ni cambio de estado presentado:
 
-- **Dos de ellos importaban** (prioridad Alta): un delta desconocido se pintaba como `0` en el historial móvil (H-39-01, **cerrado el 2026-11-27**) y la tarjeta «Máquina» del detalle de Coordinación quedaba vacía (H-39-02, pendiente).
+- **Dos de ellos importaban** (prioridad Alta): un delta desconocido se pintaba como `0` en el historial móvil (H-39-01, **cerrado el 2026-11-27**) y la tarjeta «Máquina» del detalle de Coordinación quedaba vacía (H-39-02, **cerrado el 2026-11-27**).
 - **Un defecto de accesibilidad** deja al panel DEX del Reponedor sin comportamiento modal real en teclado (`P3`).
 - **Los cuatro restantes son de presentación o copy** (`P3-P4`): timestamp técnico sin localizar, dos plurales con una unidad, placeholder duplicado en Delta y texto recortado del selector de archivo en móvil.
 
@@ -26,7 +26,7 @@ El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); s
 | Orden | ID | Prioridad | Hallazgo | Estado |
 |---:|---|---|---|---|
 | 1 | **H-39-01** | **Alta** | Un delta sin base se muestra como `0` en el historial móvil | **Cerrado (2026-11-27)** |
-| 2 | **H-39-02** | **Alta** | La tarjeta «Máquina» del detalle de Coordinación está vacía | Pendiente |
+| 2 | **H-39-02** | **Alta** | La tarjeta «Máquina» del detalle de Coordinación está vacía | **Cerrado (2026-11-27)** |
 | 3 | **H-39-03** | **P3 · Media** | El panel DEX del Reponedor no es un modal plenamente operable por teclado | Pendiente |
 | 4 | **H-39-04** | **P3 · Media-baja** | Fecha técnica sin localizar en el historial móvil | Pendiente |
 | 5 | **H-39-05** | **P4 · Baja** | Plurales incorrectos con una unidad (`1 anulados`, `1 bloques`) | Pendiente |
@@ -94,7 +94,7 @@ El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); s
 
 **Evidencia.** `GET /api/coordinator/dex-audits/6376 → 200` con `machine_code_snapshot` presente y `machine_code` sin campo equivalente en esa proyección. `CoordinatorDexAuditsSubTab.js` pinta en listado con `machine_code_snapshot`; la plantilla de detalle lee `detail.machine_code`. `src/Application/Service/MachineDexAuditService.php` (proyección `COORDINATOR`) y `CoordinadorDexAuditController.php` (`show()`) acarrean esa diferencia. Capturas: `ui-audit-04-dex-detail-modal.png` (desktop) y `ui-audit-13-dex-detail-360.png` (móvil).
 
-**Estado:** Pendiente. Prioridad Alta.
+**Estado:** **Cerrado el 2026-11-27.** La proyección de Coordinación devolvía la fila cruda del repositorio, que solo trae `machine_code_snapshot`; la tarjeta lee `detail.machine_code` y quedaba vacía. `MachineDexAuditService::projectByRole()` publica ahora `machine_code` (y `machine_type`) desde esas instantáneas para la proyección `COORDINATOR`, igual que `toCoordinatorArray()`; la plantilla no cambia. **Evidencia:** `php tests/unit/MachineDexAuditServiceTest.php` → **30/30**, `exit=0` (nueva aserción 3.4: `findForRole()` publica `VEND-DEX07`/`COMBO`); `php tests/integration/DexAuditApiTest.php` → **46/46**, `exit=0` (la aserción 3.2 exige `machine_code` no vacío e igual a la instantánea). Comprobación real en Chromium a 1280×900: `DEX-2026-0001` abre el detalle y la tarjeta «Máquina» muestra `VEND-0101` (captura `screenshots/ui-audit-17-dex-detail-machine-1280.png`), sin errores de producto en consola. Prioridad Alta.
 
 **Nota de prioridad.** Es una proyección/plantilla, no un problema de la regla de negocio ni del cálculo. Se carga en Alta porque la pantalla de auditoría clara falla en una celda de título de máquina.
 
@@ -243,7 +243,7 @@ En el mismo producto, el modal de Coordinación sí mueve el foco al abrir, tien
 ## 7. Orden de corrección propuesto
 
 1. ~~**H-39-01 (Alta):** Que `dexAuditDeltaUnits()` (Reponedor y Técnico) preserve el caso de base inicial (`delta_source = 'INITIAL_BASELINE'` y/o `delta_vend_units` nulo) y pinte `—` en lugar de `0`.~~ **Hecho el 2026-11-27** (ver §3).
-2. **H-39-02 (Alta):** Que la proyección del detalle de Coordinación publique `machine_code` (o que la plantilla lea `machine_code_snapshot`) de modo que la tarjeta «Máquina» se rellene. Regresión de UI que compruebe el card con `VEND-0101`.
+2. ~~**H-39-02 (Alta):** Que la proyección del detalle de Coordinación publique `machine_code` (o que la plantilla lea `machine_code_snapshot`) de modo que la tarjeta «Máquina» se rellene. Regresión de UI que compruebe el card con `VEND-0101`.~~ **Hecho el 2026-11-27** (ver §3).
 3. **H-39-03 (P3):** Convertir el panel DEX del Reponedor en un diálogo semántico con foco inicial, atrapa de `Tab`/`Shift+Tab`, cierre con `Escape` y retorno de foco al disparador, o consolidarlo con el componente modal que ya lo hace en Coordinación. Regresión de accesibilidad.
 4. **H-39-04 (P3):** Formatear la fecha del historial móvil con la misma presentación local usada en el resto de la app (`25/11/26, 14:06`), sin zona horaria expuesta.
 5. **H-39-05 (P4):** Concordancia numérica del copy en el KPI de Coordinación y en el contador de bloques del modal de anulación (`1 anulado`, `1 bloque`).
@@ -285,4 +285,4 @@ Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de 
 
 **Estado del árbol:** `feat/eva-dts-dex-audit` al `158c578c`; la corrida no modificó código ni confirmó cambios de estado, y no quedó ningún archivo de código alterado por este documento. Este `docs/ui-audit-eva-dts-dex.md` queda como acta de la auditoría en navegador y se incorpora al historial de la rama.
 
-**Cierres registrados:** H-39-01 cerrado el 2026-11-27 (ver §3 para la corrección y su evidencia); H-39-02 a H-39-07 siguen pendientes.
+**Cierres registrados:** H-39-01 y H-39-02 cerrados el 2026-11-27 (ver §3 para la corrección y su evidencia); H-39-03 a H-39-07 siguen pendientes.
