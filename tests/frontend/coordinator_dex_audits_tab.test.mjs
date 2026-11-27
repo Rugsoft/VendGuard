@@ -308,6 +308,14 @@ async function run() {
   const voidCall = calls.filter((call) => call.method === 'voidDexAudit').at(-1);
   assert('4.4 La anulación es POST lógico con el motivo recortado', voidCall?.auditId === 31 && voidCall?.payload?.void_reason === validVoidReason.trim());
   assert('4.5 El cierre conserva el original y recarga el libro', vm.showVoidModal === false && vm.successMessage.includes('anulado lógicamente'));
+  assert(
+    '4.6 Los contadores de una unidad usan singular',
+    vm.pluralUnit(1, 'anulado', 'anulados') === 'anulado'
+      && vm.pluralUnit(2, 'anulado', 'anulados') === 'anulados'
+      && vm.pluralUnit('1', 'bloque', 'bloques') === 'bloque'
+      && CoordinatorDexAuditsSubTab.template.includes("pluralUnit(safeKpis.voided_count, 'anulado', 'anulados')")
+      && CoordinatorDexAuditsSubTab.template.includes("pluralUnit(voidReasonBlocks, 'bloque', 'bloques')")
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // 5. Raw y CSV

@@ -190,6 +190,9 @@ export const CoordinatorDexAuditsSubTab = {
     formatDateTime,
     money,
     integer,
+    pluralUnit(count, singular, plural) {
+      return Number(count) === 1 ? singular : plural;
+    },
     sourceLabel(value, fallback = '') {
       return IMPORT_SOURCE_LABELS[value] || fallback || value || '—';
     },
@@ -444,7 +447,7 @@ export const CoordinatorDexAuditsSubTab = {
             {{ integer(safeKpis.cash_deviation_count) }}
           </div>
           <div v-if="safeKpis.voided_count > 0" style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">
-            {{ integer(safeKpis.voided_count) }} anulados en el perímetro
+            {{ integer(safeKpis.voided_count) }} {{ pluralUnit(safeKpis.voided_count, 'anulado', 'anulados') }} en el perímetro
           </div>
         </div>
       </div>
@@ -765,7 +768,7 @@ export const CoordinatorDexAuditsSubTab = {
             style="width: 100%; resize: vertical;"
           ></textarea>
           <div style="display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: var(--font-size-caption); color: var(--color-ink-muted);">
-            <span>{{ voidReasonLength }} / 500 caracteres · {{ voidReasonBlocks }} bloques</span>
+            <span>{{ voidReasonLength }} / 500 caracteres · {{ voidReasonBlocks }} {{ pluralUnit(voidReasonBlocks, 'bloque', 'bloques') }}</span>
             <span v-if="voidReasonLength > 0 && !voidReasonIsValid">Aún no cumple el mínimo.</span>
           </div>
           <div v-if="voidError" class="vg-alert vg-alert-error" role="alert" style="margin-top: 10px;" data-testid="dex-void-error">
