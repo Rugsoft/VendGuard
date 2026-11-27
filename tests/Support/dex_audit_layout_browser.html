@@ -169,6 +169,10 @@
     api.coordinator.getDexAudits = async () => ({
       data: {
         audits,
+        total: audits.length,
+        limit: 100,
+        offset: 0,
+        export_limit: 500,
         kpis: {
           total_active: 2,
           thermal_alert_count: 1,
@@ -187,6 +191,8 @@
         ]
       }
     });
+    api.coordinator.getZones = async () => ({ data: { zones: [] } });
+    api.coordinator.getLocations = async () => ({ data: [] });
     api.coordinator.getDexAudit = async () => ({ data: detail });
     api.coordinator.downloadDexAuditRaw = async () => true;
     api.coordinator.exportDexAuditsCsv = async () => true;

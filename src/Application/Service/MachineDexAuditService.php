@@ -645,6 +645,7 @@ final class MachineDexAuditService
      */
     public function exportCsv(array $filters = [], ?array $actor = null): string
     {
+        $totalRows = $this->repository->countForCoordinator($filters);
         $rows = $this->repository->listForCoordinator($filters, self::MAX_CSV_ROWS, 0);
 
         $headers = [
@@ -675,6 +676,15 @@ final class MachineDexAuditService
             $lines[] = implode(';', array_map(fn (string $value): string => $this->csvCell($value), $values));
         }
 
+        $truncated = $totalRows > count($rows);
+        if ($truncated) {
+            $lines[] = $this->csvCell(sprintf(
+                'AVISO: exportación truncada a %d de %d filas; ajusta el perímetro para exportar el resto.',
+                count($rows),
+                $totalRows
+            ));
+        }
+
         $exportedAt = (new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))->format('Y-m-d\TH:i:sP');
         if ($this->auditLogger !== null && $actor !== null && (int)($actor['id'] ?? 0) > 0) {
             $this->auditLogger->logMachineDexAuditExport(
@@ -684,11 +694,15 @@ final class MachineDexAuditService
                 null,
                 array_merge($filters, [
                     'row_count' => count($rows),
+                    'total_rows' => $totalRows,
+                    'truncated' => $truncated,
                     'exported_at' => $exportedAt,
                 ]),
                 [
                     'filters' => $filters,
                     'row_count' => count($rows),
+                    'total_rows' => $totalRows,
+                    'truncated' => $truncated,
                     'exported_at' => $exportedAt,
                 ]
             );
@@ -846,12 +860,26 @@ final class MachineDexAuditService
      * Listado paginado de Coordinación con sus KPIs (RF-07.1).
      *
      * @param array<string, mixed> $filters
-     * @return array{audits: list<array<string, mixed>>, kpis: array<string, int>}
+     * @return array{
+     *     audits: list<array<string, mixed>>,
+     *     total: int,
+     *     limit: int,
+     *     offset: int,
+     *     export_limit: int,
+     *     kpis: array<string, int>
+     * }
      */
     public function listForCoordinator(array $filters = [], int $limit = 100, int $offset = 0): array
     {
+        $limit = max(1, min($limit, 500));
+        $offset = max(0, $offset);
+
         return [
-            'audits' => $this->repository->listForCoordinator($filters, max(1, min($limit, 500)), max(0, $offset)),
+            'audits' => $this->repository->listForCoordinator($filters, $limit, $offset),
+            'total' => $this->repository->countForCoordinator($filters),
+            'limit' => $limit,
+            'offset' => $offset,
+            'export_limit' => self::MAX_CSV_ROWS,
             'kpis' => $this->repository->kpisForCoordinator($filters),
         ];
     }

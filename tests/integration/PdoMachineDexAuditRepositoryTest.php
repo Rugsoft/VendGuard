@@ -732,6 +732,38 @@ try {
         $reservedAfterTenThousandOne === 'DEX-2026-10002',
         $reservedAfterTenThousandOne
     );
+
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 6. Paginación y filtros por zona/sede (PR25-09) ---\n";
+    // ─────────────────────────────────────────────────────────────────────
+
+    for ($index = 1; $index <= 105; $index++) {
+        $code = sprintf('DEX-2026-%04d', 3000 + $index);
+        $repository->create($makeAudit(
+            $code,
+            '2026-11-22 10:00:00+00',
+            "DXS*COMM-DEX06*VA*DEX 6.0\nVA1*" . (3000 + $index) . "*1\nDXE*FIN"
+        ));
+    }
+
+    $total = $repository->countForCoordinator([]);
+    $assert(
+        '6.1 El total cuenta todo el perímetro y responde a zona y sede',
+        $total >= 105
+            && $repository->countForCoordinator(['zone_id' => $zoneId]) === $total
+            && $repository->countForCoordinator(['location_id' => $locationId]) === $total
+            && $repository->countForCoordinator(['zone_id' => 999999]) === 0
+            && $repository->countForCoordinator(['location_id' => 999999]) === 0
+    );
+
+    $firstPage = $repository->listForCoordinator([], 100, 0);
+    $secondPage = $repository->listForCoordinator([], 100, 100);
+    $assert(
+        '6.2 Dos páginas de 100 cubren el total sin repetir identificadores',
+        count($firstPage) === 100
+            && count($secondPage) === $total - 100
+            && count(array_intersect(array_column($firstPage, 'id'), array_column($secondPage, 'id'))) === 0
+    );
 } catch (Throwable $exception) {
     $crash = $exception;
 } finally {

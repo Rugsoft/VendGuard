@@ -248,6 +248,11 @@ final class Dex07FakeRepository implements MachineDexAuditRepositoryInterface
         return array_slice($rows, $offset, $limit);
     }
 
+    public function countForCoordinator(array $filters = []): int
+    {
+        return count($this->listForCoordinator($filters, PHP_INT_MAX, 0));
+    }
+
     public function kpisForCoordinator(array $filters = []): array
     {
         $active = array_filter($this->audits, static fn (array $a): bool => $a['status'] === 'ACTIVE');
@@ -725,6 +730,23 @@ $csv = $service->exportCsv();
 $assert('5.4 El CSV lleva BOM UTF-8 y separador ;', str_starts_with($csv, "\xEF\xBB\xBF") && str_contains($csv, 'audit_code;machine_code;captured_at'));
 $assert('5.5 La fecha se presenta en Europe/Madrid', str_contains($csv, '20/11/2026 11:00'));
 $assert('5.6 Una celda con fórmula se neutraliza', str_contains($csv, "'=DEX-2026-9999"));
+
+for ($index = 1; $index <= 501; $index++) {
+    $repository->seed([
+        'id' => 5000 + $index,
+        'machine_id' => 20,
+        'status' => 'ACTIVE',
+        'captured_at' => '2026-11-20 10:00:00+00',
+        'va1_total_sales_eur' => 1.0,
+        'va1_total_vend_units' => 1,
+        'audit_code' => sprintf('DEX-2026-%04d', 5000 + $index),
+    ]);
+}
+$csvTruncated = $service->exportCsv();
+$assert(
+    '5.7 El CSV avisa cuando el perímetro supera el tope de 500 filas',
+    str_contains($csvTruncated, 'AVISO: exportación truncada a 500 de')
+);
 
 echo "\n--- 6. Vínculos M34/M35/M16 del alta (PR25-05) ---\n";
 

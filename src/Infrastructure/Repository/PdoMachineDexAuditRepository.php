@@ -535,6 +535,28 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
     /**
      * {@inheritdoc}
      */
+    public function countForCoordinator(array $filters = []): int
+    {
+        [$where, $params] = $this->buildFilterClause($filters);
+
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*)
+             FROM machine_dex_audits a
+             INNER JOIN machines m ON m.id = a.machine_id
+             INNER JOIN locations l ON l.id = m.location_id
+             WHERE ' . $where
+        );
+        foreach ($params as $name => $value) {
+            $stmt->bindValue($name, $value);
+        }
+        $stmt->execute();
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function kpisForCoordinator(array $filters = []): array
     {
         [$where, $params] = $this->buildFilterClause($filters, false);

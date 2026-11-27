@@ -561,13 +561,40 @@ try {
     $list = $call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['machine_id' => (string)$machineId]);
     $listData = $data($list);
     $assert(
-        '3.1 El listado devuelve volcados y los cinco KPIs',
+        '3.1 El listado devuelve volcados, total, tope de exportación y los cinco KPIs',
         $list->getStatusCode() === 200
             && count($listData['audits'] ?? []) === 1
+            && (int)($listData['total'] ?? 0) === 1
+            && (int)($listData['limit'] ?? 0) === 100
+            && (int)($listData['offset'] ?? -1) === 0
+            && (int)($listData['export_limit'] ?? 0) === 500
             && isset($listData['kpis']['total_active'], $listData['kpis']['thermal_alert_count'], $listData['kpis']['warning_count'], $listData['kpis']['cash_deviation_count'], $listData['kpis']['voided_count'])
     );
     $invalidFilter = $call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['status' => 'BORRADO']);
     $assert('3.1.b Un filtro status fuera del contrato responde 422', $invalidFilter->getStatusCode() === 422 && $errorCode($invalidFilter) === 'VALIDATION_ERROR');
+
+    $pageOne = $data($call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['status' => 'ALL', 'limit' => '1', 'offset' => '0']));
+    $pageTwo = $data($call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['status' => 'ALL', 'limit' => '1', 'offset' => '1']));
+    $assert(
+        '3.1.c limit y offset paginan sin repetir y conservan el total',
+        count($pageOne['audits'] ?? []) === 1
+            && count($pageTwo['audits'] ?? []) === 1
+            && (int)($pageOne['audits'][0]['id'] ?? 0) !== (int)($pageTwo['audits'][0]['id'] ?? 0)
+            && (int)($pageOne['total'] ?? 0) >= 2
+            && (int)($pageTwo['total'] ?? -1) === (int)($pageOne['total'] ?? 0)
+    );
+    $byZone = $data($call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['status' => 'ALL', 'zone_id' => (string)$zoneId]));
+    $byLocation = $data($call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['status' => 'ALL', 'location_id' => (string)$locationId]));
+    $outsideZone = $data($call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['status' => 'ALL', 'zone_id' => (string)$outsideZoneId]));
+    $outsideLocation = $data($call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['status' => 'ALL', 'location_id' => (string)$outsideLocationId]));
+    $assert(
+        '3.1.d Los filtros de zona y sede acotan listado y total',
+        (int)($byZone['total'] ?? 0) >= 2
+            && (int)($byZone['total'] ?? -1) === (int)($byLocation['total'] ?? 0)
+            && (int)($outsideZone['total'] ?? -1) === 0
+            && (int)($outsideLocation['total'] ?? -1) === 0
+            && !in_array($outsideMachineId, array_column($byZone['audits'] ?? [], 'machine_id'), true)
+    );
     $auditId = (int)($listData['audits'][0]['id'] ?? 0);
     $auditCode = (string)($listData['audits'][0]['audit_code'] ?? '');
     $detail = $call('GET', '/api/coordinator/dex-audits/' . $auditId, [], $coordinatorToken);

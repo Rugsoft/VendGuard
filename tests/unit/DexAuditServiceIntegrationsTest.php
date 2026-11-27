@@ -111,6 +111,7 @@ final class Dex08AuditRepository implements MachineDexAuditRepositoryInterface
     public function hasLaterActive(int $machineId, string $capturedAt): bool { return false; }
     public function findSelectionsByAudit(int $auditId): array { return []; }
     public function listForCoordinator(array $filters = [], int $limit = 100, int $offset = 0): array { return []; }
+    public function countForCoordinator(array $filters = []): int { return 0; }
     public function kpisForCoordinator(array $filters = []): array { return ['total_active' => 0, 'thermal_alert_count' => 0, 'warning_count' => 0, 'cash_deviation_count' => 0, 'voided_count' => 0]; }
     public function void(int $auditId, string $reason, int $voidedBy, string $voidedByName, string $voidedAt): array { return []; }
 }

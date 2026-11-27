@@ -53,6 +53,8 @@ const emptyFilters = () => ({
   status: 'ACTIVE',
   import_source: '',
   machine_id: '',
+  zone_id: '',
+  location_id: '',
   alerts_only: false
 });
 
@@ -120,6 +122,12 @@ export const CoordinatorDexAuditsSubTab = {
       kpis: emptyKpis(),
       filters: emptyFilters(),
       machines: [],
+      zones: [],
+      locations: [],
+      total: 0,
+      offset: 0,
+      pageSize: 100,
+      exportLimit: 500,
       isLoading: false,
       loadError: '',
       successMessage: '',
@@ -157,6 +165,19 @@ export const CoordinatorDexAuditsSubTab = {
         }))
         .filter((machine) => Number.isFinite(machine.id) && machine.id > 0);
     },
+    zoneOptions() {
+      return this.zones
+        .map((zone) => ({ id: Number(zone.id), label: zone.name || zone.code || `#${zone.id}` }))
+        .filter((zone) => Number.isFinite(zone.id) && zone.id > 0);
+    },
+    locationOptions() {
+      return this.locations
+        .map((location) => ({
+          id: Number(location.id),
+          label: `${location.name || location.site_code || `#${location.id}`}${location.site_code ? ` (${location.site_code})` : ''}`
+        }))
+        .filter((location) => Number.isFinite(location.id) && location.id > 0);
+    },
     voidReasonLength() {
       return String(this.voidReason ?? '').trim().length;
     },
@@ -174,17 +195,26 @@ export const CoordinatorDexAuditsSubTab = {
         || this.filters.date_to
         || this.filters.import_source
         || this.filters.machine_id
+        || this.filters.zone_id
+        || this.filters.location_id
         || this.filters.alerts_only
         || this.filters.status !== 'ACTIVE'
       );
     },
     exportsLabel() {
       return this.filters.status === 'ALL' ? 'Exportar CSV (todos)' : `Exportar CSV (${STATUS_LABELS[this.filters.status] || this.filters.status})`;
+    },
+    hasMore() {
+      return this.audits.length < this.total;
+    },
+    exportTruncated() {
+      return this.total > this.exportLimit;
     }
   },
   mounted() {
     this.loadAudits();
     this.loadMachines();
+    this.loadFilterCatalogs();
   },
   methods: {
     formatDateTime,
@@ -222,7 +252,7 @@ export const CoordinatorDexAuditsSubTab = {
     },
     buildFilterParams() {
       const params = {};
-      for (const field of ['date_from', 'date_to', 'status', 'import_source', 'machine_id']) {
+      for (const field of ['date_from', 'date_to', 'status', 'import_source', 'machine_id', 'zone_id', 'location_id']) {
         const value = this.filters[field];
         if (value !== '' && value !== null && value !== undefined) {
           params[field] = value;
@@ -242,14 +272,44 @@ export const CoordinatorDexAuditsSubTab = {
         this.machines = [];
       }
     },
+    async loadFilterCatalogs() {
+      const [zonesResult, locationsResult] = await Promise.allSettled([
+        api.coordinator.getZones(),
+        api.coordinator.getLocations()
+      ]);
+      if (zonesResult.status === 'fulfilled') {
+        const payload = unwrap(zonesResult.value);
+        this.zones = extractList(payload, ['zones']);
+      }
+      if (locationsResult.status === 'fulfilled') {
+        const payload = unwrap(locationsResult.value);
+        this.locations = Array.isArray(payload) ? payload : extractList(payload, ['locations', 'data']);
+      }
+    },
     async loadAudits() {
+      this.offset = 0;
+      return this.fetchAudits(false);
+    },
+    async loadMore() {
+      if (!this.hasMore || this.isLoading) return;
+      this.offset = this.audits.length;
+      return this.fetchAudits(true);
+    },
+    async fetchAudits(append) {
       const sequence = ++this.requestSequence;
       this.isLoading = true;
       this.loadError = '';
       try {
-        const payload = unwrap(await api.coordinator.getDexAudits(this.buildFilterParams()));
+        const payload = unwrap(await api.coordinator.getDexAudits({
+          ...this.buildFilterParams(),
+          limit: this.pageSize,
+          offset: this.offset
+        }));
         if (sequence !== this.requestSequence) return;
-        this.audits = extractList(payload, ['audits']);
+        const rows = extractList(payload, ['audits']);
+        this.audits = append ? [...this.audits, ...rows] : rows;
+        this.total = Number(payload?.total ?? this.audits.length);
+        this.exportLimit = Number(payload?.export_limit ?? 500);
         this.kpis = { ...emptyKpis(), ...(payload?.kpis || {}) };
       } catch (error) {
         if (sequence !== this.requestSequence) return;
@@ -427,6 +487,9 @@ export const CoordinatorDexAuditsSubTab = {
       <div v-if="successMessage" class="vg-alert vg-alert-success" role="status" data-testid="dex-success">
         ✅ {{ successMessage }}
       </div>
+      <div v-if="exportTruncated" class="vg-alert vg-alert-warning" role="status" data-testid="dex-export-warning">
+        ⚠️ El CSV se limita a {{ integer(exportLimit) }} filas y el perímetro tiene {{ integer(total) }}. Ajusta los filtros para exportar el resto.
+      </div>
 
       <div data-testid="dex-kpis" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
         <div class="vg-card" style="padding: 14px;">
@@ -491,6 +554,20 @@ export const CoordinatorDexAuditsSubTab = {
             <select id="dex-filter-machine" v-model="filters.machine_id" class="vg-input" data-testid="dex-filter-machine" @change="loadAudits">
               <option value="">Todas</option>
               <option v-for="machine in machineOptions" :key="machine.id" :value="machine.id">{{ machine.label }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="vg-label" for="dex-filter-zone">Zona</label>
+            <select id="dex-filter-zone" v-model="filters.zone_id" class="vg-input" data-testid="dex-filter-zone" @change="loadAudits">
+              <option value="">Todas</option>
+              <option v-for="zone in zoneOptions" :key="zone.id" :value="zone.id">{{ zone.label }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="vg-label" for="dex-filter-location">Sede</label>
+            <select id="dex-filter-location" v-model="filters.location_id" class="vg-input" data-testid="dex-filter-location" @change="loadAudits">
+              <option value="">Todas</option>
+              <option v-for="location in locationOptions" :key="location.id" :value="location.id">{{ location.label }}</option>
             </select>
           </div>
           <label class="vg-label" style="display: flex; align-items: center; gap: 8px; padding-top: 18px; text-transform: none;">
@@ -634,6 +711,15 @@ export const CoordinatorDexAuditsSubTab = {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="vg-action-group" style="justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;" data-testid="dex-pagination">
+        <span style="font-size: var(--font-size-caption); color: var(--color-ink-muted);" data-testid="dex-page-summary">
+          Mostrando {{ integer(audits.length) }} de {{ integer(total) }} volcados
+        </span>
+        <button v-if="hasMore" type="button" class="vg-btn vg-btn-secondary" data-testid="dex-load-more" :disabled="isLoading" @click="loadMore">
+          {{ isLoading ? 'Cargando…' : 'Cargar más' }}
+        </button>
       </div>
 
       <div v-if="rawError" class="vg-alert vg-alert-error" role="alert" data-testid="dex-raw-error">⚠️ {{ rawError }}</div>

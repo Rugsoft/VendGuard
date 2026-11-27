@@ -160,6 +160,10 @@ async function run() {
     return {
       data: {
         audits: [listAudit],
+        total: 1,
+        limit: 100,
+        offset: 0,
+        export_limit: 500,
         kpis: {
           total_active: 1,
           thermal_alert_count: 1,
@@ -169,6 +173,14 @@ async function run() {
         }
       }
     };
+  };
+  api.coordinator.getZones = async () => {
+    calls.push({ method: 'getZones' });
+    return { data: { zones: [{ id: 9, code: 'ZONA-N', name: 'Zona Norte' }] } };
+  };
+  api.coordinator.getLocations = async () => {
+    calls.push({ method: 'getLocations' });
+    return { data: [{ id: 5, name: 'Sede Centro', site_code: 'MAD-01' }] };
   };
   api.coordinator.getDexAudit = async (auditId) => {
     calls.push({ method: 'getDexAudit', auditId });
@@ -204,7 +216,14 @@ async function run() {
 
   await vm.loadAudits();
   const listCall = calls.filter((call) => call.method === 'getDexAudits').at(-1);
-  assert('1.1 La carga inicial pide solo vigentes sin filtros vacíos', listCall?.params?.status === 'ACTIVE' && !('date_from' in listCall.params) && !('alerts_only' in listCall.params));
+  assert(
+    '1.1 La carga inicial pide solo vigentes, sin filtros vacíos y con la primera página',
+    listCall?.params?.status === 'ACTIVE'
+      && listCall?.params?.limit === 100
+      && listCall?.params?.offset === 0
+      && !('date_from' in listCall.params)
+      && !('alerts_only' in listCall.params)
+  );
   assert(
     '1.2 Publica los cuatro KPIs y el contador de anulados',
     vm.safeKpis.total_active === 1
@@ -220,6 +239,8 @@ async function run() {
   vm.filters.status = 'ALL';
   vm.filters.import_source = 'COORDINATOR_CONSOLE';
   vm.filters.machine_id = 1;
+  vm.filters.zone_id = 9;
+  vm.filters.location_id = 5;
   vm.filters.alerts_only = true;
   await vm.loadAudits();
   const filteredCall = calls.filter((call) => call.method === 'getDexAudits').at(-1);
@@ -230,13 +251,62 @@ async function run() {
       && filteredCall?.params?.status === 'ALL'
       && filteredCall?.params?.import_source === 'COORDINATOR_CONSOLE'
       && filteredCall?.params?.machine_id === 1
+      && filteredCall?.params?.zone_id === 9
+      && filteredCall?.params?.location_id === 5
       && filteredCall?.params?.alerts_only === '1'
   );
   assert('1.5 El botón de limpiar solo se activa con perímetro', vm.hasActiveFilters === true);
   vm.resetFilters();
   assert('1.6 Limpiar restaura vigentes y borra el perímetro', vm.filters.status === 'ACTIVE' && vm.hasActiveFilters === false);
+
+  await vm.loadFilterCatalogs();
   assert(
-    '1.7 La celda Delta no duplica el placeholder cuando no hay unidades',
+    '1.7 Zonas y sedes alimentan los selectores del perímetro',
+    vm.zoneOptions.length === 1
+      && vm.zoneOptions[0].id === 9
+      && vm.locationOptions.length === 1
+      && vm.locationOptions[0].id === 5
+  );
+
+  const pagedCalls = [];
+  const originalPagedGet = api.coordinator.getDexAudits;
+  api.coordinator.getDexAudits = async (params) => {
+    pagedCalls.push(params);
+    return {
+      data: {
+        audits: [{ ...listAudit, id: params.offset === 0 ? 101 : 102 }],
+        total: 2,
+        export_limit: 500,
+        kpis: {}
+      }
+    };
+  };
+  vm.pageSize = 1;
+  await vm.loadAudits();
+  await vm.loadMore();
+  assert(
+    '1.8 La consola pagina con limit/offset y acumula «Cargar más»',
+    pagedCalls[0]?.limit === 1
+      && pagedCalls[0]?.offset === 0
+      && pagedCalls[1]?.limit === 1
+      && pagedCalls[1]?.offset === 1
+      && vm.audits.length === 2
+      && vm.hasMore === false
+  );
+  api.coordinator.getDexAudits = originalPagedGet;
+
+  vm.total = 600;
+  vm.exportLimit = 500;
+  assert(
+    '1.9 El aviso de CSV truncado se activa por encima del tope',
+    vm.exportTruncated === true
+      && CoordinatorDexAuditsSubTab.template.includes('data-testid="dex-export-warning"')
+      && CoordinatorDexAuditsSubTab.template.includes('data-testid="dex-load-more"')
+  );
+  await vm.loadAudits();
+
+  assert(
+    '1.10 La celda Delta no duplica el placeholder cuando no hay unidades',
     vm.deltaUnits({ effective_delta_vend_units: null, delta_vend_units: null }) === null
       && vm.deltaUnits({ effective_delta_vend_units: null, delta_vend_units: 7 }) === 7
       && vm.deltaUnits('') === null

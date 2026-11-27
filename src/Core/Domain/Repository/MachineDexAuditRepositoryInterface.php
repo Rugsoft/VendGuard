@@ -106,6 +106,13 @@ interface MachineDexAuditRepositoryInterface
     public function listForCoordinator(array $filters = [], int $limit = 100, int $offset = 0): array;
 
     /**
+     * Total de volcados del filtro activo, para paginar la consola (RF-07.1).
+     *
+     * @param array<string, mixed> $filters
+     */
+    public function countForCoordinator(array $filters = []): int;
+
+    /**
      * Cinco KPIs sobre el filtro activo, sin `raw_payload` (RF-07.1).
      *
      * @param array<string, mixed> $filters
