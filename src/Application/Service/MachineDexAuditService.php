@@ -72,6 +72,11 @@ use VendGuard\Core\Service\EvaDtsParser;
  * DEX_LINK_TARGET_NOT_ELIGIBLE`; un segundo volcado vigente sobre la misma
  * visita o recaudación responde `409 DEX_AUDIT_ALREADY_LINKED`.
  *
+ * **Conflicto Offline (PR25-06).** El volcado de un `.dex` rechazado se archiva
+ * solo si la máquina existe y queda dentro del perímetro vivo del actor, con el
+ * mismo guard del historial móvil (`404 MACHINE_NOT_FOUND`, `403
+ * MACHINE_OUTSIDE_*`) y un motivo de 1 a 500 caracteres.
+ *
  * El servicio no escribe SQL ni conoce PDO: compone los puertos de dominio.
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas.
@@ -85,6 +90,9 @@ final class MachineDexAuditService
     public const THERMAL_DEDUP_PREFIX = 'dex_thermal:';
     public const COLD_CHAIN_MACHINE_TYPES = ['PERISHABLE_FOOD', 'COMBO'];
     public const MAX_CSV_ROWS = 500;
+
+    /** Cota del motivo del volcado de conflicto Offline (PR25-06). */
+    public const CONFLICT_DUMP_MAX_REASON_LENGTH = 500;
 
     /** Tolerancia de reloj para una captura fechada por el cliente (PR25-04). */
     public const CAPTURED_AT_MAX_FUTURE_SECONDS = 300;
@@ -718,6 +726,86 @@ final class MachineDexAuditService
             );
         }
 
+        $context = $this->authorizedMobileMachineContext($machineId, $normalizedRole, $actorId);
+
+        $rows = $this->repository->listForCoordinator(
+            ['machine_id' => $machineId, 'status' => 'ACTIVE'],
+            max(1, min($limit, 100)),
+            0
+        );
+
+        return array_values(array_map(
+            fn (array $row): array => $this->projectByRole($row, $normalizedRole, false),
+            $rows
+        ));
+    }
+
+    /**
+     * Valida el volcado Offline de un `.dex` rechazado (PR25-06, C5).
+     *
+     * El conflicto se archiva como evento `MACHINE` solo si la máquina es real y
+     * queda dentro del perímetro vivo del actor. La lectura es la misma del
+     * historial móvil: sin `FOR UPDATE` y con `404 MACHINE_NOT_FOUND`, `403
+     * MACHINE_OUTSIDE_RESTOCKER_ZONES`/`MACHINE_OUTSIDE_TECHNICIAN_SCOPE` y
+     * `403 DEX_ACTOR_INACTIVE`. El motivo se acota a 1–500 caracteres reales.
+     *
+     * @return array<string, mixed>
+     */
+    public function assertConflictDumpMachine(int $machineId, string $role, int $actorId, string $reason): array
+    {
+        if ($machineId <= 0) {
+            throw new DexAuditValidationException(
+                'El volcado de conflicto .dex no trae una máquina válida.',
+                'DEX_INVALID_CONFLICT_DUMP_REQUEST',
+                ['field' => 'machine_id', 'value' => $machineId]
+            );
+        }
+
+        $cleanReason = trim($reason);
+        $reasonLength = mb_strlen($cleanReason, 'UTF-8');
+        if ($cleanReason === '' || $reasonLength > self::CONFLICT_DUMP_MAX_REASON_LENGTH) {
+            throw new DexAuditValidationException(
+                sprintf(
+                    'El motivo del volcado de conflicto debe tener entre 1 y %d caracteres.',
+                    self::CONFLICT_DUMP_MAX_REASON_LENGTH
+                ),
+                'DEX_INVALID_CONFLICT_REASON',
+                [
+                    'field' => 'reason',
+                    'length' => $reasonLength,
+                    'max_length' => self::CONFLICT_DUMP_MAX_REASON_LENGTH,
+                ]
+            );
+        }
+
+        $normalizedRole = strtoupper(trim($role));
+        if (!in_array($normalizedRole, ['RESTOCKER', 'TECHNICIAN'], true)) {
+            throw new DexAuditValidationException(
+                sprintf("El rol '%s' no puede volcar conflictos .dex móviles.", $role),
+                'DEX_INVALID_READER_ROLE',
+                ['role' => $role]
+            );
+        }
+
+        if ($actorId <= 0) {
+            throw new DexAuditValidationException(
+                'El volcado de conflicto .dex no trae un actor válido.',
+                'DEX_INVALID_CONFLICT_DUMP_REQUEST',
+                ['field' => 'actor_id', 'value' => $actorId]
+            );
+        }
+
+        return $this->authorizedMobileMachineContext($machineId, $normalizedRole, $actorId);
+    }
+
+    /**
+     * Máquina y perímetro compartidos por el historial móvil y el conflicto
+     * Offline (PR25-01, PR25-06).
+     *
+     * @return array<string, mixed>
+     */
+    private function authorizedMobileMachineContext(int $machineId, string $role, int $actorId): array
+    {
         $context = $this->gateway->findMachineContext($machineId, $actorId);
         if ($context === null) {
             throw new DexAuditValidationException(
@@ -730,37 +818,28 @@ final class MachineDexAuditService
 
         if (($context['actor_is_active'] ?? false) !== true) {
             throw new DexAuditForbiddenException(
-                'El usuario que intenta consultar el historial .dex no está activo.',
+                'El usuario que intenta acceder al historial .dex no está activo.',
                 'DEX_ACTOR_INACTIVE',
                 ['actor_id' => $actorId]
             );
         }
 
-        $coversTerritory = $normalizedRole === 'RESTOCKER'
+        $coversTerritory = $role === 'RESTOCKER'
             ? (bool)($context['is_covered_restocker'] ?? false)
             : (bool)($context['is_covered_technician'] ?? false);
         if (!$coversTerritory) {
             throw new DexAuditForbiddenException(
-                $normalizedRole === 'RESTOCKER'
+                $role === 'RESTOCKER'
                     ? 'La máquina queda fuera de las zonas operativas activas del Reponedor.'
                     : 'El Técnico no tiene intervención activa ni cobertura de la zona de la sede.',
-                $normalizedRole === 'RESTOCKER'
+                $role === 'RESTOCKER'
                     ? 'MACHINE_OUTSIDE_RESTOCKER_ZONES'
                     : 'MACHINE_OUTSIDE_TECHNICIAN_SCOPE',
-                ['machine_id' => $machineId, 'actor_id' => $actorId, 'role' => $normalizedRole]
+                ['machine_id' => $machineId, 'actor_id' => $actorId, 'role' => $role]
             );
         }
 
-        $rows = $this->repository->listForCoordinator(
-            ['machine_id' => $machineId, 'status' => 'ACTIVE'],
-            max(1, min($limit, 100)),
-            0
-        );
-
-        return array_values(array_map(
-            fn (array $row): array => $this->projectByRole($row, $normalizedRole, false),
-            $rows
-        ));
+        return $context;
     }
 
     /**

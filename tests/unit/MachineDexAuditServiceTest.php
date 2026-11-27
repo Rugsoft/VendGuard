@@ -792,6 +792,42 @@ $coordinatorLinked = $service->importDex($request(16, 7, 'COORDINATOR_CONSOLE', 
 $assert('6.9 Coordinación puede enlazar una visita de otro operador de la misma máquina',
     ($coordinatorLinked['audit']['restock_visit_id'] ?? 0) === 901);
 
+echo "\n--- 7. Volcado de conflicto Offline (PR25-06) ---\n";
+
+$gateway->contexts[17] = $context('COMBO', 'RESTOCKER', ['is_covered_restocker' => false]);
+$gateway->contexts[18] = $context('COMBO', 'TECHNICIAN', ['is_covered_technician' => false]);
+$conflictReason = 'El volcado .dex offline ya no puede aplicarse.';
+
+$assert('7.1 Una máquina inexistente es 404 MACHINE_NOT_FOUND', $expect(
+    static fn () => $service->assertConflictDumpMachine(999999, 'RESTOCKER', 5, $conflictReason),
+    'MACHINE_NOT_FOUND',
+    404
+));
+$assert('7.2 Una máquina fuera de las zonas del Reponedor es 403', $expect(
+    static fn () => $service->assertConflictDumpMachine(17, 'RESTOCKER', 5, $conflictReason),
+    'MACHINE_OUTSIDE_RESTOCKER_ZONES',
+    403
+));
+$assert('7.3 Una máquina fuera del alcance del Técnico es 403', $expect(
+    static fn () => $service->assertConflictDumpMachine(18, 'TECHNICIAN', 6, $conflictReason),
+    'MACHINE_OUTSIDE_TECHNICIAN_SCOPE',
+    403
+));
+$assert('7.4 Un motivo vacío es 422 DEX_INVALID_CONFLICT_REASON', $expect(
+    static fn () => $service->assertConflictDumpMachine(15, 'RESTOCKER', 5, '   '),
+    'DEX_INVALID_CONFLICT_REASON',
+    422
+));
+$assert('7.5 Un motivo de más de 500 caracteres es 422 DEX_INVALID_CONFLICT_REASON', $expect(
+    static fn () => $service->assertConflictDumpMachine(15, 'RESTOCKER', 5, str_repeat('x', 501)),
+    'DEX_INVALID_CONFLICT_REASON',
+    422
+));
+$conflictContext = $service->assertConflictDumpMachine(15, 'RESTOCKER', 5, $conflictReason);
+$assert('7.6 El volcado válido devuelve la máquina resuelta',
+    ($conflictContext['machine_code'] ?? '') === 'VEND-DEX07'
+        && ($conflictContext['actor_role'] ?? '') === 'RESTOCKER');
+
 echo "\n======================================================================\n";
 echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";
 

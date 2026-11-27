@@ -306,14 +306,18 @@ class TechnicianController
             $payload = $request->getParsedBody();
             $machineId = (int)($payload['machine_id'] ?? 0);
             $reason = trim((string)($payload['reason'] ?? ''));
-            if ($machineId <= 0 || $reason === '') {
-                throw new InvalidArgumentException('El volcado de conflicto exige machine_id y reason.');
-            }
+            $actor = $this->dexActor($request);
+            $this->dexService()->assertConflictDumpMachine(
+                $machineId,
+                'TECHNICIAN',
+                (int)($actor['id'] ?? 0),
+                $reason
+            );
 
             $this->audit()->logMachineEvent(
                 $machineId,
                 'OFFLINE_DEX_AUDIT_CONFLICT_DUMP',
-                $this->dexActor($request),
+                $actor,
                 null,
                 ['reason' => $reason, 'client_mutation_id' => $payload['client_mutation_id'] ?? null],
                 ['module' => 'EVA_DTS_DEX_AUDIT']

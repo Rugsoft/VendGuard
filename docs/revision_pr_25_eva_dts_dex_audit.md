@@ -9,9 +9,9 @@
 | **HEAD revisado** | `305d7ac5` (`docs(eva-dts-dex-audit): sync certification metrics after the UI audit`) |
 | **Base** | `efd18fb8` (`main`) |
 | **Fecha de la revisión** | 2026-11-27 |
-| **Estado** | PR abierta, **no fusionada**. `PR25-01`, `PR25-02`, `PR25-03`, `PR25-04` y `PR25-05` cerrados en local el 2026-11-27; los cuatro hallazgos restantes siguen abiertos. |
+| **Estado** | PR abierta, **no fusionada**. `PR25-01`, `PR25-02`, `PR25-03`, `PR25-04`, `PR25-05` y `PR25-06` cerrados en local el 2026-11-27; los tres hallazgos restantes siguen abiertos. |
 | **Alcance** | Diff `origin/main...HEAD` del Módulo 39: migración `035` y convergencia con `supabase_init.sql`, parser/validador, servicio, repositorio y gateway, RBAC/perímetro, controladores, consola de Coordinación, vistas móviles y cola Offline. Contraste con `specs/39-eva-dts-dex-audit/spec.md` y las suites del módulo. |
-| **Resultado** | **9 hallazgos**: 5 cerrados (`PR25-01`, `PR25-02`, `PR25-03`, `PR25-04` y `PR25-05`) y 4 abiertos (2 P2 y 2 P3). Las correcciones y sus regresiones están incluidas en esta rama local. |
+| **Resultado** | **9 hallazgos**: 6 cerrados (`PR25-01`, `PR25-02`, `PR25-03`, `PR25-04`, `PR25-05` y `PR25-06`) y 3 abiertos (1 P2 y 2 P3). Las correcciones y sus regresiones están incluidas en esta rama local. |
 
 > **Acta de cierre · `PR25-01` (2026-11-27):** cerrado en local. El historial móvil exige actor, resuelve la cobertura con `findMachineContext()` —lectura sin `FOR UPDATE`— y responde `404 MACHINE_NOT_FOUND` o `403 MACHINE_OUTSIDE_RESTOCKER_ZONES`/`MACHINE_OUTSIDE_TECHNICIAN_SCOPE`. La regresión `DexAuditApiTest` 1.5–1.8 cierra en verde (50/50 aserciones). La PR no se ha fusionado.
 
@@ -22,6 +22,8 @@
 > **Acta de cierre · `PR25-04` (2026-11-27):** cerrado en local. `MachineDexAuditService::normalizeCapturedAt()` valida una sola vez `captured_at` antes de la transacción: acepta ISO 8601 con offset/Z y `datetime-local` sin zona, interpreta este último como `Europe/Madrid`, normaliza a UTC y rechaza fechas futuras con una tolerancia de 300 s. Los errores de formato y de futuro responden `422` con código y campo. Las puertas móviles añaden un `catch (Throwable)` defensivo. La regresión cubre formato inválido, fecha futura, `Z` con milisegundos y una captura de Coordinación a las 23:30 que se persiste como 22:30 UTC. Unitarias 36/36, API 54/54 y canal `DexAudit` 7/7 suites · 183 aserciones. La PR no se ha fusionado.
 
 > **Acta de cierre · `PR25-05` (2026-11-27):** cerrado en local. `MachineDexAuditService::resolveLinkTargets()` valida y bloquea `restock_visit_id`, `cash_collection_id` e `incident_id` dentro de la transacción del alta: la visita debe existir, ser de la máquina y estar `COMPLETED`; en la puerta del Reponedor, visita y recaudación deben ser del propio actor. Los rechazos son `422 DEX_LINK_TARGET_NOT_FOUND`/`DEX_LINK_ID_INVALID` y `409 DEX_LINK_TARGET_NOT_ELIGIBLE`. El repositorio traduce `23503` de los tres vínculos y los índices únicos de visita/recaudación a `422`/`409 DEX_AUDIT_ALREADY_LINKED`, de modo que la cola Offline aísla el conflicto en lugar de reintentar un 500. Unitarias 45/45, API 58/58 y canal `DexAudit` 7/7 suites · 187 aserciones. La PR no se ha fusionado.
+
+> **Acta de cierre · `PR25-06` (2026-11-27):** cerrado en local. `MachineDexAuditService::assertConflictDumpMachine()` reutiliza el guard del historial móvil (`findMachineContext`, sin `FOR UPDATE`) antes de escribir en `audit_log`: máquina inexistente `404 MACHINE_NOT_FOUND`, fuera de zona `403 MACHINE_OUTSIDE_RESTOCKER_ZONES`/`MACHINE_OUTSIDE_TECHNICIAN_SCOPE` y motivo de 1 a 500 caracteres (`422 DEX_INVALID_CONFLICT_REASON`). `RestockerRouteController` usa el `AuditLogger` inyectado en lugar de instanciar uno nuevo. Unitarias 51/51, API 64/64 y canal `DexAudit` 7/7 suites · 193 aserciones. La PR no se ha fusionado.
 
 > **Nota:** la batería global de la rama estaba en verde antes de esta revisión (461 suites · 18.140 aserciones · 0 fallos · `DocMetricsGuard` coherente; canal `new_engine` 85/85 · 2.905 aserciones). Ese verde no cubre los huecos descritos: no hay pruebas de perímetro en el listado móvil ni de vínculos operativos, entre otros. Tras las correcciones, `DexAuditApiTest`, `DexAuditConcurrencyTest` y el canal `DexAudit` cierran en verde.
 
@@ -34,10 +36,10 @@ El núcleo del Módulo 39 está bien construido: el parser es determinista, la m
 Los defectos se concentran en los bordes del contrato y en la confianza en datos del cliente:
 
 - **P1:** fuga de perímetro en los historiales `.dex` móviles, **cerrada** (`PR25-01`), y ausencia de una transacción real que haga efectivo el `FOR UPDATE` durante el cálculo de deltas, **cerrada** (`PR25-02`).
-- **P2:** vínculos M34/M35/M16 sin comprobar, **cerrada** (`PR25-05`); `conflict-dump` sin perímetro y cola `.dex` que sobrevive al cierre de sesión siguen abiertos.
+- **P2:** vínculos M34/M35/M16 sin comprobar, **cerrada** (`PR25-05`), y `conflict-dump` sin perímetro, **cerrada** (`PR25-06`); la cola `.dex` que sobrevive al cierre de sesión sigue abierta.
 - **P3:** correlativo anual que se bloquea al superar 9.999 y consola de Coordinación sin paginación ni filtros completos.
 
-**Recomendación:** no fusionar hasta corregir `PR25-06` a `PR25-09`. Esos hallazgos deberían entrar en la misma corrección por afectar a integridad, contrato HTTP y datos operativos. `PR25-01`, `PR25-02`, `PR25-03`, `PR25-04` y `PR25-05` ya están corregidos y verificados en local.
+**Recomendación:** no fusionar hasta corregir `PR25-07` a `PR25-09`. Esos hallazgos deberían entrar en la misma corrección por afectar a integridad, contrato HTTP y datos operativos. `PR25-01`, `PR25-02`, `PR25-03`, `PR25-04`, `PR25-05` y `PR25-06` ya están corregidos y verificados en local.
 
 ---
 
@@ -50,7 +52,7 @@ Los defectos se concentran en los bordes del contrato y en la confianza en datos
 | 3 | `PR25-03` | **P2 · Media-alta** | `expected_machine_code` permitía ocultar un DEX de otra máquina | Se suprimía el aviso de identidad y se contaminaban los contadores de la máquina destino | ✅ Cerrado |
 | 4 | `PR25-04` | **P2 · Media-alta** | `captured_at` no se valida: 500, fechas futuras y desfase horario | Error interno ante una fecha malformada y alteración del orden/deltas | ✅ Cerrado |
 | 5 | `PR25-05` | **P2 · Media-alta** | Vínculos M34/M35/M16 sin validar y violaciones únicas no traducidas | Vínculos cruzados, cruces nulos y 500 que la cola reintenta | ✅ Cerrado |
-| 6 | `PR25-06` | **P2 · Media** | `conflict-dump` no comprueba existencia ni perímetro de la máquina | Cualquier operador puede escribir en `audit_log` para una máquina ajena o inexistente | Abierto |
+| 6 | `PR25-06` | **P2 · Media** | `conflict-dump` no comprueba existencia ni perímetro de la máquina | Cualquier operador puede escribir en `audit_log` para una máquina ajena o inexistente | ✅ Cerrado |
 | 7 | `PR25-07` | **P2 · Media** | La cola `.dex` no se limpia al cerrar sesión | Los `.dex` crudos quedan en IndexedDB en un dispositivo compartido | Abierto |
 | 8 | `PR25-08` | **P3 · Baja** | El correlativo anual se bloquea al pasar de 9.999 | Las importaciones fallan hasta el siguiente año al superar 10.000 volcados | Abierto |
 | 9 | `PR25-09` | **P3 · Baja** | La consola de Coordinación no pagina y no ofrece todos los filtros | Los volcados antiguos quedan ocultos tras las primeras 100 filas | Abierto |
@@ -295,6 +297,8 @@ Las pruebas HTTP 2.12 y 2.13 llegan al `INSERT` real y certifican la traducción
 
 **Prioridad:** P2 · **Requisitos afectados:** contrato de `POST /api/{role}/dex-audits/conflict-dump` (`403`, `404`, `422`), Art. III.3.
 
+**Estado:** ✅ **Cerrado (2026-11-27)** · guard de existencia y perímetro compartido con el historial móvil, motivo acotado a 500 caracteres y `AuditLogger` inyectado.
+
 ### Evidencia
 
 - `src/Presentation/Controller/RestockerRouteController.php:676-698`: solo valida `machine_id > 0` y `reason` no vacío. No resuelve la máquina ni comprueba cobertura.
@@ -321,9 +325,23 @@ Responde `200 CONFLICT_DUMPED` y escribe en `audit_log` para una máquina inexis
 
 Cualquier operador autenticado puede generar ruido o entradas falsas en el visor de auditoría de una máquina que no le corresponde. Además, el uso de `new AuditLogger()` rompe la inyección: en pruebas o con un `$pdo`/transacción distinta, el evento se escribe por otra conexión.
 
-### Corrección propuesta
+### Corrección aplicada
 
-Reutilizar la resolución de máquina y el guard de perímetro de la importación; devolver `404 MACHINE_NOT_FOUND` o `403 MACHINE_OUTSIDE_*`; validar el motivo con las cotas del contrato y usar el `AuditLogger` inyectado. Añadir pruebas de máquina inexistente y fuera de zona.
+1. `MachineDexAuditService::assertConflictDumpMachine()` valida el cuerpo antes de escribir nada: `machine_id` positivo (`422 DEX_INVALID_CONFLICT_DUMP_REQUEST`), motivo obligatorio de 1 a 500 caracteres reales (`422 DEX_INVALID_CONFLICT_REASON`), rol móvil autorizado y actor positivo. Después exige la máquina con el mismo guard del historial móvil: `404 MACHINE_NOT_FOUND`, `403 DEX_ACTOR_INACTIVE` o `403 MACHINE_OUTSIDE_RESTOCKER_ZONES`/`MACHINE_OUTSIDE_TECHNICIAN_SCOPE`.
+2. El guard compartido se extrajo a `authorizedMobileMachineContext()`, que usa `findMachineContext()` sin `FOR UPDATE`: el historial móvil (`listForRole`) y el `conflict-dump` resuelven la misma cobertura y los mismos códigos, sin duplicar la regla.
+3. `RestockerRouteController::dumpDexConflict()` y `TechnicianController::dumpDexConflict()` invocan el guard antes de `logMachineEvent()`. Un rechazo no escribe ninguna fila en `audit_log`; la entidad del evento aceptado sigue siendo `MACHINE` (C5).
+4. `RestockerRouteController` recibe un `?AuditLogger` opcional y lo resuelve con `audit()`; `dumpDexConflict()` deja de usar `(new AuditLogger())`. El Técnico ya usaba su logger perezoso inyectado.
+5. La regresión añade las unitarias 7.1–7.6 (máquina inexistente, fuera de zona de Reponedor y de Técnico, motivo vacío, motivo de 501 caracteres y contexto válido) y las HTTP 6.1–6.8 (200, motivo vacío, motivo largo, máquina inexistente, ambos perímetros, ausencia de filas en `audit_log` y logger inyectado mediante espía).
+
+### Verificación
+
+```text
+php tests/unit/MachineDexAuditServiceTest.php             → 51/51 aserciones · exit 0
+php tests/integration/DexAuditApiTest.php                → 64/64 aserciones · exit 0
+php tests/run_new_engine.php DexAudit                    → 7/7 suites · 193 aserciones · exit 0
+```
+
+La prueba HTTP 6.7 consulta `audit_log` para las máquinas rechazadas y exige cero filas; 6.8 construye la puerta del Reponedor con un `AuditLogger` espía y certifica que el evento pasa por la instancia inyectada. `php -l` y `git diff --check` también cierran sin errores.
 
 ---
 
@@ -405,15 +423,15 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 - Identidad `ID1` contrastada contra la máquina resuelta aunque el cliente falsifique `expected_machine_code` (`PR25-03`, unitaria 1.11 y HTTP 2.6).
 - Validación y normalización de `captured_at` (`PR25-04`, unitarias 1.12–1.14 y HTTP 2.7–2.9): formato inválido, fecha futura, ISO 8601 móvil con `Z` y milisegundos, y captura local de Coordinación interpretada en `Europe/Madrid`.
 - Vínculos M34/M35/M16 (`PR25-05`, unitarias 6.1–6.9 y HTTP 2.10–2.13): inexistente, de otra máquina, visita no completada, visita/recaudación de otro Reponedor, identificador no numérico, persistencia de los tres vínculos y ocupación única de visita/recaudación traducida a `409`.
+- `conflict-dump` Offline (`PR25-06`, unitarias 7.1–7.6 y HTTP 6.1–6.8): máquina inexistente, fuera de zona de Reponedor y de Técnico, motivo vacío o de más de 500 caracteres, ausencia de filas en `audit_log` y uso del `AuditLogger` inyectado.
 - Parser, esquema, convergencia y rendimiento del canal `new_engine`.
 
 ### Lo que no cubre la suite existente
 
-- `conflict-dump` con máquina inexistente/fuera de zona (`PR25-06`).
 - Limpieza de IndexedDB al cerrar sesión (`PR25-07`).
 - Transición del correlativo `9999 → 10000 → 10001` (`PR25-08`).
 - Paginación y filtros de zona/sede de la consola (`PR25-09`).
 
 ### Límites
 
-La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest`, `PR25-02` con la carrera real de `DexAuditConcurrencyTest`, `PR25-03` con la regresión unitaria 1.11 y la HTTP 2.6, `PR25-04` con las unitarias 1.12–1.14 y las HTTP 2.7–2.9, y `PR25-05` con las unitarias 6.1–6.9 y las HTTP 2.10–2.13, todos contra PostgreSQL aislado; los cuatro hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.
+La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest`, `PR25-02` con la carrera real de `DexAuditConcurrencyTest`, `PR25-03` con la regresión unitaria 1.11 y la HTTP 2.6, `PR25-04` con las unitarias 1.12–1.14 y las HTTP 2.7–2.9, `PR25-05` con las unitarias 6.1–6.9 y las HTTP 2.10–2.13, y `PR25-06` con las unitarias 7.1–7.6 y las HTTP 6.1–6.8, todos contra PostgreSQL aislado; los tres hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.

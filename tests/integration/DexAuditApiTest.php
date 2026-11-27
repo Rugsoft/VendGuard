@@ -34,17 +34,60 @@ require_once __DIR__ . '/../../src/Infrastructure/Database/PostgresMigrationRunn
 
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\AuthService;
+use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Application\Service\DexAuditLinker;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineDexAuditRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
+use VendGuard\Presentation\Controller\RestockerRouteController;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 use VendGuard\Presentation\Routing\AppRouter;
 
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 const DEX09_API_SCHEMA = 't_dex09_api';
+
+/** Espía del `AuditLogger` inyectado en la puerta del Reponedor (PR25-06). */
+final class Dex09SpyAuditLogger extends AuditLogger
+{
+    /** @var list<array<string, mixed>> */
+    public array $machineEvents = [];
+
+    public function __construct()
+    {
+    }
+
+    public function logMachineEvent(
+        int $machineId,
+        string $action,
+        array $user,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $this->machineEvents[] = [
+            'machine_id' => $machineId,
+            'action' => strtoupper(trim($action)),
+            'user' => $user,
+            'new_state' => $newState,
+            'metadata' => $metadata,
+        ];
+
+        return new AuditEvent(
+            null,
+            AuditEvent::ENTITY_MACHINE,
+            $machineId,
+            $action,
+            isset($user['id']) ? (int)$user['id'] : null,
+            (string)($user['role'] ?? 'RESTOCKER'),
+            (string)($user['name'] ?? 'Reposición'),
+            $previousState,
+            $newState,
+            $metadata
+        );
+    }
+}
 
 $projectRoot = dirname(__DIR__, 2);
 $assertions = 0;
@@ -652,14 +695,85 @@ try {
     );
 
     echo "\n--- 6. Conflict-dump Offline ---\n";
+    $dumpReason = 'El volcado .dex offline ya no puede aplicarse.';
     $dump = $call('POST', '/api/restocker/dex-audits/conflict-dump', [
         'machine_id' => $machineId,
         'reason' => 'DEX_DUPLICATE_HASH',
         'client_mutation_id' => 'dex09-api-conflict-0001',
     ], $restockerToken);
     $assert('6.1 El volcado de conflicto responde 200 CONFLICT_DUMPED', $dump->getStatusCode() === 200 && (($data($dump)['outcome_status'] ?? '') === 'CONFLICT_DUMPED'));
-    $badDump = $call('POST', '/api/technician/dex-audits/conflict-dump', ['machine_id' => 0], $technicianToken);
-    $assert('6.2 Un conflict-dump sin motivo responde 422', $badDump->getStatusCode() === 422);
+    $badDump = $call('POST', '/api/technician/dex-audits/conflict-dump', ['machine_id' => $machineId], $technicianToken);
+    $assert(
+        '6.2 Un conflict-dump sin motivo responde 422 DEX_INVALID_CONFLICT_REASON',
+        $badDump->getStatusCode() === 422 && $errorCode($badDump) === 'DEX_INVALID_CONFLICT_REASON',
+        $errorCode($badDump)
+    );
+    $longDump = $call('POST', '/api/restocker/dex-audits/conflict-dump', [
+        'machine_id' => $machineId,
+        'reason' => str_repeat('x', 501),
+    ], $restockerToken);
+    $assert(
+        '6.3 Un motivo de más de 500 caracteres responde 422 DEX_INVALID_CONFLICT_REASON',
+        $longDump->getStatusCode() === 422 && $errorCode($longDump) === 'DEX_INVALID_CONFLICT_REASON',
+        $errorCode($longDump)
+    );
+    $missingDump = $call('POST', '/api/restocker/dex-audits/conflict-dump', [
+        'machine_id' => 999999,
+        'reason' => $dumpReason,
+    ], $restockerToken);
+    $assert(
+        '6.4 Una máquina inexistente responde 404 MACHINE_NOT_FOUND',
+        $missingDump->getStatusCode() === 404 && $errorCode($missingDump) === 'MACHINE_NOT_FOUND',
+        $errorCode($missingDump)
+    );
+    $outsideDump = $call('POST', '/api/restocker/dex-audits/conflict-dump', [
+        'machine_id' => $outsideMachineId,
+        'reason' => $dumpReason,
+    ], $restockerToken);
+    $assert(
+        '6.5 Una máquina fuera de las zonas del Reponedor responde 403',
+        $outsideDump->getStatusCode() === 403 && $errorCode($outsideDump) === 'MACHINE_OUTSIDE_RESTOCKER_ZONES',
+        $errorCode($outsideDump)
+    );
+    $outsideTechnicianDump = $call('POST', '/api/technician/dex-audits/conflict-dump', [
+        'machine_id' => $outsideMachineId,
+        'reason' => $dumpReason,
+    ], $technicianToken);
+    $assert(
+        '6.6 Una máquina fuera del alcance del Técnico responde 403',
+        $outsideTechnicianDump->getStatusCode() === 403
+            && $errorCode($outsideTechnicianDump) === 'MACHINE_OUTSIDE_TECHNICIAN_SCOPE',
+        $errorCode($outsideTechnicianDump)
+    );
+    $rejectedRows = $pdo->prepare(
+        "SELECT COUNT(*) FROM audit_log
+         WHERE action = 'OFFLINE_DEX_AUDIT_CONFLICT_DUMP'
+           AND entity_type = 'MACHINE'
+           AND entity_id IN (999999, :outside_machine_id)"
+    );
+    $rejectedRows->execute([':outside_machine_id' => $outsideMachineId]);
+    $assert(
+        '6.7 Los volcados rechazados no escriben en audit_log',
+        (int)$rejectedRows->fetchColumn() === 0
+    );
+
+    $spyLogger = new Dex09SpyAuditLogger();
+    $spyController = new RestockerRouteController($pdo, auditLogger: $spyLogger);
+    $spyRequest = new Request('POST', '/api/restocker/dex-audits/conflict-dump', [], [
+        'machine_id' => $machineId,
+        'reason' => 'Motivo de conflicto con el logger inyectado.',
+        'client_mutation_id' => 'dex09-api-conflict-0002',
+    ], ['Content-Type' => 'application/json']);
+    $spyRequest->setAttribute('user_id', $restockerId);
+    $spyRequest->setAttribute('user_role', 'RESTOCKER');
+    $spyResponse = $spyController->dumpDexConflict($spyRequest);
+    $assert(
+        '6.8 El conflict-dump usa el AuditLogger inyectado',
+        $spyResponse->getStatusCode() === 200
+            && ($spyLogger->machineEvents[0]['action'] ?? '') === 'OFFLINE_DEX_AUDIT_CONFLICT_DUMP'
+            && (int)($spyLogger->machineEvents[0]['machine_id'] ?? 0) === $machineId,
+        (string)$spyResponse->getStatusCode()
+    );
 
     echo "\n--- 7. Delta efectivo tras VOIDED (AUD-39-02, QA-2) ---\n";
     $chainPayload = static fn (string $comm, int $salesCents, int $units): string =>

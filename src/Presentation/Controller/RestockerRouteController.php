@@ -130,6 +130,9 @@ final class RestockerRouteController
 
     private ?MachineDexAuditService $dexAuditService;
 
+    /** Registro de auditoría inyectable (PR25-06). */
+    private ?AuditLogger $auditLogger = null;
+
     public function __construct(
         ?PDO $pdo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -145,7 +148,8 @@ final class RestockerRouteController
         ?RestockRoutePlannerService $routePlanner = null,
         ?RestockRouteOverrideService $routeOverrides = null,
         ?RouteSettingsRepositoryInterface $routeSettings = null,
-        ?MachineDexAuditService $dexAuditService = null
+        ?MachineDexAuditService $dexAuditService = null,
+        ?AuditLogger $auditLogger = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $this->pdo = $pdo;
@@ -224,6 +228,7 @@ final class RestockerRouteController
         );
         $this->routeSettings = $routeSettings ?? new PdoRouteSettingsRepository($pdo);
         $this->dexAuditService = $dexAuditService;
+        $this->auditLogger = $auditLogger;
 
         $this->visitService = $visitService ?? new MachineRestockVisitService(
             $this->visitRepository,
@@ -680,12 +685,14 @@ final class RestockerRouteController
             $payload = $request->getParsedBody();
             $machineId = (int)($payload['machine_id'] ?? 0);
             $reason = trim((string)($payload['reason'] ?? ''));
-            if ($machineId <= 0 || $reason === '') {
-                throw new InvalidArgumentException('El volcado de conflicto exige machine_id y reason.');
-            }
-
             $actor = $this->actor($request);
-            (new AuditLogger())->logMachineEvent(
+            $this->dexService()->assertConflictDumpMachine(
+                $machineId,
+                'RESTOCKER',
+                (int)$actor['id'],
+                $reason
+            );
+            $this->audit()->logMachineEvent(
                 $machineId,
                 'OFFLINE_DEX_AUDIT_CONFLICT_DUMP',
                 $actor,
@@ -1496,6 +1503,11 @@ final class RestockerRouteController
         }
 
         return $payload;
+    }
+
+    private function audit(): AuditLogger
+    {
+        return $this->auditLogger ??= new AuditLogger(new PdoAuditLogRepository($this->pdo));
     }
 
     private function dexService(): MachineDexAuditService
