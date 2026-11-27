@@ -513,6 +513,8 @@ try {
     'dex-filter-status',
     'dex-filter-source',
     'dex-filter-machine',
+    'dex-filter-zone',
+    'dex-filter-location',
     'dex-filter-alerts'
   ];
   const filters = [];
@@ -522,10 +524,30 @@ try {
   }
   emitMeasurement('filtros 360', filters.map((field) => ({ testid: field.testid, left: field.left, right: field.right, width: field.width })));
   assert(
-    '1.5 Los seis filtros están montados y contenidos',
-    filters.length === 6
+    '1.5 Los ocho filtros, incluidos zona y sede, están montados y contenidos',
+    filters.length === 8
       && filters.every((field) => field.found === true && field.left >= 0 && field.right <= 360 && field.width > 0),
     JSON.stringify(filters)
+  );
+
+  const pagination = await measureElement(mobile, '[data-testid="dex-pagination"]');
+  const pageSummary = await measureElement(mobile, '[data-testid="dex-page-summary"]');
+  const loadMore = await measureElement(mobile, '[data-testid="dex-load-more"]');
+  emitMeasurement('paginación 360', {
+    pagination: { left: pagination.left, right: pagination.right, width: pagination.width },
+    summary: { left: pageSummary.left, right: pageSummary.right, width: pageSummary.width, text: pageSummary.text },
+    loadMore: { left: loadMore.left, right: loadMore.right, width: loadMore.width }
+  });
+  assert(
+    '1.5.b El resumen y «Cargar más» caben a 360 px',
+    pagination.found === true
+      && pageSummary.found === true
+      && loadMore.found === true
+      && pagination.left >= 0 && pagination.right <= 360
+      && pageSummary.left >= 0 && pageSummary.right <= 360
+      && loadMore.left >= 0 && loadMore.right <= 360 && loadMore.width > 0
+      && pageSummary.text.includes('de 120'),
+    JSON.stringify({ pagination, pageSummary, loadMore })
   );
 
   const manual = await measureElement(mobile, '[data-testid="dex-manual-import"]');
