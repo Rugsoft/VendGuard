@@ -18,7 +18,7 @@
 No se detectó ningún fallo de bloqueo (`P1`) en la UI del Módulo 39. El flujo principal respondió bien: carga de vigentes, filtro de alertas, modal de detalle, apertura/cierre de modales, anulación sin confirmar, importación manual con zona vacía, CSV y descarga `.dex` devolvieron `200`; las APIs de producto fueron limpias y la consola del producto no mostró errores. Se detectaron **7 defectos de UI**, sin Pérdida de datos ni cambio de estado presentado:
 
 - **Dos de ellos importaban** (prioridad Alta): un delta desconocido se pintaba como `0` en el historial móvil (H-39-01, **cerrado el 2026-11-27**) y la tarjeta «Máquina» del detalle de Coordinación quedaba vacía (H-39-02, **cerrado el 2026-11-27**).
-- **Un defecto de accesibilidad** deja al panel DEX del Reponedor sin comportamiento modal real en teclado (`P3`).
+- **Un defecto de accesibilidad** dejaba al panel DEX del Reponedor sin comportamiento modal real en teclado (`P3`); **cerrado el 2026-11-27**.
 - **Los cuatro restantes son de presentación o copy** (`P3-P4`): timestamp técnico sin localizar, dos plurales con una unidad, placeholder duplicado en Delta y texto recortado del selector de archivo en móvil.
 
 El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); se documenta aparte como externo/ambiental.
@@ -27,7 +27,7 @@ El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); s
 |---:|---|---|---|---|
 | 1 | **H-39-01** | **Alta** | Un delta sin base se muestra como `0` en el historial móvil | **Cerrado (2026-11-27)** |
 | 2 | **H-39-02** | **Alta** | La tarjeta «Máquina» del detalle de Coordinación está vacía | **Cerrado (2026-11-27)** |
-| 3 | **H-39-03** | **P3 · Media** | El panel DEX del Reponedor no es un modal plenamente operable por teclado | Pendiente |
+| 3 | **H-39-03** | **P3 · Media** | El panel DEX del Reponedor no es un modal plenamente operable por teclado | **Cerrado (2026-11-27)** |
 | 4 | **H-39-04** | **P3 · Media-baja** | Fecha técnica sin localizar en el historial móvil | Pendiente |
 | 5 | **H-39-05** | **P4 · Baja** | Plurales incorrectos con una unidad (`1 anulados`, `1 bloques`) | Pendiente |
 | 6 | **H-39-06** | **P4 · Baja** | Placeholder duplicado `— — uds.` en la columna Delta de la tabla | Pendiente |
@@ -123,7 +123,7 @@ En el mismo producto, el modal de Coordinación sí mueve el foco al abrir, tien
 
 **Evidencia.** Evaluación sobre el DOM con `document.querySelector('[data-testid="restocker-dex-modal"]')`: `role` nulo, `aria-modal` nulo, `modalContainsFocus === false`; `Escape` no cerró el panel; el botón de fondo conservó el foco.
 
-**Estado:** Pendiente. Prioridad `P3` (accesibilidad, sin bloqueo).
+**Estado:** **Cerrado el 2026-11-27.** El panel inferior se declara ahora como diálogo semántico (`role="dialog"`, `aria-modal="true"`, `aria-labelledby="restocker-dex-title"`, `tabindex="-1"`, `ref="dexDialog"`) sin cambiar su presentación móvil. Al abrirse guarda el disparador y mueve el foco al botón «Cerrar»; un `keydown` de documento atrapa `Tab`/`Shift+Tab` dentro del panel, cierra con `Escape` y devuelve el foco al botón `btn-open-dex-audit` de origen. **Evidencia:** `node tests/frontend/restocker_route_view.test.mjs` → **267/267**, `exit=0` (4 aserciones nuevas: semántica del tag, foco inicial, `Escape` con retorno de foco y trampa de `Tab`); `node tests/unit/FrontendTemplateCompileTest.mjs` → **83 plantillas / 5.729 expresiones / 0 fallos**, `exit=0`; `node --check` de la vista → sintaxis válida. Comprobación real en Chromium a 360×800: apertura con `Enter` desde el botón (`document.activeElement` = «Cerrar», dentro del diálogo), `Tab` desde el último control vuelve al primero, `Shift+Tab` desde el primero vuelve al último, `Escape` cierra y deja el foco en `btn-open-dex-audit`; consola sin errores de producto. Captura: `screenshots/ui-audit-18-dex-dialog-keyboard-360.png`. Prioridad `P3` (accesibilidad, sin bloqueo).
 
 ---
 
@@ -244,7 +244,7 @@ En el mismo producto, el modal de Coordinación sí mueve el foco al abrir, tien
 
 1. ~~**H-39-01 (Alta):** Que `dexAuditDeltaUnits()` (Reponedor y Técnico) preserve el caso de base inicial (`delta_source = 'INITIAL_BASELINE'` y/o `delta_vend_units` nulo) y pinte `—` en lugar de `0`.~~ **Hecho el 2026-11-27** (ver §3).
 2. ~~**H-39-02 (Alta):** Que la proyección del detalle de Coordinación publique `machine_code` (o que la plantilla lea `machine_code_snapshot`) de modo que la tarjeta «Máquina» se rellene. Regresión de UI que compruebe el card con `VEND-0101`.~~ **Hecho el 2026-11-27** (ver §3).
-3. **H-39-03 (P3):** Convertir el panel DEX del Reponedor en un diálogo semántico con foco inicial, atrapa de `Tab`/`Shift+Tab`, cierre con `Escape` y retorno de foco al disparador, o consolidarlo con el componente modal que ya lo hace en Coordinación. Regresión de accesibilidad.
+3. ~~**H-39-03 (P3):** Convertir el panel DEX del Reponedor en un diálogo semántico con foco inicial, atrapa de `Tab`/`Shift+Tab`, cierre con `Escape` y retorno de foco al disparador, o consolidarlo con el componente modal que ya lo hace en Coordinación. Regresión de accesibilidad.~~ **Hecho el 2026-11-27** (ver §3).
 4. **H-39-04 (P3):** Formatear la fecha del historial móvil con la misma presentación local usada en el resto de la app (`25/11/26, 14:06`), sin zona horaria expuesta.
 5. **H-39-05 (P4):** Concordancia numérica del copy en el KPI de Coordinación y en el contador de bloques del modal de anulación (`1 anulado`, `1 bloque`).
 6. **H-39-06 (P4):** Unificar el render de la celda Delta para valores nulos, evitando el placeholder duplicado `— — uds.`.
@@ -285,4 +285,4 @@ Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de 
 
 **Estado del árbol:** `feat/eva-dts-dex-audit` al `158c578c`; la corrida no modificó código ni confirmó cambios de estado, y no quedó ningún archivo de código alterado por este documento. Este `docs/ui-audit-eva-dts-dex.md` queda como acta de la auditoría en navegador y se incorpora al historial de la rama.
 
-**Cierres registrados:** H-39-01 y H-39-02 cerrados el 2026-11-27 (ver §3 para la corrección y su evidencia); H-39-03 a H-39-07 siguen pendientes.
+**Cierres registrados:** H-39-01, H-39-02 y H-39-03 cerrados el 2026-11-27 (ver §3 para la corrección y su evidencia); H-39-04 a H-39-07 siguen pendientes.

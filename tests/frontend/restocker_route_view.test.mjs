@@ -2240,6 +2240,15 @@ assert(
     && dexVm.dexAuditDeltaLabel({ delta_vend_units: 41 }) === '41 u'
     && RestockerRouteView.template.includes('dexAuditDeltaLabel(audit)')
 );
+
+const dexModalTag = (RestockerRouteView.template.split('data-testid="restocker-dex-modal"')[1] || '').split('>')[0];
+assert(
+  'El panel .dex se anuncia como diálogo modal con título propio',
+  dexModalTag.includes('role="dialog"')
+    && dexModalTag.includes('aria-modal="true"')
+    && dexModalTag.includes('aria-labelledby="restocker-dex-title"')
+    && RestockerRouteView.template.includes('id="restocker-dex-title"')
+);
 await dexVm.handleDexFile({ target: { files: [dexFile] } });
 assert(
   'El pre-filtro muestra unidades y el pre-relleno VA1 del Reponedor',
@@ -2359,6 +2368,46 @@ assert(
     && dumpedDexPayload?.reason === 'Duplicado'
     && (await conflictDexVm.ensureDexQueue().list(12)).length === 0
 );
+let dexCloseFocused = false;
+let dexTriggerFocused = false;
+dexVm.$refs = {
+  dexCloseButton: { focus() { dexCloseFocused = true; } },
+  dexDialog: { querySelectorAll: () => [], contains: () => false, focus() {} }
+};
+await dexVm.openDexModal(
+  { id: 7, code: 'VEND-0701' },
+  { trigger: { focus() { dexTriggerFocused = true; }, isConnected: true } }
+);
+assert(
+  'El panel .dex mueve el foco al botón de cierre al abrirse',
+  dexVm.showDexModal === true && dexCloseFocused === true
+);
+
+let escapePrevented = false;
+dexVm.handleDexKeydown({ key: 'Escape', preventDefault() { escapePrevented = true; } });
+assert(
+  'Escape cierra el diálogo .dex y devuelve el foco al disparador',
+  dexVm.showDexModal === false && dexTriggerFocused === true && escapePrevented === true
+);
+
+let firstDexControlFocused = false;
+let tabPrevented = false;
+dexVm.showDexModal = true;
+dexVm.$refs.dexDialog = {
+  querySelectorAll: () => [
+    { focus() { firstDexControlFocused = true; } },
+    { focus() {} }
+  ],
+  contains: () => false,
+  focus() {}
+};
+dexVm.handleDexKeydown({ key: 'Tab', shiftKey: false, preventDefault() { tabPrevented = true; } });
+assert(
+  'Tab queda atrapado dentro del diálogo .dex',
+  tabPrevented === true && firstDexControlFocused === true
+);
+dexVm.showDexModal = false;
+
 api.restocker.dumpDexAuditConflict = originalDexDump;
 api.restocker.importDexAudit = originalDexImport;
 api.restocker.getDexAudits = originalDexList;

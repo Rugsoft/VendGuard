@@ -272,6 +272,7 @@ export const RestockerRouteView = {
 
       // Auditorías EVA-DTS `.dex` online/offline (Módulo 39, T-DEX-12)
       showDexModal: false,
+      dexTrigger: null,
       dexMachine: null,
       dexFromVisit: false,
       dexFile: null,
@@ -728,6 +729,8 @@ export const RestockerRouteView = {
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       this.skipRouteKeydownHandler = (event) => this.handleSkipRouteKeydown(event);
       document.addEventListener('keydown', this.skipRouteKeydownHandler);
+      this.dexKeydownHandler = (event) => this.handleDexKeydown(event);
+      document.addEventListener('keydown', this.dexKeydownHandler);
     }
   },
   beforeUnmount() {
@@ -736,6 +739,9 @@ export const RestockerRouteView = {
     }
     if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function' && this.skipRouteKeydownHandler) {
       document.removeEventListener('keydown', this.skipRouteKeydownHandler);
+    }
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function' && this.dexKeydownHandler) {
+      document.removeEventListener('keydown', this.dexKeydownHandler);
     }
   },
   methods: {
@@ -3234,12 +3240,84 @@ export const RestockerRouteView = {
       this.dexSuccess = '';
       this.dexThermalAudit = null;
       this.dexSuggestedEscalation = null;
+      const activeElement = typeof document !== 'undefined' ? document.activeElement : null;
+      this.dexTrigger = options.trigger || activeElement || null;
       this.showDexModal = true;
+
+      const focusInitial = () => this.focusDexClose();
+      if (typeof this.$nextTick === 'function') this.$nextTick(focusInitial);
+      else focusInitial();
 
       await Promise.all([
         this.loadDexHistory(target.id),
         this.loadPendingDexQueue()
       ]);
+    },
+
+    focusDexClose() {
+      const closeButton = this.$refs?.dexCloseButton;
+      if (closeButton && typeof closeButton.focus === 'function') closeButton.focus();
+    },
+
+    restoreDexFocus() {
+      const trigger = this.dexTrigger;
+      this.dexTrigger = null;
+      if (!trigger || typeof trigger.focus !== 'function') return;
+
+      const focusTrigger = () => {
+        if (trigger.isConnected === false) return;
+        trigger.focus();
+      };
+      if (typeof this.$nextTick === 'function') this.$nextTick(focusTrigger);
+      else focusTrigger();
+    },
+
+    dexFocusableElements() {
+      const dialog = this.$refs?.dexDialog;
+      if (!dialog || typeof dialog.querySelectorAll !== 'function') return [];
+      const selector = [
+        'a[href]',
+        'button:not([disabled])',
+        'input:not([disabled]):not([type="hidden"])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])'
+      ].join(', ');
+      return Array.from(dialog.querySelectorAll(selector))
+        .filter((element) => element && typeof element.focus === 'function')
+        .filter((element) => !element.hidden && (typeof element.getClientRects !== 'function' || element.getClientRects().length > 0));
+    },
+
+    trapDexFocus(event) {
+      const dialog = this.$refs?.dexDialog;
+      if (!dialog) return;
+      const focusable = this.dexFocusableElements();
+      if (focusable.length === 0) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof dialog.focus === 'function') dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = typeof document !== 'undefined' ? document.activeElement : null;
+      const inside = !!(active && typeof dialog.contains === 'function' && dialog.contains(active));
+      if (event.shiftKey && (!inside || active === first || active === dialog)) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (!inside || active === last || active === dialog)) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        first.focus();
+      }
+    },
+
+    handleDexKeydown(event) {
+      if (!this.showDexModal || event?.key == null) return;
+      if (event.key === 'Escape') {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        this.closeDexModal();
+        return;
+      }
+      if (event.key === 'Tab') this.trapDexFocus(event);
     },
 
     closeDexModal() {
@@ -3252,6 +3330,7 @@ export const RestockerRouteView = {
       this.dexPreview = null;
       this.dexError = '';
       this.dexSuccess = '';
+      this.restoreDexFocus();
     },
 
     async handleDexFile(event) {
@@ -5943,18 +6022,23 @@ export const RestockerRouteView = {
       <div
         v-if="showDexModal"
         data-testid="restocker-dex-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="restocker-dex-title"
+        tabindex="-1"
+        ref="dexDialog"
         style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 90; padding: 0;"
         @click.self="closeDexModal"
       >
         <div style="background-color: var(--color-surface-card); width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; border-radius: var(--radius-card) var(--radius-card) 0 0; padding: 18px 16px; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); box-sizing: border-box;">
           <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
             <div>
-              <h2 style="font-family: var(--font-display); font-size: 17px; margin: 0 0 4px 0;">📄 Auditoría EVA-DTS</h2>
+              <h2 id="restocker-dex-title" style="font-family: var(--font-display); font-size: 17px; margin: 0 0 4px 0;">📄 Auditoría EVA-DTS</h2>
               <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
                 {{ dexMachine?.code || dexMachine?.machine_code || 'Máquina' }} · volcado .dex
               </p>
             </div>
-            <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-dex" @click="closeDexModal">Cerrar</button>
+            <button ref="dexCloseButton" type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-dex" @click="closeDexModal">Cerrar</button>
           </div>
 
           <p v-if="dexError" role="alert" data-testid="restocker-dex-error" style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;">⚠️ {{ dexError }}</p>
