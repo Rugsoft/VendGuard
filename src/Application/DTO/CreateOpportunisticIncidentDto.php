@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Application\DTO;
 
 use InvalidArgumentException;
+use VendGuard\Application\Service\DexAuditLinker;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\OpportunisticMode;
 use VendGuard\Core\Domain\ValueObject\OpportunisticOriginReason;
@@ -55,7 +56,8 @@ final class CreateOpportunisticIncidentDto
         public readonly ?string $informantName = null,
         public readonly ?string $photoPath = null,
         public readonly bool $confirmColdChainOverride = false,
-        public readonly bool $formOpenedWithinGrace = false
+        public readonly bool $formOpenedWithinGrace = false,
+        public readonly ?int $dexAuditId = null
     ) {
         if ($machineId < 1) {
             throw new InvalidArgumentException(
@@ -141,7 +143,8 @@ final class CreateOpportunisticIncidentDto
             informantName: $informantName,
             photoPath: $photoPath !== null && trim($photoPath) !== '' ? trim($photoPath) : null,
             confirmColdChainOverride: self::toBool($payload['confirm_cold_chain_override'] ?? false),
-            formOpenedWithinGrace: self::toBool($payload['form_opened_within_grace'] ?? false)
+            formOpenedWithinGrace: self::toBool($payload['form_opened_within_grace'] ?? false),
+            dexAuditId: DexAuditLinker::parseOptionalId($payload['dex_audit_id'] ?? null)
         );
     }
 
@@ -196,6 +199,7 @@ final class CreateOpportunisticIncidentDto
             'photo_path' => $this->photoPath,
             'confirm_cold_chain_override' => $this->confirmColdChainOverride,
             'form_opened_within_grace' => $this->formOpenedWithinGrace,
+            'dex_audit_id' => $this->dexAuditId,
         ];
     }
 

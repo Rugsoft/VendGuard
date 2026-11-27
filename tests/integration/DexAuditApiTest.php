@@ -36,8 +36,13 @@ use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\AuthService;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Application\Service\DexAuditLinker;
+use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineDexAuditRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Controller\RestockerRouteController;
@@ -191,6 +196,8 @@ try {
     $secondMachineId = (int)$machineStmt->fetchColumn();
     $machineStmt->execute([':location_id' => $locationId, ':code' => 'DEX9-FOOD-03']);
     $identityMachineId = (int)$machineStmt->fetchColumn();
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'DEX9-FOOD-04']);
+    $fourthMachineId = (int)$machineStmt->fetchColumn();
 
     // Máquina viva fuera del perímetro de los dos actores móviles: su sede
     // pertenece a una zona sin asignación de Reponedor ni de Técnico (PR25-01).
@@ -1051,13 +1058,13 @@ try {
         hex2bin('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082')
     );
 
-    $importProductionAudit = static function (string $mutation, string $capturedAt, string $comm) use (
+    $importProductionAudit = static function (string $mutation, string $capturedAt, string $comm, ?int $targetMachineId = null) use (
         $call,
         $coordinatorToken,
         $machineId,
         $data
     ): int {
-        $response = $call('POST', '/api/coordinator/machines/' . $machineId . '/dex-audits', [
+        $response = $call('POST', '/api/coordinator/machines/' . ($targetMachineId ?? $machineId) . '/dex-audits', [
             'raw_payload' => "DXS*{$comm}*VA*DEX 6.0\nID1*DEX9-FOOD-01\nID4*2\nVA1*3000*60\nDXE*FIN",
             'original_filename' => $mutation . '.dex',
             'captured_at' => $capturedAt,
@@ -1156,6 +1163,109 @@ try {
             && ($m36LinkAudit['metadata']['target'] ?? '') === 'incident'
             && (int)($m36LinkAudit['metadata']['target_id'] ?? 0) === $m36IncidentId,
         json_encode(['status' => $m36Escalation->getStatusCode(), 'error' => $errorCode($m36Escalation), 'audit' => $m36LinkAudit])
+    );
+
+    echo "\n--- 10. Vínculo .dex del M16 (H25-01) ---\n";
+    $incidentRepo = new PdoIncidentRepository($pdo);
+    $anchor = $incidentRepo->create(
+        new Incident(
+            id: null,
+            ticketCode: 'INC-2026-D9M16',
+            machineId: $secondMachineId,
+            locationId: $locationId,
+            category: IncidentCategory::PRODUCT_JAM,
+            description: 'Parada ancla ASSIGNED para habilitar la sede en el alta oportunista.',
+            urgency: UrgencyLevel::MEDIUM,
+            status: IncidentStatus::ASSIGNED,
+            assignedTechnicianId: $technicianId,
+            reporterName: 'Técnico DEX 09',
+            assignedAt: '2026-11-24T08:00:00+00:00',
+            cycleStartedAt: '2026-11-24T08:00:00+00:00'
+        ),
+        $technicianId,
+        'Parada ancla de la certificación H25-01.'
+    );
+    $anchorId = (int)$anchor->getId();
+    $assert('10.0 Parada ancla ASSIGNED creada para habilitar la sede', $anchorId > 0);
+
+    $m16CreateAuditId = $importProductionAudit('h2501-create', '2026-11-24 17:00:00+00', 'COMM-H2501-CREATE', $fourthMachineId);
+    $m16AssumeAuditId = $importProductionAudit('h2501-assume', '2026-11-24 17:05:00+00', 'COMM-H2501-ASSUME', $secondMachineId);
+    $m16VoidedAuditId = $importProductionAudit('h2501-voided', '2026-11-24 17:10:00+00', 'COMM-H2501-VOIDED', $identityMachineId);
+    $m16ForeignAuditId = $importProductionAudit('h2501-foreign', '2026-11-24 17:15:00+00', 'COMM-H2501-FOREIGN', $fourthMachineId);
+    $assert(
+        '10.1 Las cuatro auditorías del M16 se importan ACTIVE',
+        $m16CreateAuditId > 0 && $m16AssumeAuditId > 0 && $m16VoidedAuditId > 0 && $m16ForeignAuditId > 0
+    );
+
+    $m16Create = $call('POST', '/api/technician/opportunistic/incidents', [
+        'machine_id' => $fourthMachineId,
+        'category' => 'PRODUCT_JAM',
+        'origin_reason' => 'TECHNICIAN_DETECTION',
+        'description' => 'Espiral bloqueada detectada al revisar el volcado .dex de la máquina.',
+        'dex_audit_id' => $m16CreateAuditId,
+    ], $technicianToken);
+    $m16CreateData = $data($m16Create);
+    $m16CreateIncidentId = (int)($m16CreateData['id'] ?? 0);
+    $m16CreateLinkAudit = $findAuditRow('DEX_AUDIT_LINKED', 'MACHINE_DEX_AUDIT', $m16CreateAuditId);
+    $assert(
+        '10.2 El alta oportunista persiste machine_dex_audits.incident_id',
+        $m16Create->getStatusCode() === 201
+            && $m16CreateIncidentId > 0
+            && $linkedTarget('incident_id', $m16CreateAuditId) === $m16CreateIncidentId
+            && $m16CreateLinkAudit !== null
+            && (int)($m16CreateLinkAudit['user_id'] ?? 0) === $technicianId
+            && ($m16CreateLinkAudit['metadata']['target'] ?? '') === 'incident',
+        json_encode(['status' => $m16Create->getStatusCode(), 'error' => $errorCode($m16Create), 'audit' => $m16CreateLinkAudit])
+    );
+
+    $m16Assume = $call('POST', '/api/technician/opportunistic/incidents/' . $anchorId . '/assume', [
+        'dex_audit_id' => $m16AssumeAuditId,
+    ], $technicianToken);
+    $m16AssumeLinkAudit = $findAuditRow('DEX_AUDIT_LINKED', 'MACHINE_DEX_AUDIT', $m16AssumeAuditId);
+    $assert(
+        '10.3 La asunción oportunista persiste machine_dex_audits.incident_id',
+        $m16Assume->getStatusCode() === 200
+            && $linkedTarget('incident_id', $m16AssumeAuditId) === $anchorId
+            && $m16AssumeLinkAudit !== null
+            && (int)($m16AssumeLinkAudit['user_id'] ?? 0) === $technicianId,
+        json_encode(['status' => $m16Assume->getStatusCode(), 'error' => $errorCode($m16Assume), 'audit' => $m16AssumeLinkAudit])
+    );
+
+    $voidedM16 = $call('POST', '/api/coordinator/dex-audits/' . $m16VoidedAuditId . '/void', [
+        'void_reason' => 'Anulación previa a un intento de alta oportunista con vínculo inválido.',
+    ], $coordinatorToken);
+    $m16WithVoided = $call('POST', '/api/technician/opportunistic/incidents', [
+        'machine_id' => $identityMachineId,
+        'category' => 'PRODUCT_JAM',
+        'origin_reason' => 'TECHNICIAN_DETECTION',
+        'description' => 'Alta que declara un volcado anulado y no debe persistirse.',
+        'dex_audit_id' => $m16VoidedAuditId,
+    ], $technicianToken);
+    $thirdMachineIncidents = $pdo->prepare('SELECT COUNT(*) FROM incidents WHERE machine_id = :id AND deleted_at IS NULL');
+    $thirdMachineIncidents->execute([':id' => $identityMachineId]);
+    $assert(
+        '10.4 Un volcado anulado responde 409 y deshace el alta oportunista',
+        $voidedM16->getStatusCode() === 200
+            && $m16WithVoided->getStatusCode() === 409
+            && $errorCode($m16WithVoided) === 'DEX_AUDIT_VOIDED'
+            && (int)$thirdMachineIncidents->fetchColumn() === 0,
+        json_encode(['status' => $m16WithVoided->getStatusCode(), 'error' => $errorCode($m16WithVoided)])
+    );
+
+    $m16WithForeign = $call('POST', '/api/technician/opportunistic/incidents', [
+        'machine_id' => $identityMachineId,
+        'category' => 'PRODUCT_JAM',
+        'origin_reason' => 'TECHNICIAN_DETECTION',
+        'description' => 'Alta que declara un volcado de otra máquina y no debe persistirse.',
+        'dex_audit_id' => $m16ForeignAuditId,
+    ], $technicianToken);
+    $thirdMachineIncidents->execute([':id' => $identityMachineId]);
+    $assert(
+        '10.5 Un volcado de otra máquina responde 422 y deshace el alta oportunista',
+        $m16WithForeign->getStatusCode() === 422
+            && $errorCode($m16WithForeign) === 'DEX_AUDIT_MACHINE_MISMATCH'
+            && (int)$thirdMachineIncidents->fetchColumn() === 0,
+        json_encode(['status' => $m16WithForeign->getStatusCode(), 'error' => $errorCode($m16WithForeign)])
     );
 
     $exitCode = $failures === 0 ? 0 : 1;
