@@ -115,16 +115,21 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
             ->format('Y');
         $prefix = sprintf('DEX-%d-', $year);
 
+        // El sufijo no se ordena como texto: `DEX-2026-9999` es mayor que
+        // `DEX-2026-10000`. El máximo se calcula sobre el entero del sufijo.
         $stmt = $this->pdo->prepare(
-            'SELECT MAX(audit_code) FROM machine_dex_audits WHERE audit_code LIKE :prefix'
+            'SELECT MAX(CAST(SUBSTR(audit_code, CAST(:suffix_start AS INTEGER)) AS INTEGER))
+             FROM machine_dex_audits
+             WHERE audit_code LIKE :prefix'
         );
+        $stmt->bindValue(':suffix_start', strlen($prefix) + 1, PDO::PARAM_INT);
         $stmt->bindValue(':prefix', $prefix . '%', PDO::PARAM_STR);
         $stmt->execute();
         $max = $stmt->fetchColumn();
 
         $next = $max === false || $max === null
             ? 1
-            : ((int)substr((string)$max, strlen($prefix))) + 1;
+            : ((int)$max) + 1;
 
         return sprintf('%s%04d', $prefix, $next);
     }

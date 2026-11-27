@@ -700,6 +700,38 @@ try {
         '4.7 El payload original sigue disponible tras la anulación (C3)',
         $repository->findRawPayload($auditAId)['raw_payload'] === $payloadA
     );
+
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 5. Correlativo anual por encima de 9.999 (PR25-08) ---\n";
+    // ─────────────────────────────────────────────────────────────────────
+
+    $repository->create($makeAudit(
+        'DEX-2026-9999',
+        '2026-11-21 10:00:00+00',
+        "DXS*COMM-DEX06*VA*DEX 6.0\nVA1*9999*1\nDXE*FIN"
+    ));
+    $repository->create($makeAudit(
+        'DEX-2026-10000',
+        '2026-11-21 11:00:00+00',
+        "DXS*COMM-DEX06*VA*DEX 6.0\nVA1*10000*1\nDXE*FIN"
+    ));
+    $reservedAfterTenThousand = $repository->reserveAuditCode(new DateTimeImmutable('2026-06-01 10:00:00', new DateTimeZone('UTC')));
+    $assert(
+        '5.1 Tras 9999 y 10000 el siguiente correlativo es 10001, no 10000',
+        $reservedAfterTenThousand === 'DEX-2026-10001',
+        $reservedAfterTenThousand
+    );
+    $repository->create($makeAudit(
+        'DEX-2026-10001',
+        '2026-11-21 12:00:00+00',
+        "DXS*COMM-DEX06*VA*DEX 6.0\nVA1*10001*1\nDXE*FIN"
+    ));
+    $reservedAfterTenThousandOne = $repository->reserveAuditCode(new DateTimeImmutable('2026-06-01 10:00:00', new DateTimeZone('UTC')));
+    $assert(
+        '5.2 La secuencia 9999 → 10000 → 10001 continúa en 10002',
+        $reservedAfterTenThousandOne === 'DEX-2026-10002',
+        $reservedAfterTenThousandOne
+    );
 } catch (Throwable $exception) {
     $crash = $exception;
 } finally {
