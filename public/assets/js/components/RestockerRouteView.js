@@ -3781,6 +3781,17 @@ export const RestockerRouteView = {
     async handleLogout() {
       const restockerId = this.visitRestockerId;
       if (restockerId) {
+        let pendingDex = [];
+        try {
+          pendingDex = await this.ensureDexQueue().list(restockerId, [DEX_AUDIT_PENDING]);
+        } catch (error) {
+          // Sin IndexedDB no se puede certificar la cola; el cierre sigue.
+        }
+        if (pendingDex.length > 0) {
+          this.loadingActionError = `No puedes cerrar sesión: ${pendingDex.length} importación(es) `
+            + '.dex sin sincronizar. Sincronízalas antes de salir.';
+          return;
+        }
         try {
           const queue = this.ensureRouteOverrideQueue();
           const remaining = await queue.list(restockerId);
@@ -3806,7 +3817,8 @@ export const RestockerRouteView = {
           // La sesión se cierra igualmente: la limpieza local es best-effort.
         }
         try {
-          // PR25-07: el `.dex` crudo y sus vínculos no sobreviven a la baja.
+          // PR25-07: se purga todo, incluidos los conflictos ya rechazados;
+          // estos no bloquean porque pueden no ser volcables (p. ej. fuera de zona).
           await this.ensureDexQueue().clear(restockerId);
           this.pendingDexMutations = [];
           this.dexSyncMessage = '';

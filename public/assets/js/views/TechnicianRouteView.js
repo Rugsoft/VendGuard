@@ -2733,7 +2733,9 @@ export const TechnicianRouteView = {
       let pendingDex = 0;
       if (technicianId > 0) {
         try {
-          pendingDex = (await this.ensureDexQueue().list(technicianId)).length;
+          // Solo los PENDING bloquean: un CONFLICT ya rechazado puede no ser
+          // volcable (p. ej. fuera de zona) y no debe atrapar al técnico.
+          pendingDex = (await this.ensureDexQueue().list(technicianId, [DEX_AUDIT_PENDING])).length;
         } catch (error) {
           // Sin IndexedDB no se puede certificar la cola; el cierre sigue.
         }
@@ -2742,7 +2744,7 @@ export const TechnicianRouteView = {
       if (this.offlineQueue.total > 0 || pendingDex > 0) {
         const pending = this.offlineQueue.pending + this.offlineQueue.syncing;
         this.errorMessage = `No puedes cerrar sesión: ${this.offlineQueue.total + pendingDex} operación(es) `
-          + `sin sincronizar (${pending} pendiente(s), ${this.offlineQueue.conflicts} en conflicto, ${pendingDex} .dex). `
+          + `sin sincronizar (${pending} pendiente(s), ${this.offlineQueue.conflicts} en conflicto, ${pendingDex} .dex sin enviar). `
           + 'Sincroniza y vuelca los conflictos antes de salir.';
         this.showOfflineTray = true;
         return;
@@ -2758,7 +2760,8 @@ export const TechnicianRouteView = {
 
       try {
         if (technicianId > 0) {
-          // PR25-07: el `.dex` crudo tampoco sobrevive al cierre de sesión.
+          // PR25-07: se purga todo, incluidos los conflictos ya rechazados;
+          // estos no bloquean porque pueden no ser volcables.
           await this.ensureDexQueue().clear(technicianId);
           this.pendingDexMutations = [];
           this.dexSyncError = '';

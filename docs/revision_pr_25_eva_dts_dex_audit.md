@@ -25,7 +25,7 @@
 
 > **Acta de cierre · `PR25-06` (2026-11-27):** cerrado en local. `MachineDexAuditService::assertConflictDumpMachine()` reutiliza el guard del historial móvil (`findMachineContext`, sin `FOR UPDATE`) antes de escribir en `audit_log`: máquina inexistente `404 MACHINE_NOT_FOUND`, fuera de zona `403 MACHINE_OUTSIDE_RESTOCKER_ZONES`/`MACHINE_OUTSIDE_TECHNICIAN_SCOPE` y motivo de 1 a 500 caracteres (`422 DEX_INVALID_CONFLICT_REASON`). `RestockerRouteController` usa el `AuditLogger` inyectado en lugar de instanciar uno nuevo. Unitarias 51/51, API 64/64 y canal `DexAudit` 7/7 suites · 193 aserciones. La PR no se ha fusionado.
 
-> **Acta de cierre · `PR25-07` (2026-11-27):** cerrado en local. `RestockerRouteView.handleLogout()` purga `ensureDexQueue().clear(restockerId)` después de volcar y limpiar los overrides de ruta; `TechnicianRouteView.handleLogout()` cuenta la cola `.dex` del técnico, bloquea el cierre si quedan pendientes —igual que la cola general— y, una vez despejada, ejecuta `clear(technicianId)` junto a `offlineStorage.clearTechnician()`. Ambas limpiezas son best-effort: un fallo de IndexedDB no impide cerrar la sesión. `clear()` solo borra los registros cuyo `actor_id` coincide, de modo que la cola de otro operador del mismo dispositivo permanece intacta. La regresión cierra en verde: `restocker_route_planner_view` 53/53 (4.4) y `technician_route_view` 25/25 (6.1–6.2). La PR no se ha fusionado.
+> **Acta de cierre · `PR25-07` (2026-11-27):** cerrado en local. Ambos logout bloquean el cierre solo si la cola `.dex` del actor tiene importaciones `PENDING`: el Reponedor avisa en `loadingActionError` antes de volcar o limpiar overrides, y el Técnico lo suma al bloqueo de su cola general. Los `CONFLICT` ya rechazados no bloquean —un conflicto fuera de zona no es volcable y dejaría al operador sin salida— y se purgan junto al resto al completar el cierre. `RestockerRouteView` ejecuta `clear(restockerId)` tras los overrides y `TechnicianRouteView` `clear(technicianId)` tras `offlineStorage.clearTechnician()`; ambas limpiezas son best-effort. `clear()` solo borra el `actor_id` del que sale, así que otra cuenta conserva su cola. La regresión cierra en verde: `restocker_route_planner_view` 54/54 (4.3–4.5) y `technician_route_view` 25/25 (6.1–6.2). La PR no se ha fusionado.
 
 > **Nota:** la batería global de la rama estaba en verde antes de esta revisión (461 suites · 18.140 aserciones · 0 fallos · `DocMetricsGuard` coherente; canal `new_engine` 85/85 · 2.905 aserciones). Ese verde no cubre los huecos descritos: no hay pruebas de perímetro en el listado móvil ni de vínculos operativos, entre otros. Tras las correcciones, `DexAuditApiTest`, `DexAuditConcurrencyTest` y el canal `DexAudit` cierran en verde.
 
@@ -368,15 +368,15 @@ En ambos logout, limpiar `ensureDexQueue().clear(actorId)` después de la polít
 
 ### Corrección aplicada
 
-1. `RestockerRouteView.handleLogout()` limpia la cola `.dex` del reponedor (`ensureDexQueue().clear(restockerId)`) después de volcar y borrar los overrides de ruta. La limpieza va en su propio `try/catch`: si IndexedDB falla, la sesión se cierra igualmente. También se vacía el espejo `pendingDexMutations` y los mensajes de sincronización.
-2. `TechnicianRouteView.handleLogout()` lee la cola `.dex` del técnico antes de decidir: si quedan importaciones pendientes o en conflicto, bloquea el cierre con el mismo criterio que la cola general y desglosa el recuento `.dex` en el aviso. Sin pendientes, purga `clear(technicianId)` tras `offlineStorage.clearTechnician()` y resetea el espejo local.
-3. `DexAuditOfflineQueue.clear()` borra únicamente los registros cuyo `actor_id` coincide con el operador que cierra sesión; una cuenta distinta en el mismo dispositivo conserva su propia cola.
-4. La regresión cubre la baja del Reponedor (4.4: cola del actor vacía, cola ajena intacta) y la del Técnico (6.1: bloqueo con `.dex` pendiente; 6.2: purga del actor sin tocar la de otro).
+1. `RestockerRouteView.handleLogout()` consulta `list(restockerId, [DEX_AUDIT_PENDING])` antes de tocar nada. Si hay pendientes, publica el aviso en `loadingActionError` y retorna sin volcar overrides, sin borrar el snapshot y sin limpiar la cola. Si no los hay, vuelca y limpia los overrides y después purga la cola `.dex` completa del actor.
+2. `TechnicianRouteView.handleLogout()` aplica el mismo filtro: solo las importaciones `PENDING` bloquean el cierre, junto con la cola general, y el aviso desglosa los `.dex sin enviar`. Un `CONFLICT` ya rechazado no bloquea porque puede no ser volcable (por ejemplo, fuera de zona); al completar el cierre se purga con `clear(technicianId)`.
+3. `DexAuditOfflineQueue.clear()` borra únicamente los registros cuyo `actor_id` coincide con el operador que cierra sesión; una cuenta distinta en el mismo dispositivo conserva su propia cola. Los conflictos se descartan al salir para no dejar `.dex` crudos retenidos.
+4. La regresión cubre el bloqueo por `PENDING` y la purga de conflictos: Reponedor 4.4 (aviso, overrides intactos) y 4.5 (conflicto no volcable que no bloquea y cola ajena intacta); Técnico 6.1 (bloqueo con pendiente) y 6.2 (conflicto no volcable que no bloquea y cola ajena intacta).
 
 ### Verificación
 
 ```text
-node tests/frontend/restocker_route_planner_view.test.mjs  → 53/53 aserciones · exit 0
+node tests/frontend/restocker_route_planner_view.test.mjs  → 54/54 aserciones · exit 0
 node tests/frontend/technician_route_view.test.mjs          → 25/25 aserciones · exit 0
 ```
 
@@ -442,7 +442,7 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 - Validación y normalización de `captured_at` (`PR25-04`, unitarias 1.12–1.14 y HTTP 2.7–2.9): formato inválido, fecha futura, ISO 8601 móvil con `Z` y milisegundos, y captura local de Coordinación interpretada en `Europe/Madrid`.
 - Vínculos M34/M35/M16 (`PR25-05`, unitarias 6.1–6.9 y HTTP 2.10–2.13): inexistente, de otra máquina, visita no completada, visita/recaudación de otro Reponedor, identificador no numérico, persistencia de los tres vínculos y ocupación única de visita/recaudación traducida a `409`.
 - `conflict-dump` Offline (`PR25-06`, unitarias 7.1–7.6 y HTTP 6.1–6.8): máquina inexistente, fuera de zona de Reponedor y de Técnico, motivo vacío o de más de 500 caracteres, ausencia de filas en `audit_log` y uso del `AuditLogger` inyectado.
-- Limpieza de la cola `.dex` al cerrar sesión (`PR25-07`, `restocker_route_planner_view` 4.4 y `technician_route_view` 6.1–6.2): baja del Reponedor y del Técnico, bloqueo con pendientes y aislamiento de la cola de otro operador.
+- Limpieza de la cola `.dex` al cerrar sesión (`PR25-07`, `restocker_route_planner_view` 4.3–4.5 y `technician_route_view` 6.1–6.2): bloqueo solo con importaciones `PENDING`, purga de conflictos ya rechazados y aislamiento de la cola de otro operador.
 - Parser, esquema, convergencia y rendimiento del canal `new_engine`.
 
 ### Lo que no cubre la suite existente
@@ -452,4 +452,4 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 
 ### Límites
 
-La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest`, `PR25-02` con la carrera real de `DexAuditConcurrencyTest`, `PR25-03` con la regresión unitaria 1.11 y la HTTP 2.6, `PR25-04` con las unitarias 1.12–1.14 y las HTTP 2.7–2.9, `PR25-05` con las unitarias 6.1–6.9 y las HTTP 2.10–2.13, `PR25-06` con las unitarias 7.1–7.6 y las HTTP 6.1–6.8 y `PR25-07` con las suites frontend del Reponedor (53/53) y del Técnico (25/25), todos contra PostgreSQL aislado o con IndexedDB simulada; los dos hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.
+La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest`, `PR25-02` con la carrera real de `DexAuditConcurrencyTest`, `PR25-03` con la regresión unitaria 1.11 y la HTTP 2.6, `PR25-04` con las unitarias 1.12–1.14 y las HTTP 2.7–2.9, `PR25-05` con las unitarias 6.1–6.9 y las HTTP 2.10–2.13, `PR25-06` con las unitarias 7.1–7.6 y las HTTP 6.1–6.8 y `PR25-07` con las suites frontend del Reponedor (54/54) y del Técnico (25/25), todos contra PostgreSQL aislado o con IndexedDB simulada; los dos hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.

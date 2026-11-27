@@ -400,12 +400,16 @@ assert(
     && (await logoutQueue.list(21)).length === 1
 );
 
-await logoutQueue.remove('dex12_tech_logout_0001');
+await logoutQueue.markConflict('dex12_tech_logout_0001', {
+  code: 'MACHINE_OUTSIDE_TECHNICIAN_ZONES',
+  message: 'La máquina ya no está asignada al técnico.',
+  http_status: 403
+});
 await logoutVm.handleLogout();
 assert(
-  '6.2 Sin pendientes .dex, el logout solo purga la cola del técnico',
+  '6.2 Un conflicto .dex no volcable no bloquea y se purga sin tocar la cola ajena',
   store.state.user === null
-    && (await logoutQueue.list(21)).length === 0
+    && (await logoutQueue.list(21, ['CONFLICT'])).length === 0
     && (await logoutQueue.list(22)).length === 1
 );
 
