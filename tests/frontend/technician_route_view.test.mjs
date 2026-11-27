@@ -169,6 +169,21 @@ assert(
   vm.dexAuditUnits(vm.dexHistory[0]) === 30 && vm.dexAuditDeltaUnits(vm.dexHistory[0]) === 4
 );
 
+const baselineAudit = {
+  id: 900,
+  audit_code: 'DEX-900',
+  va1_total_vend_units: 118,
+  delta_vend_units: null,
+  delta_source: 'INITIAL_BASELINE'
+};
+assert(
+  'Un volcado base sin delta se pinta como — y no como 0',
+  vm.dexAuditDeltaUnits(baselineAudit) === null
+    && vm.dexAuditDeltaLabel(baselineAudit) === '—'
+    && vm.dexAuditDeltaLabel(vm.dexHistory[0]) === '4 u'
+    && TechnicianRouteView.template.includes('dexAuditDeltaLabel(audit)')
+);
+
 await vm.handleDexFile({ target: { files: [dexFile] } });
 assert(
   'El pre-filtro del técnico no recibe el importe VA1',

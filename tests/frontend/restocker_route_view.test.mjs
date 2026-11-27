@@ -2225,6 +2225,21 @@ dexVm.visitMachine = { id: 7, code: 'VEND-0701', machine_type: 'COMBO' };
 dexVm.visitForm = { ...dexVm.visitForm, dex_audit_id: null, items: [] };
 await dexVm.openDexModal({ id: 7, code: 'VEND-0701' }, { fromVisit: true });
 assert('openDexModal abre el modal y carga el historial', dexVm.showDexModal === true && dexVm.dexHistory.length === 0);
+
+const baselineDexAudit = {
+  id: 900,
+  audit_code: 'DEX-900',
+  va1_total_vend_units: 118,
+  delta_vend_units: null,
+  delta_source: 'INITIAL_BASELINE'
+};
+assert(
+  'Un volcado base sin delta se pinta como — y no como 0',
+  dexVm.dexAuditDeltaUnits(baselineDexAudit) === null
+    && dexVm.dexAuditDeltaLabel(baselineDexAudit) === '—'
+    && dexVm.dexAuditDeltaLabel({ delta_vend_units: 41 }) === '41 u'
+    && RestockerRouteView.template.includes('dexAuditDeltaLabel(audit)')
+);
 await dexVm.handleDexFile({ target: { files: [dexFile] } });
 assert(
   'El pre-filtro muestra unidades y el pre-relleno VA1 del Reponedor',

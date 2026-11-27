@@ -17,7 +17,7 @@
 
 No se detectó ningún fallo de bloqueo (`P1`) en la UI del Módulo 39. El flujo principal respondió bien: carga de vigentes, filtro de alertas, modal de detalle, apertura/cierre de modales, anulación sin confirmar, importación manual con zona vacía, CSV y descarga `.dex` devolvieron `200`; las APIs de producto fueron limpias y la consola del producto no mostró errores. Se detectaron **7 defectos de UI**, sin Pérdida de datos ni cambio de estado presentado:
 
-- **Dos de ellos importan** (prioridad Alta): un delta desconocido se pintaba como `0` en el historial móvil, y la tarjeta «Máquina» del detalle de Coordinación quedaba vacía.
+- **Dos de ellos importaban** (prioridad Alta): un delta desconocido se pintaba como `0` en el historial móvil (H-39-01, **cerrado el 2026-11-27**) y la tarjeta «Máquina» del detalle de Coordinación quedaba vacía (H-39-02, pendiente).
 - **Un defecto de accesibilidad** deja al panel DEX del Reponedor sin comportamiento modal real en teclado (`P3`).
 - **Los cuatro restantes son de presentación o copy** (`P3-P4`): timestamp técnico sin localizar, dos plurales con una unidad, placeholder duplicado en Delta y texto recortado del selector de archivo en móvil.
 
@@ -25,7 +25,7 @@ El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); s
 
 | Orden | ID | Prioridad | Hallazgo | Estado |
 |---:|---|---|---|---|
-| 1 | **H-39-01** | **Alta** | Un delta sin base se muestra como `0` en el historial móvil | Pendiente |
+| 1 | **H-39-01** | **Alta** | Un delta sin base se muestra como `0` en el historial móvil | **Cerrado (2026-11-27)** |
 | 2 | **H-39-02** | **Alta** | La tarjeta «Máquina» del detalle de Coordinación está vacía | Pendiente |
 | 3 | **H-39-03** | **P3 · Media** | El panel DEX del Reponedor no es un modal plenamente operable por teclado | Pendiente |
 | 4 | **H-39-04** | **P3 · Media-baja** | Fecha técnica sin localizar en el historial móvil | Pendiente |
@@ -71,7 +71,7 @@ El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); s
 
 **Evidencia.** `VEND-0101` en ruta de Lucía; historial móvil mostró `VA1 118 u · Δ 0 u · —`. Detalle de Coordinación de `DEX-2026-0001` mostró `Delta unidades: —` y `Fuente del delta: INITIAL_BASELINE`. Respuesta API (`GET /api/coordinator/dex-audits/6376 → 200`) acorde con la proyección de coordinador. `public/assets/js/components/RestockerRouteView.js` y `TechnicianRouteView.js` (`dexAuditDeltaUnits()`) devuelven `0` para el `NULL`. La misma función `dexAuditUnits()` del volcado sí pinta `118`.
 
-**Estado:** Pendiente. Prioridad Alta.
+**Estado:** **Cerrado el 2026-11-27.** `dexAuditDeltaUnits()` (Reponedor y Técnico) ya no convierte el hueco en cero: devuelve `null` cuando `delta_vend_units` es `null`, `undefined` o cadena vacía (antes `Number(null) === 0` se colaba como valor finito), y la nueva etiqueta `dexAuditDeltaLabel()` publica `—` en el historial móvil. Un delta real sigue pintándose como `4 u`. **Evidencia:** `node tests/frontend/technician_route_view.test.mjs` → **21/21**, `exit=0`; `node tests/frontend/restocker_route_view.test.mjs` → **263/263**, `exit=0`; `node tests/unit/FrontendTemplateCompileTest.mjs` → **83 plantillas / 5.729 expresiones / 0 fallos**, `exit=0`; `node --check` de ambas vistas → sintaxis válida. Regresión añadida en ambas suites: un volcado con `delta_vend_units: null` y `delta_source: 'INITIAL_BASELINE'` se etiqueta `—` y no `0`. Prioridad Alta.
 
 **Nota de prioridad.** No es un fallo de cálculo; el riesgo es de interpretación en el operador móvil, pero la columna «Delta» de un volcado base es un dato que tiene sentido opaco (debe ser `—` o «sin base»), no cero. Por eso se carga en Alta en esta cadena.
 
@@ -242,7 +242,7 @@ En el mismo producto, el modal de Coordinación sí mueve el foco al abrir, tien
 
 ## 7. Orden de corrección propuesto
 
-1. **H-39-01 (Alta):** Que `dexAuditDeltaUnits()` (Reponedor y Técnico) preserva el caso de base inicial (`delta_source = 'INITIAL_BASELINE'` y/o `delta_vend_units` nulo) y pinte `—` en lugar de `0`. Conjunto con regresión frontend que reproduzca el historial con una fila de base.
+1. ~~**H-39-01 (Alta):** Que `dexAuditDeltaUnits()` (Reponedor y Técnico) preserve el caso de base inicial (`delta_source = 'INITIAL_BASELINE'` y/o `delta_vend_units` nulo) y pinte `—` en lugar de `0`.~~ **Hecho el 2026-11-27** (ver §3).
 2. **H-39-02 (Alta):** Que la proyección del detalle de Coordinación publique `machine_code` (o que la plantilla lea `machine_code_snapshot`) de modo que la tarjeta «Máquina» se rellene. Regresión de UI que compruebe el card con `VEND-0101`.
 3. **H-39-03 (P3):** Convertir el panel DEX del Reponedor en un diálogo semántico con foco inicial, atrapa de `Tab`/`Shift+Tab`, cierre con `Escape` y retorno de foco al disparador, o consolidarlo con el componente modal que ya lo hace en Coordinación. Regresión de accesibilidad.
 4. **H-39-04 (P3):** Formatear la fecha del historial móvil con la misma presentación local usada en el resto de la app (`25/11/26, 14:06`), sin zona horaria expuesta.
@@ -284,3 +284,5 @@ Externo: resolver por canal de integración/ambiental la inconsistencia del widg
 Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de **Pendiente** a **Cerrado (fecha)** y se añadirá la evidencia focalizada que lo demuestre (suite de regresión o comprobación manual reproducible). No se declarará cerrado un hallazgo de prioridad Alta mientras no exista una prueba de regresión que reproduzca el caso original y pase en verde.
 
 **Estado del árbol:** `feat/eva-dts-dex-audit` al `158c578c`; la corrida no modificó código ni confirmó cambios de estado, y no quedó ningún archivo de código alterado por este documento. Este `docs/ui-audit-eva-dts-dex.md` queda como acta de la auditoría en navegador y se incorpora al historial de la rama.
+
+**Cierres registrados:** H-39-01 cerrado el 2026-11-27 (ver §3 para la corrección y su evidencia); H-39-02 a H-39-07 siguen pendientes.

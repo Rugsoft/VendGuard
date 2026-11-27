@@ -2356,8 +2356,15 @@ export const TechnicianRouteView = {
     },
 
     dexAuditDeltaUnits(audit) {
-      const value = Number(audit?.delta_vend_units);
-      return Number.isFinite(value) ? value : 0;
+      const raw = audit?.delta_vend_units;
+      if (raw === null || raw === undefined || raw === '') return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    },
+
+    dexAuditDeltaLabel(audit) {
+      const units = this.dexAuditDeltaUnits(audit);
+      return units === null ? '—' : `${units} u`;
     },
 
     dexAuditHasThermal(audit) {
@@ -5539,7 +5546,7 @@ export const TechnicianRouteView = {
                   <span style="color: var(--color-ink-muted);">{{ audit.captured_at || '' }}</span>
                 </div>
                 <div style="margin-top: 3px; color: var(--color-slate);">
-                  VA1 {{ dexAuditUnits(audit) }} u · Δ {{ dexAuditDeltaUnits(audit) }} u · {{ audit.delta_source || '—' }}
+                  VA1 {{ dexAuditUnits(audit) }} u · Δ {{ dexAuditDeltaLabel(audit) }} · {{ audit.delta_source || '—' }}
                 </div>
                 <div v-if="dexAuditHasThermal(audit)" style="margin-top: 5px;">
                   <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm" data-testid="technician-dex-history-opportunistic" @click="openDexOpportunistic(audit)">📋 Alta oportunista M16</button>
