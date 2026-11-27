@@ -146,6 +146,23 @@ try {
     $machineId = (int)$machineStmt->fetchColumn();
     $machineStmt->execute([':location_id' => $locationId, ':code' => 'DEX9-FOOD-02']);
     $secondMachineId = (int)$machineStmt->fetchColumn();
+
+    // Máquina viva fuera del perímetro de los dos actores móviles: su sede
+    // pertenece a una zona sin asignación de Reponedor ni de Técnico (PR25-01).
+    $outsideZoneId = (int)$pdo->query(
+        "INSERT INTO operational_zones (code, name, color_hex)
+         VALUES ('ZONA-DEX9-OUT', 'Zona DEX 09 fuera', '#2560ff') RETURNING id"
+    )->fetchColumn();
+    $locationStmt->execute([
+        ':site_code' => 'SEDE-DEX9-OUT',
+        ':site_code_key' => 'sede-dex9-out',
+        ':name' => 'Sede DEX 09 fuera de perímetro',
+        ':address' => 'Carrer DEX 9, Girona',
+        ':zone_id' => $outsideZoneId,
+    ]);
+    $outsideLocationId = (int)$locationStmt->fetchColumn();
+    $machineStmt->execute([':location_id' => $outsideLocationId, ':code' => 'DEX9-FOOD-OUT']);
+    $outsideMachineId = (int)$machineStmt->fetchColumn();
     $pdo->prepare(
         "INSERT INTO restocker_zone_assignments (restocker_id, zone_id, role_in_zone, is_primary)
          VALUES (:restocker_id, :zone_id, 'PRIMARY', TRUE)"
@@ -303,6 +320,31 @@ try {
     $assert('1.3 El Reponedor no entra en la consola de Coordinación (403)', $restockerOnCoordinator->getStatusCode() === 403);
     $technicianOnRestocker = $call('GET', '/api/restocker/machines/' . $machineId . '/dex-audits', [], $technicianToken);
     $assert('1.4 El Técnico no entra en la puerta del Reponedor (403)', $technicianOnRestocker->getStatusCode() === 403);
+
+    $outsideRestocker = $call('GET', '/api/restocker/machines/' . $outsideMachineId . '/dex-audits', [], $restockerToken);
+    $assert(
+        '1.5 Un Reponedor fuera de sus zonas recibe 403 MACHINE_OUTSIDE_RESTOCKER_ZONES',
+        $outsideRestocker->getStatusCode() === 403 && $errorCode($outsideRestocker) === 'MACHINE_OUTSIDE_RESTOCKER_ZONES',
+        $errorCode($outsideRestocker)
+    );
+    $outsideTechnician = $call('GET', '/api/technician/machines/' . $outsideMachineId . '/dex-audits', [], $technicianToken);
+    $assert(
+        '1.6 Un Técnico sin intervención ni zona recibe 403 MACHINE_OUTSIDE_TECHNICIAN_SCOPE',
+        $outsideTechnician->getStatusCode() === 403 && $errorCode($outsideTechnician) === 'MACHINE_OUTSIDE_TECHNICIAN_SCOPE',
+        $errorCode($outsideTechnician)
+    );
+    $missingRestocker = $call('GET', '/api/restocker/machines/999999/dex-audits', [], $restockerToken);
+    $assert(
+        '1.7 Una máquina inexistente en la puerta móvil responde 404 MACHINE_NOT_FOUND',
+        $missingRestocker->getStatusCode() === 404 && $errorCode($missingRestocker) === 'MACHINE_NOT_FOUND',
+        $errorCode($missingRestocker)
+    );
+    $missingTechnician = $call('GET', '/api/technician/machines/999999/dex-audits', [], $technicianToken);
+    $assert(
+        '1.8 La misma guarda de existencia aplica a la puerta del Técnico',
+        $missingTechnician->getStatusCode() === 404 && $errorCode($missingTechnician) === 'MACHINE_NOT_FOUND',
+        $errorCode($missingTechnician)
+    );
 
     echo "\n--- 2. Importación y Arqueo Ciego del Reponedor (QA-1) ---\n";
     $dexPayload = "DXS*COMM-DEX09*VA*DEX 6.0\nID1*DEX9-FOOD-01\nID4*2\nVA1*1250*25\nCA3*900*0*0\nPA1*A1*150\nPA2*10*1250\nEA2*EG01*1*1*0*1\nDXE*FIN";

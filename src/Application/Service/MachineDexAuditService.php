@@ -487,10 +487,65 @@ final class MachineDexAuditService
     /**
      * Listado de volcados `ACTIVE` de una máquina para la puerta móvil indicada.
      *
+     * El perímetro se resuelve antes de consultar el historial: la máquina debe
+     * existir y estar viva (`404 MACHINE_NOT_FOUND`) y el actor debe cubrirla
+     * (`403 MACHINE_OUTSIDE_RESTOCKER_ZONES`/`MACHINE_OUTSIDE_TECHNICIAN_SCOPE`).
+     * Es una lectura sin `FOR UPDATE`: no compite con una importación en curso.
+     *
      * @return list<array<string, mixed>>
      */
-    public function listForRole(int $machineId, string $role, int $limit = 50): array
+    public function listForRole(int $machineId, string $role, int $actorId, int $limit = 50): array
     {
+        $normalizedRole = strtoupper(trim($role));
+        if (!in_array($normalizedRole, ['RESTOCKER', 'TECHNICIAN'], true)) {
+            throw new DexAuditValidationException(
+                sprintf("El rol '%s' no puede consultar el historial .dex móvil.", $role),
+                'DEX_INVALID_READER_ROLE',
+                ['role' => $role]
+            );
+        }
+
+        if ($machineId <= 0 || $actorId <= 0) {
+            throw new DexAuditValidationException(
+                'La consulta del historial .dex no trae una máquina y un actor válidos.',
+                'DEX_INVALID_READ_REQUEST',
+                ['machine_id' => $machineId, 'actor_id' => $actorId]
+            );
+        }
+
+        $context = $this->gateway->findMachineContext($machineId, $actorId);
+        if ($context === null) {
+            throw new DexAuditValidationException(
+                'La máquina solicitada no existe o está inactiva.',
+                'MACHINE_NOT_FOUND',
+                ['machine_id' => $machineId],
+                404
+            );
+        }
+
+        if (($context['actor_is_active'] ?? false) !== true) {
+            throw new DexAuditForbiddenException(
+                'El usuario que intenta consultar el historial .dex no está activo.',
+                'DEX_ACTOR_INACTIVE',
+                ['actor_id' => $actorId]
+            );
+        }
+
+        $coversTerritory = $normalizedRole === 'RESTOCKER'
+            ? (bool)($context['is_covered_restocker'] ?? false)
+            : (bool)($context['is_covered_technician'] ?? false);
+        if (!$coversTerritory) {
+            throw new DexAuditForbiddenException(
+                $normalizedRole === 'RESTOCKER'
+                    ? 'La máquina queda fuera de las zonas operativas activas del Reponedor.'
+                    : 'El Técnico no tiene intervención activa ni cobertura de la zona de la sede.',
+                $normalizedRole === 'RESTOCKER'
+                    ? 'MACHINE_OUTSIDE_RESTOCKER_ZONES'
+                    : 'MACHINE_OUTSIDE_TECHNICIAN_SCOPE',
+                ['machine_id' => $machineId, 'actor_id' => $actorId, 'role' => $normalizedRole]
+            );
+        }
+
         $rows = $this->repository->listForCoordinator(
             ['machine_id' => $machineId, 'status' => 'ACTIVE'],
             max(1, min($limit, 100)),
@@ -498,7 +553,7 @@ final class MachineDexAuditService
         );
 
         return array_values(array_map(
-            fn (array $row): array => $this->projectByRole($row, $role, false),
+            fn (array $row): array => $this->projectByRole($row, $normalizedRole, false),
             $rows
         ));
     }

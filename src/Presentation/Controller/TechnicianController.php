@@ -288,9 +288,10 @@ class TechnicianController
     {
         return $this->runDexOperation(function () use ($request): Response {
             $machineId = $this->positiveDexMachineId($request);
+            $actor = $this->dexActor($request);
 
             return Response::json(
-                ['audits' => $this->dexService()->listForRole($machineId, 'TECHNICIAN')],
+                ['audits' => $this->dexService()->listForRole($machineId, 'TECHNICIAN', (int)($actor['id'] ?? 0))],
                 200
             );
         });

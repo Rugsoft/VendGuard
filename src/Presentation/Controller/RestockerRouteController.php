@@ -664,9 +664,10 @@ final class RestockerRouteController
     {
         return $this->runDexOperation(function () use ($request): Response {
             $machineId = $this->positiveMachineId($request);
+            $actor = $this->actor($request);
 
             return Response::json(
-                ['audits' => $this->dexService()->listForRole($machineId, 'RESTOCKER')],
+                ['audits' => $this->dexService()->listForRole($machineId, 'RESTOCKER', (int)$actor['id'])],
                 200
             );
         });

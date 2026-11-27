@@ -43,11 +43,31 @@ final class PdoMachineDexAuditGateway implements MachineDexAuditGatewayInterface
      */
     public function lockMachineContext(int $machineId, int $actorId): ?array
     {
+        return $this->machineContext($machineId, $actorId, true);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function findMachineContext(int $machineId, int $actorId): ?array
+    {
+        return $this->machineContext($machineId, $actorId, false);
+    }
+
+    /**
+     * Fotografía de máquina y actor. El bloqueo solo se añade en la ruta de
+     * importación; el listado histórico es una lectura y no debe esperar por
+     * una fila de `machines`.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function machineContext(int $machineId, int $actorId, bool $forUpdate): ?array
+    {
         if ($machineId <= 0 || $actorId <= 0) {
             return null;
         }
 
-        $stmt = $this->pdo->prepare("
+        $sql = "
             SELECT
                 m.id,
                 m.code AS machine_code,
@@ -114,8 +134,11 @@ final class PdoMachineDexAuditGateway implements MachineDexAuditGatewayInterface
             WHERE m.id = :machine_id
               AND m.is_active = TRUE
               AND m.deleted_at IS NULL
-            FOR UPDATE OF m
-        ");
+        ";
+        if ($forUpdate) {
+            $sql .= ' FOR UPDATE OF m';
+        }
+        $stmt = $this->pdo->prepare($sql);
         $stmt->bindValue(':cover_restocker_id', $actorId, PDO::PARAM_INT);
         $stmt->bindValue(':target_restocker_id', $actorId, PDO::PARAM_INT);
         $stmt->bindValue(':cover_technician_id', $actorId, PDO::PARAM_INT);

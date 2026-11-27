@@ -324,6 +324,11 @@ final class Dex07FakeGateway implements MachineDexAuditGatewayInterface
         return $this->contexts[$machineId] ?? null;
     }
 
+    public function findMachineContext(int $machineId, int $actorId): ?array
+    {
+        return $this->contexts[$machineId] ?? null;
+    }
+
     public function lockRestockVisit(int $visitId, int $machineId): ?array
     {
         return null;

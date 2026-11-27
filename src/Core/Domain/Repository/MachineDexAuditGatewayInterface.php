@@ -34,6 +34,16 @@ interface MachineDexAuditGatewayInterface
     public function lockMachineContext(int $machineId, int $actorId): ?array;
 
     /**
+     * Máquina viva + actor + coberturas + avería térmica, sin bloquear la fila.
+     *
+     * Es la lectura de perímetro de los listados históricos: no abre una
+     * transacción ni espera por una importación en curso.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findMachineContext(int $machineId, int $actorId): ?array;
+
+    /**
      * @return array<string, mixed>|null
      */
     public function lockRestockVisit(int $visitId, int $machineId): ?array;
