@@ -59,6 +59,11 @@ use VendGuard\Core\Service\EvaDtsParser;
  * transición terminal; `exportCsv()` emite BOM UTF-8, separador `;`, fechas en
  * `Europe/Madrid` y celdas neutralizadas contra fórmulas.
  *
+ * **Fecha de captura (PR25-04).** `captured_at` se acepta como ISO 8601 con
+ * offset/Z o como fecha local sin offset, que se interpreta en `Europe/Madrid`.
+ * Se normaliza a UTC y se rechaza si supera el reloj del servidor en más de
+ * `CAPTURED_AT_MAX_FUTURE_SECONDS`.
+ *
  * El servicio no escribe SQL ni conoce PDO: compone los puertos de dominio.
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas.
@@ -72,6 +77,28 @@ final class MachineDexAuditService
     public const THERMAL_DEDUP_PREFIX = 'dex_thermal:';
     public const COLD_CHAIN_MACHINE_TYPES = ['PERISHABLE_FOOD', 'COMBO'];
     public const MAX_CSV_ROWS = 500;
+
+    /** Tolerancia de reloj para una captura fechada por el cliente (PR25-04). */
+    public const CAPTURED_AT_MAX_FUTURE_SECONDS = 300;
+
+    private const OPERATIONAL_TIMEZONE = 'Europe/Madrid';
+
+    /** Formatos aceptados para `captured_at`; sin offset se interpreta en Madrid. */
+    private const CAPTURED_AT_FORMATS = [
+        'Y-m-d\TH:i:s.uP',
+        'Y-m-d\TH:i:sP',
+        'Y-m-d\TH:i:s.uO',
+        'Y-m-d\TH:i:sO',
+        'Y-m-d H:i:s.uP',
+        'Y-m-d H:i:sP',
+        'Y-m-d H:i:s.uO',
+        'Y-m-d H:i:sO',
+        'Y-m-d\TH:i:s.u',
+        'Y-m-d\TH:i:s',
+        'Y-m-d H:i:s',
+        'Y-m-d\TH:i',
+        'Y-m-d H:i',
+    ];
 
     /** Puerta de entrada → rol autorizado (RF-03.1). */
     private const SOURCE_ROLE_MAP = [
@@ -122,6 +149,11 @@ final class MachineDexAuditService
      */
     public function importDex(array $request): array
     {
+        $capturedAt = trim((string)($request['captured_at'] ?? ''));
+        if ($capturedAt !== '') {
+            $request['captured_at'] = $this->normalizeCapturedAt($capturedAt);
+        }
+
         return $this->transactions->runInTransaction(
             fn (): array => $this->importDexAtomically($request)
         );
@@ -1181,6 +1213,60 @@ final class MachineDexAuditService
             'dex_audit_id' => $auditId,
             'is_internal' => true,
         ];
+    }
+
+    /**
+     * Normaliza la captura del cliente y la fija en UTC para toda la unidad de trabajo.
+     *
+     * Los formatos sin offset son la hora local de la sede (`Europe/Madrid`), que
+     * es lo que emite el `datetime-local` de la consola de Coordinación. Los
+     * formatos con offset/Z conservan el instante enviado. La tolerancia futura
+     * protege la cadena de deltas sin castigar un pequeño desfase de reloj móvil.
+     */
+    private function normalizeCapturedAt(string $raw): string
+    {
+        $raw = trim($raw);
+        $captured = null;
+        foreach (self::CAPTURED_AT_FORMATS as $format) {
+            $candidate = DateTimeImmutable::createFromFormat(
+                $format,
+                $raw,
+                new DateTimeZone(self::OPERATIONAL_TIMEZONE)
+            );
+            $errors = DateTimeImmutable::getLastErrors();
+            if ($candidate === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
+                continue;
+            }
+
+            $captured = $candidate;
+            break;
+        }
+
+        if ($captured === null) {
+            throw new DexAuditValidationException(
+                'La fecha de captura no es una fecha ISO 8601 válida ni una fecha local interpretable.',
+                'DEX_INVALID_CAPTURED_AT',
+                ['field' => 'captured_at', 'value' => $raw, 'timezone' => self::OPERATIONAL_TIMEZONE]
+            );
+        }
+
+        $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $latest = $now->modify('+' . self::CAPTURED_AT_MAX_FUTURE_SECONDS . ' seconds');
+        if ($captured > $latest) {
+            throw new DexAuditValidationException(
+                'La fecha de captura no puede estar más de cinco minutos por delante del reloj del servidor.',
+                'DEX_CAPTURED_AT_IN_FUTURE',
+                [
+                    'field' => 'captured_at',
+                    'value' => $raw,
+                    'max_future_seconds' => self::CAPTURED_AT_MAX_FUTURE_SECONDS,
+                ]
+            );
+        }
+
+        return $captured
+            ->setTimezone(new DateTimeZone('UTC'))
+            ->format('Y-m-d\TH:i:sP');
     }
 
     private function formatCapturedAt(string $value): string

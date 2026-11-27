@@ -588,6 +588,27 @@ $forgedIdentity = $service->importDex($request(
 ));
 $assert('1.11 La identidad se contrasta con la máquina resuelta e ignora el código esperado del cliente', ($forgedIdentity['audit']['identity_mismatch_warning'] ?? false) === true
     && ($forgedIdentity['audit']['machine_id'] ?? 0) === 20);
+$assert('1.12 Una fecha de captura no interpretable es 422 DEX_INVALID_CAPTURED_AT', $expect(
+    static fn () => $service->importDex($request(20, 5, 'RESTOCKER_ROUTE', $payload('1000*10'), ['captured_at' => 'no-es-una-fecha'])),
+    'DEX_INVALID_CAPTURED_AT',
+    422
+));
+$futureCapturedAt = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+    ->modify('+1 day')
+    ->format('Y-m-d\TH:i:sP');
+$assert('1.13 Una fecha futura fuera de la tolerancia es 422 DEX_CAPTURED_AT_IN_FUTURE', $expect(
+    static fn () => $service->importDex($request(20, 5, 'RESTOCKER_ROUTE', $payload('1000*10'), ['captured_at' => $futureCapturedAt])),
+    'DEX_CAPTURED_AT_IN_FUTURE',
+    422
+));
+$mobileCaptured = $service->importDex($request(
+    20,
+    5,
+    'RESTOCKER_ROUTE',
+    $payload('1200*12'),
+    ['client_mutation_id' => 'dex07-mobile-z-0001', 'captured_at' => '2026-11-24T09:00:00.000Z']
+));
+$assert('1.14 La captura móvil ISO 8601 con Z y milisegundos se normaliza a UTC', ($mobileCaptured['audit']['captured_at'] ?? '') === '2026-11-24T09:00:00+00:00');
 
 echo "\n--- 2. Puertas, perímetro y primacía sanitaria (RF-03.1, C2) ---\n";
 

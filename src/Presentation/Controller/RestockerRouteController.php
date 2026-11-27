@@ -1524,6 +1524,10 @@ final class RestockerRouteController
             return Response::error($exception->getErrorCode(), $exception->getMessage(), $exception->getHttpStatusCode(), $exception->getDetails());
         } catch (InvalidArgumentException $exception) {
             return Response::error('VALIDATION_ERROR', $exception->getMessage(), 422);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo inesperado al operar con auditorías .dex: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo completar la operación sobre auditorías .dex.', 500);
         }
     }
 

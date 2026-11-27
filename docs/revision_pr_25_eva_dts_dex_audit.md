@@ -9,9 +9,9 @@
 | **HEAD revisado** | `305d7ac5` (`docs(eva-dts-dex-audit): sync certification metrics after the UI audit`) |
 | **Base** | `efd18fb8` (`main`) |
 | **Fecha de la revisión** | 2026-11-27 |
-| **Estado** | PR abierta, **no fusionada**. `PR25-01`, `PR25-02` y `PR25-03` cerrados en local el 2026-11-27; el resto de hallazgos sigue abierto. |
+| **Estado** | PR abierta, **no fusionada**. `PR25-01`, `PR25-02`, `PR25-03` y `PR25-04` cerrados en local el 2026-11-27; los cinco hallazgos restantes siguen abiertos. |
 | **Alcance** | Diff `origin/main...HEAD` del Módulo 39: migración `035` y convergencia con `supabase_init.sql`, parser/validador, servicio, repositorio y gateway, RBAC/perímetro, controladores, consola de Coordinación, vistas móviles y cola Offline. Contraste con `specs/39-eva-dts-dex-audit/spec.md` y las suites del módulo. |
-| **Resultado** | **9 hallazgos**: 3 cerrados (`PR25-01`, `PR25-02` y `PR25-03`) y 6 abiertos (4 P2 y 2 P3). Las correcciones y sus regresiones están incluidas en esta rama local. |
+| **Resultado** | **9 hallazgos**: 4 cerrados (`PR25-01`, `PR25-02`, `PR25-03` y `PR25-04`) y 5 abiertos (3 P2 y 2 P3). Las correcciones y sus regresiones están incluidas en esta rama local. |
 
 > **Acta de cierre · `PR25-01` (2026-11-27):** cerrado en local. El historial móvil exige actor, resuelve la cobertura con `findMachineContext()` —lectura sin `FOR UPDATE`— y responde `404 MACHINE_NOT_FOUND` o `403 MACHINE_OUTSIDE_RESTOCKER_ZONES`/`MACHINE_OUTSIDE_TECHNICIAN_SCOPE`. La regresión `DexAuditApiTest` 1.5–1.8 cierra en verde (50/50 aserciones). La PR no se ha fusionado.
 
@@ -19,7 +19,9 @@
 
 > **Acta de cierre · `PR25-03` (2026-11-27):** cerrado en local. La importación contrasta siempre la identidad `ID1` contra `machines.code` de la máquina resuelta; el `expected_machine_code` del cliente se ignora y los controladores ya no lo reenvían. La regresión unitaria 1.11 y la HTTP 2.6 demuestran que un código esperado falsificado no suprime `identity_mismatch_warning`. `DexAuditApiTest` cierra 51/51 y el canal `DexAudit` 7/7 suites · 180 aserciones. La PR no se ha fusionado.
 
-> **Nota:** la batería global de la rama estaba en verde antes de esta revisión (461 suites · 18.140 aserciones · 0 fallos · `DocMetricsGuard` coherente; canal `new_engine` 85/85 · 2.905 aserciones). Ese verde no cubre los huecos descritos: no hay pruebas de perímetro en el listado móvil, de vínculos operativos ni de fechas de captura inválidas/futuras, entre otros. Tras las correcciones, `DexAuditApiTest`, `DexAuditConcurrencyTest` y el canal `DexAudit` cierran en verde.
+> **Acta de cierre · `PR25-04` (2026-11-27):** cerrado en local. `MachineDexAuditService::normalizeCapturedAt()` valida una sola vez `captured_at` antes de la transacción: acepta ISO 8601 con offset/Z y `datetime-local` sin zona, interpreta este último como `Europe/Madrid`, normaliza a UTC y rechaza fechas futuras con una tolerancia de 300 s. Los errores de formato y de futuro responden `422` con código y campo. Las puertas móviles añaden un `catch (Throwable)` defensivo. La regresión cubre formato inválido, fecha futura, `Z` con milisegundos y una captura de Coordinación a las 23:30 que se persiste como 22:30 UTC. Unitarias 36/36, API 54/54 y canal `DexAudit` 7/7 suites · 183 aserciones. La PR no se ha fusionado.
+
+> **Nota:** la batería global de la rama estaba en verde antes de esta revisión (461 suites · 18.140 aserciones · 0 fallos · `DocMetricsGuard` coherente; canal `new_engine` 85/85 · 2.905 aserciones). Ese verde no cubre los huecos descritos: no hay pruebas de perímetro en el listado móvil ni de vínculos operativos, entre otros. Tras las correcciones, `DexAuditApiTest`, `DexAuditConcurrencyTest` y el canal `DexAudit` cierran en verde.
 
 ---
 
@@ -30,10 +32,10 @@ El núcleo del Módulo 39 está bien construido: el parser es determinista, la m
 Los defectos se concentran en los bordes del contrato y en la confianza en datos del cliente:
 
 - **P1:** fuga de perímetro en los historiales `.dex` móviles, **cerrada** (`PR25-01`), y ausencia de una transacción real que haga efectivo el `FOR UPDATE` durante el cálculo de deltas, **cerrada** (`PR25-02`).
-- **P2:** `captured_at` sin validar, vínculos M34/M35/M16 sin comprobar, `conflict-dump` sin perímetro y cola `.dex` que sobrevive al cierre de sesión.
+- **P2:** vínculos M34/M35/M16 sin comprobar, `conflict-dump` sin perímetro y cola `.dex` que sobrevive al cierre de sesión.
 - **P3:** correlativo anual que se bloquea al superar 9.999 y consola de Coordinación sin paginación ni filtros completos.
 
-**Recomendación:** no fusionar hasta corregir `PR25-04` a `PR25-06`. Esos hallazgos deberían entrar en la misma corrección por afectar a integridad, contrato HTTP y datos operativos. `PR25-01`, `PR25-02` y `PR25-03` ya están corregidos y verificados en local.
+**Recomendación:** no fusionar hasta corregir `PR25-05` a `PR25-06`. Esos hallazgos deberían entrar en la misma corrección por afectar a integridad, contrato HTTP y datos operativos. `PR25-01`, `PR25-02`, `PR25-03` y `PR25-04` ya están corregidos y verificados en local.
 
 ---
 
@@ -44,7 +46,7 @@ Los defectos se concentran en los bordes del contrato y en la confianza en datos
 | 1 | `PR25-01` | **P1 · Alta** | El historial `.dex` móvil no validaba el perímetro de la máquina | Un Reponedor o Técnico autenticado podía leer historiales de máquinas fuera de su zona | ✅ Cerrado |
 | 2 | `PR25-02` | **P1 · Alta** | El `FOR UPDATE` no serializaba la importación completa | Dos altas concurrentes podían calcular deltas desde el mismo predecesor | ✅ Cerrado |
 | 3 | `PR25-03` | **P2 · Media-alta** | `expected_machine_code` permitía ocultar un DEX de otra máquina | Se suprimía el aviso de identidad y se contaminaban los contadores de la máquina destino | ✅ Cerrado |
-| 4 | `PR25-04` | **P2 · Media-alta** | `captured_at` no se valida: 500, fechas futuras y desfase horario | Error interno ante una fecha malformada y alteración del orden/deltas | Abierto |
+| 4 | `PR25-04` | **P2 · Media-alta** | `captured_at` no se valida: 500, fechas futuras y desfase horario | Error interno ante una fecha malformada y alteración del orden/deltas | ✅ Cerrado |
 | 5 | `PR25-05` | **P2 · Media-alta** | Vínculos M34/M35/M16 sin validar y violaciones únicas no traducidas | Vínculos cruzados, cruces nulos y 500 que la cola reintenta | Abierto |
 | 6 | `PR25-06` | **P2 · Media** | `conflict-dump` no comprueba existencia ni perímetro de la máquina | Cualquier operador puede escribir en `audit_log` para una máquina ajena o inexistente | Abierto |
 | 7 | `PR25-07` | **P2 · Media** | La cola `.dex` no se limpia al cerrar sesión | Los `.dex` crudos quedan en IndexedDB en un dispositivo compartido | Abierto |
@@ -196,31 +198,44 @@ php tests/run_new_engine.php DexAudit                    → 7/7 suites · 180 a
 
 **Prioridad:** P2 · **Requisitos afectados:** RNF-04, RF-04.1, contrato de errores de importación.
 
+**Estado:** ✅ **Cerrado (2026-11-27)** · validación única en el servicio, normalización a UTC, tolerancia futura de 300 s, `422` tipificado y defensa `Throwable` en las puertas móviles.
+
 ### Evidencia
 
-- `src/Presentation/Controller/RestockerRouteController.php:1488`, `src/Presentation/Controller/TechnicianController.php:374` y `src/Presentation/Controller/CoordinatorDexAuditController.php:193` aceptan `captured_at` del cuerpo sin validar formato ni ventana temporal.
-- `src/Application/Service/MachineDexAuditService.php:224-226`: el valor se pasa a `findPreviousActive()`/`hasLaterActive()`, que lo castean a `timestamptz` en SQL (`PdoMachineDexAuditRepository.php:345` y `:388`). Una cadena no interpretable lanza `PDOException`.
-- `src/Application/Service/MachineDexAuditService.php:252`: `new DateTimeImmutable($capturedAt)` tampoco está protegido.
-- `src/Presentation/Controller/RestockerRouteController.php:1517-1526` y `src/Presentation/Controller/TechnicianController.php:404-413`: `runDexOperation()` solo captura excepciones de dominio e `InvalidArgumentException`; no hay `catch (Throwable)`. El 500 resultante se sirve como error interno.
-- `public/assets/js/components/CoordinatorDexAuditsSubTab.js:85-90` y `:526`: el formulario manual usa `datetime-local`, que produce `YYYY-MM-DDTHH:mm` sin zona. PostgreSQL lo interpreta en la zona de sesión (normalmente UTC en Supabase), no en `Europe/Madrid`.
+- Los tres controladores aceptaban `captured_at` del cuerpo sin validar formato ni ventana temporal.
+- `MachineDexAuditService::importDexAtomically()` pasaba el valor crudo a `findPreviousActive()`/`hasLaterActive()`, que lo castean a `timestamptz` en SQL (`PdoMachineDexAuditRepository.php`). Una cadena no interpretable lanzaba `PDOException`.
+- `new DateTimeImmutable($capturedAt)` tampoco estaba protegido.
+- `runDexOperation()` de las puertas móviles solo capturaba excepciones de dominio e `InvalidArgumentException`; no había `catch (Throwable)`. El 500 resultante se servía como error interno.
+- `public/assets/js/components/CoordinatorDexAuditsSubTab.js` usa `datetime-local`, que produce `YYYY-MM-DDTHH:mm` sin zona. PostgreSQL lo interpretaba en la zona de sesión (normalmente UTC en Supabase), no en `Europe/Madrid`.
 
 ### Reproducción
 
 1. `POST /api/restocker/machines/{id}/dex-audits` con `"captured_at": "no-es-una-fecha"` → 500 en lugar de 422.
-2. La misma petición con `"captured_at": "2099-01-01T00:00:00+00:00"` se acepta; el volcado queda como el más reciente y altera el orden y los deltas posteriores.
-3. En Coordinación, una captura local de las 23:30 se almacena como 23:30 UTC (o la zona que tenga la sesión de PostgreSQL), desplazando 1–2 horas el día civil usado por M34/M35 y los filtros.
+2. La misma petición con `"captured_at": "2099-01-01T00:00:00+00:00"` se aceptaba; el volcado quedaba como el más reciente y alteraba el orden y los deltas posteriores.
+3. En Coordinación, una captura local de las 23:30 se almacenaba como 23:30 UTC (o la zona que tuviera la sesión de PostgreSQL), desplazando 1–2 horas el día civil usado por M34/M35 y los filtros.
 
 ### Impacto
 
-Un cliente defectuoso o malicioso puede provocar un 500, insertar un volcado con fecha futura y desordenar la cadena de deltas, o desplazar el día operativo de una carga manual. La spec RNF-04 exige fechas operativas en `Europe/Madrid`; el runtime no fija `date_default_timezone_set()` en producción y la conexión no configura la zona de sesión.
+Un cliente defectuoso o malicioso podía provocar un 500, insertar un volcado con fecha futura y desordenar la cadena de deltas, o desplazar el día operativo de una carga manual. La spec RNF-04 exige fechas operativas en `Europe/Madrid`; el runtime no fija `date_default_timezone_set()` en producción y la conexión no configura la zona de sesión.
 
-### Corrección propuesta
+### Corrección aplicada
 
-1. Parsear y validar `captured_at` una sola vez en el servicio con `DateTimeImmutable`/`createFromFormat`, aceptando ISO 8601 con offset y el formato local documentado.
-2. Rechazar fechas futuras fuera de una tolerancia explícita y normalizar siempre a UTC antes de pasarlas al SQL.
-3. Tratar el `datetime-local` de Coordinación como `Europe/Madrid` (o enviar un offset desde el navegador).
-4. Devolver `422` con el campo y el motivo; añadir un `catch (Throwable)` de defensa en los `runDexOperation` móviles para registrar y no disfrazar errores de infraestructura.
-5. Añadir pruebas de fecha inválida, futura y captura manual cerca de medianoche.
+1. `MachineDexAuditService::normalizeCapturedAt()` se ejecuta una sola vez, antes de abrir la transacción y de cualquier SQL. Acepta ISO 8601 con offset/Z (`Y-m-d\TH:i:sP` y variantes con milisegundos, `O`, espacio) y formatos locales sin zona (`Y-m-d\TH:i`, `Y-m-d H:i:s`, etc.). Los formatos se validan con `DateTimeImmutable::createFromFormat()` y se rechazan fechas imposibles como `2026-02-30`.
+2. Los formatos sin offset se interpretan en `Europe/Madrid`, que es el contrato del `datetime-local` de Coordinación. Los formatos con offset/Z conservan el instante recibido. El resultado se normaliza siempre a `Y-m-d\TH:i:sP` en UTC antes de `findPreviousActive()`, `hasLaterActive()`, `reserveAuditCode()` y la entidad.
+3. `CAPTURED_AT_MAX_FUTURE_SECONDS = 300` limita el desfase de reloj móvil y rechaza cualquier captura posterior a ese margen. El error es `422 DEX_CAPTURED_AT_IN_FUTURE` con `field`, `value` y `max_future_seconds`.
+4. Un formato no interpretable responde `422 DEX_INVALID_CAPTURED_AT` con `field`, `value` y `timezone = Europe/Madrid`, sin llegar a PostgreSQL.
+5. `runDexOperation()` de Reponedor y Técnico añade un `catch (Throwable)` que registra el fallo y devuelve `INTERNAL_SERVER_ERROR` controlado; Coordinación ya lo tenía.
+6. La regresión añade las unitarias 1.12–1.14 y las HTTP 2.7–2.9: formato inválido, fecha futura, ISO 8601 móvil con `Z` y milisegundos, y una captura de Coordinación a las 23:30 que debe persistirse como las 22:30 UTC.
+
+### Verificación
+
+```text
+php tests/unit/MachineDexAuditServiceTest.php             → 36/36 aserciones · exit 0
+php tests/integration/DexAuditApiTest.php                → 54/54 aserciones · exit 0
+php tests/run_new_engine.php DexAudit                    → 7/7 suites · 183 aserciones · exit 0
+```
+
+La prueba HTTP 2.9 compara la época Unix persistida con la de `2026-11-24T23:30:00` en `Europe/Madrid`; no depende de la zona de sesión de PostgreSQL. `php -l` y `git diff --check` también cierran sin errores.
 
 ---
 
@@ -373,11 +388,11 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 - Concurrencia por misma huella, misma `client_mutation_id` y dos DEX válidos distintos con cadena de deltas serializada (`PR25-02`).
 - Replay exacto idempotente y rechazo `409` de una mutación reutilizada con contenido distinto.
 - Identidad `ID1` contrastada contra la máquina resuelta aunque el cliente falsifique `expected_machine_code` (`PR25-03`, unitaria 1.11 y HTTP 2.6).
+- Validación y normalización de `captured_at` (`PR25-04`, unitarias 1.12–1.14 y HTTP 2.7–2.9): formato inválido, fecha futura, ISO 8601 móvil con `Z` y milisegundos, y captura local de Coordinación interpretada en `Europe/Madrid`.
 - Parser, esquema, convergencia y rendimiento del canal `new_engine`.
 
 ### Lo que no cubre la suite existente
 
-- Fechas inválidas, futuras o `datetime-local` sin zona (`PR25-04`).
 - Vínculos inexistentes, de otra máquina o ya ocupados (`PR25-05`).
 - `conflict-dump` con máquina inexistente/fuera de zona (`PR25-06`).
 - Limpieza de IndexedDB al cerrar sesión (`PR25-07`).
@@ -386,4 +401,4 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 
 ### Límites
 
-La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest`, `PR25-02` con la carrera real de `DexAuditConcurrencyTest` y `PR25-03` con la regresión unitaria 1.11 y la HTTP 2.6, todos contra PostgreSQL aislado; los seis hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.
+La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest`, `PR25-02` con la carrera real de `DexAuditConcurrencyTest`, `PR25-03` con la regresión unitaria 1.11 y la HTTP 2.6, y `PR25-04` con las unitarias 1.12–1.14 y las HTTP 2.7–2.9, todos contra PostgreSQL aislado; los cinco hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.

@@ -406,6 +406,52 @@ try {
         json_encode($forgedIdentityData)
     );
 
+    $invalidCaptured = $call('POST', '/api/restocker/machines/' . $identityMachineId . '/dex-audits', [
+        'raw_payload' => "DXS*COMM-DEX09-INVALID-DATE*VA*DEX 6.0\nID4*2\nVA1*1000*10\nDXE*FIN",
+        'original_filename' => 'fecha-invalida.dex',
+        'captured_at' => 'no-es-una-fecha',
+        'client_mutation_id' => 'dex09-api-invalid-date-0001',
+    ], $restockerToken);
+    $assert(
+        '2.7 Una captura no interpretable responde 422 DEX_INVALID_CAPTURED_AT',
+        $invalidCaptured->getStatusCode() === 422 && $errorCode($invalidCaptured) === 'DEX_INVALID_CAPTURED_AT',
+        $errorCode($invalidCaptured)
+    );
+
+    $futureCapturedAt = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+        ->modify('+1 day')
+        ->format('Y-m-d\TH:i:sP');
+    $futureCaptured = $call('POST', '/api/restocker/machines/' . $identityMachineId . '/dex-audits', [
+        'raw_payload' => "DXS*COMM-DEX09-FUTURE-DATE*VA*DEX 6.0\nID4*2\nVA1*1000*10\nDXE*FIN",
+        'original_filename' => 'fecha-futura.dex',
+        'captured_at' => $futureCapturedAt,
+        'client_mutation_id' => 'dex09-api-future-date-0001',
+    ], $restockerToken);
+    $assert(
+        '2.8 Una captura futura fuera de la tolerancia responde 422 DEX_CAPTURED_AT_IN_FUTURE',
+        $futureCaptured->getStatusCode() === 422 && $errorCode($futureCaptured) === 'DEX_CAPTURED_AT_IN_FUTURE',
+        $errorCode($futureCaptured)
+    );
+
+    $localCaptured = $call('POST', '/api/coordinator/machines/' . $identityMachineId . '/dex-audits', [
+        'raw_payload' => "DXS*COMM-DEX09-LOCAL-DATE*VA*DEX 6.0\nID4*2\nVA1*1100*11\nDXE*FIN",
+        'original_filename' => 'fecha-local.dex',
+        'captured_at' => '2026-11-24T23:30',
+        'client_mutation_id' => 'dex09-api-local-date-0001',
+    ], $coordinatorToken);
+    $localAuditId = (int)($data($localCaptured)['audit']['id'] ?? 0);
+    $capturedStmt = $pdo->prepare('SELECT EXTRACT(EPOCH FROM captured_at) FROM machine_dex_audits WHERE id = :id');
+    $capturedStmt->execute([':id' => $localAuditId]);
+    $storedCapturedEpoch = (int)$capturedStmt->fetchColumn();
+    $expectedCaptured = new \DateTimeImmutable('2026-11-24T23:30:00', new \DateTimeZone('Europe/Madrid'));
+    $assert(
+        '2.9 Una captura local de Coordinación se interpreta en Europe/Madrid',
+        $localCaptured->getStatusCode() === 201
+            && $localAuditId > 0
+            && $storedCapturedEpoch === $expectedCaptured->getTimestamp(),
+        json_encode(['status' => $localCaptured->getStatusCode(), 'stored_epoch' => $storedCapturedEpoch, 'expected_epoch' => $expectedCaptured->getTimestamp()])
+    );
+
     echo "\n--- 3. Consola de Coordinación, detalle y carga manual ---\n";
     $list = $call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['machine_id' => (string)$machineId]);
     $listData = $data($list);
