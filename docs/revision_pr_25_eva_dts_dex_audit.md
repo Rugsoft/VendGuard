@@ -9,13 +9,15 @@
 | **HEAD revisado** | `305d7ac5` (`docs(eva-dts-dex-audit): sync certification metrics after the UI audit`) |
 | **Base** | `efd18fb8` (`main`) |
 | **Fecha de la revisión** | 2026-11-27 |
-| **Estado** | PR abierta, **no fusionada**. `PR25-01` y `PR25-02` cerrados en local el 2026-11-27; el resto de hallazgos sigue abierto. |
+| **Estado** | PR abierta, **no fusionada**. `PR25-01`, `PR25-02` y `PR25-03` cerrados en local el 2026-11-27; el resto de hallazgos sigue abierto. |
 | **Alcance** | Diff `origin/main...HEAD` del Módulo 39: migración `035` y convergencia con `supabase_init.sql`, parser/validador, servicio, repositorio y gateway, RBAC/perímetro, controladores, consola de Coordinación, vistas móviles y cola Offline. Contraste con `specs/39-eva-dts-dex-audit/spec.md` y las suites del módulo. |
-| **Resultado** | **9 hallazgos**: 2 cerrados (`PR25-01` y `PR25-02`) y 7 abiertos (5 P2 y 2 P3). Las correcciones y sus regresiones están incluidas en esta rama local. |
+| **Resultado** | **9 hallazgos**: 3 cerrados (`PR25-01`, `PR25-02` y `PR25-03`) y 6 abiertos (4 P2 y 2 P3). Las correcciones y sus regresiones están incluidas en esta rama local. |
 
 > **Acta de cierre · `PR25-01` (2026-11-27):** cerrado en local. El historial móvil exige actor, resuelve la cobertura con `findMachineContext()` —lectura sin `FOR UPDATE`— y responde `404 MACHINE_NOT_FOUND` o `403 MACHINE_OUTSIDE_RESTOCKER_ZONES`/`MACHINE_OUTSIDE_TECHNICIAN_SCOPE`. La regresión `DexAuditApiTest` 1.5–1.8 cierra en verde (50/50 aserciones). La PR no se ha fusionado.
 
 > **Acta de cierre · `PR25-02` (2026-11-27):** cerrado en local. `MachineDexAuditService::importDex()` ejecuta el caso de uso completo dentro de `TransactionManagerInterface`; `PdoMachineDexAuditRepository::create()` participa en esa unidad de trabajo mediante `SAVEPOINT` y solo abre/confirma transacción propia cuando es el dueño. La carrera de dos DEX válidos distintos queda certificada en `DexAuditConcurrencyTest` 4.1–4.3, y el canal `DexAudit` cierra 7/7 suites · 179 aserciones. Además, el replay de una misma `client_mutation_id` exige la misma huella SHA-256; si el contenido cambia, responde `409 CLIENT_MUTATION_ID_ALREADY_USED`. La PR no se ha fusionado.
+
+> **Acta de cierre · `PR25-03` (2026-11-27):** cerrado en local. La importación contrasta siempre la identidad `ID1` contra `machines.code` de la máquina resuelta; el `expected_machine_code` del cliente se ignora y los controladores ya no lo reenvían. La regresión unitaria 1.11 y la HTTP 2.6 demuestran que un código esperado falsificado no suprime `identity_mismatch_warning`. `DexAuditApiTest` cierra 51/51 y el canal `DexAudit` 7/7 suites · 180 aserciones. La PR no se ha fusionado.
 
 > **Nota:** la batería global de la rama estaba en verde antes de esta revisión (461 suites · 18.140 aserciones · 0 fallos · `DocMetricsGuard` coherente; canal `new_engine` 85/85 · 2.905 aserciones). Ese verde no cubre los huecos descritos: no hay pruebas de perímetro en el listado móvil, de vínculos operativos ni de fechas de captura inválidas/futuras, entre otros. Tras las correcciones, `DexAuditApiTest`, `DexAuditConcurrencyTest` y el canal `DexAudit` cierran en verde.
 
@@ -28,10 +30,10 @@ El núcleo del Módulo 39 está bien construido: el parser es determinista, la m
 Los defectos se concentran en los bordes del contrato y en la confianza en datos del cliente:
 
 - **P1:** fuga de perímetro en los historiales `.dex` móviles, **cerrada** (`PR25-01`), y ausencia de una transacción real que haga efectivo el `FOR UPDATE` durante el cálculo de deltas, **cerrada** (`PR25-02`).
-- **P2:** identidad de máquina controlable por el cliente, `captured_at` sin validar, vínculos M34/M35/M16 sin comprobar, `conflict-dump` sin perímetro y cola `.dex` que sobrevive al cierre de sesión.
+- **P2:** `captured_at` sin validar, vínculos M34/M35/M16 sin comprobar, `conflict-dump` sin perímetro y cola `.dex` que sobrevive al cierre de sesión.
 - **P3:** correlativo anual que se bloquea al superar 9.999 y consola de Coordinación sin paginación ni filtros completos.
 
-**Recomendación:** no fusionar hasta corregir `PR25-03` a `PR25-06`. Esos hallazgos deberían entrar en la misma corrección por afectar a integridad, contrato HTTP y datos operativos. `PR25-01` y `PR25-02` ya están corregidos y verificados en local.
+**Recomendación:** no fusionar hasta corregir `PR25-04` a `PR25-06`. Esos hallazgos deberían entrar en la misma corrección por afectar a integridad, contrato HTTP y datos operativos. `PR25-01`, `PR25-02` y `PR25-03` ya están corregidos y verificados en local.
 
 ---
 
@@ -41,7 +43,7 @@ Los defectos se concentran en los bordes del contrato y en la confianza en datos
 |---:|:---:|:---:|---|---|---|
 | 1 | `PR25-01` | **P1 · Alta** | El historial `.dex` móvil no validaba el perímetro de la máquina | Un Reponedor o Técnico autenticado podía leer historiales de máquinas fuera de su zona | ✅ Cerrado |
 | 2 | `PR25-02` | **P1 · Alta** | El `FOR UPDATE` no serializaba la importación completa | Dos altas concurrentes podían calcular deltas desde el mismo predecesor | ✅ Cerrado |
-| 3 | `PR25-03` | **P2 · Media-alta** | `expected_machine_code` permite ocultar un DEX de otra máquina | Se suprime el aviso de identidad y se contaminan los contadores de la máquina destino | Abierto |
+| 3 | `PR25-03` | **P2 · Media-alta** | `expected_machine_code` permitía ocultar un DEX de otra máquina | Se suprimía el aviso de identidad y se contaminaban los contadores de la máquina destino | ✅ Cerrado |
 | 4 | `PR25-04` | **P2 · Media-alta** | `captured_at` no se valida: 500, fechas futuras y desfase horario | Error interno ante una fecha malformada y alteración del orden/deltas | Abierto |
 | 5 | `PR25-05` | **P2 · Media-alta** | Vínculos M34/M35/M16 sin validar y violaciones únicas no traducidas | Vínculos cruzados, cruces nulos y 500 que la cola reintenta | Abierto |
 | 6 | `PR25-06` | **P2 · Media** | `conflict-dump` no comprueba existencia ni perímetro de la máquina | Cualquier operador puede escribir en `audit_log` para una máquina ajena o inexistente | Abierto |
@@ -145,11 +147,13 @@ php tests/run_new_engine.php DexAudit                    → 7/7 suites · 179 a
 
 ---
 
-## 5. `PR25-03` · `expected_machine_code` permite ocultar un DEX de otra máquina
+## 5. `PR25-03` · `expected_machine_code` permitía ocultar un DEX de otra máquina
 
 **Prioridad:** P2 · **Requisitos afectados:** D3 (identidad `ID1`), RF-02.
 
-### Evidencia
+**Estado:** ✅ **Cerrado (2026-11-27)** · la identidad se contrasta siempre contra `machines.code`; el código esperado del cliente se ignora.
+
+### Evidencia original
 
 - `src/Application/Service/MachineDexAuditService.php:176`:
 
@@ -163,7 +167,7 @@ $parsed = $this->parser->parse(
 - La spec D3 (`specs/39-eva-dts-dex-audit/spec.md:151`) exige comparar el identificador `ID1` contra `machines.code` normalizado.
 - Los controladores reenvían `expected_machine_code` desde el cuerpo de la petición (`RestockerRouteController.php:1490`, `TechnicianController.php:376`, `CoordinatorDexAuditController.php:196`) sin contrastarlo con la máquina resuelta.
 
-### Reproducción
+### Reproducción original
 
 Enviar a la máquina A un DEX cuyo `ID1` corresponde a la máquina B, incluyendo `expected_machine_code` con el código de B. El parser considera que la identidad coincide y persiste `identity_mismatch_warning = false`, aunque el DEX pertenezca a otra máquina.
 
@@ -171,9 +175,20 @@ Enviar a la máquina A un DEX cuyo `ID1` corresponde a la máquina B, incluyendo
 
 Se suprime la única señal de identidad del volcado y se permite atribuir contadores de ventas de una máquina a otra. El histórico de A queda contaminado y la discrepancia no es visible en la consola de Coordinación. Aunque el aviso no bloquea por diseño, debe calcularse siempre contra la máquina real.
 
-### Corrección propuesta
+### Corrección aplicada
 
-Ignorar `expected_machine_code` del cliente o exigir que sea exactamente igual a `$context['machine_code']`; en caso contrario, devolver `422 DEX_MACHINE_IDENTITY_MISMATCH` (o mantener el aviso `true`, pero nunca permitir que el cliente lo desactive). Añadir una prueba de suplantación con un DEX de otra máquina y `expected_machine_code` falsificado.
+1. `src/Application/Service/MachineDexAuditService.php`: `importDexAtomically()` pasa a `EvaDtsParser::parse()` el `machine_code` de la máquina resuelta por `lockMachineContext()`, no el campo del cliente. La comparación normalizada de `ID1` queda así anclada al dato de servidor.
+2. Los tres controladores dejan de reenviar `expected_machine_code` en el payload de importación. Si un cliente lo envía, se ignora; no puede desactivar el aviso de identidad.
+3. `tests/unit/MachineDexAuditServiceTest.php` 1.11 importa un DEX con `ID1` ajeno y un `expected_machine_code` falsificado; exige `identity_mismatch_warning = true` y que el volcado quede en la máquina resuelta.
+4. `tests/integration/DexAuditApiTest.php` 2.6 reproduce la suplantación por HTTP contra una tercera máquina de la misma sede y exige `201`, `machine_id` correcto y `identity_mismatch_warning = true`.
+
+### Verificación
+
+```text
+php tests/unit/MachineDexAuditServiceTest.php             → 33/33 aserciones · exit 0
+php tests/integration/DexAuditApiTest.php                → 51/51 aserciones · exit 0
+php tests/run_new_engine.php DexAudit                    → 7/7 suites · 180 aserciones · exit 0
+```
 
 ---
 
@@ -357,11 +372,11 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 - Cruces M34/M35 del detalle de Coordinación y delta efectivo tras `VOIDED`.
 - Concurrencia por misma huella, misma `client_mutation_id` y dos DEX válidos distintos con cadena de deltas serializada (`PR25-02`).
 - Replay exacto idempotente y rechazo `409` de una mutación reutilizada con contenido distinto.
+- Identidad `ID1` contrastada contra la máquina resuelta aunque el cliente falsifique `expected_machine_code` (`PR25-03`, unitaria 1.11 y HTTP 2.6).
 - Parser, esquema, convergencia y rendimiento del canal `new_engine`.
 
 ### Lo que no cubre la suite existente
 
-- Suplantación de `expected_machine_code` (`PR25-03`).
 - Fechas inválidas, futuras o `datetime-local` sin zona (`PR25-04`).
 - Vínculos inexistentes, de otra máquina o ya ocupados (`PR25-05`).
 - `conflict-dump` con máquina inexistente/fuera de zona (`PR25-06`).
@@ -371,4 +386,4 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 
 ### Límites
 
-La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest` y `PR25-02` con la carrera real de `DexAuditConcurrencyTest`, ambos contra PostgreSQL aislado; los siete hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.
+La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest`, `PR25-02` con la carrera real de `DexAuditConcurrencyTest` y `PR25-03` con la regresión unitaria 1.11 y la HTTP 2.6, todos contra PostgreSQL aislado; los seis hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.

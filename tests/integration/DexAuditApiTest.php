@@ -146,6 +146,8 @@ try {
     $machineId = (int)$machineStmt->fetchColumn();
     $machineStmt->execute([':location_id' => $locationId, ':code' => 'DEX9-FOOD-02']);
     $secondMachineId = (int)$machineStmt->fetchColumn();
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'DEX9-FOOD-03']);
+    $identityMachineId = (int)$machineStmt->fetchColumn();
 
     // Máquina viva fuera del perímetro de los dos actores móviles: su sede
     // pertenece a una zona sin asignación de Reponedor ni de Técnico (PR25-01).
@@ -387,6 +389,22 @@ try {
         'client_mutation_id' => 'dex09-api-0002',
     ], $restockerToken);
     $assert('2.5 La misma huella responde 409 DEX_DUPLICATE_HASH', $duplicated->getStatusCode() === 409 && $errorCode($duplicated) === 'DEX_DUPLICATE_HASH');
+
+    $forgedIdentity = $call('POST', '/api/restocker/machines/' . $identityMachineId . '/dex-audits', [
+        'raw_payload' => "DXS*COMM-DEX09-IDENTITY*VA*DEX 6.0\nID1*DEX9-FOOD-01\nID4*2\nVA1*1000*10\nDXE*FIN",
+        'original_filename' => 'identidad-forzada.dex',
+        'captured_at' => '2026-11-24 10:15:00+00',
+        'client_mutation_id' => 'dex09-api-identity-0001',
+        'expected_machine_code' => 'DEX9-FOOD-01',
+    ], $restockerToken);
+    $forgedIdentityData = $data($forgedIdentity);
+    $assert(
+        '2.6 El código esperado del cliente no oculta un ID1 ajeno (PR25-03)',
+        $forgedIdentity->getStatusCode() === 201
+            && ($forgedIdentityData['audit']['identity_mismatch_warning'] ?? null) === true
+            && (int)($forgedIdentityData['audit']['machine_id'] ?? 0) === $identityMachineId,
+        json_encode($forgedIdentityData)
+    );
 
     echo "\n--- 3. Consola de Coordinación, detalle y carga manual ---\n";
     $list = $call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, ['machine_id' => (string)$machineId]);

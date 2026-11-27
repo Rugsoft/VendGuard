@@ -194,7 +194,7 @@ final class CoordinatorDexAuditController
             'captured_at' => trim((string)($request->getBodyParam('captured_at') ?? '')) ?: (new \DateTimeImmutable('now'))->format('Y-m-d\TH:i:sP'),
         ];
 
-        foreach (['client_mutation_id', 'expected_machine_code', 'restock_visit_id', 'cash_collection_id', 'incident_id'] as $field) {
+        foreach (['client_mutation_id', 'restock_visit_id', 'cash_collection_id', 'incident_id'] as $field) {
             $value = $request->getBodyParam($field);
             if ($value !== null && $value !== '') {
                 $payload[$field] = $value;

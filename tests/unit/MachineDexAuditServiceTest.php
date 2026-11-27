@@ -579,6 +579,15 @@ $assert('1.10 La misma mutación con otro contenido es 409 CLIENT_MUTATION_ID_AL
     'CLIENT_MUTATION_ID_ALREADY_USED',
     409
 ));
+$forgedIdentity = $service->importDex($request(
+    20,
+    5,
+    'RESTOCKER_ROUTE',
+    "DXS*COMM-DEX07*VA*DEX 6.0\nID1*MAQ-AJENA\nID4*2\nVA1*900*9\nDXE*FIN",
+    ['client_mutation_id' => 'dex07-identity-0001', 'expected_machine_code' => 'MAQ-AJENA']
+));
+$assert('1.11 La identidad se contrasta con la máquina resuelta e ignora el código esperado del cliente', ($forgedIdentity['audit']['identity_mismatch_warning'] ?? false) === true
+    && ($forgedIdentity['audit']['machine_id'] ?? 0) === 20);
 
 echo "\n--- 2. Puertas, perímetro y primacía sanitaria (RF-03.1, C2) ---\n";
 

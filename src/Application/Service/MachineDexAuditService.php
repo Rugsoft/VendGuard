@@ -106,8 +106,9 @@ final class MachineDexAuditService
      *
      * Claves obligatorias: `machine_id`, `actor_id`, `import_source`,
      * `raw_payload`, `original_filename`, `captured_at`. Opcionales:
-     * `expected_machine_code`, `client_mutation_id`, `restock_visit_id`,
-     * `cash_collection_id`, `incident_id`.
+     * `client_mutation_id`, `restock_visit_id`, `cash_collection_id`,
+     * `incident_id`. El `expected_machine_code` del cliente se ignora: la
+     * identidad `ID1` se contrasta siempre contra `machines.code`.
      *
      * @param array<string, mixed> $request
      * @return array{
@@ -200,7 +201,7 @@ final class MachineDexAuditService
             (bool)($context['has_open_thermal_breakdown'] ?? false)
         );
 
-        $parsed = $this->parser->parse($rawPayload, (string)($request['expected_machine_code'] ?? ($context['machine_code'] ?? '')));
+        $parsed = $this->parser->parse($rawPayload, (string)($context['machine_code'] ?? ''));
 
         $mutationId = isset($request['client_mutation_id']) && trim((string)$request['client_mutation_id']) !== ''
             ? trim((string)$request['client_mutation_id'])
