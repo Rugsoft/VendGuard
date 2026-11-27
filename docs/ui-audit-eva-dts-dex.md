@@ -19,7 +19,8 @@ No se detectó ningún fallo de bloqueo (`P1`) en la UI del Módulo 39. El flujo
 
 - **Dos de ellos importaban** (prioridad Alta): un delta desconocido se pintaba como `0` en el historial móvil (H-39-01, **cerrado el 2026-11-27**) y la tarjeta «Máquina» del detalle de Coordinación quedaba vacía (H-39-02, **cerrado el 2026-11-27**).
 - **Un defecto de accesibilidad** dejaba al panel DEX del Reponedor sin comportamiento modal real en teclado (`P3`); **cerrado el 2026-11-27**.
-- **Los cuatro restantes son de presentación o copy** (`P3-P4`): timestamp técnico sin localizar, dos plurales con una unidad, placeholder duplicado en Delta y texto recortado del selector de archivo en móvil.
+- **El timestamp técnico del historial móvil** (H-39-04) **se cerró el 2026-11-27** con el formateo local compartido.
+- **Los tres restantes son de presentación o copy** (`P4`): dos plurales con una unidad, placeholder duplicado en Delta y texto recortado del selector de archivo en móvil.
 
 El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); se documenta aparte como externo/ambiental.
 
@@ -28,7 +29,7 @@ El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); s
 | 1 | **H-39-01** | **Alta** | Un delta sin base se muestra como `0` en el historial móvil | **Cerrado (2026-11-27)** |
 | 2 | **H-39-02** | **Alta** | La tarjeta «Máquina» del detalle de Coordinación está vacía | **Cerrado (2026-11-27)** |
 | 3 | **H-39-03** | **P3 · Media** | El panel DEX del Reponedor no es un modal plenamente operable por teclado | **Cerrado (2026-11-27)** |
-| 4 | **H-39-04** | **P3 · Media-baja** | Fecha técnica sin localizar en el historial móvil | Pendiente |
+| 4 | **H-39-04** | **P3 · Media-baja** | Fecha técnica sin localizar en el historial móvil | **Cerrado (2026-11-27)** |
 | 5 | **H-39-05** | **P4 · Baja** | Plurales incorrectos con una unidad (`1 anulados`, `1 bloques`) | Pendiente |
 | 6 | **H-39-06** | **P4 · Baja** | Placeholder duplicado `— — uds.` en la columna Delta de la tabla | Pendiente |
 | 7 | **H-39-07** | **P4 · Baja** | Texto del selector de archivo recortado en móvil | Pendiente |
@@ -143,7 +144,7 @@ En el mismo producto, el modal de Coordinación sí mueve el foco al abrir, tien
 
 **Evidencia.** Snapshot del historial móvil: `2026-11-25 13:06:05+00`. Detalle de Coordinación de `DEX-2026-0001`: `Capturado: 25/11/26, 14:06`.
 
-**Estado:** Pendiente. Prioridad `P3` (consistencia y usabilidad).
+**Estado:** **Cerrado el 2026-11-27.** Las plantillas del historial móvil del Reponedor y del Técnico pintan `formatDateTime(audit.captured_at)` con el util compartido `utils/DateTimeFormat.js`, el mismo que usa la consola y el detalle de Coordinación; ya no se publica el `captured_at` crudo con offset. **Evidencia:** `node tests/frontend/restocker_route_view.test.mjs` → **268/268**, `exit=0`; `node tests/frontend/technician_route_view.test.mjs` → **22/22**, `exit=0` (ambas con aserción nueva: la fecha se localiza, no contiene `+00` y un nulo se pinta `—`); `node tests/unit/FrontendTemplateCompileTest.mjs` → **83 plantillas / 5.729 expresiones / 0 fallos**, `exit=0`; `node --check` de ambas vistas → sintaxis válida. Comprobación real en Chromium a 360×640: el historial de `VEND-0101` muestra `25/11/26, 14:06`, igual que el detalle de Coordinación, y la consola queda limpia. Captura: `screenshots/ui-audit-19-dex-history-local-date-360.png`. Prioridad `P3` (consistencia y usabilidad).
 
 ---
 
@@ -245,7 +246,7 @@ En el mismo producto, el modal de Coordinación sí mueve el foco al abrir, tien
 1. ~~**H-39-01 (Alta):** Que `dexAuditDeltaUnits()` (Reponedor y Técnico) preserve el caso de base inicial (`delta_source = 'INITIAL_BASELINE'` y/o `delta_vend_units` nulo) y pinte `—` en lugar de `0`.~~ **Hecho el 2026-11-27** (ver §3).
 2. ~~**H-39-02 (Alta):** Que la proyección del detalle de Coordinación publique `machine_code` (o que la plantilla lea `machine_code_snapshot`) de modo que la tarjeta «Máquina» se rellene. Regresión de UI que compruebe el card con `VEND-0101`.~~ **Hecho el 2026-11-27** (ver §3).
 3. ~~**H-39-03 (P3):** Convertir el panel DEX del Reponedor en un diálogo semántico con foco inicial, atrapa de `Tab`/`Shift+Tab`, cierre con `Escape` y retorno de foco al disparador, o consolidarlo con el componente modal que ya lo hace en Coordinación. Regresión de accesibilidad.~~ **Hecho el 2026-11-27** (ver §3).
-4. **H-39-04 (P3):** Formatear la fecha del historial móvil con la misma presentación local usada en el resto de la app (`25/11/26, 14:06`), sin zona horaria expuesta.
+4. ~~**H-39-04 (P3):** Formatear la fecha del historial móvil con la misma presentación local usada en el resto de la app (`25/11/26, 14:06`), sin zona horaria expuesta.~~ **Hecho el 2026-11-27** (ver §3).
 5. **H-39-05 (P4):** Concordancia numérica del copy en el KPI de Coordinación y en el contador de bloques del modal de anulación (`1 anulado`, `1 bloque`).
 6. **H-39-06 (P4):** Unificar el render de la celda Delta para valores nulos, evitando el placeholder duplicado `— — uds.`.
 7. **H-39-07 (P4):** Ajuste de presentación del selector de archivo nativo a `360 px` para que el texto «Ningún archivo seleccionado» se lea completo sin truncar.
@@ -285,4 +286,4 @@ Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de 
 
 **Estado del árbol:** `feat/eva-dts-dex-audit` al `158c578c`; la corrida no modificó código ni confirmó cambios de estado, y no quedó ningún archivo de código alterado por este documento. Este `docs/ui-audit-eva-dts-dex.md` queda como acta de la auditoría en navegador y se incorpora al historial de la rama.
 
-**Cierres registrados:** H-39-01, H-39-02 y H-39-03 cerrados el 2026-11-27 (ver §3 para la corrección y su evidencia); H-39-04 a H-39-07 siguen pendientes.
+**Cierres registrados:** H-39-01, H-39-02, H-39-03 y H-39-04 cerrados el 2026-11-27 (ver §3 para la corrección y su evidencia); H-39-05 a H-39-07 siguen pendientes.

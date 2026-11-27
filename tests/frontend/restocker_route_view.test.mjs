@@ -2241,6 +2241,15 @@ assert(
     && RestockerRouteView.template.includes('dexAuditDeltaLabel(audit)')
 );
 
+const formattedDexCapturedAt = dexVm.formatDateTime('2026-11-25 13:06:05+00');
+assert(
+  'La fecha del historial .dex se localiza y no expone la zona UTC',
+  /^\d{2}\/\d{2}\/\d{2}, \d{2}:\d{2}$/.test(formattedDexCapturedAt)
+    && !formattedDexCapturedAt.includes('+00')
+    && dexVm.formatDateTime(null) === '—'
+    && RestockerRouteView.template.includes('formatDateTime(audit.captured_at)')
+);
+
 const dexModalTag = (RestockerRouteView.template.split('data-testid="restocker-dex-modal"')[1] || '').split('>')[0];
 assert(
   'El panel .dex se anuncia como diálogo modal con título propio',

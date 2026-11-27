@@ -18,6 +18,7 @@
 
 import { api } from '../api.js';
 import { store } from '../store.js';
+import { formatDateTime } from '../utils/DateTimeFormat.js';
 import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
 import {
@@ -770,6 +771,7 @@ export const TechnicianRouteView = {
     }
   },
   methods: {
+    formatDateTime,
     /**
      * Aplica la respuesta del ciclo de jornada: estado y acumulado del día.
      *
@@ -5543,7 +5545,7 @@ export const TechnicianRouteView = {
               <li v-for="audit in dexHistory" :key="audit.id" style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 7px 8px; font-size: 12px;">
                 <div style="display: flex; justify-content: space-between; gap: 6px;">
                   <strong>{{ audit.audit_code || ('DEX #' + audit.id) }}</strong>
-                  <span style="color: var(--color-ink-muted);">{{ audit.captured_at || '' }}</span>
+                  <span style="color: var(--color-ink-muted);">{{ formatDateTime(audit.captured_at) }}</span>
                 </div>
                 <div style="margin-top: 3px; color: var(--color-slate);">
                   VA1 {{ dexAuditUnits(audit) }} u · Δ {{ dexAuditDeltaLabel(audit) }} · {{ audit.delta_source || '—' }}

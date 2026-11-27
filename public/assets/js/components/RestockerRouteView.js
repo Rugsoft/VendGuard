@@ -58,6 +58,7 @@ import {
   DEX_AUDIT_PENDING
 } from '../utils/DexAuditOfflineQueue.js';
 import { previewDexFile, DEX_PREVIEW_ROLES } from '../utils/EvaDtsClientPreview.js';
+import { formatDateTime } from '../utils/DateTimeFormat.js';
 
 const HYGIENE_ITEMS = [
   { key: 'coffee_grounds_emptied', label: 'Cajón de posos vaciado', scope: 'hot' },
@@ -745,6 +746,8 @@ export const RestockerRouteView = {
     }
   },
   methods: {
+    formatDateTime,
+
     /**
      * Acceso del reponedor (RF-04.1). El rol se comprueba en el cliente y el
      * servidor vuelve a imponerlo en cada petición: esta vista no es la frontera
@@ -6086,7 +6089,7 @@ export const RestockerRouteView = {
               <li v-for="audit in dexHistory" :key="audit.id" style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 7px 8px; font-size: 12px;">
                 <div style="display: flex; justify-content: space-between; gap: 6px;">
                   <strong>{{ audit.audit_code || ('DEX #' + audit.id) }}</strong>
-                  <span style="color: var(--color-ink-muted);">{{ audit.captured_at || '' }}</span>
+                  <span style="color: var(--color-ink-muted);">{{ formatDateTime(audit.captured_at) }}</span>
                 </div>
                 <div style="margin-top: 3px; color: var(--color-slate);">
                   VA1 {{ dexAuditUnits(audit) }} u · Δ {{ dexAuditDeltaLabel(audit) }} · {{ audit.delta_source || '—' }}
