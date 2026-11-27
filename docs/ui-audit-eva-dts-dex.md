@@ -21,7 +21,8 @@ No se detectó ningún fallo de bloqueo (`P1`) en la UI del Módulo 39. El flujo
 - **Un defecto de accesibilidad** dejaba al panel DEX del Reponedor sin comportamiento modal real en teclado (`P3`); **cerrado el 2026-11-27**.
 - **El timestamp técnico del historial móvil** (H-39-04) **se cerró el 2026-11-27** con el formateo local compartido.
 - **Los plurales con una unidad** (H-39-05) **se cerraron el 2026-11-27** con un helper de concordancia compartido en la consola.
-- **Los dos restantes son de presentación** (`P4`): placeholder duplicado en Delta y texto recortado del selector de archivo en móvil.
+- **El placeholder duplicado de Delta** (H-39-06) **se cerró el 2026-11-27** dejando un solo `—` cuando no hay unidades.
+- **El restante es de presentación** (`P4`): texto recortado del selector de archivo en móvil.
 
 El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); se documenta aparte como externo/ambiental.
 
@@ -32,7 +33,7 @@ El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); s
 | 3 | **H-39-03** | **P3 · Media** | El panel DEX del Reponedor no es un modal plenamente operable por teclado | **Cerrado (2026-11-27)** |
 | 4 | **H-39-04** | **P3 · Media-baja** | Fecha técnica sin localizar en el historial móvil | **Cerrado (2026-11-27)** |
 | 5 | **H-39-05** | **P4 · Baja** | Plurales incorrectos con una unidad (`1 anulados`, `1 bloques`) | **Cerrado (2026-11-27)** |
-| 6 | **H-39-06** | **P4 · Baja** | Placeholder duplicado `— — uds.` en la columna Delta de la tabla | Pendiente |
+| 6 | **H-39-06** | **P4 · Baja** | Placeholder duplicado `— — uds.` en la columna Delta de la tabla | **Cerrado (2026-11-27)** |
 | 7 | **H-39-07** | **P4 · Baja** | Texto del selector de archivo recortado en móvil | Pendiente |
 
 **Lectura de prioridades:** Alta = dato operativo incorrecto o campo de trazabilidad clave sin valor, con impacto en el juicio de auditoría; `P3` es una deuda de accesibilidad, presentación o semántica sin bloqueo; `P4` es cosmético o de refinamiento.
@@ -183,7 +184,7 @@ En el mismo producto, el modal de Coordinación sí mueve el foco al abrir, tien
 
 **Evidencia.** Snapshot de la tabla de Coordinación: celdas Delta de las tres filas con `— — uds.` (ej. `DEX-2026-0001`, `DEX-2026-0003`, `DEX-2026-0002`).
 
-**Estado:** Pendiente. Prioridad `P4` (presentación).
+**Estado:** **Cerrado el 2026-11-27.** La celda Delta apilaba dos placeholders cuando el volcado no traía deltas: el importe vacío (`—`) y la línea de unidades (`— uds.`), de ahí `— — uds.`. El componente gana `deltaUnits(audit)`, que resuelve el delta efectivo con su respaldo y devuelve `null` si no hay valor finito; la línea de unidades solo se renderiza con `v-if="deltaUnits(audit) !== null"`, quedando un único `—` en la celda. Los volcados con unidades conservan `X uds.`. **Evidencia:** `node tests/frontend/coordinator_dex_audits_tab.test.mjs` → **33/33**, `exit=0` (aserción nueva: `null` sin valor —también con cadena vacía—, respaldo al delta persistido y plantilla sin la expresión antigua); `node tests/unit/FrontendTemplateCompileTest.mjs` → **83 plantillas / 5.731 expresiones / 0 fallos**, `exit=0`; `node --check` del componente → sintaxis válida. Comprobación real en Chromium a 1280×900: las cuatro filas del libro muestran `—` en Delta, sin ninguna celda con `— — uds.`; consola sin errores de producto. Captura: `screenshots/ui-audit-21-dex-delta-single-placeholder-table.png`. Prioridad `P4` (presentación).
 
 ---
 
@@ -249,7 +250,7 @@ En el mismo producto, el modal de Coordinación sí mueve el foco al abrir, tien
 3. ~~**H-39-03 (P3):** Convertir el panel DEX del Reponedor en un diálogo semántico con foco inicial, atrapa de `Tab`/`Shift+Tab`, cierre con `Escape` y retorno de foco al disparador, o consolidarlo con el componente modal que ya lo hace en Coordinación. Regresión de accesibilidad.~~ **Hecho el 2026-11-27** (ver §3).
 4. ~~**H-39-04 (P3):** Formatear la fecha del historial móvil con la misma presentación local usada en el resto de la app (`25/11/26, 14:06`), sin zona horaria expuesta.~~ **Hecho el 2026-11-27** (ver §3).
 5. ~~**H-39-05 (P4):** Concordancia numérica del copy en el KPI de Coordinación y en el contador de bloques del modal de anulación (`1 anulado`, `1 bloque`).~~ **Hecho el 2026-11-27** (ver §3).
-6. **H-39-06 (P4):** Unificar el render de la celda Delta para valores nulos, evitando el placeholder duplicado `— — uds.`.
+6. ~~**H-39-06 (P4):** Unificar el render de la celda Delta para valores nulos, evitando el placeholder duplicado `— — uds.`.~~ **Hecho el 2026-11-27** (ver §3).
 7. **H-39-07 (P4):** Ajuste de presentación del selector de archivo nativo a `360 px` para que el texto «Ningún archivo seleccionado» se lea completo sin truncar.
 
 Externo: resolver por canal de integración/ambiental la inconsistencia del widget de n8n (solapamiento y errores de red), sin modificar el M39.
@@ -287,4 +288,4 @@ Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de 
 
 **Estado del árbol:** `feat/eva-dts-dex-audit` al `158c578c`; la corrida no modificó código ni confirmó cambios de estado, y no quedó ningún archivo de código alterado por este documento. Este `docs/ui-audit-eva-dts-dex.md` queda como acta de la auditoría en navegador y se incorpora al historial de la rama.
 
-**Cierres registrados:** H-39-01 a H-39-05 cerrados el 2026-11-27 (ver §3 para la corrección y su evidencia); H-39-06 y H-39-07 siguen pendientes.
+**Cierres registrados:** H-39-01 a H-39-06 cerrados el 2026-11-27 (ver §3 para la corrección y su evidencia); H-39-07 sigue pendiente.

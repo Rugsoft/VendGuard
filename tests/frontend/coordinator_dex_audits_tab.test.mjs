@@ -235,6 +235,14 @@ async function run() {
   assert('1.5 El botón de limpiar solo se activa con perímetro', vm.hasActiveFilters === true);
   vm.resetFilters();
   assert('1.6 Limpiar restaura vigentes y borra el perímetro', vm.filters.status === 'ACTIVE' && vm.hasActiveFilters === false);
+  assert(
+    '1.7 La celda Delta no duplica el placeholder cuando no hay unidades',
+    vm.deltaUnits({ effective_delta_vend_units: null, delta_vend_units: null }) === null
+      && vm.deltaUnits({ effective_delta_vend_units: null, delta_vend_units: 7 }) === 7
+      && vm.deltaUnits('') === null
+      && CoordinatorDexAuditsSubTab.template.includes('v-if="deltaUnits(audit) !== null"')
+      && !CoordinatorDexAuditsSubTab.template.includes('effective_delta_vend_units ?? audit.delta_vend_units) }} uds.')
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // 2. Listado y detalle

@@ -193,6 +193,12 @@ export const CoordinatorDexAuditsSubTab = {
     pluralUnit(count, singular, plural) {
       return Number(count) === 1 ? singular : plural;
     },
+    deltaUnits(audit) {
+      const raw = audit?.effective_delta_vend_units ?? audit?.delta_vend_units;
+      if (raw === null || raw === undefined || raw === '') return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    },
     sourceLabel(value, fallback = '') {
       return IMPORT_SOURCE_LABELS[value] || fallback || value || '—';
     },
@@ -585,7 +591,7 @@ export const CoordinatorDexAuditsSubTab = {
               <td>{{ integer(audit.va1_total_vend_units) }}</td>
               <td style="white-space: nowrap;">
                 <div>{{ money(audit.effective_delta_sales_eur ?? audit.delta_sales_eur) }}</div>
-                <div style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ integer(audit.effective_delta_vend_units ?? audit.delta_vend_units) }} uds.</div>
+                <div v-if="deltaUnits(audit) !== null" style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ integer(deltaUnits(audit)) }} uds.</div>
               </td>
               <td style="white-space: nowrap;">{{ money(audit.ca3_cashbox_eur) }}</td>
               <td>
