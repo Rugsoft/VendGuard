@@ -1268,6 +1268,53 @@ try {
         json_encode(['status' => $m16WithForeign->getStatusCode(), 'error' => $errorCode($m16WithForeign)])
     );
 
+    // Reapertura en garantía (RF-05.4.1): el expediente nace RESOLVED dentro de
+    // las 48 h y el técnico lo reabre con el volcado que documenta la reincidencia.
+    $reopenIncident = $incidentRepo->create(
+        new Incident(
+            id: null,
+            ticketCode: 'INC-2026-D9M16R',
+            machineId: $identityMachineId,
+            locationId: $locationId,
+            category: IncidentCategory::PRODUCT_JAM,
+            description: 'Avería resuelta hace una hora que reincide durante la visita.',
+            urgency: UrgencyLevel::MEDIUM,
+            status: IncidentStatus::RESOLVED,
+            assignedTechnicianId: $technicianId,
+            reporterName: 'Técnico DEX 09',
+            assignedAt: gmdate('Y-m-d\TH:i:sP', time() - 7200),
+            startedAt: gmdate('Y-m-d\TH:i:sP', time() - 7200),
+            resolvedAt: gmdate('Y-m-d\TH:i:sP', time() - 3600),
+            resolutionDiagnosis: 'Diagnóstico de la reparación previa del mecanismo.',
+            resolutionAction: 'Sustitución del muelle de la espiral en la visita anterior.'
+        ),
+        $technicianId,
+        'Expediente resuelto para la reapertura en garantía H25-01.'
+    );
+    $reopenIncidentId = (int)$reopenIncident->getId();
+    $m16ReopenAuditId = $importProductionAudit('h2501-reopen', '2026-11-24 17:20:00+00', 'COMM-H2501-REOPEN', $identityMachineId);
+    $m16Reopen = $call('POST', '/api/technician/opportunistic/incidents/' . $reopenIncidentId . '/assume', [
+        'reopen_reason' => 'Reincidencia del mismo atasco una hora después de la reparación.',
+        'dex_audit_id' => $m16ReopenAuditId,
+    ], $technicianToken);
+    $m16ReopenData = $data($m16Reopen);
+    $m16ReopenLinkAudit = $findAuditRow('DEX_AUDIT_LINKED', 'MACHINE_DEX_AUDIT', $m16ReopenAuditId);
+    $assert(
+        '10.6 La reapertura en garantía enlaza el expediente reabierto',
+        $reopenIncidentId > 0
+            && $m16ReopenAuditId > 0
+            && $m16Reopen->getStatusCode() === 200
+            && (int)($m16ReopenData['id'] ?? 0) === $reopenIncidentId
+            && ($m16ReopenData['status'] ?? '') === 'IN_PROGRESS'
+            && ($m16ReopenData['opportunistic_origin_reason'] ?? '') === 'WARRANTY_REOPEN_IN_SITU'
+            && ($m16ReopenData['dex_audit_id'] ?? null) === $m16ReopenAuditId
+            && $linkedTarget('incident_id', $m16ReopenAuditId) === $reopenIncidentId
+            && $m16ReopenLinkAudit !== null
+            && (int)($m16ReopenLinkAudit['user_id'] ?? 0) === $technicianId
+            && (int)($m16ReopenLinkAudit['metadata']['target_id'] ?? 0) === $reopenIncidentId,
+        json_encode(['status' => $m16Reopen->getStatusCode(), 'error' => $errorCode($m16Reopen), 'data' => $m16ReopenData, 'audit' => $m16ReopenLinkAudit])
+    );
+
     $exitCode = $failures === 0 ? 0 : 1;
 } catch (Throwable $exception) {
     fwrite(STDERR, "\n[EXCEPCIÓN] " . $exception->getMessage() . "\n" . $exception->getTraceAsString() . "\n");

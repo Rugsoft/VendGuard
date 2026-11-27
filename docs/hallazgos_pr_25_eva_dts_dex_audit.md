@@ -15,7 +15,7 @@
 
 > **Documento de trabajo.** Esta es una segunda revisión posterior al acta cerrada [`revision_pr_25_eva_dts_dex_audit.md`](revision_pr_25_eva_dts_dex_audit.md), que declaraba 9/9 hallazgos cerrados. El acta histórica no se modifica; este documento registra los huecos de la nueva pasada y el cierre de los que ya se han corregido.
 
-> **Acta de cierre · `H25-01` (2026-11-27):** cerrado en local. Los DTO de alta y asunción aceptan `dex_audit_id` con `DexAuditLinker::parseOptionalId()`; `OpportunisticIncidentService` enlaza el volcado con el expediente resultante dentro de la misma transacción del caso de uso, de modo que un vínculo inválido deshace el alta o la asunción completa; y `TechnicianOpportunisticController` inyecta el enlazador, traduce `DexAuditValidationException` a su código de contrato y conserva el campo en `form_data`. Regresión: `DexAuditApiTest` 10.1–10.5 (72/72) y las suites M16 `T-OPP-08` y `T-OPP-09` en verde. La PR no se ha fusionado.
+> **Acta de cierre · `H25-01` (2026-11-27):** cerrado en local. Los DTO de alta y asunción aceptan `dex_audit_id` con `DexAuditLinker::parseOptionalId()`; `OpportunisticIncidentService` enlaza el volcado con el expediente resultante dentro de la misma transacción del caso de uso, de modo que un vínculo inválido deshace el alta o la asunción completa; y `TechnicianOpportunisticController` inyecta el enlazador, traduce `DexAuditValidationException` a su código de contrato y conserva el campo en `form_data`. Regresión: `DexAuditApiTest` 10.1–10.6 (73/73), con alta, asunción y reapertura en garantía enlazadas, y las suites M16 `T-OPP-08` y `T-OPP-09` en verde. La PR no se ha fusionado.
 
 ---
 
@@ -113,17 +113,17 @@ El flujo «un toque» de M16 no deja trazabilidad hacia el volcado que lo motiv�
 1. `CreateOpportunisticIncidentDto` y `AssumeOpportunisticIncidentDto` declaran `dexAuditId` y lo resuelven en `fromPayload()` con `DexAuditLinker::parseOptionalId()`: ausente o vacío es `null`; cualquier otro valor debe ser un entero positivo y se rechaza con `422 DEX_AUDIT_ID_INVALID`.
 2. `OpportunisticIncidentService` recibe un `?DexAuditLinker` opcional y, tras crear o asumir el expediente, llama a `linkToIncident()` con el `id` resultante —también el del sucesor crónico— usando el actor del técnico. La llamada ocurre dentro de `runInTransaction()`, de modo que `DEX_AUDIT_NOT_FOUND`, `DEX_AUDIT_MACHINE_MISMATCH`, `DEX_AUDIT_VOIDED` o `DEX_AUDIT_ALREADY_LINKED` revierten la incidencia completa en lugar de dejarla escrita sin trazabilidad.
 3. `TechnicianOpportunisticController` inyecta el enlazador con `PdoMachineDexAuditRepository` y el `AuditLogger` del controlador, traduce `DexAuditValidationException` a su código y estado de contrato y conserva `dex_audit_id` en `form_data` cuando falla la fotografía. La respuesta de alta y asunción publica `dex_audit_id`.
-4. La regresión HTTP 10.1–10.5 de `DexAuditApiTest` certifica el alta con vínculo, la asunción con vínculo, el rechazo de un volcado anulado y el de un volcado de otra máquina, incluida la ausencia de expediente tras el rechazo.
+4. La regresión HTTP 10.1–10.6 de `DexAuditApiTest` certifica el alta con vínculo, la asunción con vínculo, la reapertura en garantía con vínculo, el rechazo de un volcado anulado y el de un volcado de otra máquina, incluida la ausencia de expediente tras el rechazo. La reapertura 10.6 parte de un expediente `RESOLVED` dentro de las 48 h y exige que el `incident_id` enlazado sea el del propio expediente reabierto, con su `DEX_AUDIT_LINKED` firmado por el técnico.
 
 **Verificación**
 
 ```text
-php tests/integration/DexAuditApiTest.php                          → 72/72 aserciones · exit 0
+php tests/integration/DexAuditApiTest.php                          → 73/73 aserciones · exit 0
 php tests/integration/OpportunisticIncidentServiceTest.php         → 100% en verde · exit 0
 php tests/integration/OpportunisticIncidentApiIntegrationTest.php  → 56/56 aserciones · exit 0
 ```
 
-La reapertura usa el mismo camino de enlace que la asunción, pero la regresión 10.x no reproduce los tres estados de reincidencia; queda como hueco de cobertura de la suite M16.
+La regresión 10.6 cubre la reapertura en garantía; la sustitución por Avería Crónica en la 3.ª reincidencia comparte el mismo enlace al expediente sucesor, pero no se reproduce en esta suite.
 
 ---
 
