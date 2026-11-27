@@ -22,7 +22,9 @@ No se detectó ningún fallo de bloqueo (`P1`) en la UI del Módulo 39. El flujo
 - **El timestamp técnico del historial móvil** (H-39-04) **se cerró el 2026-11-27** con el formateo local compartido.
 - **Los plurales con una unidad** (H-39-05) **se cerraron el 2026-11-27** con un helper de concordancia compartido en la consola.
 - **El placeholder duplicado de Delta** (H-39-06) **se cerró el 2026-11-27** dejando un solo `—` cuando no hay unidades.
-- **El restante es de presentación** (`P4`): texto recortado del selector de archivo en móvil.
+- **El último, cosmético** (H-39-07), **se cerró el 2026-11-27** sustituyendo el control nativo por un disparador legible con el estado del archivo.
+
+**Los siete hallazgos quedan cerrados a 2026-11-27.**
 
 El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); se documenta aparte como externo/ambiental.
 
@@ -34,7 +36,7 @@ El único fallo de red visto fue el widget de chat de n8n (`net::ERR_FAILED`); s
 | 4 | **H-39-04** | **P3 · Media-baja** | Fecha técnica sin localizar en el historial móvil | **Cerrado (2026-11-27)** |
 | 5 | **H-39-05** | **P4 · Baja** | Plurales incorrectos con una unidad (`1 anulados`, `1 bloques`) | **Cerrado (2026-11-27)** |
 | 6 | **H-39-06** | **P4 · Baja** | Placeholder duplicado `— — uds.` en la columna Delta de la tabla | **Cerrado (2026-11-27)** |
-| 7 | **H-39-07** | **P4 · Baja** | Texto del selector de archivo recortado en móvil | Pendiente |
+| 7 | **H-39-07** | **P4 · Baja** | Texto del selector de archivo recortado en móvil | **Cerrado (2026-11-27)** |
 
 **Lectura de prioridades:** Alta = dato operativo incorrecto o campo de trazabilidad clave sin valor, con impacto en el juicio de auditoría; `P3` es una deuda de accesibilidad, presentación o semántica sin bloqueo; `P4` es cosmético o de refinamiento.
 
@@ -203,7 +205,7 @@ En el mismo producto, el modal de Coordinación sí mueve el foco al abrir, tien
 
 **Evidencia.** Snapshot móvil del panel: `document.documentElement.scrollWidth = 343`, viewport `360`; el control muestra `Ningún ar…ccionado`. No se midió overflow (el documento no desborda).
 
-**Estado:** Pendiente. Prioridad `P4` (cosmético).
+**Estado:** **Cerrado el 2026-11-27.** El control nativo se sustituye por el patrón de disparador del sistema de diseño: el `input[type=file]` queda `visually-hidden` (sigue siendo el control real y accesible, con su `label for`) y un `<label>` con clase `vg-btn` («Seleccionar archivo .dex») abre el selector; debajo se anuncia el estado completo («Ningún archivo seleccionado» o «📄 nombre.dex»). La regla `.vg-file-field:focus-within .vg-file-trigger` dibuja el anillo de foco sobre el disparador. Se aplicó el mismo patrón a los selectores .dex del Reponedor, del Técnico y de la consola de Coordinación. **Evidencia:** `node tests/frontend/coordinator_dex_audits_tab.test.mjs` → **34/34**, `node tests/frontend/restocker_route_view.test.mjs` → **269/269** y `node tests/frontend/technician_route_view.test.mjs` → **23/23**, los tres `exit=0` y con aserción nueva sobre disparador, `for`, estado vacío y control oculto; `node tests/unit/FrontendTemplateCompileTest.mjs` → **83 plantillas / 5.730 expresiones / 0 fallos**, `exit=0`; `node --check` de las tres vistas → sintaxis válida. Comprobación real en Chromium a 360×800: el disparador mide 190,4 px con `scrollWidth - clientWidth = 0`, el estado «Ningún archivo seleccionado» mide 311 px sin recorte, el `input` oculto mide 1×1, su `label` apunta a su `id`, el foco pinta un anillo sólido de 2 px en primario y el documento sigue sin desbordar (`scrollWidth = 343`). Al simular la selección de `volcado.dex`, el estado pasa a «📄 volcado.dex» y se calcula la vista previa sin error ni importación. Consola sin errores de producto. Captura: `screenshots/ui-audit-22-dex-file-picker-360.png`. Prioridad `P4` (cosmético).
 
 ---
 
@@ -251,7 +253,7 @@ En el mismo producto, el modal de Coordinación sí mueve el foco al abrir, tien
 4. ~~**H-39-04 (P3):** Formatear la fecha del historial móvil con la misma presentación local usada en el resto de la app (`25/11/26, 14:06`), sin zona horaria expuesta.~~ **Hecho el 2026-11-27** (ver §3).
 5. ~~**H-39-05 (P4):** Concordancia numérica del copy en el KPI de Coordinación y en el contador de bloques del modal de anulación (`1 anulado`, `1 bloque`).~~ **Hecho el 2026-11-27** (ver §3).
 6. ~~**H-39-06 (P4):** Unificar el render de la celda Delta para valores nulos, evitando el placeholder duplicado `— — uds.`.~~ **Hecho el 2026-11-27** (ver §3).
-7. **H-39-07 (P4):** Ajuste de presentación del selector de archivo nativo a `360 px` para que el texto «Ningún archivo seleccionado» se lea completo sin truncar.
+7. ~~**H-39-07 (P4):** Ajuste de presentación del selector de archivo nativo a `360 px` para que el texto «Ningún archivo seleccionado» se lea completo sin truncar.~~ **Hecho el 2026-11-27** (ver §3).
 
 Externo: resolver por canal de integración/ambiental la inconsistencia del widget de n8n (solapamiento y errores de red), sin modificar el M39.
 
@@ -288,4 +290,4 @@ Este acta se actualizará cuando cada hallazgo se corrija: el estado pasará de 
 
 **Estado del árbol:** `feat/eva-dts-dex-audit` al `158c578c`; la corrida no modificó código ni confirmó cambios de estado, y no quedó ningún archivo de código alterado por este documento. Este `docs/ui-audit-eva-dts-dex.md` queda como acta de la auditoría en navegador y se incorpora al historial de la rama.
 
-**Cierres registrados:** H-39-01 a H-39-06 cerrados el 2026-11-27 (ver §3 para la corrección y su evidencia); H-39-07 sigue pendiente.
+**Cierres registrados:** H-39-01 a H-39-07 cerrados el 2026-11-27 (ver §3 para la corrección y su evidencia). No quedan hallazgos pendientes en esta acta.

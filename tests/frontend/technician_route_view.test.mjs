@@ -100,6 +100,13 @@ assert(
     && viewSource.includes('data-testid="technician-dex-queue"')
 );
 assert(
+  'El selector .dex es un disparador legible y anuncia el estado vacío',
+  viewSource.includes('data-testid="technician-dex-file-trigger"')
+    && viewSource.includes('for="technician-dex-file-input"')
+    && viewSource.includes("'Ningún archivo seleccionado'")
+    && /id="technician-dex-file-input"[\s\S]{0,220}class="visually-hidden"/.test(viewSource)
+);
+assert(
   'La vista del técnico no publica el prefill económico ni CA3',
   !viewSource.includes('va1_total_sales_eur')
     && !viewSource.includes('ca3_')

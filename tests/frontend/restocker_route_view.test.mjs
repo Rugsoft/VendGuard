@@ -2220,6 +2220,14 @@ api.restocker.importDexAudit = async (machineId, payload) => {
   };
 };
 
+assert(
+  'El selector .dex es un disparador legible y anuncia el estado vacío',
+  viewSource.includes('data-testid="restocker-dex-file-trigger"')
+    && viewSource.includes('for="restocker-dex-file-input"')
+    && viewSource.includes("'Ningún archivo seleccionado'")
+    && /id="restocker-dex-file-input"[\s\S]{0,220}class="visually-hidden"/.test(viewSource)
+);
+
 const dexVm = buildVm({ restocker: { id: 12, name: 'Lucía Gómez', role: 'RESTOCKER' } });
 dexVm.visitMachine = { id: 7, code: 'VEND-0701', machine_type: 'COMBO' };
 dexVm.visitForm = { ...dexVm.visitForm, dex_audit_id: null, items: [] };

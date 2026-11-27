@@ -527,23 +527,31 @@ export const CoordinatorDexAuditsSubTab = {
           </div>
           <div>
             <label class="vg-label" for="dex-manual-file">Fichero .dex (máx. 1 MB)</label>
-            <input
-              :key="manualFileInputKey"
-              id="dex-manual-file"
-              class="vg-input"
-              type="file"
-              accept=".dex,text/plain"
-              data-testid="dex-manual-file"
-              @change="handleManualFile"
-            >
+            <div class="vg-file-field">
+              <input
+                :key="manualFileInputKey"
+                id="dex-manual-file"
+                class="visually-hidden"
+                type="file"
+                accept=".dex,text/plain"
+                data-testid="dex-manual-file"
+                @change="handleManualFile"
+              >
+              <label
+                for="dex-manual-file"
+                class="vg-btn vg-btn-secondary vg-file-trigger"
+                data-testid="dex-manual-file-trigger"
+                style="display: inline-flex; cursor: pointer;"
+              >Seleccionar archivo .dex</label>
+            </div>
+            <p style="margin: 4px 0 0; font-size: var(--font-size-caption); color: var(--color-ink-muted); overflow-wrap: anywhere;">
+              {{ manualForm.original_filename ? manualForm.original_filename + ' · ' + integer(manualForm.raw_payload.length) + ' bytes' : 'Ningún archivo seleccionado' }}
+            </p>
           </div>
           <div>
             <label class="vg-label" for="dex-manual-expected-code">Código esperado (opcional)</label>
             <input id="dex-manual-expected-code" v-model="manualForm.expected_machine_code" class="vg-input" type="text" placeholder="VEND-MAD-0001" data-testid="dex-manual-expected-code">
           </div>
-        </div>
-        <div v-if="manualForm.original_filename" style="margin-top: 8px; font-size: var(--font-size-caption); color: var(--color-ink-muted);">
-          Adjunto: <strong>{{ manualForm.original_filename }}</strong> · {{ integer(manualForm.raw_payload.length) }} bytes
         </div>
         <div v-if="manualFileError" class="vg-alert vg-alert-error" role="alert" style="margin-top: 10px;" data-testid="dex-manual-file-error">
           ⚠️ {{ manualFileError }}

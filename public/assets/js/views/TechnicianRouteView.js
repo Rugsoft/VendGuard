@@ -5507,8 +5507,24 @@ export const TechnicianRouteView = {
           <p v-if="dexSuccess" data-testid="technician-dex-success" style="font-size: 12px; color: var(--color-success-text); background-color: var(--color-success-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;">✓ {{ dexSuccess }}</p>
 
           <label style="display: block; font-size: 12px; font-weight: 600; margin: 14px 0 4px 0;">Volcado EVA-DTS (.dex, máx. 1 MB)</label>
-          <input type="file" accept=".dex,text/plain" class="vg-input" data-testid="technician-dex-file" @change="handleDexFile" />
-          <p v-if="dexFileName" style="font-size: 11px; color: var(--color-ink-muted); margin: 4px 0 0 0;">📄 {{ dexFileName }}</p>
+          <div class="vg-file-field">
+            <input
+              id="technician-dex-file-input"
+              type="file"
+              accept=".dex,text/plain"
+              class="visually-hidden"
+              data-testid="technician-dex-file"
+              aria-label="Volcado EVA-DTS (.dex, máx. 1 MB)"
+              @change="handleDexFile"
+            />
+            <label
+              for="technician-dex-file-input"
+              class="vg-btn vg-btn-secondary vg-file-trigger"
+              data-testid="technician-dex-file-trigger"
+              style="display: inline-flex; cursor: pointer;"
+            >Seleccionar archivo .dex</label>
+          </div>
+          <p style="font-size: 11px; color: var(--color-ink-muted); margin: 4px 0 0 0;">{{ dexFileName ? '📄 ' + dexFileName : 'Ningún archivo seleccionado' }}</p>
 
           <div v-if="dexPreview" data-testid="technician-dex-preview" style="margin-top: 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 9px 10px; font-size: 12px;">
             <div style="display: flex; justify-content: space-between; gap: 8px;">

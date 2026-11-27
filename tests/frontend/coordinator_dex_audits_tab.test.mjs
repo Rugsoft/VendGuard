@@ -400,6 +400,13 @@ async function run() {
   assert('7.2 La tabla ancha queda dentro de un contenedor con scroll propio', source.includes('data-testid="dex-table-wrapper"') && source.includes('overflow-x: auto') && source.includes('min-width: 1080px'));
   assert('7.3 Los KPIs y filtros usan rejillas auto-ajustables', (source.match(/repeat\(auto-fit, minmax\(150px, 1fr\)\)/g) || []).length >= 3);
   assert('7.4 No introduce dependencias externas', !/from\s+['"](?!\.\.?\/)/.test(source) && !source.includes('axios') && !source.includes('lodash'));
+  assert(
+    '7.5 El selector .dex oculta el control nativo y rotula su estado',
+    source.includes('data-testid="dex-manual-file-trigger"')
+      && source.includes('for="dex-manual-file"')
+      && source.includes("'Ningún archivo seleccionado'")
+      && /id="dex-manual-file"[\s\S]{0,220}class="visually-hidden"/.test(source)
+  );
 
   console.log('\n======================================================================');
   console.log(` Total Aserciones: ${assertions} | Exitosas: ${assertions - failures} | Fallidas: ${failures}`);
