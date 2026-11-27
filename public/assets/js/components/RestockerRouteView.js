@@ -3805,6 +3805,15 @@ export const RestockerRouteView = {
         } catch (error) {
           // La sesión se cierra igualmente: la limpieza local es best-effort.
         }
+        try {
+          // PR25-07: el `.dex` crudo y sus vínculos no sobreviven a la baja.
+          await this.ensureDexQueue().clear(restockerId);
+          this.pendingDexMutations = [];
+          this.dexSyncMessage = '';
+          this.dexSyncError = '';
+        } catch (error) {
+          // La sesión se cierra igualmente.
+        }
       }
       store.clearSession();
       this.restocker = null;

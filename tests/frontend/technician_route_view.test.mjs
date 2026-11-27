@@ -26,6 +26,9 @@ import { readFileSync } from 'node:fs';
 import { api } from '../../public/assets/js/api.js';
 import { TechnicianRouteView } from '../../public/assets/js/views/TechnicianRouteView.js';
 import { TechnicianOpportunisticModal } from '../../public/assets/js/components/TechnicianOpportunisticModal.js';
+import { store } from '../../public/assets/js/store.js';
+import { DexAuditOfflineQueue } from '../../public/assets/js/utils/DexAuditOfflineQueue.js';
+import { createFakeIndexedDb } from '../Support/FakeIndexedDb.mjs';
 
 console.log('======================================================================');
 console.log(' VendGuard: Frontend Test Suite - TechnicianRouteView (T-DEX-12)');
@@ -360,6 +363,51 @@ assert(
 api.technician.dumpDexAuditConflict = originalDump;
 api.technician.importDexAudit = originalImport;
 api.technician.getDexAudits = originalList;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. Cierre de sesión (PR25-07): la cola `.dex` no sobrevive al logout
+// ─────────────────────────────────────────────────────────────────────────────
+const logoutQueue = new DexAuditOfflineQueue({ indexedDB: createFakeIndexedDb() });
+const logoutVm = buildViewModel(TechnicianRouteView, {
+  currentUser: { id: 21, name: 'Jordi Logout', role: 'TECHNICIAN' },
+  offlineStorage: null,
+  refreshOfflineState: async () => {},
+  dexQueue: logoutQueue
+});
+await logoutQueue.enqueue({
+  client_mutation_id: 'dex12_tech_logout_0001',
+  actor_id: 21,
+  actor_role: 'TECHNICIAN',
+  machine_id: 7,
+  captured_at: '2026-11-25T09:00:00.000Z',
+  raw_payload: dexRaw
+});
+await logoutQueue.enqueue({
+  client_mutation_id: 'dex12_tech_logout_0002',
+  actor_id: 22,
+  actor_role: 'TECHNICIAN',
+  machine_id: 8,
+  captured_at: '2026-11-25T09:00:00.000Z',
+  raw_payload: dexRaw
+});
+
+store.state.user = { id: 21, name: 'Jordi Logout', role: 'TECHNICIAN' };
+await logoutVm.handleLogout();
+assert(
+  '6.1 El logout del técnico se bloquea si la cola .dex tiene pendientes',
+  store.state.user?.id === 21
+    && logoutVm.errorMessage.includes('.dex')
+    && (await logoutQueue.list(21)).length === 1
+);
+
+await logoutQueue.remove('dex12_tech_logout_0001');
+await logoutVm.handleLogout();
+assert(
+  '6.2 Sin pendientes .dex, el logout solo purga la cola del técnico',
+  store.state.user === null
+    && (await logoutQueue.list(21)).length === 0
+    && (await logoutQueue.list(22)).length === 1
+);
 
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Exitosas: ${assertions - failures} | Fallidas: ${failures}`);

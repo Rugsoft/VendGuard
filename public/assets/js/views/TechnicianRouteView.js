@@ -2729,22 +2729,42 @@ export const TechnicianRouteView = {
     async handleLogout() {
       await this.refreshOfflineState();
 
-      if (this.offlineQueue.total > 0) {
+      const technicianId = this.offlineTechnicianId();
+      let pendingDex = 0;
+      if (technicianId > 0) {
+        try {
+          pendingDex = (await this.ensureDexQueue().list(technicianId)).length;
+        } catch (error) {
+          // Sin IndexedDB no se puede certificar la cola; el cierre sigue.
+        }
+      }
+
+      if (this.offlineQueue.total > 0 || pendingDex > 0) {
         const pending = this.offlineQueue.pending + this.offlineQueue.syncing;
-        this.errorMessage = `No puedes cerrar sesión: ${this.offlineQueue.total} operación(es) `
-          + `sin sincronizar (${pending} pendiente(s), ${this.offlineQueue.conflicts} en conflicto). `
+        this.errorMessage = `No puedes cerrar sesión: ${this.offlineQueue.total + pendingDex} operación(es) `
+          + `sin sincronizar (${pending} pendiente(s), ${this.offlineQueue.conflicts} en conflicto, ${pendingDex} .dex). `
           + 'Sincroniza y vuelca los conflictos antes de salir.';
         this.showOfflineTray = true;
         return;
       }
 
       try {
-        const technicianId = this.offlineTechnicianId();
         if (technicianId > 0 && this.offlineStorage !== null) {
           await this.offlineStorage.clearTechnician(technicianId);
         }
       } catch (error) {
         // La sesión se cierra igualmente: sin la cuenta, la copia local no sirve.
+      }
+
+      try {
+        if (technicianId > 0) {
+          // PR25-07: el `.dex` crudo tampoco sobrevive al cierre de sesión.
+          await this.ensureDexQueue().clear(technicianId);
+          this.pendingDexMutations = [];
+          this.dexSyncError = '';
+        }
+      } catch (error) {
+        // La sesión se cierra igualmente: la limpieza local es best-effort.
       }
 
       store.clearSession();
