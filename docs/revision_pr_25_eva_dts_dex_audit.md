@@ -9,13 +9,15 @@
 | **HEAD revisado** | `305d7ac5` (`docs(eva-dts-dex-audit): sync certification metrics after the UI audit`) |
 | **Base** | `efd18fb8` (`main`) |
 | **Fecha de la revisión** | 2026-11-27 |
-| **Estado** | PR abierta, **no fusionada**. `PR25-01` cerrado en local el 2026-11-27; el resto de hallazgos sigue abierto. |
+| **Estado** | PR abierta, **no fusionada**. `PR25-01` y `PR25-02` cerrados en local el 2026-11-27; el resto de hallazgos sigue abierto. |
 | **Alcance** | Diff `origin/main...HEAD` del Módulo 39: migración `035` y convergencia con `supabase_init.sql`, parser/validador, servicio, repositorio y gateway, RBAC/perímetro, controladores, consola de Coordinación, vistas móviles y cola Offline. Contraste con `specs/39-eva-dts-dex-audit/spec.md` y las suites del módulo. |
-| **Resultado** | **9 hallazgos**: 1 cerrado (`PR25-01`) y 8 abiertos (1 P1, 5 P2 y 2 P3). La corrección y su regresión están incluidas en esta rama local. |
+| **Resultado** | **9 hallazgos**: 2 cerrados (`PR25-01` y `PR25-02`) y 7 abiertos (5 P2 y 2 P3). Las correcciones y sus regresiones están incluidas en esta rama local. |
 
 > **Acta de cierre · `PR25-01` (2026-11-27):** cerrado en local. El historial móvil exige actor, resuelve la cobertura con `findMachineContext()` —lectura sin `FOR UPDATE`— y responde `404 MACHINE_NOT_FOUND` o `403 MACHINE_OUTSIDE_RESTOCKER_ZONES`/`MACHINE_OUTSIDE_TECHNICIAN_SCOPE`. La regresión `DexAuditApiTest` 1.5–1.8 cierra en verde (50/50 aserciones). La PR no se ha fusionado.
 
-> **Nota:** la batería global de la rama estaba en verde antes de esta revisión (461 suites · 18.140 aserciones · 0 fallos · `DocMetricsGuard` coherente; canal `new_engine` 85/85 · 2.905 aserciones). Ese verde no cubre los huecos descritos: no hay pruebas de perímetro en el listado móvil, de carrera de deltas con dos DEX válidos distintos, de vínculos operativos ni de fechas de captura inválidas/futuras.
+> **Acta de cierre · `PR25-02` (2026-11-27):** cerrado en local. `MachineDexAuditService::importDex()` ejecuta el caso de uso completo dentro de `TransactionManagerInterface`; `PdoMachineDexAuditRepository::create()` participa en esa unidad de trabajo mediante `SAVEPOINT` y solo abre/confirma transacción propia cuando es el dueño. La carrera de dos DEX válidos distintos queda certificada en `DexAuditConcurrencyTest` 4.1–4.3, y el canal `DexAudit` cierra 7/7 suites · 179 aserciones. Además, el replay de una misma `client_mutation_id` exige la misma huella SHA-256; si el contenido cambia, responde `409 CLIENT_MUTATION_ID_ALREADY_USED`. La PR no se ha fusionado.
+
+> **Nota:** la batería global de la rama estaba en verde antes de esta revisión (461 suites · 18.140 aserciones · 0 fallos · `DocMetricsGuard` coherente; canal `new_engine` 85/85 · 2.905 aserciones). Ese verde no cubre los huecos descritos: no hay pruebas de perímetro en el listado móvil, de vínculos operativos ni de fechas de captura inválidas/futuras, entre otros. Tras las correcciones, `DexAuditApiTest`, `DexAuditConcurrencyTest` y el canal `DexAudit` cierran en verde.
 
 ---
 
@@ -25,11 +27,11 @@ El núcleo del Módulo 39 está bien construido: el parser es determinista, la m
 
 Los defectos se concentran en los bordes del contrato y en la confianza en datos del cliente:
 
-- **P1:** fuga de perímetro en los historiales `.dex` móviles, **cerrada** (`PR25-01`), y ausencia de una transacción real que haga efectivo el `FOR UPDATE` durante el cálculo de deltas, que sigue abierta (`PR25-02`).
+- **P1:** fuga de perímetro en los historiales `.dex` móviles, **cerrada** (`PR25-01`), y ausencia de una transacción real que haga efectivo el `FOR UPDATE` durante el cálculo de deltas, **cerrada** (`PR25-02`).
 - **P2:** identidad de máquina controlable por el cliente, `captured_at` sin validar, vínculos M34/M35/M16 sin comprobar, `conflict-dump` sin perímetro y cola `.dex` que sobrevive al cierre de sesión.
 - **P3:** correlativo anual que se bloquea al superar 9.999 y consola de Coordinación sin paginación ni filtros completos.
 
-**Recomendación:** no fusionar hasta corregir `PR25-02`. Los hallazgos `PR25-03` a `PR25-06` deberían entrar en la misma corrección por afectar a integridad, contrato HTTP y datos operativos. `PR25-01` ya está corregido y verificado en local.
+**Recomendación:** no fusionar hasta corregir `PR25-03` a `PR25-06`. Esos hallazgos deberían entrar en la misma corrección por afectar a integridad, contrato HTTP y datos operativos. `PR25-01` y `PR25-02` ya están corregidos y verificados en local.
 
 ---
 
@@ -38,7 +40,7 @@ Los defectos se concentran en los bordes del contrato y en la confianza en datos
 | # | ID | Prioridad | Hallazgo | Impacto | Estado |
 |---:|:---:|:---:|---|---|---|
 | 1 | `PR25-01` | **P1 · Alta** | El historial `.dex` móvil no validaba el perímetro de la máquina | Un Reponedor o Técnico autenticado podía leer historiales de máquinas fuera de su zona | ✅ Cerrado |
-| 2 | `PR25-02` | **P1 · Alta** | El `FOR UPDATE` no serializa la importación completa | Dos altas concurrentes pueden calcular deltas desde el mismo predecesor | Abierto |
+| 2 | `PR25-02` | **P1 · Alta** | El `FOR UPDATE` no serializaba la importación completa | Dos altas concurrentes podían calcular deltas desde el mismo predecesor | ✅ Cerrado |
 | 3 | `PR25-03` | **P2 · Media-alta** | `expected_machine_code` permite ocultar un DEX de otra máquina | Se suprime el aviso de identidad y se contaminan los contadores de la máquina destino | Abierto |
 | 4 | `PR25-04` | **P2 · Media-alta** | `captured_at` no se valida: 500, fechas futuras y desfase horario | Error interno ante una fecha malformada y alteración del orden/deltas | Abierto |
 | 5 | `PR25-05` | **P2 · Media-alta** | Vínculos M34/M35/M16 sin validar y violaciones únicas no traducidas | Vínculos cruzados, cruces nulos y 500 que la cola reintenta | Abierto |
@@ -96,11 +98,13 @@ php tests/run_new_engine.php DexAudit              → 7/7 suites · 176 asercio
 
 ---
 
-## 4. `PR25-02` · El `FOR UPDATE` no serializa el cálculo de deltas
+## 4. `PR25-02` · El `FOR UPDATE` no serializaba el cálculo de deltas
 
 **Prioridad:** P1 · **Requisitos afectados:** RF-04.1, EARS 03.1.1 (`SELECT ... FOR UPDATE` para serializar concurrencia e historial de deltas).
 
-### Evidencia
+**Estado:** ✅ **Cerrado (2026-11-27)** · transacción de caso de uso completa, `SAVEPOINT` en el alta y carrera real de dos DEX válidos en `DexAuditConcurrencyTest` 4.1–4.3.
+
+### Evidencia original
 
 - `src/Application/Service/MachineDexAuditService.php:137`: `importDex()` llama a `lockMachineContext()`.
 - `src/Application/Service/MachineDexAuditService.php:224-226`: después lee `findPreviousActive()` y `hasLaterActive()`.
@@ -110,22 +114,34 @@ php tests/run_new_engine.php DexAudit              → 7/7 suites · 176 asercio
 
 PDO trabaja en autocommit: la transacción implícita del `SELECT ... FOR UPDATE` termina al finalizar la sentencia y el bloqueo se libera. No existe un `TransactionManager` que envuelva `lockMachineContext → lecturas → reserva → insert`; el controlador no abre transacción.
 
-### Reproducción
+### Reproducción original
 
 Dos `POST` simultáneos sobre la misma máquina con payloads válidos distintos —hashes SHA-256 distintos y `client_mutation_id` distintos— pueden leer el mismo `previous_audit_id` antes de que cualquiera inserte. Ambos crean un volcado `ACTIVE` con el mismo predecesor; no hay restricción SQL que impida dos “hermanos” activos.
 
-La suite existente `tests/integration/DexAuditConcurrencyTest.php` compite por el mismo hash y por la misma mutación, pero no por dos volcados válidos diferentes; por eso no detecta la carrera de deltas.
+La suite existente `tests/integration/DexAuditConcurrencyTest.php` competía por el mismo hash y por la misma mutación, pero no por dos volcados válidos diferentes; por eso no detectaba la carrera de deltas.
 
 ### Impacto
 
 La cadena de deltas puede duplicar ventas o unidades y uno de los dos volcados queda como rama huérfana. El comentario de la spec sobre serialización y el propio DocBlock del gateway no se cumplen. Es un fallo de integridad difícil de detectar después, porque ambos volcados son válidos individualmente.
 
-### Corrección propuesta
+### Corrección aplicada
 
-1. Envolver todo el caso de uso en una transacción real, por ejemplo con `PdoTransactionManager` o un método `importDexInTransaction()`.
-2. Hacer que `PdoMachineDexAuditRepository::create()` participe en la transacción existente en lugar de abrir otra, o mover la orquestación transaccional al repositorio.
-3. Mantener dentro de esa transacción el bloqueo de máquina, la lectura del predecesor, la reserva del correlativo, el `INSERT`, las líneas y las escrituras de auditoría/outbox.
-4. Añadir una prueba de dos procesos con dos DEX válidos diferentes y comprobar que el segundo ve al primero como predecesor (o que la serialización produce una cadena coherente).
+1. `src/Application/Service/MachineDexAuditService.php`: el constructor recibe `TransactionManagerInterface` y `importDex()` delega el caso de uso completo en `importDexAtomically()` dentro de `runInTransaction()`. La transacción cubre el bloqueo `FOR UPDATE` de la máquina, las lecturas de predecesor/posterior, la reserva del correlativo, el `INSERT`, las líneas, la auditoría y el outbox.
+2. `src/Infrastructure/Repository/PdoMachineDexAuditRepository.php`: `create()` detecta si ya existe una transacción exterior. Si es el dueño, abre y confirma la suya; si no, crea un `SAVEPOINT`, libera el savepoint al terminar o hace `ROLLBACK TO SAVEPOINT` ante error. Así el reintento de `DEX_DUPLICATE_AUDIT_CODE` no invalida la transacción de PostgreSQL ni pierde el `FOR UPDATE`.
+3. Los tres controladores de importación y los actores de prueba pasan `new PdoTransactionManager($pdo)` con el mismo PDO que usan el repositorio, el gateway, el logger y el outbox. No se cambió el DDL ni el contrato de las rutas.
+4. El replay de `client_mutation_id` comprueba ahora que la huella SHA-256 coincide. Un reintento idéntico sigue devolviendo `200 idempotent_replay = true`; reutilizar la mutación con otro contenido responde `409 CLIENT_MUTATION_ID_ALREADY_USED`.
+5. `tests/integration/DexAuditConcurrencyTest.php` añade la sección 4: dos procesos con DEX válidos distintos, mismo instante de captura y mutaciones distintas. Ambos se persisten y el segundo enlaza al primero; sus deltas se calculan sobre esa cadena, no sobre un predecesor compartido.
+6. `tests/unit/MachineDexAuditServiceTest.php` incorpora un doble de `TransactionManagerInterface`, verifica que el alta se delega a la unidad de trabajo y cubre el replay exacto y el conflicto por contenido distinto.
+
+### Verificación
+
+```text
+php tests/unit/MachineDexAuditServiceTest.php             → 32/32 aserciones · exit 0
+php tests/integration/DexAuditApiTest.php                → 50/50 aserciones · exit 0
+php tests/integration/DexAuditConcurrencyTest.php        → 9/9 aserciones · exit 0
+php tests/integration/DexAuditPerformanceTest.php        → 3/3 aserciones · exit 0 · p95 193,3 ms
+php tests/run_new_engine.php DexAudit                    → 7/7 suites · 179 aserciones · exit 0
+```
 
 ---
 
@@ -339,12 +355,12 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 - `/raw` con `text/plain`, `nosniff` y nombre `DEX-AAAA-NNNN.dex`.
 - Anulación terminal, CSV con BOM/neutralización y firma en `audit_log`.
 - Cruces M34/M35 del detalle de Coordinación y delta efectivo tras `VOIDED`.
-- Concurrencia por misma huella y misma `client_mutation_id`.
+- Concurrencia por misma huella, misma `client_mutation_id` y dos DEX válidos distintos con cadena de deltas serializada (`PR25-02`).
+- Replay exacto idempotente y rechazo `409` de una mutación reutilizada con contenido distinto.
 - Parser, esquema, convergencia y rendimiento del canal `new_engine`.
 
 ### Lo que no cubre la suite existente
 
-- Dos importaciones concurrentes con hashes y mutaciones **distintos** (`PR25-02`).
 - Suplantación de `expected_machine_code` (`PR25-03`).
 - Fechas inválidas, futuras o `datetime-local` sin zona (`PR25-04`).
 - Vínculos inexistentes, de otra máquina o ya ocupados (`PR25-05`).
@@ -355,4 +371,4 @@ Añadir paginación real o “cargar más” con total, exponer los filtros `zon
 
 ### Límites
 
-La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se corrigió después y se verificó contra PostgreSQL real con el esquema aislado de `DexAuditApiTest`; los ocho hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.
+La revisión original fue **estática** sobre el diff y el código de producción del Módulo 39. `PR25-01` se verificó con `DexAuditApiTest` y `PR25-02` con la carrera real de `DexAuditConcurrencyTest`, ambos contra PostgreSQL aislado; los siete hallazgos restantes siguen siendo diagnóstico estático y no se explotaron de nuevo en esta pasada. No se revisaron línea a línea los 101 archivos del diff (tests, documentación y capturas). La PR no fue fusionada.

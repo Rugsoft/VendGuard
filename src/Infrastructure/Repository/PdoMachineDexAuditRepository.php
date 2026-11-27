@@ -135,7 +135,17 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
         array $selectionLines = [],
         array $eventLines = []
     ): MachineDexAudit {
-        $this->pdo->beginTransaction();
+        // Participa en la unidad de trabajo del servicio si ya existe. El
+        // SAVEPOINT permite reintentar el correlativo tras una violación única
+        // sin abortar la transacción exterior ni liberar el FOR UPDATE de la
+        // máquina.
+        $ownsTransaction = !$this->pdo->inTransaction();
+        $savepoint = 'dex_audit_create_' . bin2hex(random_bytes(4));
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        } else {
+            $this->pdo->exec('SAVEPOINT ' . $savepoint);
+        }
 
         try {
             $stmt = $this->pdo->prepare('
@@ -215,20 +225,42 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
             $this->insertSelectionLines($auditId, $selectionLines);
             $this->insertEventLines($auditId, $eventLines);
 
-            $this->pdo->commit();
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            } else {
+                $this->pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            }
 
             return $audit->withId($auditId);
         } catch (PDOException $exception) {
-            $this->pdo->rollBack();
+            $this->rollbackCreate($ownsTransaction, $savepoint);
             $conflict = $this->translateUniqueViolation($exception);
             if ($conflict !== null) {
                 throw $conflict;
             }
             throw $exception;
         } catch (Throwable $exception) {
-            $this->pdo->rollBack();
+            $this->rollbackCreate($ownsTransaction, $savepoint);
             throw $exception;
         }
+    }
+
+    /**
+     * Deshace solo el intento de alta, no la transacción exterior.
+     */
+    private function rollbackCreate(bool $ownsTransaction, string $savepoint): void
+    {
+        if (!$this->pdo->inTransaction()) {
+            return;
+        }
+
+        if ($ownsTransaction) {
+            $this->pdo->rollBack();
+            return;
+        }
+
+        $this->pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+        $this->pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
     }
 
     /**

@@ -38,6 +38,7 @@ use VendGuard\Core\Domain\Exception\ServiceSheetPersistenceException;
 use VendGuard\Core\Domain\Model\CashCustodyAction;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
 use VendGuard\Infrastructure\Repository\PdoUnclaimedCashFindingRepository;
 use VendGuard\Core\Domain\Exception\InvalidOutOfCatalogJustificationException;
@@ -395,6 +396,7 @@ class TechnicianController
                 new \VendGuard\Core\Service\DexSelectionMatcher(),
                 new \VendGuard\Core\Service\DexAuditValidator(),
                 new PdoNotificationOutboxRepository($pdo),
+                new PdoTransactionManager($pdo),
                 new AuditLogger(new PdoAuditLogRepository($pdo))
             );
         }

@@ -18,6 +18,7 @@ use VendGuard\Core\Service\DexAuditValidator;
 use VendGuard\Core\Service\DexSelectionMatcher;
 use VendGuard\Core\Service\EvaDtsParser;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoMachineDexAuditGateway;
 use VendGuard\Infrastructure\Repository\PdoMachineDexAuditRepository;
 use VendGuard\Infrastructure\Repository\PdoNotificationOutboxRepository;
@@ -322,6 +323,7 @@ final class CoordinatorDexAuditController
                 new DexSelectionMatcher(),
                 new DexAuditValidator(),
                 new PdoNotificationOutboxRepository($pdo),
+                new PdoTransactionManager($pdo),
                 $this->audit()
             );
         }

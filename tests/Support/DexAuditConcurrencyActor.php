@@ -31,6 +31,7 @@ use VendGuard\Core\Domain\Exception\DexAuditValidationException;
 use VendGuard\Core\Service\DexAuditValidator;
 use VendGuard\Core\Service\DexSelectionMatcher;
 use VendGuard\Core\Service\EvaDtsParser;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoMachineDexAuditGateway;
 use VendGuard\Infrastructure\Repository\PdoMachineDexAuditRepository;
 use VendGuard\Infrastructure\Repository\PdoNotificationOutboxRepository;
@@ -94,7 +95,8 @@ try {
         new EvaDtsParser(),
         new DexSelectionMatcher(),
         new DexAuditValidator(),
-        new PdoNotificationOutboxRepository($pdo)
+        new PdoNotificationOutboxRepository($pdo),
+        new PdoTransactionManager($pdo)
     );
 
     file_put_contents($readyFile, 'ready');

@@ -43,6 +43,7 @@ use VendGuard\Core\Domain\Model\NotificationOutboxItem;
 use VendGuard\Core\Domain\Repository\MachineDexAuditGatewayInterface;
 use VendGuard\Core\Domain\Repository\MachineDexAuditRepositoryInterface;
 use VendGuard\Core\Domain\Repository\NotificationOutboxRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Service\DexAuditValidator;
 use VendGuard\Core\Service\DexSelectionMatcher;
 use VendGuard\Core\Service\EvaDtsParser;
@@ -373,6 +374,19 @@ final class Dex07FakeGateway implements MachineDexAuditGatewayInterface
     }
 }
 
+/** Unidad de trabajo de prueba: ejecuta el cierre y cuenta la delegación. */
+final class Dex07FakeTransactions implements TransactionManagerInterface
+{
+    public int $calls = 0;
+
+    public function runInTransaction(callable $operation): mixed
+    {
+        $this->calls++;
+
+        return $operation();
+    }
+}
+
 /** Outbox en memoria con deduplicación por clave. */
 final class Dex07FakeOutbox implements NotificationOutboxRepositoryInterface
 {
@@ -477,13 +491,15 @@ $expect = static function (callable $operation, string $errorCode, int $httpStat
 $repository = new Dex07FakeRepository();
 $gateway = new Dex07FakeGateway();
 $outbox = new Dex07FakeOutbox();
+$transactions = new Dex07FakeTransactions();
 $service = new MachineDexAuditService(
     $repository,
     $gateway,
     new EvaDtsParser(),
     new DexSelectionMatcher(),
     new DexAuditValidator(),
-    $outbox
+    $outbox,
+    $transactions
 );
 
 $context = static fn (string $type, string $role, array $overrides = []): array => $overrides + [
@@ -522,14 +538,16 @@ echo "======================================================================\n";
 
 echo "\n--- 1. Puerta del Reponedor, deltas y alerta térmica (QA-1, QA-4) ---\n";
 
+$firstRaw = $payload('2550*41', "EA2*EG01*1*1*0*1\n");
 $first = $service->importDex($request(
     1,
     5,
     'RESTOCKER_ROUTE',
-    $payload('2550*41', "EA2*EG01*1*1*0*1\n"),
+    $firstRaw,
     ['client_mutation_id' => 'dex07-mut-0001']
 ));
 
+$assert('1.0 El alta se delega a una unidad de trabajo', $transactions->calls === 1);
 $assert('1.1 El volcado del Reponedor se persiste con código y delta inicial', ($first['audit']['id'] ?? 0) === 1 && $first['audit']['delta_source'] === 'INITIAL_BASELINE');
 $assert('1.2 La selección PA1 se empareja con el carril A1', ($first['audit']['selections'][0]['match_status'] ?? '') === 'EXACT_MATCH' && ($first['audit']['selections'][0]['matched_slot_id'] ?? 0) === 10);
 $assert('1.3 El prefill VA1 solo viaja al Reponedor', $first['prefill_sales_counter_reading_eur'] === 25.50);
@@ -543,7 +561,7 @@ $assert('1.6 La sugerencia de escalado lleva categoría y códigos', $first['sug
     && str_contains($first['suggested_escalation_payload']['internal_note'], 'EG01')
     && $first['suggested_escalation_payload']['is_internal'] === true);
 
-$replay = $service->importDex($request(1, 5, 'RESTOCKER_ROUTE', $payload('2550*41'), ['client_mutation_id' => 'dex07-mut-0001']));
+$replay = $service->importDex($request(1, 5, 'RESTOCKER_ROUTE', $firstRaw, ['client_mutation_id' => 'dex07-mut-0001']));
 $assert('1.7 El replay del móvil es idempotente y no duplica filas', $replay['idempotent_replay'] === true && $repository->createCalls === 1);
 
 $assert('1.8 La misma mutación en otra máquina es 409', $expect(
@@ -552,8 +570,13 @@ $assert('1.8 La misma mutación en otra máquina es 409', $expect(
     409
 ));
 $assert('1.9 La misma huella vigente es 409 DEX_DUPLICATE_HASH', $expect(
-    static fn () => $service->importDex($request(1, 5, 'RESTOCKER_ROUTE', $payload('2550*41', "EA2*EG01*1*1*0*1\n"), ['captured_at' => '2026-11-22 10:00:00+00'])),
+    static fn () => $service->importDex($request(1, 5, 'RESTOCKER_ROUTE', $firstRaw, ['captured_at' => '2026-11-22 10:00:00+00'])),
     'DEX_DUPLICATE_HASH',
+    409
+));
+$assert('1.10 La misma mutación con otro contenido es 409 CLIENT_MUTATION_ID_ALREADY_USED', $expect(
+    static fn () => $service->importDex($request(1, 5, 'RESTOCKER_ROUTE', $payload('2600*42'), ['client_mutation_id' => 'dex07-mut-0001'])),
+    'CLIENT_MUTATION_ID_ALREADY_USED',
     409
 ));
 

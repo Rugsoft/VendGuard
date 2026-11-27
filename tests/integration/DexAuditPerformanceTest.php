@@ -40,6 +40,7 @@ use VendGuard\Application\Service\MachineDexAuditService;
 use VendGuard\Core\Service\DexAuditValidator;
 use VendGuard\Core\Service\DexSelectionMatcher;
 use VendGuard\Core\Service\EvaDtsParser;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoMachineDexAuditGateway;
 use VendGuard\Infrastructure\Repository\PdoMachineDexAuditRepository;
 use VendGuard\Infrastructure\Repository\PdoNotificationOutboxRepository;
@@ -124,7 +125,8 @@ try {
         new EvaDtsParser(),
         new DexSelectionMatcher(),
         new DexAuditValidator(),
-        new PdoNotificationOutboxRepository($pdo)
+        new PdoNotificationOutboxRepository($pdo),
+        new PdoTransactionManager($pdo)
     );
 
     $makePayload = static function (int $iteration): string {

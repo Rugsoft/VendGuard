@@ -15,6 +15,8 @@ declare(strict_types=1);
  *      persiste; el otro recibe `409 CLIENT_MUTATION_ID_ALREADY_USED`.
  *   3. **Replay secuencial de la misma mutación en la misma máquina.** Devuelve
  *      el mismo volcado con `idempotent_replay = true`, sin insertar otra fila.
+ *   4. **Dos DEX válidos distintos.** Ambos se persisten y el segundo enlaza al
+ *      primero dentro de la misma cadena, sin compartir el predecesor (PR25-02).
  *
  * CATEGORÍA: `new_engine`. Exige PostgreSQL real y trabaja en un esquema aislado;
  * sin motor responde código 2, nunca un verde silencioso. El esquema se retira con
@@ -36,6 +38,7 @@ use VendGuard\Application\Service\MachineDexAuditService;
 use VendGuard\Core\Service\DexAuditValidator;
 use VendGuard\Core\Service\DexSelectionMatcher;
 use VendGuard\Core\Service\EvaDtsParser;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoMachineDexAuditGateway;
 use VendGuard\Infrastructure\Repository\PdoMachineDexAuditRepository;
 use VendGuard\Infrastructure\Repository\PdoNotificationOutboxRepository;
@@ -134,11 +137,17 @@ try {
         new EvaDtsParser(),
         new DexSelectionMatcher(),
         new DexAuditValidator(),
-        new PdoNotificationOutboxRepository($pgPdo)
+        new PdoNotificationOutboxRepository($pgPdo),
+        new PdoTransactionManager($pgPdo)
     );
 
-    $makeRaw = static function (string $machineCode, float $sales, int $units): string {
-        return "DXS*COMM-DEX10*VA*DEX 6.0\n"
+    $makeRaw = static function (
+        string $machineCode,
+        float $sales,
+        int $units,
+        string $comm = 'COMM-DEX10'
+    ): string {
+        return "DXS*{$comm}*VA*DEX 6.0\n"
             . "ID1*{$machineCode}\n"
             . "ID4*2\n"
             . "VA1*" . number_format($sales, 2, '.', '') . "*{$units}\n"
@@ -381,6 +390,73 @@ try {
             && ($second['idempotent_replay'] ?? false) === true
             && $replayRows === 1,
         'first=' . json_encode($first['audit']['id'] ?? null) . ' second=' . json_encode($second['audit']['id'] ?? null) . ' rows=' . $replayRows
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 4. Carrera de dos DEX válidos distintos
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 4. Dos DEX válidos distintos compiten por la misma máquina ---\n";
+
+    // Mismo instante de captura y mismos contadores: el segundo en obtener el
+    // cerrojo debe ver al primero como predecesor. Así la aserción no depende de
+    // que gane un actor concreto, solo de que la cadena no se bifurque.
+    $validRace = $runRace($machineA, [
+        'a' => [
+            'raw_payload' => $makeRaw('DEX10-CONC-A', 400.00, 40, 'COMM-DEX10-VALID-A'),
+            'original_filename' => 'valid-a.dex',
+            'captured_at' => '2026-11-24 12:00:00+00',
+            'client_mutation_id' => 'dex10-conc-valid-a-0001',
+            'expected_machine_code' => 'DEX10-CONC-A',
+        ],
+        'b' => [
+            'raw_payload' => $makeRaw('DEX10-CONC-A', 400.00, 40, 'COMM-DEX10-VALID-B'),
+            'original_filename' => 'valid-b.dex',
+            'captured_at' => '2026-11-24 12:00:00+00',
+            'client_mutation_id' => 'dex10-conc-valid-b-0002',
+            'expected_machine_code' => 'DEX10-CONC-A',
+        ],
+    ]);
+    $validOk = array_values(array_filter($validRace, static fn(array $r): bool => ($r['ok'] ?? false) === true));
+    $validRowsStmt = $pgPdo->prepare(
+        'SELECT id, client_mutation_id, previous_audit_id, delta_sales_eur, delta_vend_units
+         FROM machine_dex_audits
+         WHERE machine_id = :machine_id
+           AND client_mutation_id IN (:mutation_a, :mutation_b)'
+    );
+    $validRowsStmt->execute([
+        ':machine_id' => $machineA,
+        ':mutation_a' => 'dex10-conc-valid-a-0001',
+        ':mutation_b' => 'dex10-conc-valid-b-0002',
+    ]);
+    $validRows = [];
+    foreach ($validRowsStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $validRows[(string)$row['client_mutation_id']] = $row;
+    }
+    $rowA = $validRows['dex10-conc-valid-a-0001'] ?? [];
+    $rowB = $validRows['dex10-conc-valid-b-0002'] ?? [];
+    $linkedRow = null;
+    if ((int)($rowA['previous_audit_id'] ?? 0) === (int)($rowB['id'] ?? -1)) {
+        $linkedRow = $rowA;
+    } elseif ((int)($rowB['previous_audit_id'] ?? 0) === (int)($rowA['id'] ?? -2)) {
+        $linkedRow = $rowB;
+    }
+
+    $assert(
+        '4.1 Los dos volcados válidos se persisten sin perder ninguno',
+        count($validOk) === 2 && count($validRows) === 2,
+        'ok=' . count($validOk) . ' rows=' . count($validRows) . ' result=' . json_encode($validRace)
+    );
+    $assert(
+        '4.2 El segundo volcado enlaza al primero: la cadena no se bifurca',
+        $linkedRow !== null,
+        'A=' . json_encode($rowA) . ' B=' . json_encode($rowB)
+    );
+    $assert(
+        '4.3 El delta del volcado enlazado se calcula sobre el primero, no sobre el predecesor antiguo',
+        $linkedRow !== null
+            && (float)($linkedRow['delta_sales_eur'] ?? -1) === 0.0
+            && (int)($linkedRow['delta_vend_units'] ?? -1) === 0,
+        json_encode($linkedRow)
     );
 
     $exitCode = $failures === 0 ? 0 : 1;

@@ -17,6 +17,7 @@ use VendGuard\Core\Domain\Model\NotificationOutboxItem;
 use VendGuard\Core\Domain\Repository\MachineDexAuditGatewayInterface;
 use VendGuard\Core\Domain\Repository\MachineDexAuditRepositoryInterface;
 use VendGuard\Core\Domain\Repository\NotificationOutboxRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\NotificationChannel;
 use VendGuard\Core\Domain\ValueObject\NotificationPriority;
 use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
@@ -95,6 +96,7 @@ final class MachineDexAuditService
         private readonly DexSelectionMatcher $matcher,
         private readonly DexAuditValidator $validator,
         private readonly NotificationOutboxRepositoryInterface $outbox,
+        private readonly TransactionManagerInterface $transactions,
         private readonly ?AuditLogger $auditLogger = null
     ) {
     }
@@ -118,6 +120,31 @@ final class MachineDexAuditService
      * }
      */
     public function importDex(array $request): array
+    {
+        return $this->transactions->runInTransaction(
+            fn (): array => $this->importDexAtomically($request)
+        );
+    }
+
+    /**
+     * Cuerpo del alta dentro de una única unidad de trabajo.
+     *
+     * El bloqueo de máquina, las lecturas de predecesor, la reserva del código,
+     * las líneas, el rastro de auditoría y el outbox participan en la misma
+     * transacción. Así el `FOR UPDATE` sigue vigente hasta el commit y dos altas
+     * válidas distintas no pueden calcular deltas desde el mismo predecesor.
+     *
+     * @param array<string, mixed> $request
+     * @return array{
+     *     audit: array<string, mixed>,
+     *     idempotent_replay: bool,
+     *     has_thermal_alert: bool,
+     *     thermal_alert_enqueued: bool,
+     *     suggested_escalation_payload: array<string, mixed>|null,
+     *     prefill_sales_counter_reading_eur: float|null
+     * }
+     */
+    private function importDexAtomically(array $request): array
     {
         $machineId = (int)($request['machine_id'] ?? 0);
         $actorId = (int)($request['actor_id'] ?? 0);
@@ -196,6 +223,18 @@ final class MachineDexAuditService
                         'El volcado del replay no pudo releerse.',
                         'DEX_AUDIT_NOT_FOUND',
                         ['audit_id' => $existing['id']]
+                    );
+                }
+
+                if (!hash_equals((string)($detail['sha256_hash'] ?? ''), (string)$parsed['sha256_hash'])) {
+                    throw new DexAuditConflictException(
+                        'El identificador de mutación ya se usó con otro contenido en esta máquina.',
+                        'CLIENT_MUTATION_ID_ALREADY_USED',
+                        [
+                            'client_mutation_id' => $mutationId,
+                            'machine_id' => $machineId,
+                            'audit_id' => (int)$existing['id'],
+                        ]
                     );
                 }
 
