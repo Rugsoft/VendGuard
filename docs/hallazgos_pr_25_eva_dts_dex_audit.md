@@ -11,11 +11,13 @@
 | **Fecha de la revisión** | 2026-11-27 |
 | **Estado de la PR** | `OPEN`, `MERGEABLE`, `mergeStateStatus = CLEAN`; **no fusionada** |
 | **Alcance** | Segunda pasada estática sobre `git diff origin/main...HEAD`: importación `.dex`, parser, proyecciones, vínculos M16/M34/M35/M36, consola de Coordinación, descarga `/raw`, CSV, cola Offline y pruebas del módulo |
-| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **1 cerrado** (`H25-01`) y 11 abiertos |
+| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **2 cerrados** (`H25-01`, `H25-02`) y 10 abiertos |
 
 > **Documento de trabajo.** Esta es una segunda revisión posterior al acta cerrada [`revision_pr_25_eva_dts_dex_audit.md`](revision_pr_25_eva_dts_dex_audit.md), que declaraba 9/9 hallazgos cerrados. El acta histórica no se modifica; este documento registra los huecos de la nueva pasada y el cierre de los que ya se han corregido.
 
 > **Acta de cierre · `H25-01` (2026-11-27):** cerrado en local. Los DTO de alta y asunción aceptan `dex_audit_id` con `DexAuditLinker::parseOptionalId()`; `OpportunisticIncidentService` enlaza el volcado con el expediente resultante dentro de la misma transacción del caso de uso, de modo que un vínculo inválido deshace el alta o la asunción completa; y `TechnicianOpportunisticController` inyecta el enlazador, traduce `DexAuditValidationException` a su código de contrato y conserva el campo en `form_data`. Regresión: `DexAuditApiTest` 10.1–10.6 (73/73), con alta, asunción y reapertura en garantía enlazadas, y las suites M16 `T-OPP-08` y `T-OPP-09` en verde. La PR no se ha fusionado.
+
+> **Acta de cierre · `H25-02` (2026-11-27):** cerrado en local. Con `dex_audit_id`, `RestockerSatSynergyService::escalateToSat()` ejecuta la validación, el gateway y el enlace dentro de una única unidad de trabajo (`TransactionManagerInterface`); el `FOR UPDATE` del volcado se retiene hasta el commit y el `begin()/commit()` interno del gateway pasa a ser reentrante, de modo que un enlace rechazado deshace el ticket SAT completo. `RestockerRouteController` inyecta `PdoTransactionManager` y traduce `DexAuditValidationException` a su código de contrato. Regresión: `DexAuditApiTest` 11.1 (74/74), `DexAuditServiceIntegrationsTest` 19/19, `RestockerSatSynergyServiceTest` 40/40 y `RestockerSatSynergyApiTest` 98/98. La PR no se ha fusionado.
 
 ---
 
@@ -26,7 +28,7 @@ El núcleo del Módulo 39 sigue siendo sólido: el parser es determinista, la mi
 Los dos hallazgos de mayor prioridad eran:
 
 1. **P1 · M16 no persiste el vínculo `.dex`** —**cerrado** (`H25-01`)—: el modal del Técnico enviaba `dex_audit_id` en el alta, la asunción y la reapertura, pero el backend lo ignoraba por completo.
-2. **P2 · El ticket SAT puede quedar huérfano**: el enlace del `.dex` se ejecuta después de que el gateway haya confirmado el ticket, fuera de su transacción.
+2. **P2 · El ticket SAT podía quedar huérfano** —**cerrado** (`H25-02`)—: el enlace del `.dex` se ejecutaba después de que el gateway hubiera confirmado el ticket, fuera de su transacción.
 
 Ninguno de los dos está cubierto por las suites actuales: la prueba frontend de M16 solo comprueba el payload y la API solo valida M34/M35/M36.
 
@@ -37,7 +39,7 @@ Ninguno de los dos está cubierto por las suites actuales: la prueba frontend de
 | # | ID | Prioridad | Hallazgo | Impacto | Estado |
 |---:|:---:|:---:|---|---|---|
 | 1 | `H25-01` | **P1 · Alta** | M16 no persiste `machine_dex_audits.incident_id` | El alta/asunción/reabertura desde el aviso térmico queda sin vínculo `.dex` | ✅ Cerrado |
-| 2 | `H25-02` | **P2 · Media-alta** | Ticket SAT creado antes de enlazar el `.dex` | Un fallo de enlace deja un ticket huérfano y permite duplicados | Abierto |
+| 2 | `H25-02` | **P2 · Media-alta** | Ticket SAT creado antes de enlazar el `.dex` | Un fallo de enlace deja un ticket huérfano y permite duplicados | ✅ Cerrado |
 | 3 | `H25-03` | **P2 · Media-alta** | El listado y el CSV no calculan el delta efectivo tras `VOIDED` | La consola financiera muestra el delta persistido, no el vigente | Abierto |
 | 4 | `H25-04` | **P2 · Media** | `/raw` devuelve el payload normalizado, no el fichero original | La descarga no es byte a byte el `.dex` subido y el hash no coincide | Abierto |
 | 5 | `H25-05` | **P2 · Media** | El replay idempotente se comprueba después del perímetro y los vínculos | Un reintento puede fallar aunque la importación ya estuviera confirmada | Abierto |
@@ -129,6 +131,8 @@ La regresión 10.6 cubre la reapertura en garantía; la sustitución por Avería
 
 ### H25-02 · P2 · Ticket SAT huérfano si falla el enlace posterior
 
+**Estado:** ✅ **Cerrado (2026-11-27)** · validación, ticket y enlace en una sola unidad de trabajo; el rechazo del vínculo revierte el expediente SAT íntegro.
+
 **Evidencia**
 
 - La validación del `.dex` se ejecuta antes de crear el ticket:
@@ -162,6 +166,24 @@ No hay prueba de fallo de enlace después del commit ni de concurrencia entre la
 **Corrección propuesta**
 
 Enlazar dentro de la misma transacción del gateway o compensar el ticket si el enlace falla. Añadir una prueba con una auditoría que se anula o se vincula concurrentemente entre `assertCompatible()` y `linkToIncident()`.
+
+**Corrección aplicada**
+
+1. `RestockerSatSynergyService` recibe un `?TransactionManagerInterface` y, cuando el cuerpo declara `dex_audit_id`, ejecuta la revalidación del volcado, la llamada al gateway y el enlace dentro de la misma unidad de trabajo. La revalidación interna adquiere el `FOR UPDATE` de `machine_dex_audits` y lo retiene hasta el commit, de modo que una anulación concurrente ya no puede colarse en la ventana entre `assertCompatible()` y `linkToIncident()`.
+2. El gateway ya era reentrante (`begin()` solo abre transacción si no existe y `commit()` solo confirma cuando es su dueño); con la unidad de trabajo exterior, su `commit()` deja de confirmar y el ticket solo existe si el enlace también se confirma. Un `DEX_AUDIT_VOIDED`, `DEX_AUDIT_ALREADY_LINKED` o cualquier otro rechazo revierte el expediente y el registro de la mutación offline.
+3. `RestockerRouteController::buildSynergyService()` inyecta `PdoTransactionManager($pdo)` y `executeSynergy()` traduce `DexAuditValidationException` a su código y estado de contrato en lugar de devolver un `500` genérico.
+4. La regresión 11.1 de `DexAuditApiTest` instala un disparador de prueba que anula el volcado justo durante el `INSERT` del expediente —la ventana exacta del hallazgo— y exige `409 DEX_AUDIT_VOIDED`, cero expedientes en la máquina y el volcado de nuevo `ACTIVE` sin vínculo tras el rollback. La unitaria 4.1 certifica que el escalado con vínculo pasa por la unidad de trabajo.
+
+**Verificación**
+
+```text
+php tests/integration/DexAuditApiTest.php                    → 74/74 aserciones · exit 0
+php tests/unit/DexAuditServiceIntegrationsTest.php           → 19/19 aserciones · exit 0
+php tests/unit/RestockerSatSynergyServiceTest.php            → 40/40 aserciones · exit 0
+php tests/integration/RestockerSatSynergyApiTest.php         → 98/98 aserciones · exit 0
+```
+
+`PdoRestockerSatSynergyGatewayTest` no se ejecutó en esta pasada porque exige su propio contrato `PG_TEST_DSN`, no disponible en el entorno usado; el gateway no se modificó.
 
 ---
 

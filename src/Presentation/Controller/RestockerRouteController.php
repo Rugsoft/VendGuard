@@ -412,7 +412,8 @@ final class RestockerRouteController
             $resolver,
             $notifier,
             null,
-            $dexAuditLinks
+            $dexAuditLinks,
+            new PdoTransactionManager($pdo)
         );
     }
 
@@ -1213,6 +1214,15 @@ final class RestockerRouteController
                 $exception->getMessage(),
                 $exception->getHttpStatusCode(),
                 $exception->getField() === null ? null : ['field' => $exception->getField()]
+            );
+        } catch (DexAuditValidationException $exception) {
+            // H25-02: un vínculo .dex rechazado dentro de la transacción del
+            // escalado devuelve su código de contrato, no un 500 genérico.
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $exception->getDetails()
             );
         } catch (InvalidArgumentException $exception) {
             return Response::error('VALIDATION_ERROR', $exception->getMessage(), 400);

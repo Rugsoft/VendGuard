@@ -118,8 +118,12 @@ final class Dex08AuditRepository implements MachineDexAuditRepositoryInterface
 
 final class Dex08Transactions implements TransactionManagerInterface
 {
+    public int $calls = 0;
+
     public function runInTransaction(callable $operation): mixed
     {
+        $this->calls++;
+
         return $operation();
     }
 }
@@ -510,12 +514,14 @@ file_put_contents(
     base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1cAAAAASUVORK5CYII=')
 );
 $synergyGateway = new Dex08SynergyGateway();
+$synergyTransactions = new Dex08Transactions();
 $synergy = new RestockerSatSynergyService(
     $synergyGateway,
     null,
     null,
     new LocalFileUploader($uploadDir),
-    $linker
+    $linker,
+    $synergyTransactions
 );
 $audits->seed(40, 3);
 $escalation = [
@@ -525,7 +531,10 @@ $escalation = [
     'dex_audit_id' => 40,
 ];
 $result = $synergy->escalateToSat(3, ['id' => 4, 'role' => 'RESTOCKER', 'name' => 'Lucía'], $escalation, ['client_mutation_id' => 'dex08-escalate-0001']);
-$assert('4.1 El escalado devuelve el dex_audit_id enlazado', ($result['dex_audit_id'] ?? 0) === 40);
+$assert(
+    '4.1 El escalado enlaza el dex_audit_id dentro de una unidad de trabajo',
+    ($result['dex_audit_id'] ?? 0) === 40 && $synergyTransactions->calls === 1
+);
 $assert('4.2 El vínculo apunta al expediente SAT creado', ($audits->audits[40]['incident_id'] ?? 0) === 501);
 
 $callsBefore = count($synergyGateway->calls);

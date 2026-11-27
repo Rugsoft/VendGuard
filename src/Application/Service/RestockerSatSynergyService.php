@@ -9,6 +9,7 @@ use InvalidArgumentException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
 use VendGuard\Core\Domain\Repository\RestockerSatSynergyGatewayInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentDispatchLevel;
 use VendGuard\Core\Domain\ValueObject\Level1IssueType;
@@ -53,18 +54,21 @@ final class RestockerSatSynergyService
     private LocalFileUploader $uploader;
 
     private ?DexAuditLinker $dexAuditLinks;
+    private ?TransactionManagerInterface $transactions;
 
     public function __construct(
         private readonly RestockerSatSynergyGatewayInterface $gateway,
         ?callable $technicianResolver = null,
         ?callable $notifier = null,
         ?LocalFileUploader $uploader = null,
-        ?DexAuditLinker $dexAuditLinks = null
+        ?DexAuditLinker $dexAuditLinks = null,
+        ?TransactionManagerInterface $transactions = null
     ) {
         $this->technicianResolver = $technicianResolver;
         $this->notifier = $notifier;
         $this->uploader = $uploader ?? new LocalFileUploader();
         $this->dexAuditLinks = $dexAuditLinks;
+        $this->transactions = $transactions;
     }
 
     /**
@@ -231,8 +235,11 @@ final class RestockerSatSynergyService
             if ($this->dexAuditLinks === null) {
                 throw new \LogicException('El escalado declara dex_audit_id pero el enlazador de auditorías no está configurado.');
             }
+            if ($this->transactions === null) {
+                throw new \LogicException('El escalado declara dex_audit_id pero no hay una unidad de trabajo configurada.');
+            }
             // Se valida antes de crear el expediente: un vínculo imposible no puede
-            // dejar un ticket SAT huérfano por un error del cliente (QA-5).
+            // llegar siquiera a la puerta del gateway (QA-5).
             $this->dexAuditLinks->assertCompatible($dexAuditId, $machineId);
         }
 
@@ -274,13 +281,36 @@ final class RestockerSatSynergyService
             }
         }
 
-        $result = $this->gateway->escalateToSat($machineId, $actor, $payload, $mutation);
-        if ($dexAuditId !== null
-            && ($result['ok'] ?? false) === true
-            && (int)($result['incident_id'] ?? 0) > 0) {
-            $this->dexAuditLinks->linkToIncident($dexAuditId, $machineId, (int)$result['incident_id'], $actor);
-            $result['dex_audit_id'] = $dexAuditId;
-        }
+        $dexAuditLinks = $this->dexAuditLinks;
+        $transactions = $this->transactions;
+
+        $escalate = function () use ($machineId, $actor, $payload, $mutation, $dexAuditId, $dexAuditLinks): array {
+            if ($dexAuditId !== null && $dexAuditLinks !== null) {
+                // Dentro de la unidad de trabajo, el `FOR UPDATE` del volcado queda
+                // retenido hasta el commit: una anulación concurrente no puede
+                // colarse entre esta validación y el enlace posterior.
+                $dexAuditLinks->assertCompatible($dexAuditId, $machineId);
+            }
+
+            $result = $this->gateway->escalateToSat($machineId, $actor, $payload, $mutation);
+
+            if ($dexAuditId !== null
+                && $dexAuditLinks !== null
+                && ($result['ok'] ?? false) === true
+                && (int)($result['incident_id'] ?? 0) > 0) {
+                // H25-02: el vínculo entra en la misma transacción que el ticket.
+                // Si falla, el gateway no confirma el expediente y no queda un
+                // ticket SAT huérfano.
+                $dexAuditLinks->linkToIncident($dexAuditId, $machineId, (int)$result['incident_id'], $actor);
+                $result['dex_audit_id'] = $dexAuditId;
+            }
+
+            return $result;
+        };
+
+        $result = $dexAuditId !== null && $transactions !== null
+            ? $transactions->runInTransaction($escalate)
+            : $escalate();
 
         // C2: un reenvío idempotente ya encoló su aviso la primera vez; repetirlo
         // duplicaría la notificación al técnico y al reponedor.

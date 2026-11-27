@@ -198,6 +198,8 @@ try {
     $identityMachineId = (int)$machineStmt->fetchColumn();
     $machineStmt->execute([':location_id' => $locationId, ':code' => 'DEX9-FOOD-04']);
     $fourthMachineId = (int)$machineStmt->fetchColumn();
+    $machineStmt->execute([':location_id' => $locationId, ':code' => 'DEX9-FOOD-05']);
+    $fifthMachineId = (int)$machineStmt->fetchColumn();
 
     // Máquina viva fuera del perímetro de los dos actores móviles: su sede
     // pertenece a una zona sin asignación de Reponedor ni de Técnico (PR25-01).
@@ -1313,6 +1315,68 @@ try {
             && (int)($m16ReopenLinkAudit['user_id'] ?? 0) === $technicianId
             && (int)($m16ReopenLinkAudit['metadata']['target_id'] ?? 0) === $reopenIncidentId,
         json_encode(['status' => $m16Reopen->getStatusCode(), 'error' => $errorCode($m16Reopen), 'data' => $m16ReopenData, 'audit' => $m16ReopenLinkAudit])
+    );
+
+    echo "\n--- 11. Escalado M36 atómico con el vínculo .dex (H25-02) ---\n";
+    // Anula el volcado justo en el INSERT del expediente: es la ventana exacta
+    // entre la validación previa y el enlace posterior que denunciaba H25-02.
+    $pdo->exec(<<<'SQL'
+CREATE OR REPLACE FUNCTION h2502_void_dex_on_incident() RETURNS trigger AS $$
+DECLARE
+    target BIGINT;
+    void_user BIGINT;
+BEGIN
+    target := NULLIF(current_setting('vendguard.h2502_dex', true), '')::bigint;
+    IF target IS NOT NULL THEN
+        SELECT imported_by INTO void_user FROM machine_dex_audits WHERE id = target;
+        UPDATE machine_dex_audits
+           SET status = 'VOIDED',
+               void_reason = 'Anulación concurrente simulada durante el escalado atómico.',
+               voided_by = void_user,
+               voided_by_name_snapshot = 'Prueba H25-02',
+               voided_at = CURRENT_TIMESTAMP
+         WHERE id = target AND status = 'ACTIVE';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_h2502_void_dex
+BEFORE INSERT ON incidents
+FOR EACH ROW EXECUTE FUNCTION h2502_void_dex_on_incident();
+SQL);
+    $m36AtomicAuditId = $importProductionAudit('h2502-atomic', '2026-11-24 17:30:00+00', 'COMM-H2502-ATOMIC', $fifthMachineId);
+    $pdo->exec("SET vendguard.h2502_dex = '" . $m36AtomicAuditId . "'");
+    $m36Atomic = $call('POST', '/api/restocker/machines/' . $fifthMachineId . '/escalate-to-sat', [
+        'category' => 'PRODUCT_JAM',
+        'workshop_internal_note' => 'El carril queda bloqueado y la espiral no gira al pulsar el botón.',
+        'photo_path' => '/uploads/incidents/aud3903_escalation.png',
+        'urgency' => 'HIGH',
+        'client_mutation_id' => 'h2502-atomic-escalation',
+        'client_occurred_at' => '2026-11-24 17:30:00+00',
+        'dex_audit_id' => $m36AtomicAuditId,
+    ], $restockerToken);
+    $pdo->exec("SET vendguard.h2502_dex = ''");
+    $fifthMachineIncidents = $pdo->prepare('SELECT COUNT(*) FROM incidents WHERE machine_id = :id AND deleted_at IS NULL');
+    $fifthMachineIncidents->execute([':id' => $fifthMachineId]);
+    $atomicAuditState = $pdo->prepare('SELECT status, incident_id FROM machine_dex_audits WHERE id = :id');
+    $atomicAuditState->execute([':id' => $m36AtomicAuditId]);
+    $atomicAuditRow = $atomicAuditState->fetch(PDO::FETCH_ASSOC) ?: [];
+    $fifthIncidentCount = (int)$fifthMachineIncidents->fetchColumn();
+    $assert(
+        '11.1 Un vínculo imposible deshace el ticket SAT y devuelve 409 DEX_AUDIT_VOIDED',
+        $m36AtomicAuditId > 0
+            && $m36Atomic->getStatusCode() === 409
+            && $errorCode($m36Atomic) === 'DEX_AUDIT_VOIDED'
+            && $fifthIncidentCount === 0
+            && ($atomicAuditRow['status'] ?? '') === 'ACTIVE'
+            && ($atomicAuditRow['incident_id'] ?? null) === null,
+        json_encode([
+            'status' => $m36Atomic->getStatusCode(),
+            'error' => $errorCode($m36Atomic),
+            'incidents' => $fifthIncidentCount,
+            'audit' => $atomicAuditRow,
+        ])
     );
 
     $exitCode = $failures === 0 ? 0 : 1;
