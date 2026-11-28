@@ -566,7 +566,7 @@ final class EvaDtsParser
         if ($clean === '' || mb_strlen($clean, 'UTF-8') > $maxLength) {
             throw new DexAuditValidationException(
                 sprintf('El campo %s debe tener entre 1 y %d caracteres.', $field, $maxLength),
-                'DEX_INVALID_NUMERIC_BOUNDS',
+                'DEX_INVALID_CODE',
                 ['line' => $lineNumber, 'field' => $field]
             );
         }

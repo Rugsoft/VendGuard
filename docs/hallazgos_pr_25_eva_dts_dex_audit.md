@@ -11,7 +11,7 @@
 | **Fecha de la revisión** | 2026-11-27 |
 | **Estado de la PR** | `OPEN`, `MERGEABLE`, `mergeStateStatus = CLEAN`; **no fusionada** |
 | **Alcance** | Segunda pasada estática sobre `git diff origin/main...HEAD`: importación `.dex`, parser, proyecciones, vínculos M16/M34/M35/M36, consola de Coordinación, descarga `/raw`, CSV, cola Offline y pruebas del módulo |
-| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **11 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-04`, `H25-05`, `H25-06`, `H25-07`, `H25-08`, `H25-09`, `H25-10`, `H25-11`) y 1 abierto |
+| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **12 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-04`, `H25-05`, `H25-06`, `H25-07`, `H25-08`, `H25-09`, `H25-10`, `H25-11`, `H25-12`) y 0 abiertos |
 
 > **Documento de trabajo.** Esta es una segunda revisión posterior al acta cerrada [`revision_pr_25_eva_dts_dex_audit.md`](revision_pr_25_eva_dts_dex_audit.md), que declaraba 9/9 hallazgos cerrados. El acta histórica no se modifica; este documento registra los huecos de la nueva pasada y el cierre de los que ya se han corregido.
 
@@ -37,13 +37,15 @@
 
 > **Acta de cierre · `H25-10` (2026-11-28):** cerrado en local. `openDetail()` usa una secuencia propia y descarta las respuestas que ya no son la última; `closeDetail()` invalida la secuencia para que una respuesta en vuelo no rellene el detalle tras cerrar. Regresión: Coordinación 2.7 con dos peticiones resueltas en orden inverso, 43/43. La PR no se ha fusionado.
 
+> **Acta de cierre · `H25-12` (2026-11-28):** cerrado en local. `assertCodeLength()` reporta `DEX_INVALID_CODE` en vez de `DEX_INVALID_NUMERIC_BOUNDS` para códigos de texto vacíos o demasiado largos, conservando `field` y `line` en `details`. Regresión: `EvaDtsParserAndCatalogTest` 1.19 y 1.20, 48/48. La PR no se ha fusionado.
+
 ---
 
 ## 1. Veredicto ejecutivo
 
 El núcleo del Módulo 39 sigue siendo sólido: el parser es determinista, la migración protege la inmutabilidad, las proyecciones móviles eliminan importes y la anulación es terminal. Los hallazgos de esta pasada se concentran en **integración entre módulos**, **idempotencia de los reintentos**, **lectura financiera después de una anulación** e **integridad del fichero descargado**.
 
-Los once hallazgos cerrados hasta ahora son:
+Los doce hallazgos cerrados hasta ahora son:
 
 1. **P1 · M16 no persiste el vínculo `.dex`** —**cerrado** (`H25-01`)—: el modal del Técnico enviaba `dex_audit_id` en el alta, la asunción y la reapertura, pero el backend lo ignoraba por completo.
 2. **P2 · El ticket SAT podía quedar huérfano** —**cerrado** (`H25-02`)—: el enlace del `.dex` se ejecutaba después de que el gateway hubiera confirmado el ticket, fuera de su transacción.
@@ -56,8 +58,9 @@ Los once hallazgos cerrados hasta ahora son:
 9. **P3 · La carga manual permitía importar el `.dex` anterior** —**cerrado** (`H25-08`)—: un fichero inválido mostraba error pero dejaba intacto el adjunto previo.
 10. **P3 · El código esperado era un control muerto** —**cerrado** (`H25-09`)—: la consola lo pedía y enviaba, pero el servidor siempre valida contra `machines.code`.
 11. **P3 · La carrera del detalle podía mezclar filas** —**cerrado** (`H25-10`)—: una respuesta antigua sobrescribía el detalle de la fila seleccionada.
+12. **P4 · Un código de texto inválido se reportaba como error numérico** —**cerrado** (`H25-12`)—: `assertCodeLength()` usaba `DEX_INVALID_NUMERIC_BOUNDS`.
 
-Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta, el CSV aplicaba formato monetario a los contadores, `/raw` solo se probaba con un payload ya canónico, el replay se probaba sin cambios de perímetro ni de vínculos, el estado HTTP del replay no se comprobaba, el cliente leía siempre como UTF-8, la carga manual no invalidaba el adjunto al fallar un fichero la consola ofrecía un código esperado que el servidor nunca leía y el detalle no descartaba respuestas obsoletas. Cada uno tiene ahora su regresión propia.
+Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta, el CSV aplicaba formato monetario a los contadores, `/raw` solo se probaba con un payload ya canónico, el replay se probaba sin cambios de perímetro ni de vínculos, el estado HTTP del replay no se comprobaba, el cliente leía siempre como UTF-8, la carga manual no invalidaba el adjunto al fallar un fichero la consola ofrecía un código esperado que el servidor nunca leía y el detalle no descartaba respuestas obsoletas y un código de texto inválido se etiquetaba como error numérico. Cada uno tiene ahora su regresión propia.
 
 ---
 
@@ -76,7 +79,7 @@ Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo c
 | 9 | `H25-09` | **P3 · Baja** | `expected_machine_code` es un control muerto en la consola | La UI sugiere una validación que el servidor ignora por diseño | ✅ Cerrado |
 | 10 | `H25-10` | **P3 · Baja** | Carrera al abrir el detalle de una fila | Una respuesta antigua puede sobrescribir el detalle seleccionado | ✅ Cerrado |
 | 11 | `H25-11` | **P4 · Menor** | El CSV formatea las unidades como decimales | `delta_vend_units` sale como `5.00` en vez de `5` | ✅ Cerrado |
-| 12 | `H25-12` | **P4 · Menor** | Código de error incorrecto para longitudes de texto | Un código inválido se reporta como `DEX_INVALID_NUMERIC_BOUNDS` | Abierto |
+| 12 | `H25-12` | **P4 · Menor** | Código de error incorrecto para longitudes de texto | Un código inválido se reporta como `DEX_INVALID_NUMERIC_BOUNDS` | ✅ Cerrado |
 
 ---
 
@@ -619,6 +622,8 @@ No cambian las cabeceras del CSV ni hay DDL nuevo.
 
 ### H25-12 · P4 · Código de error incorrecto para longitudes de texto
 
+**Estado:** ✅ **Cerrado (2026-11-28)** · Los códigos de texto inválidos se reportan con `DEX_INVALID_CODE`, manteniendo `field` y `line` en `details`.
+
 **Evidencia**
 
 - `assertCodeLength()` lanza `DEX_INVALID_NUMERIC_BOUNDS` cuando un código de texto está vacío o supera la longitud:
@@ -631,6 +636,20 @@ El cliente recibe un código de error numérico para un problema de texto. No ca
 **Corrección propuesta**
 
 Usar un código específico, por ejemplo `DEX_INVALID_TEXT_FIELD` o `DEX_INVALID_CODE`, manteniendo el campo y la línea en `details`.
+
+**Corrección aplicada**
+
+1. `assertCodeLength()` lanza `DEX_INVALID_CODE` cuando el código está vacío o supera la longitud máxima, en lugar de `DEX_INVALID_NUMERIC_BOUNDS`. El mensaje, el campo y la línea no cambian.
+2. Regresión: `EvaDtsParserAndCatalogTest` 1.19 (código de evento vacío) y 1.20 (código de 33 caracteres) exigen `DEX_INVALID_CODE` con HTTP 422. La suite pasa de 46 a 48 aserciones.
+
+**Verificación**
+
+```text
+php -l src/Core/Service/EvaDtsParser.php          → sin errores
+php tests/unit/EvaDtsParserAndCatalogTest.php     → 48/48 aserciones · exit 0
+```
+
+Sin cambios en la base de datos, rutas ni contrato HTTP (sigue siendo 422).
 
 ---
 

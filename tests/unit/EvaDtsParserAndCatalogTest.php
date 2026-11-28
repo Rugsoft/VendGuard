@@ -175,6 +175,16 @@ $expectFailure(
     'DEX_DUPLICATE_SELECTION_CODE',
     '1.18 Un PA101 repetido en el mismo .dex se rechaza (QA-4)'
 );
+$expectFailure(
+    "DXS*TEST\nVA1*100*1\nEA1**20260101*1200\nDXE*TEST",
+    'DEX_INVALID_CODE',
+    '1.19 Un código de evento vacío se rechaza como campo de texto (H25-12)'
+);
+$expectFailure(
+    "DXS*TEST\nVA1*100*1\nEA2*" . str_repeat('A', 33) . "*1\nDXE*TEST",
+    'DEX_INVALID_CODE',
+    '1.20 Un código de evento fuera de longitud se rechaza como campo de texto (H25-12)'
+);
 
 // ─────────────────────────────────────────────────────────────────────────
 echo "\n--- 2. Cabeceras, identidad y escala decimal (RF-02.2) ---\n";
