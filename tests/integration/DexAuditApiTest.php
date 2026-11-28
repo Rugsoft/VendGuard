@@ -452,6 +452,22 @@ try {
     ], $restockerToken);
     $assert('2.5 La misma huella responde 409 DEX_DUPLICATE_HASH', $duplicated->getStatusCode() === 409 && $errorCode($duplicated) === 'DEX_DUPLICATE_HASH');
 
+    $replayWithDeadLinks = $call('POST', '/api/restocker/machines/' . $machineId . '/dex-audits', array_merge($importPayload, [
+        'restock_visit_id' => 999999,
+        'cash_collection_id' => 999999,
+    ]), $restockerToken);
+    $replayWithDeadLinksData = $data($replayWithDeadLinks);
+    $assert(
+        '2.5 bis El replay se resuelve antes de los vínculos ya caducados',
+        $replayWithDeadLinks->getStatusCode() === 201
+            && ($replayWithDeadLinksData['idempotent_replay'] ?? false) === true
+            && (int)($replayWithDeadLinksData['audit']['id'] ?? 0) === (int)($importedData['audit']['id'] ?? -1),
+        json_encode([
+            'status' => $replayWithDeadLinks->getStatusCode(),
+            'body' => $replayWithDeadLinksData,
+        ])
+    );
+
     $forgedIdentity = $call('POST', '/api/restocker/machines/' . $identityMachineId . '/dex-audits', [
         'raw_payload' => "DXS*COMM-DEX09-IDENTITY*VA*DEX 6.0\nID1*DEX9-FOOD-01\nID4*2\nVA1*1000*10\nDXE*FIN",
         'original_filename' => 'identidad-forzada.dex',

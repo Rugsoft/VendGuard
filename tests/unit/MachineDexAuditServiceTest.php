@@ -628,6 +628,20 @@ $assert('1.10 La misma mutación con otro contenido es 409 CLIENT_MUTATION_ID_AL
     'CLIENT_MUTATION_ID_ALREADY_USED',
     409
 ));
+$gateway->contexts[1] = $context('COMBO', 'RESTOCKER', ['sanitary_status' => 'QUARANTINE']);
+$replayAfterPerimeter = $service->importDex($request(1, 5, 'RESTOCKER_ROUTE', $firstRaw, [
+    'client_mutation_id' => 'dex07-mut-0001',
+    'restock_visit_id' => 999999,
+]));
+$assert(
+    '1.10 bis El replay prevalece sobre el perímetro y los vínculos caducados',
+    $replayAfterPerimeter['idempotent_replay'] === true
+        && ($replayAfterPerimeter['audit']['id'] ?? 0) === 1
+        && $repository->createCalls === 1
+        && $replayAfterPerimeter['prefill_sales_counter_reading_eur'] === 25.50,
+    json_encode($replayAfterPerimeter)
+);
+$gateway->contexts[1] = $context('COMBO', 'RESTOCKER');
 $forgedIdentity = $service->importDex($request(
     20,
     5,

@@ -11,7 +11,7 @@
 | **Fecha de la revisión** | 2026-11-27 |
 | **Estado de la PR** | `OPEN`, `MERGEABLE`, `mergeStateStatus = CLEAN`; **no fusionada** |
 | **Alcance** | Segunda pasada estática sobre `git diff origin/main...HEAD`: importación `.dex`, parser, proyecciones, vínculos M16/M34/M35/M36, consola de Coordinación, descarga `/raw`, CSV, cola Offline y pruebas del módulo |
-| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **5 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-04`, `H25-11`) y 7 abiertos |
+| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **6 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-04`, `H25-05`, `H25-11`) y 6 abiertos |
 
 > **Documento de trabajo.** Esta es una segunda revisión posterior al acta cerrada [`revision_pr_25_eva_dts_dex_audit.md`](revision_pr_25_eva_dts_dex_audit.md), que declaraba 9/9 hallazgos cerrados. El acta histórica no se modifica; este documento registra los huecos de la nueva pasada y el cierre de los que ya se han corregido.
 
@@ -25,21 +25,24 @@
 
 > **Acta de cierre · `H25-04` (2026-11-28):** cerrado en local. `EvaDtsParser` expone `raw_payload_received` —el texto recibido, ya en UTF-8, sin normalizar— y `MachineDexAuditService` persiste ese texto en `raw_payload`; `sha256_hash` sigue calculándose sobre el canónico, así que la deduplicación y `QA-2` no cambian. `/raw` devuelve ahora el `.dex` tal como llegó, con CRLF, espacios finales y salto final, y `file_size_bytes` mantiene el tamaño recibido. Regresión: `DexAuditApiTest` 4.4 (80/80) y `EvaDtsParserAndCatalogTest` 1.3 bis (46/46), `DexAuditConstitutionalTest` en verde. La PR no se ha fusionado.
 
+> **Acta de cierre · `H25-05` (2026-11-28):** cerrado en local. `importDexAtomically()` resuelve la mutación `(actor_id, client_mutation_id)` antes de bloquear la máquina, aplicar el perímetro o resolver vínculos; compara la huella canónica, mantiene los `409` de máquina distinta y contenido distinto, y devuelve el replay con el rol del snapshot. Regresión: `MachineDexAuditServiceTest` 1.10 bis (54/54) e `DexAuditApiTest` 2.5 bis (81/81). La PR no se ha fusionado.
+
 ---
 
 ## 1. Veredicto ejecutivo
 
 El núcleo del Módulo 39 sigue siendo sólido: el parser es determinista, la migración protege la inmutabilidad, las proyecciones móviles eliminan importes y la anulación es terminal. Los hallazgos de esta pasada se concentran en **integración entre módulos**, **idempotencia de los reintentos**, **lectura financiera después de una anulación** e **integridad del fichero descargado**.
 
-Los cinco hallazgos cerrados hasta ahora son:
+Los seis hallazgos cerrados hasta ahora son:
 
 1. **P1 · M16 no persiste el vínculo `.dex`** —**cerrado** (`H25-01`)—: el modal del Técnico enviaba `dex_audit_id` en el alta, la asunción y la reapertura, pero el backend lo ignoraba por completo.
 2. **P2 · El ticket SAT podía quedar huérfano** —**cerrado** (`H25-02`)—: el enlace del `.dex` se ejecutaba después de que el gateway hubiera confirmado el ticket, fuera de su transacción.
 3. **P2 · El listado y el CSV ignoraban el delta efectivo tras `VOIDED`** —**cerrado** (`H25-03`)—: la consola y la exportación mostraban el delta persistido contra un volcado anulado.
 4. **P4 · El CSV formateaba las unidades como decimales** —**cerrado** (`H25-11`)—: la exportación publicaba `delta_vend_units` como `5.00`.
 5. **P2 · `/raw` servía la versión normalizada** —**cerrado** (`H25-04`)—: el `.dex` descargado no era el que entró por la API y su huella canónica no coincidía con el fichero.
+6. **P2 · El replay idempotente se resolvía demasiado tarde** —**cerrado** (`H25-05`)—: un reintento de una importación ya confirmada podía fallar si la máquina había cambiado de estado o un vínculo había caducado.
 
-Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta, el CSV aplicaba formato monetario a los contadores y `/raw` solo se probaba con un payload ya canónico. Cada uno tiene ahora su regresión propia.
+Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta, el CSV aplicaba formato monetario a los contadores, `/raw` solo se probaba con un payload ya canónico y el replay solo se probaba sin cambios de perímetro ni de vínculos. Cada uno tiene ahora su regresión propia.
 
 ---
 
@@ -51,7 +54,7 @@ Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo c
 | 2 | `H25-02` | **P2 · Media-alta** | Ticket SAT creado antes de enlazar el `.dex` | Un fallo de enlace deja un ticket huérfano y permite duplicados | ✅ Cerrado |
 | 3 | `H25-03` | **P2 · Media-alta** | El listado y el CSV no calculan el delta efectivo tras `VOIDED` | La consola financiera muestra el delta persistido, no el vigente | ✅ Cerrado |
 | 4 | `H25-04` | **P2 · Media** | `/raw` devuelve el payload normalizado, no el fichero original | La descarga no es byte a byte el `.dex` subido y el hash no coincide | ✅ Cerrado |
-| 5 | `H25-05` | **P2 · Media** | El replay idempotente se comprueba después del perímetro y los vínculos | Un reintento puede fallar aunque la importación ya estuviera confirmada | Abierto |
+| 5 | `H25-05` | **P2 · Media** | El replay idempotente se comprueba después del perímetro y los vínculos | Un reintento puede fallar aunque la importación ya estuviera confirmada | ✅ Cerrado |
 | 6 | `H25-06` | **P3 · Media-baja** | El replay de importación responde `201` en vez de `200` | Contradice el contrato documentado y la convención de M35 | Abierto |
 | 7 | `H25-07` | **P2 · Media** | Los `.dex` Windows-1252 se corrompen en el cliente | `File.text()` pierde los bytes no UTF-8 antes de enviar el payload | Abierto |
 | 8 | `H25-08` | **P3 · Baja** | La carga manual conserva el `.dex` válido anterior tras un error | Se puede importar el fichero antiguo después de seleccionar uno inválido | Abierto |
@@ -308,6 +311,8 @@ php tests/integration/DexAuditConstitutionalTest.php         → 14/14 asercione
 
 ### H25-05 · P2 · El replay idempotente se comprueba demasiado tarde
 
+**Estado:** ✅ **Cerrado (2026-11-28)** · El replay se resuelve antes de bloquear la máquina, aplicar el perímetro o tocar vínculos; la huella sigue verificándose.
+
 **Evidencia**
 
 En `importDexAtomically()` el orden actual es:
@@ -331,6 +336,22 @@ Un reintento legítimo de una operación ya persistida puede acabar como conflic
 **Corrección propuesta**
 
 Tras validar la identidad básica actor/máquina, buscar primero la mutación existente y comparar la huella. Solo si no existe, aplicar perímetro, resolver vínculos y parsear. Mantener la comprobación de que la mutación pertenece a la misma máquina.
+
+**Corrección aplicada**
+
+1. `MachineDexAuditService::importDexAtomically()` busca `(actor_id, client_mutation_id)` inmediatamente después de validar la solicitud —máquina, actor, fichero, captura y origen— y antes de `lockMachineContext()`, del perímetro, de `resolveLinkTargets()` y del parseo con el código de la máquina. Si la mutación existe, compara la huella canónica del payload recibido con la persistida y devuelve el replay con la proyección del volcado original.
+2. Se conservan las guardas: una mutación de otra máquina sigue siendo `409 CLIENT_MUTATION_ID_ALREADY_USED`, y el mismo identificador con otro contenido también. El replay toma el rol del snapshot (`importer_role_snapshot`) para decidir el `prefill`, porque ya no depende del perímetro vigente.
+3. Solo si la mutación no existe se bloquea la máquina, se aplican rol, perímetro y primacía sanitaria, se resuelven y bloquean los vínculos M34/M35/M16, se parsea con el código de la máquina y se comprueba la huella vigente (`DEX_DUPLICATE_HASH`).
+4. Regresión: la unitaria 1.10 bis pone la máquina en cuarentena y envía un vínculo inexistente en el reintento, y exige `idempotent_replay`, el mismo `id`, un único alta y el `prefill` original; la HTTP 2.5 bis repite la mutación con visita y recaudación caducadas y exige el mismo expediente con `idempotent_replay = true`.
+
+**Verificación**
+
+```text
+php tests/unit/MachineDexAuditServiceTest.php                → 54/54 aserciones · exit 0
+php tests/integration/DexAuditApiTest.php                    → 81/81 aserciones · exit 0
+```
+
+El contrato de importación no cambia: el replay sigue respondiendo `201` con `idempotent_replay = true` hasta que `H25-06` lo pase a `200`.
 
 ---
 

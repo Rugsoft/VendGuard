@@ -210,6 +210,61 @@ final class MachineDexAuditService
             );
         }
 
+        // H25-05: una mutación ya confirmada se resuelve antes de bloquear la
+        // máquina, aplicar el perímetro o resolver vínculos. El reintento de la
+        // cola Offline no puede fallar porque el estado cambió desde el alta.
+        $mutationId = isset($request['client_mutation_id']) && trim((string)$request['client_mutation_id']) !== ''
+            ? trim((string)$request['client_mutation_id'])
+            : null;
+        if ($mutationId !== null) {
+            $existing = $this->repository->findByActorMutation($actorId, $mutationId);
+            if ($existing !== null) {
+                if ($existing['machine_id'] !== $machineId) {
+                    throw new DexAuditConflictException(
+                        'El identificador de mutación ya se usó en otra máquina.',
+                        'CLIENT_MUTATION_ID_ALREADY_USED',
+                        ['client_mutation_id' => $mutationId, 'machine_id' => $machineId]
+                    );
+                }
+
+                $detail = $this->repository->findById($existing['id']);
+                if ($detail === null) {
+                    throw new DexAuditConflictException(
+                        'El volcado del replay no pudo releerse.',
+                        'DEX_AUDIT_NOT_FOUND',
+                        ['audit_id' => $existing['id']]
+                    );
+                }
+
+                // La huella canónica no depende del perímetro ni del código
+                // esperado del cliente: basta para distinguir un reintento
+                // idéntico de una reutilización del identificador.
+                $incomingHash = (string)$this->parser->parse($rawPayload)['sha256_hash'];
+                if (!hash_equals((string)($detail['sha256_hash'] ?? ''), $incomingHash)) {
+                    throw new DexAuditConflictException(
+                        'El identificador de mutación ya se usó con otro contenido en esta máquina.',
+                        'CLIENT_MUTATION_ID_ALREADY_USED',
+                        [
+                            'client_mutation_id' => $mutationId,
+                            'machine_id' => $machineId,
+                            'audit_id' => (int)$existing['id'],
+                        ]
+                    );
+                }
+
+                return [
+                    'audit' => $detail,
+                    'idempotent_replay' => true,
+                    'has_thermal_alert' => (bool)($detail['has_thermal_alert'] ?? false),
+                    'thermal_alert_enqueued' => false,
+                    'suggested_escalation_payload' => null,
+                    'prefill_sales_counter_reading_eur' => ($detail['importer_role_snapshot'] ?? '') === 'RESTOCKER'
+                        ? (float)($detail['va1_total_sales_eur'] ?? 0.0)
+                        : null,
+                ];
+            }
+        }
+
         $context = $this->gateway->lockMachineContext($machineId, $actorId);
         if ($context === null) {
             throw new DexAuditValidationException(
@@ -252,55 +307,6 @@ final class MachineDexAuditService
         $links = $this->resolveLinkTargets($request, $machineId, $role, $actorId);
 
         $parsed = $this->parser->parse($rawPayload, (string)($context['machine_code'] ?? ''));
-
-        $mutationId = isset($request['client_mutation_id']) && trim((string)$request['client_mutation_id']) !== ''
-            ? trim((string)$request['client_mutation_id'])
-            : null;
-
-        if ($mutationId !== null) {
-            $existing = $this->repository->findByActorMutation($actorId, $mutationId);
-            if ($existing !== null) {
-                if ($existing['machine_id'] !== $machineId) {
-                    throw new DexAuditConflictException(
-                        'El identificador de mutación ya se usó en otra máquina.',
-                        'CLIENT_MUTATION_ID_ALREADY_USED',
-                        ['client_mutation_id' => $mutationId, 'machine_id' => $machineId]
-                    );
-                }
-
-                $detail = $this->repository->findById($existing['id']);
-                if ($detail === null) {
-                    throw new DexAuditConflictException(
-                        'El volcado del replay no pudo releerse.',
-                        'DEX_AUDIT_NOT_FOUND',
-                        ['audit_id' => $existing['id']]
-                    );
-                }
-
-                if (!hash_equals((string)($detail['sha256_hash'] ?? ''), (string)$parsed['sha256_hash'])) {
-                    throw new DexAuditConflictException(
-                        'El identificador de mutación ya se usó con otro contenido en esta máquina.',
-                        'CLIENT_MUTATION_ID_ALREADY_USED',
-                        [
-                            'client_mutation_id' => $mutationId,
-                            'machine_id' => $machineId,
-                            'audit_id' => (int)$existing['id'],
-                        ]
-                    );
-                }
-
-                return [
-                    'audit' => $detail,
-                    'idempotent_replay' => true,
-                    'has_thermal_alert' => (bool)($detail['has_thermal_alert'] ?? false),
-                    'thermal_alert_enqueued' => false,
-                    'suggested_escalation_payload' => null,
-                    'prefill_sales_counter_reading_eur' => $role === 'RESTOCKER'
-                        ? (float)($detail['va1_total_sales_eur'] ?? 0.0)
-                        : null,
-                ];
-            }
-        }
 
         $existingId = $this->repository->findActiveIdByHash($machineId, $parsed['sha256_hash']);
         if ($existingId !== null) {
