@@ -722,12 +722,31 @@ try {
     $shortVoid = $call('POST', '/api/coordinator/dex-audits/' . $manualAuditId . '/void', ['void_reason' => 'Corto'], $coordinatorToken);
     $assert('5.3 Un motivo corto responde 422 VOID_REASON_REQUIRED', $shortVoid->getStatusCode() === 422 && $errorCode($shortVoid) === 'VOID_REASON_REQUIRED');
 
+    $csvCellsFor = static function (string $body, string $auditCode): ?array {
+        foreach (explode("\r\n", $body) as $line) {
+            $cells = explode(';', $line);
+            if (($cells[0] ?? '') === $auditCode) {
+                return $cells;
+            }
+        }
+
+        return null;
+    };
     $csv = $call('GET', '/api/coordinator/dex-audits/export-csv', [], $coordinatorToken, ['machine_id' => (string)$machineId]);
     $assert(
         '5.4 El CSV lleva BOM UTF-8 y separador ;',
         $csv->getStatusCode() === 200
             && str_starts_with($csv->getBody(), "\xEF\xBB\xBF")
             && str_contains($csv->getBody(), 'audit_code;machine_code;captured_at')
+    );
+
+    $manualCsvRow = $csvCellsFor($csv->getBody(), $manualAuditCode);
+    $assert(
+        '5.5 Las columnas de unidades del CSV salen como enteros, sin decimales',
+        is_array($manualCsvRow)
+            && preg_match('/^\d+$/', (string)($manualCsvRow[6] ?? '')) === 1
+            && preg_match('/^\d+$/', (string)($manualCsvRow[9] ?? '')) === 1,
+        json_encode($manualCsvRow)
     );
 
     echo "\n--- 6. Conflict-dump Offline ---\n";
@@ -945,27 +964,17 @@ try {
         json_encode($lastListRow)
     );
 
-    $csvCellsFor = static function (string $body, string $auditCode): ?array {
-        foreach (explode("\r\n", $body) as $line) {
-            $cells = explode(';', $line);
-            if (($cells[0] ?? '') === $auditCode) {
-                return $cells;
-            }
-        }
-
-        return null;
-    };
     $lastAuditCode = (string)($lastAudit['audit_code'] ?? '');
     $csvAfterVoid = $call('GET', '/api/coordinator/dex-audits/export-csv', [], $coordinatorToken, [
         'machine_id' => (string)$secondMachineId,
     ]);
     $csvRowAfterVoid = $csvCellsFor($csvAfterVoid->getBody(), $lastAuditCode);
     $assert(
-        '7.8 El CSV publica el delta efectivo y no el persistido contra el anulado',
+        '7.8 El CSV publica el delta efectivo y las unidades como enteros',
         $csvAfterVoid->getStatusCode() === 200
             && is_array($csvRowAfterVoid)
             && ($csvRowAfterVoid[8] ?? null) === '12.00'
-            && ($csvRowAfterVoid[9] ?? null) === '12.00',
+            && ($csvRowAfterVoid[9] ?? null) === '12',
         json_encode(['csv' => $csvRowAfterVoid, 'body' => $csvAfterVoid->getBody()])
     );
 
@@ -1037,8 +1046,10 @@ try {
         '7.13 Sin delta vigente, el CSV deja las celdas vacías en vez del obsoleto',
         $csvWithoutActive->getStatusCode() === 200
             && is_array($csvRowWithoutActive)
-            && ($csvRowWithoutActive[8] ?? null) === ''
-            && ($csvRowWithoutActive[9] ?? null) === '',
+            && array_key_exists(8, $csvRowWithoutActive)
+            && $csvRowWithoutActive[8] === ''
+            && array_key_exists(9, $csvRowWithoutActive)
+            && $csvRowWithoutActive[9] === '',
         json_encode(['csv' => $csvRowWithoutActive])
     );
 

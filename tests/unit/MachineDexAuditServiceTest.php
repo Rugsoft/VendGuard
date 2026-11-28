@@ -755,10 +755,12 @@ $assert('5.3 Un motivo demasiado corto es 422', $expect(
     422
 ));
 $repository->seed(['id' => 400, 'machine_id' => 14, 'status' => 'ACTIVE', 'captured_at' => '2026-11-20 10:00:00+00', 'va1_total_sales_eur' => 1.0, 'va1_total_vend_units' => 1, 'audit_code' => '=DEX-2026-9999']);
+$repository->seed(['id' => 450, 'machine_id' => 15, 'status' => 'ACTIVE', 'captured_at' => '2026-11-20 12:00:00+00', 'va1_total_sales_eur' => 0.0, 'va1_total_vend_units' => 0, 'delta_sales_eur' => 5.0, 'delta_vend_units' => 5, 'audit_code' => 'DEX-2026-0450']);
 $csv = $service->exportCsv();
 $assert('5.4 El CSV lleva BOM UTF-8 y separador ;', str_starts_with($csv, "\xEF\xBB\xBF") && str_contains($csv, 'audit_code;machine_code;captured_at'));
 $assert('5.5 La fecha se presenta en Europe/Madrid', str_contains($csv, '20/11/2026 11:00'));
 $assert('5.6 Una celda con fórmula se neutraliza', str_contains($csv, "'=DEX-2026-9999"));
+$assert('5.7 Las unidades del CSV son enteras y los importes conservan dos decimales', str_contains($csv, ';0.00;0;;5.00;5;NO'));
 
 for ($index = 1; $index <= 501; $index++) {
     $repository->seed([
@@ -773,7 +775,7 @@ for ($index = 1; $index <= 501; $index++) {
 }
 $csvTruncated = $service->exportCsv();
 $assert(
-    '5.7 El CSV avisa cuando el perímetro supera el tope de 500 filas',
+    '5.8 El CSV avisa cuando el perímetro supera el tope de 500 filas',
     str_contains($csvTruncated, 'AVISO: exportación truncada a 500 de')
 );
 

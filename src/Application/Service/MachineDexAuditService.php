@@ -675,7 +675,7 @@ final class MachineDexAuditService
                 $this->decimal($previousVoided
                     ? ($row['effective_delta_sales_eur'] ?? null)
                     : ($row['delta_sales_eur'] ?? null)),
-                $this->decimal($previousVoided
+                $this->unitCell($previousVoided
                     ? ($row['effective_delta_vend_units'] ?? null)
                     : ($row['delta_vend_units'] ?? null)),
                 !empty($row['identity_mismatch_warning']) ? 'SI' : 'NO',
@@ -1570,6 +1570,14 @@ final class MachineDexAuditService
     private function decimal(mixed $value): string
     {
         return $value === null || $value === '' ? '' : number_format((float)$value, 2, '.', '');
+    }
+
+    /**
+     * Contadores de unidades del CSV (H25-11): enteros, sin decimales.
+     */
+    private function unitCell(mixed $value): string
+    {
+        return $value === null || $value === '' ? '' : (string)(int)$value;
     }
 
     private function csvCell(string $value): string

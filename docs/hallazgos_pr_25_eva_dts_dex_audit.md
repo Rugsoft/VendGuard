@@ -11,7 +11,7 @@
 | **Fecha de la revisión** | 2026-11-27 |
 | **Estado de la PR** | `OPEN`, `MERGEABLE`, `mergeStateStatus = CLEAN`; **no fusionada** |
 | **Alcance** | Segunda pasada estática sobre `git diff origin/main...HEAD`: importación `.dex`, parser, proyecciones, vínculos M16/M34/M35/M36, consola de Coordinación, descarga `/raw`, CSV, cola Offline y pruebas del módulo |
-| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **3 cerrados** (`H25-01`, `H25-02`, `H25-03`) y 9 abiertos |
+| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **4 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-11`) y 8 abiertos |
 
 > **Documento de trabajo.** Esta es una segunda revisión posterior al acta cerrada [`revision_pr_25_eva_dts_dex_audit.md`](revision_pr_25_eva_dts_dex_audit.md), que declaraba 9/9 hallazgos cerrados. El acta histórica no se modifica; este documento registra los huecos de la nueva pasada y el cierre de los que ya se han corregido.
 
@@ -21,19 +21,22 @@
 
 > **Acta de cierre · `H25-03` (2026-11-28):** cerrado en local. `MachineDexAuditRepositoryInterface::findEffectivePredecessorsForAudits()` resuelve en una sola consulta, para toda la página, si el predecesor persistido está `VOIDED` y cuál es el último `ACTIVE` anterior; `MachineDexAuditService` proyecta ese bloque en el listado y en el CSV con el mismo cálculo que el detalle, y `CoordinatorDexAuditsSubTab` usa el valor efectivo aunque sea `null` cuando la bandera está activa, en vez de caer al delta persistido. Regresión: `DexAuditApiTest` 7.7, 7.8, 7.12 y 7.13 (78/78), frontend 1.11 (38/38), `MachineDexAuditServiceTest` 52/52 y `DexAuditServiceIntegrationsTest` 19/19. La PR no se ha fusionado.
 
+> **Acta de cierre · `H25-11` (2026-11-28):** cerrado en local. `exportCsv()` deja de pasar `delta_vend_units` por `decimal()` y lo emite con `unitCell()`, que devuelve el entero sin decimales y la celda vacía cuando no hay valor; la rama efectiva de `H25-03` usa el mismo formateador. Regresión: `DexAuditApiTest` 5.5 (las columnas de unidades de `VA1` y delta solo tienen dígitos), 7.8 (delta efectivo `12`, no `12.00`) y 7.13 (nulo vacío), 79/79; `MachineDexAuditServiceTest` 53/53. La PR no se ha fusionado.
+
 ---
 
 ## 1. Veredicto ejecutivo
 
 El núcleo del Módulo 39 sigue siendo sólido: el parser es determinista, la migración protege la inmutabilidad, las proyecciones móviles eliminan importes y la anulación es terminal. Los hallazgos de esta pasada se concentran en **integración entre módulos**, **idempotencia de los reintentos**, **lectura financiera después de una anulación** e **integridad del fichero descargado**.
 
-Los tres hallazgos cerrados hasta ahora son:
+Los cuatro hallazgos cerrados hasta ahora son:
 
 1. **P1 · M16 no persiste el vínculo `.dex`** —**cerrado** (`H25-01`)—: el modal del Técnico enviaba `dex_audit_id` en el alta, la asunción y la reapertura, pero el backend lo ignoraba por completo.
 2. **P2 · El ticket SAT podía quedar huérfano** —**cerrado** (`H25-02`)—: el enlace del `.dex` se ejecutaba después de que el gateway hubiera confirmado el ticket, fuera de su transacción.
 3. **P2 · El listado y el CSV ignoraban el delta efectivo tras `VOIDED`** —**cerrado** (`H25-03`)—: la consola y la exportación mostraban el delta persistido contra un volcado anulado.
+4. **P4 · El CSV formateaba las unidades como decimales** —**cerrado** (`H25-11`)—: la exportación publicaba `delta_vend_units` como `5.00`.
 
-Ninguno de los tres estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36 y el detalle era el único que recalculaba el delta. Cada uno tiene ahora su regresión propia.
+Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta y el CSV aplicaba formato monetario a los contadores. Cada uno tiene ahora su regresión propia.
 
 ---
 
@@ -51,7 +54,7 @@ Ninguno de los tres estaba cubierto por las suites previas: la prueba frontend d
 | 8 | `H25-08` | **P3 · Baja** | La carga manual conserva el `.dex` válido anterior tras un error | Se puede importar el fichero antiguo después de seleccionar uno inválido | Abierto |
 | 9 | `H25-09` | **P3 · Baja** | `expected_machine_code` es un control muerto en la consola | La UI sugiere una validación que el servidor ignora por diseño | Abierto |
 | 10 | `H25-10` | **P3 · Baja** | Carrera al abrir el detalle de una fila | Una respuesta antigua puede sobrescribir el detalle seleccionado | Abierto |
-| 11 | `H25-11` | **P4 · Menor** | El CSV formatea las unidades como decimales | `delta_vend_units` sale como `5.00` en vez de `5` | Abierto |
+| 11 | `H25-11` | **P4 · Menor** | El CSV formatea las unidades como decimales | `delta_vend_units` sale como `5.00` en vez de `5` | ✅ Cerrado |
 | 12 | `H25-12` | **P4 · Menor** | Código de error incorrecto para longitudes de texto | Un código inválido se reporta como `DEX_INVALID_NUMERIC_BOUNDS` | Abierto |
 
 ---
@@ -440,6 +443,8 @@ Usar una secuencia de petición o comparar `selectedAudit.id` con el `id` solici
 
 ### H25-11 · P4 · El CSV formatea las unidades como decimales
 
+**Estado:** ✅ **Cerrado (2026-11-28)** · `exportCsv()` publica los contadores como enteros; el delta efectivo usa el mismo formateador y la celda nula queda vacía.
+
 **Evidencia**
 
 - `exportCsv()` pasa `delta_vend_units` por `decimal()`:
@@ -454,6 +459,21 @@ La columna de unidades sale como `5.00` en vez de `5`. No altera el valor, pero 
 **Corrección propuesta**
 
 Formatear `delta_vend_units` y cualquier contador de unidades como entero.
+
+**Corrección aplicada**
+
+1. `MachineDexAuditService::unitCell()` formatea contadores sin decimales ni separador de miles, y devuelve `''` cuando no hay valor.
+2. `exportCsv()` usa `unitCell()` para `delta_vend_units` —también en la rama efectiva de `H25-03`—; `va1_total_vend_units` ya se emitía como entero y los importes mantienen `decimal()` con dos decimales.
+3. Regresión: `DexAuditApiTest` 5.5 comprueba que las columnas de unidades de `VA1` y del delta solo contienen dígitos; 7.8 exige `12` (no `12.00`) en el delta efectivo y 7.13 exige la celda vacía cuando no hay predecesor activo. La unitaria 5.7 fija la fila completa con `;5.00;5;`.
+
+**Verificación**
+
+```text
+php tests/integration/DexAuditApiTest.php                    → 79/79 aserciones · exit 0
+php tests/unit/MachineDexAuditServiceTest.php                → 53/53 aserciones · exit 0
+```
+
+No cambian las cabeceras del CSV ni hay DDL nuevo.
 
 ---
 
