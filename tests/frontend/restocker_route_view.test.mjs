@@ -2181,7 +2181,8 @@ const dexFile = {
   name: 'volcado.dex',
   size: new TextEncoder().encode(dexRaw).length,
   type: 'text/plain',
-  text: async () => dexRaw
+  text: async () => dexRaw,
+  arrayBuffer: async () => new TextEncoder().encode(dexRaw).buffer
 };
 assert(
   'api.restocker publica import/list/dump de .dex',

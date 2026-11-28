@@ -26,6 +26,7 @@
 import { api } from '../api.js';
 import { formatDateTime } from '../utils/DateTimeFormat.js';
 import { ModalDialog } from './ModalDialog.js';
+import { readDexFileText } from '../utils/EvaDtsClientPreview.js';
 
 const unwrap = (response) => (response && response.data !== undefined ? response.data : response);
 
@@ -350,7 +351,7 @@ export const CoordinatorDexAuditsSubTab = {
       }
 
       try {
-        const text = await file.text();
+        const text = await readDexFileText(file);
         if (typeof text !== 'string' || text.trim() === '') {
           this.manualFileError = 'El fichero .dex está vacío o no se pudo leer.';
           return;

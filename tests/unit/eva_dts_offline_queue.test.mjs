@@ -29,7 +29,8 @@ import {
   MAX_DEX_BYTES,
   inspectDexEnvelope,
   previewDex,
-  previewDexFile
+  previewDexFile,
+  readDexFileText
 } from '../../public/assets/js/utils/EvaDtsClientPreview.js';
 import { readFileSync } from 'node:fs';
 import { createFakeIndexedDb } from '../Support/FakeIndexedDb.mjs';
@@ -181,6 +182,19 @@ assert(
   filePreview.ok === true
     && filePreview.va1_total_sales_eur === 125.5
     && filePreview.events.length === 2
+);
+
+const cp1252Bytes = Uint8Array.from([
+  ...new TextEncoder().encode('DXS*COMM-CP1252*VA*DEX 6.0\nVA1*2550*41\nMA5*Caf'),
+  0xe9,
+  ...new TextEncoder().encode('\nDXE*FIN')
+]);
+const cp1252Text = await readDexFileText(new Blob([cp1252Bytes], { type: 'text/plain' }));
+assert(
+  '1.10 bis Un .dex Windows-1252 se decodifica sin U+FFFD (H25-07)',
+  cp1252Text.includes('Café')
+    && !cp1252Text.includes('\uFFFD')
+    && cp1252Text === 'DXS*COMM-CP1252*VA*DEX 6.0\nVA1*2550*41\nMA5*Café\nDXE*FIN'
 );
 
 const swSource = readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8');

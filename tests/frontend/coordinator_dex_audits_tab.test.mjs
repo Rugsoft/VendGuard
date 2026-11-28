@@ -347,10 +347,10 @@ async function run() {
   // ─────────────────────────────────────────────────────────────────────
   console.log('\n--- 3. Carga manual de un .dex ---');
 
-  await vm.handleManualFile({ target: { files: [{ name: 'volcado.txt', size: 20, text: async () => 'x' }] } });
+  await vm.handleManualFile({ target: { files: [{ name: 'volcado.txt', size: 20, arrayBuffer: async () => new TextEncoder().encode('x').buffer }] } });
   assert('3.1 Un fichero que no es .dex se rechaza antes de leerlo', vm.manualFileError.includes('.dex') && vm.manualForm.raw_payload === '');
 
-  await vm.handleManualFile({ target: { files: [{ name: 'volcado.dex', size: 1048577, text: async () => 'x' }] } });
+  await vm.handleManualFile({ target: { files: [{ name: 'volcado.dex', size: 1048577, arrayBuffer: async () => new TextEncoder().encode('x').buffer }] } });
   assert('3.2 El tope de 1 MB se anticipa en cliente', vm.manualFileError.includes('1 MB'));
 
   await vm.handleManualFile({
@@ -358,7 +358,7 @@ async function run() {
       files: [{
         name: 'volcado.dex',
         size: 128,
-        text: async () => 'DXS*1*VEND-MAD-0001*V2.0*|\nVA1*001*2.50*10*|\nCA3*120.25*|'
+        arrayBuffer: async () => new TextEncoder().encode('DXS*1*VEND-MAD-0001*V2.0*|\nVA1*001*2.50*10*|\nCA3*120.25*|').buffer
       }]
     }
   });
@@ -378,6 +378,27 @@ async function run() {
       && importCall.payload.client_mutation_id.length >= 8
   );
   assert('3.5 El alta confirma el código y vacía el formulario', vm.successMessage.includes('DEX-2026-0032') && vm.manualForm.raw_payload === '');
+
+  const cp1252Bytes = Uint8Array.from([
+    ...new TextEncoder().encode('DXS*COMM-CP1252*VA*DEX 6.0\nVA1*100*1\nMA5*Caf'),
+    0xe9,
+    ...new TextEncoder().encode('\nDXE*FIN')
+  ]);
+  await vm.handleManualFile({
+    target: {
+      files: [{
+        name: 'cp1252.dex',
+        size: cp1252Bytes.length,
+        arrayBuffer: async () => cp1252Bytes.buffer
+      }]
+    }
+  });
+  assert(
+    '3.6 Un .dex Windows-1252 se adjunta sin U+FFFD (H25-07)',
+    vm.manualForm.raw_payload.includes('Café')
+      && !vm.manualForm.raw_payload.includes('\uFFFD')
+      && vm.manualForm.original_filename === 'cp1252.dex'
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // 4. Anulación lógica

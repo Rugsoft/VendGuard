@@ -11,7 +11,7 @@
 | **Fecha de la revisión** | 2026-11-27 |
 | **Estado de la PR** | `OPEN`, `MERGEABLE`, `mergeStateStatus = CLEAN`; **no fusionada** |
 | **Alcance** | Segunda pasada estática sobre `git diff origin/main...HEAD`: importación `.dex`, parser, proyecciones, vínculos M16/M34/M35/M36, consola de Coordinación, descarga `/raw`, CSV, cola Offline y pruebas del módulo |
-| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **7 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-04`, `H25-05`, `H25-06`, `H25-11`) y 5 abiertos |
+| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **8 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-04`, `H25-05`, `H25-06`, `H25-07`, `H25-11`) y 4 abiertos |
 
 > **Documento de trabajo.** Esta es una segunda revisión posterior al acta cerrada [`revision_pr_25_eva_dts_dex_audit.md`](revision_pr_25_eva_dts_dex_audit.md), que declaraba 9/9 hallazgos cerrados. El acta histórica no se modifica; este documento registra los huecos de la nueva pasada y el cierre de los que ya se han corregido.
 
@@ -29,13 +29,15 @@
 
 > **Acta de cierre · `H25-06` (2026-11-28):** cerrado en local. Las tres rutas de importación responden `idempotent_replay ? 200 : 201`; el cuerpo con `idempotent_replay = true` y el expediente devuelto no cambian. Regresión: `DexAuditApiTest` 2.5 bis (Reponedor, con vínculos caducados), 3.6 bis (Técnico) y 3.6 ter (Coordinación), 83/83. La PR no se ha fusionado.
 
+> **Acta de cierre · `H25-07` (2026-11-28):** cerrado en local. `EvaDtsClientPreview.js` exporta `readDexFileText()`, que lee `arrayBuffer()` y decodifica UTF-8 estricto con fallback `windows-1252`; los cuatro caminos de cliente —Coordinación, Reponedor, Técnico y pre-filtro Offline— dejan de usar `File.text()`. Regresión: `eva_dts_offline_queue` 1.10 bis (26/26), Coordinación 3.6 (39/39), Reponedor 269/269 y Técnico 25/25. La PR no se ha fusionado.
+
 ---
 
 ## 1. Veredicto ejecutivo
 
 El núcleo del Módulo 39 sigue siendo sólido: el parser es determinista, la migración protege la inmutabilidad, las proyecciones móviles eliminan importes y la anulación es terminal. Los hallazgos de esta pasada se concentran en **integración entre módulos**, **idempotencia de los reintentos**, **lectura financiera después de una anulación** e **integridad del fichero descargado**.
 
-Los siete hallazgos cerrados hasta ahora son:
+Los ocho hallazgos cerrados hasta ahora son:
 
 1. **P1 · M16 no persiste el vínculo `.dex`** —**cerrado** (`H25-01`)—: el modal del Técnico enviaba `dex_audit_id` en el alta, la asunción y la reapertura, pero el backend lo ignoraba por completo.
 2. **P2 · El ticket SAT podía quedar huérfano** —**cerrado** (`H25-02`)—: el enlace del `.dex` se ejecutaba después de que el gateway hubiera confirmado el ticket, fuera de su transacción.
@@ -44,8 +46,9 @@ Los siete hallazgos cerrados hasta ahora son:
 5. **P2 · `/raw` servía la versión normalizada** —**cerrado** (`H25-04`)—: el `.dex` descargado no era el que entró por la API y su huella canónica no coincidía con el fichero.
 6. **P2 · El replay idempotente se resolvía demasiado tarde** —**cerrado** (`H25-05`)—: un reintento de una importación ya confirmada podía fallar si la máquina había cambiado de estado o un vínculo había caducado.
 7. **P3 · El replay de importación respondía `201`** —**cerrado** (`H25-06`)—: contradecía el contrato documentado y la convención `200/201` de M35.
+8. **P2 · Los `.dex` Windows-1252 se corrompían en el cliente** —**cerrado** (`H25-07`)—: `File.text()` sustituía los bytes no UTF-8 por U+FFFD antes de enviar el payload.
 
-Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta, el CSV aplicaba formato monetario a los contadores, `/raw` solo se probaba con un payload ya canónico, el replay se probaba sin cambios de perímetro ni de vínculos y el estado HTTP del replay no se comprobaba. Cada uno tiene ahora su regresión propia.
+Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta, el CSV aplicaba formato monetario a los contadores, `/raw` solo se probaba con un payload ya canónico, el replay se probaba sin cambios de perímetro ni de vínculos, el estado HTTP del replay no se comprobaba y el cliente leía siempre como UTF-8. Cada uno tiene ahora su regresión propia.
 
 ---
 
@@ -59,7 +62,7 @@ Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo c
 | 4 | `H25-04` | **P2 · Media** | `/raw` devuelve el payload normalizado, no el fichero original | La descarga no es byte a byte el `.dex` subido y el hash no coincide | ✅ Cerrado |
 | 5 | `H25-05` | **P2 · Media** | El replay idempotente se comprueba después del perímetro y los vínculos | Un reintento puede fallar aunque la importación ya estuviera confirmada | ✅ Cerrado |
 | 6 | `H25-06` | **P3 · Media-baja** | El replay de importación responde `201` en vez de `200` | Contradice el contrato documentado y la convención de M35 | ✅ Cerrado |
-| 7 | `H25-07` | **P2 · Media** | Los `.dex` Windows-1252 se corrompen en el cliente | `File.text()` pierde los bytes no UTF-8 antes de enviar el payload | Abierto |
+| 7 | `H25-07` | **P2 · Media** | Los `.dex` Windows-1252 se corrompen en el cliente | `File.text()` pierde los bytes no UTF-8 antes de enviar el payload | ✅ Cerrado |
 | 8 | `H25-08` | **P3 · Baja** | La carga manual conserva el `.dex` válido anterior tras un error | Se puede importar el fichero antiguo después de seleccionar uno inválido | Abierto |
 | 9 | `H25-09` | **P3 · Baja** | `expected_machine_code` es un control muerto en la consola | La UI sugiere una validación que el servidor ignora por diseño | Abierto |
 | 10 | `H25-10` | **P3 · Baja** | Carrera al abrir el detalle de una fila | Una respuesta antigua puede sobrescribir el detalle seleccionado | Abierto |
@@ -403,6 +406,8 @@ Sin cambios en el `audit_log`, en la base de datos ni en las rutas.
 
 ### H25-07 · P2 · Los `.dex` Windows-1252 se corrompen en el cliente
 
+**Estado:** ✅ **Cerrado (2026-11-28)** · Los cuatro caminos de cliente leen los bytes y decodifican UTF-8 estricto con fallback `windows-1252`.
+
 **Evidencia**
 
 El parser servidor soporta Windows-1252:
@@ -427,6 +432,23 @@ El parser servidor pierde la información que precisamente decía soportar. Afec
 **Corrección propuesta**
 
 Leer el fichero como `ArrayBuffer` y decodificar primero como UTF-8 estricto, con fallback explícito a `TextDecoder('windows-1252')`. Alternativamente, enviar el fichero como binario/multipart en lugar de texto JSON. Añadir una prueba con un `.dex` CP1252 que contenga acentos.
+
+**Corrección aplicada**
+
+1. `EvaDtsClientPreview.js` exporta `readDexFileText(file)`: lee `arrayBuffer()`, intenta `TextDecoder('utf-8', { fatal: true })` y, si el contenido no es UTF-8 válido, decodifica con `TextDecoder('windows-1252')`, la misma conversión que aplica el parser del servidor. No se sustituye ningún byte por U+FFFD antes de enviar.
+2. Se reemplaza `File.text()` en los cuatro caminos: la carga manual de Coordinación, el alta móvil del Reponedor, la del Técnico y `previewDexFile()` (pre-filtro y cola Offline). El payload, el `original_filename` y el tamaño no cambian; solo cambia la lectura del fichero.
+3. Regresión: la unitaria 1.10 bis decodifica un Blob CP1252 con `Café` y exige el texto exacto sin U+FFFD; la frontend 3.6 adjunta un `.dex` CP1252 en la consola de Coordinación y exige `Café` en `manualForm.raw_payload`. Las suites del Reponedor y del Técnico adaptan sus fixtures a `arrayBuffer()` y siguen en verde.
+
+**Verificación**
+
+```text
+node tests/unit/eva_dts_offline_queue.test.mjs                 → 26/26 aserciones · exit 0
+node tests/frontend/coordinator_dex_audits_tab.test.mjs        → 39/39 aserciones · exit 0
+node tests/frontend/restocker_route_view.test.mjs              → 269/269 aserciones · exit 0
+node tests/frontend/technician_route_view.test.mjs             → 25/25 aserciones · exit 0
+```
+
+Sin cambios en rutas, base de datos ni contrato HTTP; el Service Worker sigue precacheando el mismo módulo.
 
 ---
 

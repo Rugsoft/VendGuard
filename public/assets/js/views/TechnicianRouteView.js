@@ -77,7 +77,7 @@ import {
   DEX_AUDIT_CONFLICT,
   DEX_AUDIT_PENDING
 } from '../utils/DexAuditOfflineQueue.js';
-import { previewDexFile, DEX_PREVIEW_ROLES } from '../utils/EvaDtsClientPreview.js';
+import { previewDexFile, readDexFileText, DEX_PREVIEW_ROLES } from '../utils/EvaDtsClientPreview.js';
 
 /** Identificador idempotente del alta `.dex` (Módulo 39, C5). */
 function createDexClientMutationId() {
@@ -2269,7 +2269,7 @@ export const TechnicianRouteView = {
       let queuedPayload = null;
 
       try {
-        const rawPayload = await this.dexFile.text();
+        const rawPayload = await readDexFileText(this.dexFile);
         const preview = await previewDexFile(this.dexFile, { role: DEX_PREVIEW_ROLES.TECHNICIAN });
         if (!preview?.ok) {
           this.dexError = preview?.errors?.[0]?.message || 'El fichero .dex no supera el pre-filtro.';

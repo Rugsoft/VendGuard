@@ -351,9 +351,28 @@ export async function previewDexFile(file, options = {}) {
     };
   }
 
-  const text = await file.text();
+  const text = await readDexFileText(file);
 
   return previewDex(text, options);
+}
+
+/**
+ * Lee un `.dex` respetando la codificación de origen (H25-07).
+ *
+ * `File.text()` decodifica siempre como UTF-8 y sustituye por U+FFFD los bytes
+ * Windows-1252 (`ñ`, acentos, `€`), una pérdida irreversible antes de enviar el
+ * payload. Se leen los bytes y se intenta UTF-8 estricto; si no es válido, se
+ * decodifica como `windows-1252`, la misma conversión que aplica el servidor.
+ */
+export async function readDexFileText(file) {
+  const data = await file.arrayBuffer();
+  const buffer = data instanceof ArrayBuffer ? data : new Uint8Array(data).buffer;
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder('windows-1252').decode(buffer);
+  }
 }
 
 export default previewDex;
