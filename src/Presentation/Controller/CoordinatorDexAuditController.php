@@ -88,7 +88,13 @@ final class CoordinatorDexAuditController
             $result = $this->service()->importDex($payload);
             $presented = $this->service()->presentImportResult($result, 'COORDINATOR');
 
-            return Response::json($presented, 201, 'Volcado .dex importado y auditado.');
+            // H25-06: un replay idempotente responde 200, como M35; solo un
+            // alta nueva responde 201.
+            return Response::json(
+                $presented,
+                ($result['idempotent_replay'] ?? false) === true ? 200 : 201,
+                'Volcado .dex importado y auditado.'
+            );
         });
     }
 

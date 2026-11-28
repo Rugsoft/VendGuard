@@ -458,8 +458,8 @@ try {
     ]), $restockerToken);
     $replayWithDeadLinksData = $data($replayWithDeadLinks);
     $assert(
-        '2.5 bis El replay se resuelve antes de los vínculos ya caducados',
-        $replayWithDeadLinks->getStatusCode() === 201
+        '2.5 bis El replay se resuelve antes de los vínculos ya caducados y responde 200',
+        $replayWithDeadLinks->getStatusCode() === 200
             && ($replayWithDeadLinksData['idempotent_replay'] ?? false) === true
             && (int)($replayWithDeadLinksData['audit']['id'] ?? 0) === (int)($importedData['audit']['id'] ?? -1),
         json_encode([
@@ -666,6 +666,48 @@ try {
             && count($data($technicianList)['audits'] ?? []) === 3
             && !in_array('prefill_sales_counter_reading_eur', $collectKeys($data($technicianList)), true)
             && !in_array('ca3_cashbox_eur', $collectKeys($data($technicianList)), true)
+    );
+
+    $technicianReplayPayload = [
+        'raw_payload' => "DXS*COMM-DEX09-TECH-REPLAY*VA*DEX 6.0\nID1*DEX9-FOOD-01\nID4*2\nVA1*1700*34\nDXE*FIN",
+        'original_filename' => 'sat-replay.dex',
+        'captured_at' => '2026-11-24 13:00:00+00',
+        'client_mutation_id' => 'dex09-api-tech-replay',
+    ];
+    $technicianReplayFirst = $call('POST', '/api/technician/machines/' . $machineId . '/dex-audits', $technicianReplayPayload, $technicianToken);
+    $technicianReplaySecond = $call('POST', '/api/technician/machines/' . $machineId . '/dex-audits', $technicianReplayPayload, $technicianToken);
+    $assert(
+        '3.6 bis El replay del Técnico responde 200 con el mismo volcado',
+        $technicianReplayFirst->getStatusCode() === 201
+            && $technicianReplaySecond->getStatusCode() === 200
+            && ($data($technicianReplaySecond)['idempotent_replay'] ?? false) === true
+            && (int)($data($technicianReplaySecond)['audit']['id'] ?? 0) === (int)($data($technicianReplayFirst)['audit']['id'] ?? -1),
+        json_encode([
+            'first' => $technicianReplayFirst->getStatusCode(),
+            'second' => $technicianReplaySecond->getStatusCode(),
+            'body' => $data($technicianReplaySecond),
+        ])
+    );
+
+    $coordinatorReplayPayload = [
+        'raw_payload' => "DXS*COMM-DEX09-COORD-REPLAY*VA*DEX 6.0\nID1*DEX9-FOOD-01\nID4*2\nVA1*1800*36\nDXE*FIN",
+        'original_filename' => 'consola-replay.dex',
+        'captured_at' => '2026-11-24 14:00:00+00',
+        'client_mutation_id' => 'dex09-api-coord-replay',
+    ];
+    $coordinatorReplayFirst = $call('POST', '/api/coordinator/machines/' . $machineId . '/dex-audits', $coordinatorReplayPayload, $coordinatorToken);
+    $coordinatorReplaySecond = $call('POST', '/api/coordinator/machines/' . $machineId . '/dex-audits', $coordinatorReplayPayload, $coordinatorToken);
+    $assert(
+        '3.6 ter El replay de Coordinación responde 200 con el mismo volcado',
+        $coordinatorReplayFirst->getStatusCode() === 201
+            && $coordinatorReplaySecond->getStatusCode() === 200
+            && ($data($coordinatorReplaySecond)['idempotent_replay'] ?? false) === true
+            && (int)($data($coordinatorReplaySecond)['audit']['id'] ?? 0) === (int)($data($coordinatorReplayFirst)['audit']['id'] ?? -1),
+        json_encode([
+            'first' => $coordinatorReplayFirst->getStatusCode(),
+            'second' => $coordinatorReplaySecond->getStatusCode(),
+            'body' => $data($coordinatorReplaySecond),
+        ])
     );
 
     echo "\n--- 3.7. Cruces M34/M35 del detalle de Coordinación (QA-3) ---\n";

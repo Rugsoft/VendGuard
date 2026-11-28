@@ -657,9 +657,13 @@ final class RestockerRouteController
             $actor = $this->actor($request);
             $payload = $this->dexImportPayload($request, $machineId, $actor, 'RESTOCKER_ROUTE');
 
+            $result = $this->dexService()->importDex($payload);
+
+            // H25-06: un replay idempotente responde 200, como M35; solo un
+            // alta nueva responde 201.
             return Response::json(
-                $this->dexService()->presentImportResult($this->dexService()->importDex($payload), 'RESTOCKER'),
-                201,
+                $this->dexService()->presentImportResult($result, 'RESTOCKER'),
+                ($result['idempotent_replay'] ?? false) === true ? 200 : 201,
                 'Volcado .dex importado para la máquina.'
             );
         });
