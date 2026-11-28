@@ -11,7 +11,7 @@
 | **Fecha de la revisión** | 2026-11-27 |
 | **Estado de la PR** | `OPEN`, `MERGEABLE`, `mergeStateStatus = CLEAN`; **no fusionada** |
 | **Alcance** | Segunda pasada estática sobre `git diff origin/main...HEAD`: importación `.dex`, parser, proyecciones, vínculos M16/M34/M35/M36, consola de Coordinación, descarga `/raw`, CSV, cola Offline y pruebas del módulo |
-| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **10 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-04`, `H25-05`, `H25-06`, `H25-07`, `H25-08`, `H25-09`, `H25-11`) y 2 abiertos |
+| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **11 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-04`, `H25-05`, `H25-06`, `H25-07`, `H25-08`, `H25-09`, `H25-10`, `H25-11`) y 1 abierto |
 
 > **Documento de trabajo.** Esta es una segunda revisión posterior al acta cerrada [`revision_pr_25_eva_dts_dex_audit.md`](revision_pr_25_eva_dts_dex_audit.md), que declaraba 9/9 hallazgos cerrados. El acta histórica no se modifica; este documento registra los huecos de la nueva pasada y el cierre de los que ya se han corregido.
 
@@ -35,13 +35,15 @@
 
 > **Acta de cierre · `H25-09` (2026-11-28):** cerrado en local. Se retira el control `expected_machine_code` del formulario y del payload de la consola; el servidor sigue comparando `ID1` contra `machines.code`, sin cambios. Regresión: Coordinación 3.4 (no viaja un valor obsoleto) y 7.6 (el componente no expone el campo), 42/42. La PR no se ha fusionado.
 
+> **Acta de cierre · `H25-10` (2026-11-28):** cerrado en local. `openDetail()` usa una secuencia propia y descarta las respuestas que ya no son la última; `closeDetail()` invalida la secuencia para que una respuesta en vuelo no rellene el detalle tras cerrar. Regresión: Coordinación 2.7 con dos peticiones resueltas en orden inverso, 43/43. La PR no se ha fusionado.
+
 ---
 
 ## 1. Veredicto ejecutivo
 
 El núcleo del Módulo 39 sigue siendo sólido: el parser es determinista, la migración protege la inmutabilidad, las proyecciones móviles eliminan importes y la anulación es terminal. Los hallazgos de esta pasada se concentran en **integración entre módulos**, **idempotencia de los reintentos**, **lectura financiera después de una anulación** e **integridad del fichero descargado**.
 
-Los diez hallazgos cerrados hasta ahora son:
+Los once hallazgos cerrados hasta ahora son:
 
 1. **P1 · M16 no persiste el vínculo `.dex`** —**cerrado** (`H25-01`)—: el modal del Técnico enviaba `dex_audit_id` en el alta, la asunción y la reapertura, pero el backend lo ignoraba por completo.
 2. **P2 · El ticket SAT podía quedar huérfano** —**cerrado** (`H25-02`)—: el enlace del `.dex` se ejecutaba después de que el gateway hubiera confirmado el ticket, fuera de su transacción.
@@ -53,8 +55,9 @@ Los diez hallazgos cerrados hasta ahora son:
 8. **P2 · Los `.dex` Windows-1252 se corrompían en el cliente** —**cerrado** (`H25-07`)—: `File.text()` sustituía los bytes no UTF-8 por U+FFFD antes de enviar el payload.
 9. **P3 · La carga manual permitía importar el `.dex` anterior** —**cerrado** (`H25-08`)—: un fichero inválido mostraba error pero dejaba intacto el adjunto previo.
 10. **P3 · El código esperado era un control muerto** —**cerrado** (`H25-09`)—: la consola lo pedía y enviaba, pero el servidor siempre valida contra `machines.code`.
+11. **P3 · La carrera del detalle podía mezclar filas** —**cerrado** (`H25-10`)—: una respuesta antigua sobrescribía el detalle de la fila seleccionada.
 
-Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta, el CSV aplicaba formato monetario a los contadores, `/raw` solo se probaba con un payload ya canónico, el replay se probaba sin cambios de perímetro ni de vínculos, el estado HTTP del replay no se comprobaba, el cliente leía siempre como UTF-8, la carga manual no invalidaba el adjunto al fallar un fichero y la consola ofrecía un código esperado que el servidor nunca leía. Cada uno tiene ahora su regresión propia.
+Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta, el CSV aplicaba formato monetario a los contadores, `/raw` solo se probaba con un payload ya canónico, el replay se probaba sin cambios de perímetro ni de vínculos, el estado HTTP del replay no se comprobaba, el cliente leía siempre como UTF-8, la carga manual no invalidaba el adjunto al fallar un fichero la consola ofrecía un código esperado que el servidor nunca leía y el detalle no descartaba respuestas obsoletas. Cada uno tiene ahora su regresión propia.
 
 ---
 
@@ -71,7 +74,7 @@ Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo c
 | 7 | `H25-07` | **P2 · Media** | Los `.dex` Windows-1252 se corrompen en el cliente | `File.text()` pierde los bytes no UTF-8 antes de enviar el payload | ✅ Cerrado |
 | 8 | `H25-08` | **P3 · Baja** | La carga manual conserva el `.dex` válido anterior tras un error | Se puede importar el fichero antiguo después de seleccionar uno inválido | ✅ Cerrado |
 | 9 | `H25-09` | **P3 · Baja** | `expected_machine_code` es un control muerto en la consola | La UI sugiere una validación que el servidor ignora por diseño | ✅ Cerrado |
-| 10 | `H25-10` | **P3 · Baja** | Carrera al abrir el detalle de una fila | Una respuesta antigua puede sobrescribir el detalle seleccionado | Abierto |
+| 10 | `H25-10` | **P3 · Baja** | Carrera al abrir el detalle de una fila | Una respuesta antigua puede sobrescribir el detalle seleccionado | ✅ Cerrado |
 | 11 | `H25-11` | **P4 · Menor** | El CSV formatea las unidades como decimales | `delta_vend_units` sale como `5.00` en vez de `5` | ✅ Cerrado |
 | 12 | `H25-12` | **P4 · Menor** | Código de error incorrecto para longitudes de texto | Un código inválido se reporta como `DEX_INVALID_NUMERIC_BOUNDS` | Abierto |
 
@@ -541,6 +544,8 @@ Sin cambios en rutas, base de datos ni contrato HTTP; los tests de integración 
 
 ### H25-10 · P3 · Carrera al abrir el detalle de una fila
 
+**Estado:** ✅ **Cerrado (2026-11-28)** · El detalle usa una secuencia propia: solo la última petición puede escribir `detail`, `detailError` o `isLoadingDetail`.
+
 **Evidencia**
 
 - `openDetail()` no usa secuencia, `AbortController` ni comprobación de identidad antes de asignar la respuesta:
@@ -559,6 +564,20 @@ El modal puede mostrar la cabecera de B con las líneas, eventos o cruces de A. 
 **Corrección propuesta**
 
 Usar una secuencia de petición o comparar `selectedAudit.id` con el `id` solicitado antes de asignar `detail`; opcionalmente, abortar la petición anterior.
+
+**Corrección aplicada**
+
+1. `openDetail()` captura `++this.detailRequestSequence` y, tras resolver o fallar, descarta la respuesta si ya no es la última. Una respuesta antigua no sobrescribe el detalle de la fila seleccionada.
+2. `closeDetail()` incrementa la secuencia, de modo que una respuesta en vuelo tampoco rellena el detalle después de cerrar el modal.
+3. Regresión frontend 2.7: dos `openDetail()` (ids 31 y 32) con promesas diferidas; se resuelve primero la 32 y después la 31, y se exige que `detail` y `selectedAudit` sigan en la 32 y que `isLoadingDetail` quede en `false`.
+
+**Verificación**
+
+```text
+node tests/frontend/coordinator_dex_audits_tab.test.mjs → 43/43 aserciones · exit 0
+```
+
+Sin cambios en rutas, base de datos ni contrato HTTP.
 
 ---
 

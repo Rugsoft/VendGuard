@@ -342,6 +342,26 @@ async function run() {
   assert('2.5 El detalle conserva selecciones, eventos y cruces', vm.detail?.selections?.length === 1 && vm.detail?.events?.length === 1 && vm.detail?.m34_cross_check?.matches === true && vm.detail?.m35_cross_check?.linked_collection_id === 8);
   assert('2.6 El hash y la trazabilidad del fichero están presentes', vm.detail?.sha256_hash?.length === 64 && vm.detail?.original_filename === 'DEX-2026-0031.dex');
 
+  const originalGetDexAudit = api.coordinator.getDexAudit;
+  const pendingDetails = [];
+  api.coordinator.getDexAudit = (auditId) => new Promise((resolve) => {
+    pendingDetails.push({ auditId, resolve });
+  });
+  const pendingA = vm.openDetail({ ...listAudit, id: 31 });
+  const pendingB = vm.openDetail({ ...listAudit, id: 32, audit_code: 'DEX-2026-0032' });
+  pendingDetails.find((entry) => entry.auditId === 32).resolve({ data: { ...detailAudit, id: 32, audit_code: 'DEX-2026-0032' } });
+  await pendingB;
+  pendingDetails.find((entry) => entry.auditId === 31).resolve({ data: { ...detailAudit, id: 31 } });
+  await pendingA;
+  assert(
+    '2.7 Una respuesta antigua no sobrescribe el detalle seleccionado (H25-10)',
+    vm.detail?.id === 32
+      && vm.detail?.audit_code === 'DEX-2026-0032'
+      && vm.selectedAudit?.id === 32
+      && vm.isLoadingDetail === false
+  );
+  api.coordinator.getDexAudit = originalGetDexAudit;
+
   // ─────────────────────────────────────────────────────────────────────
   // 3. Carga manual
   // ─────────────────────────────────────────────────────────────────────

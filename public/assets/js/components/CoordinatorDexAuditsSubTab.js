@@ -132,6 +132,7 @@ export const CoordinatorDexAuditsSubTab = {
       loadError: '',
       successMessage: '',
       requestSequence: 0,
+      detailRequestSequence: 0,
 
       manualForm: emptyManualForm(),
       manualFileError: '',
@@ -412,6 +413,7 @@ export const CoordinatorDexAuditsSubTab = {
       }
     },
     async openDetail(audit) {
+      const sequence = ++this.detailRequestSequence;
       this.selectedAudit = audit;
       this.detail = null;
       this.detailError = '';
@@ -420,14 +422,19 @@ export const CoordinatorDexAuditsSubTab = {
       this.isLoadingDetail = true;
       try {
         const payload = unwrap(await api.coordinator.getDexAudit(audit.id));
+        if (sequence !== this.detailRequestSequence) return;
         this.detail = payload?.audit || payload;
       } catch (error) {
+        if (sequence !== this.detailRequestSequence) return;
         this.detailError = error?.message || 'No se pudo cargar el detalle del volcado.';
       } finally {
-        this.isLoadingDetail = false;
+        if (sequence === this.detailRequestSequence) {
+          this.isLoadingDetail = false;
+        }
       }
     },
     closeDetail() {
+      this.detailRequestSequence += 1;
       this.showDetailModal = false;
       this.detail = null;
       this.selectedAudit = null;
