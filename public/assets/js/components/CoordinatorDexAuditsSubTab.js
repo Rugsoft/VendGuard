@@ -341,30 +341,47 @@ export const CoordinatorDexAuditsSubTab = {
       this.successMessage = '';
       if (!file) return;
 
+      // H25-08: una selección nueva invalida el adjunto anterior antes de
+      // validarla. Si el fichero falla, no puede quedar el .dex válido previo
+      // listo para importarse por error.
+      this.manualForm.raw_payload = '';
+      this.manualForm.original_filename = '';
+
       if (!/\.dex$/i.test(file.name)) {
-        this.manualFileError = 'Selecciona un fichero con extensión .dex.';
+        this.failManualFile(event, 'Selecciona un fichero con extensión .dex.');
         return;
       }
       if (file.size < 1 || file.size > MAX_DEX_FILE_SIZE_BYTES) {
-        this.manualFileError = 'El volcado debe pesar entre 1 byte y 1 MB.';
+        this.failManualFile(event, 'El volcado debe pesar entre 1 byte y 1 MB.');
         return;
       }
 
       try {
         const text = await readDexFileText(file);
         if (typeof text !== 'string' || text.trim() === '') {
-          this.manualFileError = 'El fichero .dex está vacío o no se pudo leer.';
+          this.failManualFile(event, 'El fichero .dex está vacío o no se pudo leer.');
           return;
         }
         this.manualForm.raw_payload = text;
         this.manualForm.original_filename = file.name;
       } catch {
-        this.manualFileError = 'No se pudo leer el fichero .dex seleccionado.';
+        this.failManualFile(event, 'No se pudo leer el fichero .dex seleccionado.');
+      }
+    },
+    failManualFile(event, message) {
+      this.manualFileError = message;
+      // Permite volver a elegir el mismo fichero tras corregirlo.
+      if (event?.target) {
+        event.target.value = '';
       }
     },
     async submitManualImport() {
       this.manualImportError = '';
       this.successMessage = '';
+      if (this.manualFileError) {
+        this.manualImportError = this.manualFileError;
+        return;
+      }
       if (!this.manualForm.machine_id) {
         this.manualImportError = 'Selecciona la máquina del volcado.';
         return;

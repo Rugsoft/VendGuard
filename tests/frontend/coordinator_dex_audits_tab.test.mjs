@@ -364,6 +364,32 @@ async function run() {
   });
   assert('3.3 Un .dex válido queda adjunto y conserva nombre y texto', vm.manualForm.raw_payload.includes('VA1') && vm.manualForm.original_filename === 'volcado.dex');
 
+  await vm.handleManualFile({ target: { files: [{ name: 'otro.txt', size: 10, arrayBuffer: async () => new ArrayBuffer(1) }] } });
+  assert(
+    '3.3 bis Un fichero inválido descarta el .dex válido anterior (H25-08)',
+    vm.manualFileError.includes('.dex')
+      && vm.manualForm.raw_payload === ''
+      && vm.manualForm.original_filename === ''
+  );
+  vm.manualForm.machine_id = 1;
+  const importsBeforeBlockedSubmit = calls.filter((call) => call.method === 'importDexAudit').length;
+  await vm.submitManualImport();
+  assert(
+    '3.3 ter El submit queda bloqueado mientras el fichero esté en error (H25-08)',
+    calls.filter((call) => call.method === 'importDexAudit').length === importsBeforeBlockedSubmit
+      && vm.manualImportError !== ''
+  );
+
+  await vm.handleManualFile({
+    target: {
+      files: [{
+        name: 'volcado.dex',
+        size: 128,
+        arrayBuffer: async () => new TextEncoder().encode('DXS*1*VEND-MAD-0001*V2.0*|\nVA1*001*2.50*10*|\nCA3*120.25*|').buffer
+      }]
+    }
+  });
+
   vm.manualForm.machine_id = 1;
   vm.manualForm.captured_at = '2026-11-25T10:15';
   await vm.submitManualImport();
