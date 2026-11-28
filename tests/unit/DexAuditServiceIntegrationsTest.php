@@ -108,6 +108,7 @@ final class Dex08AuditRepository implements MachineDexAuditRepositoryInterface
     public function findActiveIdByHash(int $machineId, string $sha256Hash): ?int { return null; }
     public function findByActorMutation(int $importedBy, string $clientMutationId): ?array { return null; }
     public function findPreviousActive(int $machineId, string $capturedAt, ?int $excludeAuditId = null): ?array { return null; }
+    public function findEffectivePredecessorsForAudits(array $auditIds): array { return []; }
     public function hasLaterActive(int $machineId, string $capturedAt): bool { return false; }
     public function findSelectionsByAudit(int $auditId): array { return []; }
     public function listForCoordinator(array $filters = [], int $limit = 100, int $offset = 0): array { return []; }

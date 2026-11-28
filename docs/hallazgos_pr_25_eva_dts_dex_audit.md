@@ -11,7 +11,7 @@
 | **Fecha de la revisión** | 2026-11-27 |
 | **Estado de la PR** | `OPEN`, `MERGEABLE`, `mergeStateStatus = CLEAN`; **no fusionada** |
 | **Alcance** | Segunda pasada estática sobre `git diff origin/main...HEAD`: importación `.dex`, parser, proyecciones, vínculos M16/M34/M35/M36, consola de Coordinación, descarga `/raw`, CSV, cola Offline y pruebas del módulo |
-| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **2 cerrados** (`H25-01`, `H25-02`) y 10 abiertos |
+| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **3 cerrados** (`H25-01`, `H25-02`, `H25-03`) y 9 abiertos |
 
 > **Documento de trabajo.** Esta es una segunda revisión posterior al acta cerrada [`revision_pr_25_eva_dts_dex_audit.md`](revision_pr_25_eva_dts_dex_audit.md), que declaraba 9/9 hallazgos cerrados. El acta histórica no se modifica; este documento registra los huecos de la nueva pasada y el cierre de los que ya se han corregido.
 
@@ -19,18 +19,21 @@
 
 > **Acta de cierre · `H25-02` (2026-11-27):** cerrado en local. Con `dex_audit_id`, `RestockerSatSynergyService::escalateToSat()` ejecuta la validación, el gateway y el enlace dentro de una única unidad de trabajo (`TransactionManagerInterface`); el `FOR UPDATE` del volcado se retiene hasta el commit y el `begin()/commit()` interno del gateway pasa a ser reentrante, de modo que un enlace rechazado deshace el ticket SAT completo. `RestockerRouteController` inyecta `PdoTransactionManager` y traduce `DexAuditValidationException` a su código de contrato. Regresión: `DexAuditApiTest` 11.1 (74/74), `DexAuditServiceIntegrationsTest` 19/19, `RestockerSatSynergyServiceTest` 40/40 y `RestockerSatSynergyApiTest` 98/98. La PR no se ha fusionado.
 
+> **Acta de cierre · `H25-03` (2026-11-28):** cerrado en local. `MachineDexAuditRepositoryInterface::findEffectivePredecessorsForAudits()` resuelve en una sola consulta, para toda la página, si el predecesor persistido está `VOIDED` y cuál es el último `ACTIVE` anterior; `MachineDexAuditService` proyecta ese bloque en el listado y en el CSV con el mismo cálculo que el detalle, y `CoordinatorDexAuditsSubTab` usa el valor efectivo aunque sea `null` cuando la bandera está activa, en vez de caer al delta persistido. Regresión: `DexAuditApiTest` 7.7, 7.8, 7.12 y 7.13 (78/78), frontend 1.11 (38/38), `MachineDexAuditServiceTest` 52/52 y `DexAuditServiceIntegrationsTest` 19/19. La PR no se ha fusionado.
+
 ---
 
 ## 1. Veredicto ejecutivo
 
 El núcleo del Módulo 39 sigue siendo sólido: el parser es determinista, la migración protege la inmutabilidad, las proyecciones móviles eliminan importes y la anulación es terminal. Los hallazgos de esta pasada se concentran en **integración entre módulos**, **idempotencia de los reintentos**, **lectura financiera después de una anulación** e **integridad del fichero descargado**.
 
-Los dos hallazgos de mayor prioridad eran:
+Los tres hallazgos cerrados hasta ahora son:
 
 1. **P1 · M16 no persiste el vínculo `.dex`** —**cerrado** (`H25-01`)—: el modal del Técnico enviaba `dex_audit_id` en el alta, la asunción y la reapertura, pero el backend lo ignoraba por completo.
 2. **P2 · El ticket SAT podía quedar huérfano** —**cerrado** (`H25-02`)—: el enlace del `.dex` se ejecutaba después de que el gateway hubiera confirmado el ticket, fuera de su transacción.
+3. **P2 · El listado y el CSV ignoraban el delta efectivo tras `VOIDED`** —**cerrado** (`H25-03`)—: la consola y la exportación mostraban el delta persistido contra un volcado anulado.
 
-Ninguno de los dos está cubierto por las suites actuales: la prueba frontend de M16 solo comprueba el payload y la API solo valida M34/M35/M36.
+Ninguno de los tres estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36 y el detalle era el único que recalculaba el delta. Cada uno tiene ahora su regresión propia.
 
 ---
 
@@ -40,7 +43,7 @@ Ninguno de los dos está cubierto por las suites actuales: la prueba frontend de
 |---:|:---:|:---:|---|---|---|
 | 1 | `H25-01` | **P1 · Alta** | M16 no persiste `machine_dex_audits.incident_id` | El alta/asunción/reabertura desde el aviso térmico queda sin vínculo `.dex` | ✅ Cerrado |
 | 2 | `H25-02` | **P2 · Media-alta** | Ticket SAT creado antes de enlazar el `.dex` | Un fallo de enlace deja un ticket huérfano y permite duplicados | ✅ Cerrado |
-| 3 | `H25-03` | **P2 · Media-alta** | El listado y el CSV no calculan el delta efectivo tras `VOIDED` | La consola financiera muestra el delta persistido, no el vigente | Abierto |
+| 3 | `H25-03` | **P2 · Media-alta** | El listado y el CSV no calculan el delta efectivo tras `VOIDED` | La consola financiera muestra el delta persistido, no el vigente | ✅ Cerrado |
 | 4 | `H25-04` | **P2 · Media** | `/raw` devuelve el payload normalizado, no el fichero original | La descarga no es byte a byte el `.dex` subido y el hash no coincide | Abierto |
 | 5 | `H25-05` | **P2 · Media** | El replay idempotente se comprueba después del perímetro y los vínculos | Un reintento puede fallar aunque la importación ya estuviera confirmada | Abierto |
 | 6 | `H25-06` | **P3 · Media-baja** | El replay de importación responde `201` en vez de `200` | Contradice el contrato documentado y la convención de M35 | Abierto |
@@ -189,6 +192,8 @@ php tests/integration/RestockerSatSynergyApiTest.php         → 98/98 asercione
 
 ### H25-03 · P2 · El listado y el CSV no muestran el delta efectivo tras `VOIDED`
 
+**Estado:** ✅ **Cerrado (2026-11-28)** · El listado y el CSV resuelven en lote el delta vigente tras `VOIDED`; la UI respeta el valor efectivo nulo y hay regresión HTTP y frontend.
+
 **Evidencia**
 
 - `listForCoordinator()` devuelve las filas del repositorio sin aplicar `attachEffectiveDeltaAfterVoid()`:
@@ -226,6 +231,24 @@ Las pruebas 7.1–7.9 de `DexAuditApiTest` validan el detalle, no el listado ni 
 2. Exponer `previous_audit_voided` en el listado.
 3. Usar el valor efectivo en CSV y en la tabla cuando la bandera indique que el predecesor fue anulado, incluso si el valor es `null`.
 4. Añadir pruebas de listado y CSV después de anular el predecesor y después de anular toda la cadena.
+
+**Corrección aplicada**
+
+1. `MachineDexAuditRepositoryInterface` incorpora `findEffectivePredecessorsForAudits()`: en una sola consulta —`LEFT JOIN LATERAL`, con el orden `captured_at DESC, id DESC` y exclusión del propio volcado— devuelve, para toda la página, si el `previous_audit_id` persistido está `VOIDED` y cuál es el último `ACTIVE` anterior con sus totales `VA1`. Se elimina el N+1 que habría supuesto invocar `findPreviousActive()` fila a fila.
+2. `MachineDexAuditService` aplica ese bloque en `listForCoordinator()` y en `exportCsv()` con el mismo `DexAuditValidator::resolveDeltas()` que el detalle, así que `previous_audit_voided`, `effective_previous_audit_id`, `effective_delta_sales_eur` y `effective_delta_vend_units` llegan a la tabla y al fichero. El CSV publica el delta efectivo y deja la celda vacía cuando ya no queda predecesor activo, en lugar de repetir el valor obsoleto. El detalle reutiliza la misma proyección (`applyEffectiveDelta()`), sin duplicar la semántica de `QA-2`.
+3. `CoordinatorDexAuditsSubTab` decide con la bandera: si `previous_audit_voided` es `true` usa el valor efectivo aunque sea `null` (muestra `—`) y solo cae al persistido cuando el predecesor sigue vigente. La tabla añade la nota «predecesor anulado» bajo el delta para explicar el recálculo, y el modal de detalle aplica la misma regla.
+4. Regresión: `DexAuditApiTest` 7.7 y 7.8 certifican listado y CSV con B recalculado contra A0 (12,00 € / 12 uds) tras anular A; 7.12 y 7.13 certifican que, anulada toda la cadena, el listado expone el bloque efectivo nulo y el CSV deja las celdas de delta vacías. La prueba frontend 1.11 cubre la precedencia de la bandera sobre el `??` en tabla y modal. La firma 8.4 del `audit_log` pasa a localizar la exportación del perímetro original, porque el escenario ahora exporta tres veces.
+
+**Verificación**
+
+```text
+php tests/integration/DexAuditApiTest.php                    → 78/78 aserciones · exit 0
+node tests/frontend/coordinator_dex_audits_tab.test.mjs      → 38/38 aserciones · exit 0
+php tests/unit/MachineDexAuditServiceTest.php                → 52/52 aserciones · exit 0
+php tests/unit/DexAuditServiceIntegrationsTest.php           → 19/19 aserciones · exit 0
+```
+
+El escenario de integración usa el contenedor PostgreSQL TLS habitual y deja limpio su esquema aislado; no hay DDL ni rutas nuevas.
 
 ---
 

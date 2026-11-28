@@ -88,6 +88,25 @@ interface MachineDexAuditRepositoryInterface
     public function findPreviousActive(int $machineId, string $capturedAt, ?int $excludeAuditId = null): ?array;
 
     /**
+     * Estado del predecesor persistido y predecesor `ACTIVE` efectivo, en lote
+     * (QA-2, H25-03).
+     *
+     * Resuelve la página del listado de Coordinación en una sola consulta, sin
+     * el N+1 de `findPreviousActive()` por fila: para cada volcado indica si su
+     * `previous_audit_id` está `VOIDED` y, en tal caso, el último `ACTIVE`
+     * anterior con sus totales `VA1` para recalcular el delta en lectura.
+     *
+     * @param list<int> $auditIds
+     * @return array<int, array{
+     *     previous_audit_voided: bool,
+     *     effective_previous_audit_id: int|null,
+     *     va1_total_sales_eur: float|null,
+     *     va1_total_vend_units: int|null
+     * }>
+     */
+    public function findEffectivePredecessorsForAudits(array $auditIds): array;
+
+    /**
      * ¿Existe algún `ACTIVE` posterior al instante indicado? (QA-2).
      */
     public function hasLaterActive(int $machineId, string $capturedAt): bool;

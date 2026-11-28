@@ -314,6 +314,18 @@ async function run() {
       && !CoordinatorDexAuditsSubTab.template.includes('effective_delta_vend_units ?? audit.delta_vend_units) }} uds.')
   );
 
+  assert(
+    '1.11 Con el predecesor anulado manda el delta efectivo, incluso cuando es null',
+    vm.deltaUnits({ previous_audit_voided: true, effective_delta_vend_units: null, delta_vend_units: 7 }) === null
+      && vm.deltaSales({ previous_audit_voided: true, effective_delta_sales_eur: null, delta_sales_eur: 7 }) === null
+      && vm.deltaUnits({ previous_audit_voided: true, effective_delta_vend_units: 3, delta_vend_units: 7 }) === 3
+      && vm.deltaSales({ previous_audit_voided: true, effective_delta_sales_eur: 12, delta_sales_eur: 7 }) === 12
+      && vm.deltaSales({ previous_audit_voided: false, effective_delta_sales_eur: null, delta_sales_eur: 7 }) === 7
+      && CoordinatorDexAuditsSubTab.template.includes('money(deltaSales(audit))')
+      && CoordinatorDexAuditsSubTab.template.includes('money(deltaSales(detail))')
+      && CoordinatorDexAuditsSubTab.template.includes('audit.previous_audit_voided === true')
+  );
+
   // ─────────────────────────────────────────────────────────────────────
   // 2. Listado y detalle
   // ─────────────────────────────────────────────────────────────────────

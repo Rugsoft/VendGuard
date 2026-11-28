@@ -424,6 +424,73 @@ final class PdoMachineDexAuditRepository implements MachineDexAuditRepositoryInt
     /**
      * {@inheritdoc}
      */
+    public function findEffectivePredecessorsForAudits(array $auditIds): array
+    {
+        $ids = [];
+        foreach ($auditIds as $auditId) {
+            $id = (int)$auditId;
+            if ($id > 0) {
+                $ids[$id] = true;
+            }
+        }
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $index = 0;
+        foreach (array_keys($ids) as $id) {
+            $placeholders[] = ':audit_' . $index++;
+        }
+
+        // Una sola consulta para toda la página (H25-03): el lateral resuelve el
+        // predecesor efectivo solo cuando el persistido está VOIDED.
+        $stmt = $this->pdo->prepare(
+            "SELECT a.id AS audit_id,
+                    (prev.status = 'VOIDED') AS previous_audit_voided,
+                    eff.id AS effective_previous_audit_id,
+                    eff.va1_total_sales_eur AS effective_va1_total_sales_eur,
+                    eff.va1_total_vend_units AS effective_va1_total_vend_units
+             FROM machine_dex_audits a
+             LEFT JOIN machine_dex_audits prev ON prev.id = a.previous_audit_id
+             LEFT JOIN LATERAL (
+                 SELECT p.id, p.va1_total_sales_eur, p.va1_total_vend_units
+                 FROM machine_dex_audits p
+                 WHERE p.machine_id = a.machine_id
+                   AND p.status = 'ACTIVE'
+                   AND p.captured_at <= a.captured_at
+                   AND p.id <> a.id
+                 ORDER BY p.captured_at DESC, p.id DESC
+                 LIMIT 1
+             ) eff ON prev.status = 'VOIDED'
+             WHERE a.id IN (" . implode(', ', $placeholders) . ')'
+        );
+        $index = 0;
+        foreach (array_keys($ids) as $id) {
+            $stmt->bindValue(':audit_' . $index++, $id, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $resolved = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $resolved[(int)$row['audit_id']] = [
+                'previous_audit_voided' => self::toBool($row['previous_audit_voided']),
+                'effective_previous_audit_id' => $row['effective_previous_audit_id'] === null
+                    ? null
+                    : (int)$row['effective_previous_audit_id'],
+                'va1_total_sales_eur' => self::nullableFloat($row['effective_va1_total_sales_eur']),
+                'va1_total_vend_units' => $row['effective_va1_total_vend_units'] === null
+                    ? null
+                    : (int)$row['effective_va1_total_vend_units'],
+            ];
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function hasLaterActive(int $machineId, string $capturedAt): bool
     {
         if ($machineId <= 0 || trim($capturedAt) === '') {

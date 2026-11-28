@@ -212,6 +212,35 @@ final class Dex07FakeRepository implements MachineDexAuditRepositoryInterface
         return $best;
     }
 
+    public function findEffectivePredecessorsForAudits(array $auditIds): array
+    {
+        $resolved = [];
+        foreach ($auditIds as $auditId) {
+            $auditId = (int)$auditId;
+            if (!isset($this->audits[$auditId])) {
+                continue;
+            }
+
+            $audit = $this->audits[$auditId];
+            $previousAuditId = isset($audit['previous_audit_id']) ? (int)$audit['previous_audit_id'] : 0;
+            $previousVoided = $previousAuditId > 0
+                && isset($this->audits[$previousAuditId])
+                && strtoupper((string)$this->audits[$previousAuditId]['status']) === 'VOIDED';
+            $effective = $previousVoided
+                ? $this->findPreviousActive((int)$audit['machine_id'], (string)$audit['captured_at'], $auditId)
+                : null;
+
+            $resolved[$auditId] = [
+                'previous_audit_voided' => $previousVoided,
+                'effective_previous_audit_id' => $effective === null ? null : (int)$effective['id'],
+                'va1_total_sales_eur' => $effective === null ? null : (float)$effective['va1_total_sales_eur'],
+                'va1_total_vend_units' => $effective === null ? null : (int)$effective['va1_total_vend_units'],
+            ];
+        }
+
+        return $resolved;
+    }
+
     public function hasLaterActive(int $machineId, string $capturedAt): bool
     {
         foreach ($this->audits as $audit) {

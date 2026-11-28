@@ -646,7 +646,9 @@ final class MachineDexAuditService
     public function exportCsv(array $filters = [], ?array $actor = null): string
     {
         $totalRows = $this->repository->countForCoordinator($filters);
-        $rows = $this->repository->listForCoordinator($filters, self::MAX_CSV_ROWS, 0);
+        $rows = $this->attachEffectiveDeltaAfterVoidBatch(
+            $this->repository->listForCoordinator($filters, self::MAX_CSV_ROWS, 0)
+        );
 
         $headers = [
             'audit_code', 'machine_code', 'captured_at', 'status', 'import_source',
@@ -657,6 +659,10 @@ final class MachineDexAuditService
         $lines = [implode(';', $headers)];
 
         foreach ($rows as $row) {
+            // H25-03: el CSV publica el delta vigente, no el persistido contra un
+            // predecesor anulado. Si la cadena entera está anulada, la celda queda
+            // vacía en vez de mostrar un delta obsoleto.
+            $previousVoided = ($row['previous_audit_voided'] ?? false) === true;
             $values = [
                 (string)($row['audit_code'] ?? ''),
                 (string)($row['machine_code_snapshot'] ?? ''),
@@ -666,8 +672,12 @@ final class MachineDexAuditService
                 $this->decimal($row['va1_total_sales_eur'] ?? null),
                 (string)($row['va1_total_vend_units'] ?? ''),
                 $this->decimal($row['ca3_cashbox_eur'] ?? null),
-                $this->decimal($row['delta_sales_eur'] ?? null),
-                $this->decimal($row['delta_vend_units'] ?? null),
+                $this->decimal($previousVoided
+                    ? ($row['effective_delta_sales_eur'] ?? null)
+                    : ($row['delta_sales_eur'] ?? null)),
+                $this->decimal($previousVoided
+                    ? ($row['effective_delta_vend_units'] ?? null)
+                    : ($row['delta_vend_units'] ?? null)),
                 !empty($row['identity_mismatch_warning']) ? 'SI' : 'NO',
                 !empty($row['counter_reset_detected']) ? 'SI' : 'NO',
                 !empty($row['out_of_order_sync']) ? 'SI' : 'NO',
@@ -859,6 +869,10 @@ final class MachineDexAuditService
     /**
      * Listado paginado de Coordinación con sus KPIs (RF-07.1).
      *
+     * Cada fila incluye el bloque efectivo de `QA-2` resuelto en lote, de modo
+     * que la tabla y el CSV no dependan de abrir el detalle tras un `VOIDED`
+     * (H25-03).
+     *
      * @param array<string, mixed> $filters
      * @return array{
      *     audits: list<array<string, mixed>>,
@@ -875,7 +889,9 @@ final class MachineDexAuditService
         $offset = max(0, $offset);
 
         return [
-            'audits' => $this->repository->listForCoordinator($filters, $limit, $offset),
+            'audits' => $this->attachEffectiveDeltaAfterVoidBatch(
+                $this->repository->listForCoordinator($filters, $limit, $offset)
+            ),
             'total' => $this->repository->countForCoordinator($filters),
             'limit' => $limit,
             'offset' => $offset,
@@ -932,35 +948,62 @@ final class MachineDexAuditService
      */
     private function attachEffectiveDeltaAfterVoid(array $row): array
     {
-        $row['previous_audit_voided'] = false;
+        $auditId = (int)($row['id'] ?? 0);
+        if ($auditId <= 0) {
+            return $this->applyEffectiveDelta($row, null);
+        }
+
+        $resolved = $this->repository->findEffectivePredecessorsForAudits([$auditId]);
+
+        return $this->applyEffectiveDelta($row, $resolved[$auditId] ?? null);
+    }
+
+    /**
+     * Aplica el bloque efectivo de `QA-2` a toda una página del listado con una
+     * sola consulta al repositorio (H25-03).
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function attachEffectiveDeltaAfterVoidBatch(array $rows): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+
+        $resolved = $this->repository->findEffectivePredecessorsForAudits(
+            array_map(static fn (array $row): int => (int)($row['id'] ?? 0), $rows)
+        );
+
+        return array_map(
+            fn (array $row): array => $this->applyEffectiveDelta(
+                $row,
+                $resolved[(int)($row['id'] ?? 0)] ?? null
+            ),
+            $rows
+        );
+    }
+
+    /**
+     * Proyecta el bloque efectivo ya resuelto: el mismo delta de lectura que el
+     * detalle, sin reescribir la cabecera ni las líneas del volcado (Art. III.3).
+     *
+     * @param array<string, mixed> $row
+     * @param array<string, mixed>|null $predecessor
+     * @return array<string, mixed>
+     */
+    private function applyEffectiveDelta(array $row, ?array $predecessor): array
+    {
+        $row['previous_audit_voided'] = (bool)($predecessor['previous_audit_voided'] ?? false);
         $row['effective_previous_audit_id'] = null;
         $row['effective_delta_sales_eur'] = null;
         $row['effective_delta_vend_units'] = null;
 
-        $previousAuditId = isset($row['previous_audit_id']) && $row['previous_audit_id'] !== null
-            ? (int)$row['previous_audit_id']
-            : null;
-        if ($previousAuditId === null || $previousAuditId <= 0) {
+        if ($row['previous_audit_voided'] !== true) {
             return $row;
         }
 
-        $previous = $this->repository->findById($previousAuditId);
-        if ($previous === null || strtoupper((string)($previous['status'] ?? '')) !== 'VOIDED') {
-            return $row;
-        }
-
-        $row['previous_audit_voided'] = true;
-        $machineId = (int)($row['machine_id'] ?? 0);
-        $capturedAt = trim((string)($row['captured_at'] ?? ''));
-        $currentAuditId = isset($row['id']) ? (int)$row['id'] : null;
-        $effectivePrevious = $machineId > 0 && $capturedAt !== ''
-            ? $this->repository->findPreviousActive($machineId, $capturedAt, $currentAuditId)
-            : null;
-        if ($effectivePrevious === null) {
-            return $row;
-        }
-
-        $effectivePreviousId = (int)($effectivePrevious['id'] ?? 0);
+        $effectivePreviousId = (int)($predecessor['effective_previous_audit_id'] ?? 0);
         if ($effectivePreviousId <= 0) {
             return $row;
         }
@@ -976,8 +1019,8 @@ final class MachineDexAuditService
                 : null,
             [
                 'id' => $effectivePreviousId,
-                'va1_total_sales_eur' => (float)($effectivePrevious['va1_total_sales_eur'] ?? 0.0),
-                'va1_total_vend_units' => (int)($effectivePrevious['va1_total_vend_units'] ?? 0),
+                'va1_total_sales_eur' => (float)($predecessor['va1_total_sales_eur'] ?? 0.0),
+                'va1_total_vend_units' => (int)($predecessor['va1_total_vend_units'] ?? 0),
             ]
         );
 

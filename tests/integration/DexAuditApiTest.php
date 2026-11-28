@@ -922,13 +922,60 @@ try {
         json_encode($lastAfterVoid)
     );
 
+    // H25-03: el listado y el CSV resuelven el delta vigente sin abrir el detalle.
+    $listAfterVoid = $data($call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, [
+        'machine_id' => (string)$secondMachineId,
+    ]));
+    $lastListRow = null;
+    foreach (($listAfterVoid['audits'] ?? []) as $listedRow) {
+        if ((int)($listedRow['id'] ?? 0) === $lastAuditId) {
+            $lastListRow = $listedRow;
+            break;
+        }
+    }
+    $assert(
+        '7.7 El listado expone el delta efectivo cuando el predecesor está anulado',
+        is_array($lastListRow)
+            && ($lastListRow['previous_audit_voided'] ?? false) === true
+            && ($lastListRow['effective_previous_audit_id'] ?? 0) === $baseAuditId
+            && (float)($lastListRow['effective_delta_sales_eur'] ?? 0) === 12.0
+            && ($lastListRow['effective_delta_vend_units'] ?? 0) === 12
+            && ($lastListRow['previous_audit_id'] ?? 0) === $middleAuditId
+            && (float)($lastListRow['delta_sales_eur'] ?? 0) === 7.0,
+        json_encode($lastListRow)
+    );
+
+    $csvCellsFor = static function (string $body, string $auditCode): ?array {
+        foreach (explode("\r\n", $body) as $line) {
+            $cells = explode(';', $line);
+            if (($cells[0] ?? '') === $auditCode) {
+                return $cells;
+            }
+        }
+
+        return null;
+    };
+    $lastAuditCode = (string)($lastAudit['audit_code'] ?? '');
+    $csvAfterVoid = $call('GET', '/api/coordinator/dex-audits/export-csv', [], $coordinatorToken, [
+        'machine_id' => (string)$secondMachineId,
+    ]);
+    $csvRowAfterVoid = $csvCellsFor($csvAfterVoid->getBody(), $lastAuditCode);
+    $assert(
+        '7.8 El CSV publica el delta efectivo y no el persistido contra el anulado',
+        $csvAfterVoid->getStatusCode() === 200
+            && is_array($csvRowAfterVoid)
+            && ($csvRowAfterVoid[8] ?? null) === '12.00'
+            && ($csvRowAfterVoid[9] ?? null) === '12.00',
+        json_encode(['csv' => $csvRowAfterVoid, 'body' => $csvAfterVoid->getBody()])
+    );
+
     $afterMiddle = $snapshot($middleAuditId);
     $afterLast = $snapshot($lastAuditId);
     $middleBeforeBusiness = $beforeMiddle;
     $middleAfterBusiness = $afterMiddle;
     unset($middleBeforeBusiness['status'], $middleAfterBusiness['status']);
     $assert(
-        '7.7 Las filas persistidas de A y B permanecen intactas (Art. III.3)',
+        '7.9 Las filas persistidas de A y B permanecen intactas (Art. III.3)',
         ($afterMiddle['status'] ?? '') === 'VOIDED'
             && $middleAfterBusiness === $middleBeforeBusiness
             && $afterLast === $beforeLast,
@@ -939,14 +986,14 @@ try {
         'void_reason' => 'Anulación AUD-39-02 del volcado base A0',
     ], $coordinatorToken);
     $assert(
-        '7.8 La anulación de la base responde 200 y VOIDED',
+        '7.10 La anulación de la base responde 200 y VOIDED',
         $voidBase->getStatusCode() === 200 && ($data($voidBase)['status'] ?? '') === 'VOIDED',
         $errorCode($voidBase)
     );
 
     $lastWithoutActive = $data($call('GET', '/api/coordinator/dex-audits/' . $lastAuditId, [], $coordinatorToken));
     $assert(
-        '7.9 Sin predecesor activo, el delta efectivo queda nulo y explícito',
+        '7.11 Sin predecesor activo, el delta efectivo queda nulo y explícito',
         ($lastWithoutActive['previous_audit_voided'] ?? false) === true
             && array_key_exists('effective_previous_audit_id', $lastWithoutActive)
             && $lastWithoutActive['effective_previous_audit_id'] === null
@@ -959,20 +1006,68 @@ try {
         json_encode($lastWithoutActive)
     );
 
+    $listWithoutActive = $data($call('GET', '/api/coordinator/dex-audits', [], $coordinatorToken, [
+        'machine_id' => (string)$secondMachineId,
+    ]));
+    $lastListWithoutActive = null;
+    foreach (($listWithoutActive['audits'] ?? []) as $listedRow) {
+        if ((int)($listedRow['id'] ?? 0) === $lastAuditId) {
+            $lastListWithoutActive = $listedRow;
+            break;
+        }
+    }
+    $assert(
+        '7.12 Sin cadena activa, el listado expone el bloque efectivo nulo y la bandera',
+        is_array($lastListWithoutActive)
+            && ($lastListWithoutActive['previous_audit_voided'] ?? false) === true
+            && array_key_exists('effective_previous_audit_id', $lastListWithoutActive)
+            && $lastListWithoutActive['effective_previous_audit_id'] === null
+            && array_key_exists('effective_delta_sales_eur', $lastListWithoutActive)
+            && $lastListWithoutActive['effective_delta_sales_eur'] === null
+            && array_key_exists('effective_delta_vend_units', $lastListWithoutActive)
+            && $lastListWithoutActive['effective_delta_vend_units'] === null,
+        json_encode($lastListWithoutActive)
+    );
+
+    $csvWithoutActive = $call('GET', '/api/coordinator/dex-audits/export-csv', [], $coordinatorToken, [
+        'machine_id' => (string)$secondMachineId,
+    ]);
+    $csvRowWithoutActive = $csvCellsFor($csvWithoutActive->getBody(), $lastAuditCode);
+    $assert(
+        '7.13 Sin delta vigente, el CSV deja las celdas vacías en vez del obsoleto',
+        $csvWithoutActive->getStatusCode() === 200
+            && is_array($csvRowWithoutActive)
+            && ($csvRowWithoutActive[8] ?? null) === ''
+            && ($csvRowWithoutActive[9] ?? null) === '',
+        json_encode(['csv' => $csvRowWithoutActive])
+    );
+
     echo "\n--- 8. Rastro MACHINE_DEX_AUDIT (AUD-39-03, Art. III.3) ---\n";
-    $findAuditRow = static function (string $action, string $entityType, int $entityId) use ($pdo): ?array {
+    $findAuditRow = static function (
+        string $action,
+        string $entityType,
+        int $entityId,
+        ?int $stateMachineId = null
+    ) use ($pdo): ?array {
+        // El escenario puede exportar varias veces; el filtro de perímetro deja
+        // localizar la firma concreta en vez de asumir que la última es la suya.
         $stmt = $pdo->prepare(
             'SELECT entity_type, entity_id, action, user_id, user_role, user_name,
                     previous_state, new_state, metadata
              FROM audit_log
-             WHERE action = :action AND entity_type = :entity_type AND entity_id = :entity_id
-             ORDER BY id DESC LIMIT 1'
+             WHERE action = :action AND entity_type = :entity_type AND entity_id = :entity_id'
+            . ($stateMachineId === null ? '' : " AND new_state->>'machine_id' = :state_machine_id")
+            . ' ORDER BY id DESC LIMIT 1'
         );
-        $stmt->execute([
+        $params = [
             ':action' => $action,
             ':entity_type' => $entityType,
             ':entity_id' => $entityId,
-        ]);
+        ];
+        if ($stateMachineId !== null) {
+            $params[':state_machine_id'] = (string)$stateMachineId;
+        }
+        $stmt->execute($params);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
             return null;
@@ -1033,7 +1128,7 @@ try {
         json_encode($voidAuditRow)
     );
 
-    $csvAuditRow = $findAuditRow('EXPORT_DEX_AUDITS_CSV', 'MACHINE_DEX_AUDIT', 0);
+    $csvAuditRow = $findAuditRow('EXPORT_DEX_AUDITS_CSV', 'MACHINE_DEX_AUDIT', 0, $machineId);
     $assert(
         '8.4 La exportación CSV registra su acción global con el perímetro aplicado',
         $csvAuditRow !== null

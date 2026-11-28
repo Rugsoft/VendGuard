@@ -223,8 +223,17 @@ export const CoordinatorDexAuditsSubTab = {
     pluralUnit(count, singular, plural) {
       return Number(count) === 1 ? singular : plural;
     },
+    deltaSales(audit) {
+      return this.deltaValue(audit, 'effective_delta_sales_eur', 'delta_sales_eur');
+    },
     deltaUnits(audit) {
-      const raw = audit?.effective_delta_vend_units ?? audit?.delta_vend_units;
+      return this.deltaValue(audit, 'effective_delta_vend_units', 'delta_vend_units');
+    },
+    deltaValue(audit, effectiveKey, persistedKey) {
+      // H25-03: con el predecesor anulado manda el valor efectivo, incluso si es
+      // null; el persistido contra el volcado anulado ya no es el delta vigente.
+      const previousVoided = audit?.previous_audit_voided === true;
+      const raw = previousVoided ? audit?.[effectiveKey] : audit?.[effectiveKey] ?? audit?.[persistedKey];
       if (raw === null || raw === undefined || raw === '') return null;
       const value = Number(raw);
       return Number.isFinite(value) ? value : null;
@@ -675,8 +684,9 @@ export const CoordinatorDexAuditsSubTab = {
               <td style="white-space: nowrap;">{{ money(audit.va1_total_sales_eur) }}</td>
               <td>{{ integer(audit.va1_total_vend_units) }}</td>
               <td style="white-space: nowrap;">
-                <div>{{ money(audit.effective_delta_sales_eur ?? audit.delta_sales_eur) }}</div>
+                <div>{{ money(deltaSales(audit)) }}</div>
                 <div v-if="deltaUnits(audit) !== null" style="font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ integer(deltaUnits(audit)) }} uds.</div>
+                <div v-if="audit.previous_audit_voided === true" style="font-size: var(--font-size-caption); color: var(--color-warning-text);">predecesor anulado</div>
               </td>
               <td style="white-space: nowrap;">{{ money(audit.ca3_cashbox_eur) }}</td>
               <td>
@@ -745,8 +755,8 @@ export const CoordinatorDexAuditsSubTab = {
             <div class="vg-card" style="padding: 10px;"><div class="vg-label">Ventas VA1</div><strong>{{ money(detail.va1_total_sales_eur) }}</strong></div>
             <div class="vg-card" style="padding: 10px;"><div class="vg-label">Unidades VA1</div><strong>{{ integer(detail.va1_total_vend_units) }}</strong></div>
             <div class="vg-card" style="padding: 10px;"><div class="vg-label">Caja CA3</div><strong>{{ money(detail.ca3_cashbox_eur) }}</strong></div>
-            <div class="vg-card" style="padding: 10px;"><div class="vg-label">Delta ventas</div>{{ money(detail.effective_delta_sales_eur ?? detail.delta_sales_eur) }}</div>
-            <div class="vg-card" style="padding: 10px;"><div class="vg-label">Delta unidades</div>{{ integer(detail.effective_delta_vend_units ?? detail.delta_vend_units) }}</div>
+            <div class="vg-card" style="padding: 10px;"><div class="vg-label">Delta ventas</div>{{ money(deltaSales(detail)) }}</div>
+            <div class="vg-card" style="padding: 10px;"><div class="vg-label">Delta unidades</div>{{ integer(deltaUnits(detail)) }}</div>
             <div class="vg-card" style="padding: 10px;"><div class="vg-label">Fuente del delta</div>{{ detail.delta_source || '—' }}</div>
           </div>
 
