@@ -63,8 +63,7 @@ const emptyManualForm = () => ({
   machine_id: '',
   captured_at: localDateTimeValue(),
   original_filename: '',
-  raw_payload: '',
-  expected_machine_code: ''
+  raw_payload: ''
 });
 
 const IMPORT_SOURCE_LABELS = {
@@ -399,9 +398,6 @@ export const CoordinatorDexAuditsSubTab = {
           captured_at: this.manualForm.captured_at || localDateTimeValue(),
           client_mutation_id: newMutationId()
         };
-        if (this.manualForm.expected_machine_code.trim() !== '') {
-          payload.expected_machine_code = this.manualForm.expected_machine_code.trim();
-        }
 
         const response = unwrap(await api.coordinator.importDexAudit(this.manualForm.machine_id, payload));
         const audit = response?.audit || response;
@@ -651,10 +647,6 @@ export const CoordinatorDexAuditsSubTab = {
             <p style="margin: 4px 0 0; font-size: var(--font-size-caption); color: var(--color-ink-muted); overflow-wrap: anywhere;">
               {{ manualForm.original_filename ? manualForm.original_filename + ' · ' + integer(manualForm.raw_payload.length) + ' bytes' : 'Ningún archivo seleccionado' }}
             </p>
-          </div>
-          <div>
-            <label class="vg-label" for="dex-manual-expected-code">Código esperado (opcional)</label>
-            <input id="dex-manual-expected-code" v-model="manualForm.expected_machine_code" class="vg-input" type="text" placeholder="VEND-MAD-0001" data-testid="dex-manual-expected-code">
           </div>
         </div>
         <div v-if="manualFileError" class="vg-alert vg-alert-error" role="alert" style="margin-top: 10px;" data-testid="dex-manual-file-error">

@@ -392,6 +392,8 @@ async function run() {
 
   vm.manualForm.machine_id = 1;
   vm.manualForm.captured_at = '2026-11-25T10:15';
+  // H25-09: un valor obsoleto del control retirado no debe viajar al servidor.
+  vm.manualForm.expected_machine_code = 'MAQ-AJENA';
   await vm.submitManualImport();
   const importCall = calls.filter((call) => call.method === 'importDexAudit').at(-1);
   assert(
@@ -400,6 +402,7 @@ async function run() {
       && importCall?.payload?.raw_payload.includes('VA1')
       && importCall?.payload?.original_filename === 'volcado.dex'
       && importCall?.payload?.captured_at === '2026-11-25T10:15'
+      && !('expected_machine_code' in importCall.payload)
       && typeof importCall?.payload?.client_mutation_id === 'string'
       && importCall.payload.client_mutation_id.length >= 8
   );
@@ -535,6 +538,13 @@ async function run() {
       && source.includes('for="dex-manual-file"')
       && source.includes("'Ningún archivo seleccionado'")
       && /id="dex-manual-file"[\s\S]{0,220}class="visually-hidden"/.test(source)
+  );
+
+  assert(
+    '7.6 La consola no expone el código esperado del cliente (H25-09)',
+    !source.includes('expected_machine_code')
+      && !source.includes('dex-manual-expected-code')
+      && !source.includes('Código esperado')
   );
 
   console.log('\n======================================================================');
