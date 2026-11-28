@@ -11,7 +11,7 @@
 | **Fecha de la revisión** | 2026-11-27 |
 | **Estado de la PR** | `OPEN`, `MERGEABLE`, `mergeStateStatus = CLEAN`; **no fusionada** |
 | **Alcance** | Segunda pasada estática sobre `git diff origin/main...HEAD`: importación `.dex`, parser, proyecciones, vínculos M16/M34/M35/M36, consola de Coordinación, descarga `/raw`, CSV, cola Offline y pruebas del módulo |
-| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **4 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-11`) y 8 abiertos |
+| **Resultado** | **12 hallazgos**: 1 de prioridad alta, 5 de prioridad media, 4 de prioridad baja y 2 detalles menores · **5 cerrados** (`H25-01`, `H25-02`, `H25-03`, `H25-04`, `H25-11`) y 7 abiertos |
 
 > **Documento de trabajo.** Esta es una segunda revisión posterior al acta cerrada [`revision_pr_25_eva_dts_dex_audit.md`](revision_pr_25_eva_dts_dex_audit.md), que declaraba 9/9 hallazgos cerrados. El acta histórica no se modifica; este documento registra los huecos de la nueva pasada y el cierre de los que ya se han corregido.
 
@@ -23,20 +23,23 @@
 
 > **Acta de cierre · `H25-11` (2026-11-28):** cerrado en local. `exportCsv()` deja de pasar `delta_vend_units` por `decimal()` y lo emite con `unitCell()`, que devuelve el entero sin decimales y la celda vacía cuando no hay valor; la rama efectiva de `H25-03` usa el mismo formateador. Regresión: `DexAuditApiTest` 5.5 (las columnas de unidades de `VA1` y delta solo tienen dígitos), 7.8 (delta efectivo `12`, no `12.00`) y 7.13 (nulo vacío), 79/79; `MachineDexAuditServiceTest` 53/53. La PR no se ha fusionado.
 
+> **Acta de cierre · `H25-04` (2026-11-28):** cerrado en local. `EvaDtsParser` expone `raw_payload_received` —el texto recibido, ya en UTF-8, sin normalizar— y `MachineDexAuditService` persiste ese texto en `raw_payload`; `sha256_hash` sigue calculándose sobre el canónico, así que la deduplicación y `QA-2` no cambian. `/raw` devuelve ahora el `.dex` tal como llegó, con CRLF, espacios finales y salto final, y `file_size_bytes` mantiene el tamaño recibido. Regresión: `DexAuditApiTest` 4.4 (80/80) y `EvaDtsParserAndCatalogTest` 1.3 bis (46/46), `DexAuditConstitutionalTest` en verde. La PR no se ha fusionado.
+
 ---
 
 ## 1. Veredicto ejecutivo
 
 El núcleo del Módulo 39 sigue siendo sólido: el parser es determinista, la migración protege la inmutabilidad, las proyecciones móviles eliminan importes y la anulación es terminal. Los hallazgos de esta pasada se concentran en **integración entre módulos**, **idempotencia de los reintentos**, **lectura financiera después de una anulación** e **integridad del fichero descargado**.
 
-Los cuatro hallazgos cerrados hasta ahora son:
+Los cinco hallazgos cerrados hasta ahora son:
 
 1. **P1 · M16 no persiste el vínculo `.dex`** —**cerrado** (`H25-01`)—: el modal del Técnico enviaba `dex_audit_id` en el alta, la asunción y la reapertura, pero el backend lo ignoraba por completo.
 2. **P2 · El ticket SAT podía quedar huérfano** —**cerrado** (`H25-02`)—: el enlace del `.dex` se ejecutaba después de que el gateway hubiera confirmado el ticket, fuera de su transacción.
 3. **P2 · El listado y el CSV ignoraban el delta efectivo tras `VOIDED`** —**cerrado** (`H25-03`)—: la consola y la exportación mostraban el delta persistido contra un volcado anulado.
 4. **P4 · El CSV formateaba las unidades como decimales** —**cerrado** (`H25-11`)—: la exportación publicaba `delta_vend_units` como `5.00`.
+5. **P2 · `/raw` servía la versión normalizada** —**cerrado** (`H25-04`)—: el `.dex` descargado no era el que entró por la API y su huella canónica no coincidía con el fichero.
 
-Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta y el CSV aplicaba formato monetario a los contadores. Cada uno tiene ahora su regresión propia.
+Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo comprobaba el payload, la API solo validaba M34/M35/M36, el detalle era el único que recalculaba el delta, el CSV aplicaba formato monetario a los contadores y `/raw` solo se probaba con un payload ya canónico. Cada uno tiene ahora su regresión propia.
 
 ---
 
@@ -47,7 +50,7 @@ Ninguno estaba cubierto por las suites previas: la prueba frontend de M16 solo c
 | 1 | `H25-01` | **P1 · Alta** | M16 no persiste `machine_dex_audits.incident_id` | El alta/asunción/reabertura desde el aviso térmico queda sin vínculo `.dex` | ✅ Cerrado |
 | 2 | `H25-02` | **P2 · Media-alta** | Ticket SAT creado antes de enlazar el `.dex` | Un fallo de enlace deja un ticket huérfano y permite duplicados | ✅ Cerrado |
 | 3 | `H25-03` | **P2 · Media-alta** | El listado y el CSV no calculan el delta efectivo tras `VOIDED` | La consola financiera muestra el delta persistido, no el vigente | ✅ Cerrado |
-| 4 | `H25-04` | **P2 · Media** | `/raw` devuelve el payload normalizado, no el fichero original | La descarga no es byte a byte el `.dex` subido y el hash no coincide | Abierto |
+| 4 | `H25-04` | **P2 · Media** | `/raw` devuelve el payload normalizado, no el fichero original | La descarga no es byte a byte el `.dex` subido y el hash no coincide | ✅ Cerrado |
 | 5 | `H25-05` | **P2 · Media** | El replay idempotente se comprueba después del perímetro y los vínculos | Un reintento puede fallar aunque la importación ya estuviera confirmada | Abierto |
 | 6 | `H25-06` | **P3 · Media-baja** | El replay de importación responde `201` en vez de `200` | Contradice el contrato documentado y la convención de M35 | Abierto |
 | 7 | `H25-07` | **P2 · Media** | Los `.dex` Windows-1252 se corrompen en el cliente | `File.text()` pierde los bytes no UTF-8 antes de enviar el payload | Abierto |
@@ -257,6 +260,8 @@ El escenario de integración usa el contenedor PostgreSQL TLS habitual y deja li
 
 ### H25-04 · P2 · `/raw` devuelve la versión normalizada, no el original byte a byte
 
+**Estado:** ✅ **Cerrado (2026-11-28)** · `raw_payload` conserva el texto recibido sin normalizar; `/raw` entrega el `.dex` tal como llegó y la huella canónica sigue separada.
+
 **Evidencia**
 
 - El parser devuelve el texto normalizado como `raw_payload_normalized`:
@@ -282,6 +287,22 @@ La descarga no es byte a byte el fichero original y su SHA-256 no coincide con e
 **Corrección propuesta**
 
 Conservar los bytes originales —o una copia comprimida— para `/raw`, manteniendo el hash canónico separado, o documentar y etiquetar explícitamente que la descarga es la versión normalizada. Añadir una prueba con CRLF, espacios finales y Windows-1252.
+
+**Corrección aplicada**
+
+1. `EvaDtsParser` devuelve `raw_payload_received`: el texto ya decodificado a UTF-8 —la única conversión ineludible para una columna `TEXT`— pero sin normalizar saltos ni recortar espacios. `raw_payload_normalized` sigue siendo la base de `sha256_hash`, de modo que la deduplicación por `(machine_id, sha256_hash)` y la semántica de `QA-2` no cambian.
+2. `MachineDexAuditService` persiste `raw_payload_received` en `machine_dex_audits.raw_payload` y mantiene `file_size_bytes` con el tamaño recibido. La descarga devuelve ahora el contenido íntegro que entró por la API —CRLF, espacios finales y salto final incluidos—, que es lo que prometen `C3` y el botón «Descargar `.dex` original».
+3. Regresión: `DexAuditApiTest` 4.4 importa un `.dex` con CRLF, espacios finales y salto final, y exige que `/raw` devuelva exactamente ese texto y que `file_size_bytes` sea su longitud; la unitaria 1.3 bis certifica que `raw_payload_received` conserva el original mientras `raw_payload_normalized` sigue siendo el canónico.
+
+La conversión de Windows-1252 a UTF-8 sigue siendo necesaria para almacenar en `TEXT`: la descarga reproduce el texto recibido ya en UTF-8, no los bytes de una codificación distinta. La pérdida de bytes en el cliente queda cubierta por `H25-07`.
+
+**Verificación**
+
+```text
+php tests/integration/DexAuditApiTest.php                    → 80/80 aserciones · exit 0
+php tests/unit/EvaDtsParserAndCatalogTest.php                → 46/46 aserciones · exit 0
+php tests/integration/DexAuditConstitutionalTest.php         → 14/14 aserciones · exit 0
+```
 
 ---
 

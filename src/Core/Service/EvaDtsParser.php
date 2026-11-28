@@ -37,10 +37,12 @@ use VendGuard\Core\Domain\Exception\DexAuditValidationException;
  *      `EA205`. Los segmentos propietarios o desconocidos se omiten de forma
  *      segura y se cuentan en `ignored_unknown_lines_count` (Art. I.3).
  *
- *   4. **Huella canónica.** `sha256_hash` se calcula sobre el texto ya
- *      convertido a UTF-8 y normalizado, sin espacios finales por línea: dos
- *      ficheros con los mismos segmentos y distintos saltos de línea producen la
- *      misma huella.
+ *   4. **Huella canónica y original intacto.** `sha256_hash` se calcula sobre el
+ *      texto ya convertido a UTF-8 y normalizado, sin espacios finales por línea:
+ *      dos ficheros con los mismos segmentos y distintos saltos de línea producen
+ *      la misma huella. El texto recibido, ya decodificado a UTF-8 pero sin
+ *      normalizar, se devuelve en `raw_payload_received` para que la descarga de
+ *      Coordinación sirva el `.dex` tal como llegó (C3, H25-04).
  *
  * El parser **no** decide el emparejamiento con el planograma, la cadena de
  * deltas, el perímetro del actor ni la primacía sanitaria: devuelve los hechos
@@ -74,6 +76,7 @@ final class EvaDtsParser
      * @param string|null $expectedMachineCode `machines.code` de la máquina destino, si se conoce.
      *
      * @return array{
+     *     raw_payload_received: string,
      *     raw_payload_normalized: string,
      *     sha256_hash: string,
      *     byte_size: int,
@@ -285,6 +288,7 @@ final class EvaDtsParser
         $identityMismatch = $this->detectIdentityMismatch($dexMachineIdentifier, $expectedMachineCode);
 
         return [
+            'raw_payload_received' => $text,
             'raw_payload_normalized' => $canonical,
             'sha256_hash' => hash('sha256', $canonical),
             'byte_size' => $byteSize,

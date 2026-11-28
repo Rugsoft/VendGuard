@@ -707,6 +707,27 @@ try {
     $missingRaw = $call('GET', '/api/coordinator/dex-audits/999999/raw', [], $coordinatorToken);
     $assert('4.3 Un volcado inexistente responde 404', $missingRaw->getStatusCode() === 404 && $errorCode($missingRaw) === 'DEX_AUDIT_NOT_FOUND');
 
+    $crlfPayload = "DXS*COMM-DEX09-CRLF*VA*DEX 6.0\r\nID1*DEX9-FOOD-01   \r\nID4*2\r\nVA1*1300*26\r\nDXE*FIN\r\n";
+    $crlfImport = $call('POST', '/api/coordinator/machines/' . $machineId . '/dex-audits', [
+        'raw_payload' => $crlfPayload,
+        'original_filename' => 'crlf.dex',
+        'captured_at' => '2026-11-23 09:00:00+00',
+        'client_mutation_id' => 'dex09-api-crlf-raw',
+    ], $coordinatorToken);
+    $crlfAudit = $data($crlfImport)['audit'] ?? [];
+    $crlfAuditId = (int)($crlfAudit['id'] ?? 0);
+    $crlfRaw = $call('GET', '/api/coordinator/dex-audits/' . $crlfAuditId . '/raw', [], $coordinatorToken);
+    $assert(
+        '4.4 /raw devuelve el contenido recibido sin normalizar, con su tamaño',
+        $crlfImport->getStatusCode() === 201
+            && $crlfAuditId > 0
+            && (int)($crlfAudit['file_size_bytes'] ?? 0) === strlen($crlfPayload)
+            && $crlfRaw->getStatusCode() === 200
+            && $crlfRaw->getBody() === $crlfPayload
+            && $crlfRaw->getBody() !== str_replace(["\r\n", '   '], ["\n", ''], $crlfPayload),
+        json_encode(['status' => $crlfImport->getStatusCode(), 'body' => $crlfRaw->getBody()])
+    );
+
     echo "\n--- 5. Anulación lógica y CSV ---\n";
     $void = $call('POST', '/api/coordinator/dex-audits/' . $auditId . '/void', [
         'void_reason' => 'Anulación por duplicado operativo en la ruta de certificación',

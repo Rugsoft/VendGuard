@@ -105,9 +105,16 @@ $assert(
     '1.2 El tamaño declarado es el del fichero recibido',
     $parsed['byte_size'] === strlen($payload)
 );
+$crlfPayload = str_replace("\n", "\r\n", $payload);
+$crlfParsed = $parser->parse($crlfPayload);
 $assert(
     '1.3 CRLF y LF producen exactamente la misma huella',
-    $parser->parse(str_replace("\n", "\r\n", $payload))['sha256_hash'] === $parsed['sha256_hash']
+    $crlfParsed['sha256_hash'] === $parsed['sha256_hash']
+);
+$assert(
+    '1.3 bis El texto recibido se conserva sin normalizar para la descarga',
+    $crlfParsed['raw_payload_received'] === $crlfPayload
+        && $crlfParsed['raw_payload_normalized'] === $parsed['raw_payload_normalized']
 );
 $assert(
     '1.4 Un fichero Latin-1/Windows-1252 se convierte a UTF-8 antes de calcular la huella',

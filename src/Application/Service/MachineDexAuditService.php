@@ -353,7 +353,9 @@ final class MachineDexAuditService
             originalFilename: $originalFilename,
             fileSizeBytes: (int)$parsed['byte_size'],
             sha256Hash: (string)$parsed['sha256_hash'],
-            rawPayload: (string)$parsed['raw_payload_normalized'],
+            // H25-04: se conserva el texto recibido, no la versión normalizada;
+            // la huella canónica sigue siendo la del parser.
+            rawPayload: (string)$parsed['raw_payload_received'],
             va1TotalSalesEur: (float)$parsed['va1_total_sales_eur'],
             va1TotalVendUnits: (int)$parsed['va1_total_vend_units'],
             deltaSource: (string)$deltas['delta_source'],
