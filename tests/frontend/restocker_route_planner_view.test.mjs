@@ -32,6 +32,8 @@ import {
   RESTOCK_ROUTE_OVERRIDE_PENDING,
   RESTOCK_ROUTE_OVERRIDE_CONFLICT
 } from '../../public/assets/js/utils/RestockRouteOverrideOfflineQueue.js';
+import { DexAuditOfflineQueue } from '../../public/assets/js/utils/DexAuditOfflineQueue.js';
+import { createFakeIndexedDb } from '../Support/FakeIndexedDb.mjs';
 
 let assertions = 0;
 let failures = 0;
@@ -494,7 +496,8 @@ async function run() {
   assert('4.2 La vista avisa de que trabaja con la copia local', snapshotVm.loadError.includes('Sin conexión'));
   api.get = originalGet;
 
-  const logoutVm = buildView({ restocker: { id: 12 }, currentUser: { id: 12 } });
+  const logoutDexQueue = new DexAuditOfflineQueue({ indexedDB: createFakeIndexedDb() });
+  const logoutVm = buildView({ restocker: { id: 12 }, currentUser: { id: 12 }, dexQueue: logoutDexQueue });
   const logoutDumpCalls = [];
   api.restocker.dumpRestockOverrideConflict = async (payload) => {
     logoutDumpCalls.push(payload);
@@ -502,6 +505,7 @@ async function run() {
   };
   await logoutVm.ensureRouteOverrideQueue().enqueue({ client_mutation_id: 'mut-logout-1', restocker_id: 12, machine_id: 5, payload: {} });
   await logoutVm.ensureRouteOverrideQueue().saveSnapshot(12, '2026-11-21', routePlanFixture());
+  const logoutDexRaw = 'DXS*COMM-DEX12*VA*DEX 6.0\nID4*2\nVA1*2550*41\nEA2*EF01*1*1*0*1\nDXE*FIN';
   await logoutVm.handleLogout();
   api.restocker.dumpRestockOverrideConflict = originalDump;
   assert(
@@ -511,6 +515,52 @@ async function run() {
       && logoutDumpCalls[0].error_code === 'ACCOUNT_DEACTIVATED_DUMP'
       && (await logoutVm.ensureRouteOverrideQueue().list(12)).length === 0
       && (await logoutVm.ensureRouteOverrideQueue().loadSnapshot(12, '2026-11-21')) === null
+  );
+  const blockedDexQueue = new DexAuditOfflineQueue({ indexedDB: createFakeIndexedDb() });
+  const blockedVm = buildView({ restocker: { id: 12 }, currentUser: { id: 12 }, dexQueue: blockedDexQueue });
+  const blockedDumpCalls = [];
+  api.restocker.dumpRestockOverrideConflict = async (payload) => {
+    blockedDumpCalls.push(payload);
+    return { data: { archived: true } };
+  };
+  await blockedVm.ensureRouteOverrideQueue().enqueue({ client_mutation_id: 'mut-logout-dex-1', restocker_id: 12, machine_id: 5, payload: {} });
+  await blockedDexQueue.enqueue({
+    client_mutation_id: 'dex12_restocker_logout_0001',
+    actor_id: 12,
+    actor_role: 'RESTOCKER',
+    machine_id: 5,
+    captured_at: '2026-11-25T09:00:00.000Z',
+    raw_payload: logoutDexRaw
+  });
+  await blockedDexQueue.enqueue({
+    client_mutation_id: 'dex12_restocker_logout_0002',
+    actor_id: 13,
+    actor_role: 'RESTOCKER',
+    machine_id: 6,
+    captured_at: '2026-11-25T09:00:00.000Z',
+    raw_payload: logoutDexRaw
+  });
+  await blockedVm.handleLogout();
+  assert(
+    '4.4 La baja se bloquea con importaciones .dex PENDING y no borra nada',
+    blockedVm.loadingActionError.includes('.dex')
+      && blockedDumpCalls.length === 0
+      && (await blockedDexQueue.list(12, ['PENDING'])).length === 1
+      && (await blockedVm.ensureRouteOverrideQueue().list(12)).length === 1
+  );
+  await blockedDexQueue.markConflict('dex12_restocker_logout_0001', {
+    code: 'MACHINE_OUTSIDE_RESTOCKER_ZONES',
+    message: 'La máquina ya no está en la zona del reponedor.',
+    http_status: 403
+  });
+  await blockedVm.handleLogout();
+  api.restocker.dumpRestockOverrideConflict = originalDump;
+  assert(
+    '4.5 Un conflicto .dex no volcable no bloquea y se purga sin tocar la cola ajena',
+    blockedVm.loadingActionError === ''
+      && blockedDumpCalls.length === 1
+      && (await blockedDexQueue.list(12)).length === 0
+      && (await blockedDexQueue.list(13)).length === 1
   );
 
   // ─────────────────────────────────────────────────────────────────────

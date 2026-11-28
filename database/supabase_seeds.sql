@@ -2369,6 +2369,241 @@ WHERE NOT EXISTS (
 );
 
 
+-- ============================================================================
+-- SECCIÓN 27 · machine_dex_audits, machine_dex_selection_lines y
+--              machine_dex_event_lines — auditorías EVA-DTS demo (Módulo 39)
+-- ============================================================================
+-- QUÉ SIEMBRA
+--   Cuatro volcados `.dex` que cubren el ciclo completo del módulo:
+--     · `DEX-2026-0001` — máquina de perecederos `VEND-0101`, importada por la
+--       reponedora en ruta y vinculada a la visita in situ `MRV-2026-0001`
+--       (M34): dos selecciones emparejadas, una exacta y otra recortando el cero
+--       a la izquierda (`C4`), y un evento de pago `EA2`.
+--     · `DEX-2026-0002` — máquina de café `VEND-0102`, importada por el Técnico
+--       SAT: tres selecciones `HOT_DRINKS_SELECTION` informativas (jamás
+--       `UNMAPPED`) y un evento de controlador de placa.
+--     · `DEX-2026-0003` — máquina de perecederos `VEND-0701`, importada desde la
+--       consola de Coordinación: evento térmico `EG01` en `EA1` y `EA2` con
+--       aviso sanitario marcado (`Art. II`, `QA-4`).
+--     · `DEX-2026-0004` — máquina de snacks `VEND-0501`, anulada lógicamente
+--       (`VOIDED`) con motivo real de más de 20 caracteres y tres bloques
+--       alfanuméricos (`Art. V.1`), una selección exacta y otra no mapeada.
+--
+-- POR QUÉ LA HUELLA ES LITERAL
+--   Cada `raw_payload` es un texto fijo y su `sha256_hash` se calculó sobre esa
+--   misma cadena normalizada. La semilla no recalcula la huella en SQL —no hay
+--   `pgcrypto` en el motor—: si el payload cambiara, la huella dejaría de ser
+--   cierta y la propia semilla lo estaría declarando mal.
+--
+-- POR QUÉ SE INSERTA SOLO SI NO EXISTE
+--   El volcado es un hecho histórico inmutable (Art. III.3): una resemilla no lo
+--   reescribe, no lo duplica ni reactiva un volcado anulado. Las referencias se
+--   resuelven por `audit_code`, `machine_code`, `email_key`, `visit_code` y
+--   `slot_code`, nunca por identificadores de secuencia.
+-- ============================================================================
+
+INSERT INTO machine_dex_audits (
+    audit_code, machine_id, machine_code_snapshot, machine_type_snapshot,
+    imported_by, importer_role_snapshot, importer_name_snapshot,
+    import_source, status, restock_visit_id, cash_collection_id, incident_id,
+    original_filename, file_size_bytes, sha256_hash, raw_payload,
+    dxs_comm_id, dxs_version, dex_machine_identifier,
+    identity_mismatch_warning, id4_decimal_places, ignored_unknown_lines_count,
+    va1_total_sales_eur, va1_total_vend_units, va1_reset_sales_eur, va1_reset_vend_units,
+    ca3_cashbox_eur, ca3_coin_tubes_eur, ca3_bills_in_eur,
+    previous_audit_id, counter_reset_detected, out_of_order_sync, delta_source,
+    delta_sales_eur, delta_vend_units, client_mutation_id, captured_at,
+    void_reason, voided_by, voided_by_name_snapshot, voided_at,
+    created_at, updated_at
+)
+SELECT
+    v.audit_code,
+    m.id,
+    m.code,
+    m.machine_type,
+    u.id,
+    u.role,
+    u.name,
+    v.import_source::dex_import_source,
+    v.status::dex_audit_status,
+    vis.id,
+    NULL,
+    NULL,
+    v.audit_code || '.dex',
+    octet_length(v.raw_payload),
+    v.sha256_hash,
+    v.raw_payload,
+    'VENDGUARD-DEX-1',
+    '1.0',
+    m.code,
+    FALSE,
+    2,
+    0,
+    v.va1_total_sales_eur,
+    v.va1_total_vend_units,
+    NULL,
+    NULL,
+    v.ca3_cashbox_eur,
+    v.ca3_coin_tubes_eur,
+    v.ca3_bills_in_eur,
+    NULL,
+    FALSE,
+    FALSE,
+    'INITIAL_BASELINE',
+    NULL,
+    NULL,
+    v.client_mutation_id,
+    CURRENT_TIMESTAMP - v.captured_age,
+    v.void_reason,
+    CASE WHEN v.void_reason IS NULL THEN NULL ELSE c.id END,
+    CASE WHEN v.void_reason IS NULL THEN NULL ELSE c.name END,
+    CASE WHEN v.void_reason IS NULL THEN NULL ELSE CURRENT_TIMESTAMP - v.voided_age END,
+    CURRENT_TIMESTAMP - v.captured_age,
+    CURRENT_TIMESTAMP - v.captured_age
+FROM (VALUES
+    ('DEX-2026-0001', 'VEND-0101', 'lucia.repostaje@vendguard.internal',
+     'RESTOCKER_ROUTE', 'ACTIVE', 'MRV-2026-0001',
+     E'DXS*VendGuard*DEX*1*\nID1*VEND-0101\nID4*2\nVA1*24580*118*0*0\nCA3*18350*4200*9800\nPA1*11*115\nPA2*46*5290*0*0\nPA1*013*38\nPA2*72*2736*0*0\nEA2*EA201*3*7*1\nDXE*1*1',
+     'c45be0a09468a7c4a83b301960b5068666fc96db771e0b35401efeed63dc6142',
+     245.80, 118, 183.50, 42.00, 98.00, INTERVAL '1 day', NULL, NULL,
+     'seed-mutation-dex-0001'),
+    ('DEX-2026-0002', 'VEND-0102', 'jordi.ruta@vendguard.internal',
+     'TECHNICIAN_ROUTE', 'ACTIVE', NULL,
+     E'DXS*VendGuard*DEX*1*\nID1*VEND-0102\nID4*2\nVA1*15720*96*0*0\nPA1*01*60\nPA2*42*2520*0*0\nPA1*02*60\nPA2*31*1860*0*0\nPA1*03*70\nPA2*23*1610*0*0\nEA2*EA203*2*4*0\nDXE*1*1',
+     '0cb643f8bbe0973c9d2a9dcd892b5d8b8cd4a79d161f2451b270e07f000b5771',
+     157.20, 96, NULL, NULL, NULL, INTERVAL '5 days', NULL, NULL,
+     'seed-mutation-dex-0002'),
+    ('DEX-2026-0003', 'VEND-0701', 'coordinacion@vendguard.internal',
+     'COORDINATOR_CONSOLE', 'ACTIVE', NULL,
+     E'DXS*VendGuard*DEX*1*\nID1*VEND-0701\nID4*2\nVA1*9840*54*0*0\nPA1*11*115\nPA2*28*3220*0*0\nPA1*013*38\nPA2*26*988*0*0\nEA1*EG01*2026-11-21T04:12\nEA2*EG01*2*7*1\nDXE*1*1',
+     'ce873b4dd31bb0a85a8f6faef743edeea5ac3c5dfb059a1c5733608a9364fcb2',
+     98.40, 54, 72.10, 18.00, 40.00, INTERVAL '2 days', NULL, NULL,
+     'seed-mutation-dex-0003'),
+    ('DEX-2026-0004', 'VEND-0501', 'lucia.repostaje@vendguard.internal',
+     'RESTOCKER_ROUTE', 'VOIDED', NULL,
+     E'DXS*VendGuard*DEX*1*\nID1*VEND-0501\nID4*2\nVA1*7360*88*0*0\nPA1*12*95\nPA2*40*3800*0*0\nPA1*99*150\nPA2*9*1350*0*0\nEA2*EA205*1*2*0\nDXE*1*1',
+     '863f3aeb937a7de53f06334567d8f556bd801616aa6aaebcec5b8fda301ebc93',
+     73.60, 88, NULL, NULL, NULL, INTERVAL '3 days',
+     'Volcado subido por error a una máquina distinta de la parada del día.',
+     INTERVAL '2 days', 'seed-mutation-dex-0004')
+) AS v(audit_code, machine_code, importer_email, import_source, status,
+       visit_code, raw_payload, sha256_hash, va1_total_sales_eur,
+       va1_total_vend_units, ca3_cashbox_eur, ca3_coin_tubes_eur,
+       ca3_bills_in_eur, captured_age, void_reason, voided_age,
+       client_mutation_id)
+INNER JOIN machines m
+        ON m.code = v.machine_code
+       AND m.is_active = TRUE
+INNER JOIN users u ON u.email_key = v.importer_email
+INNER JOIN users c ON c.email_key = 'coordinacion@vendguard.internal'
+LEFT JOIN machine_restock_visits vis ON vis.visit_code = v.visit_code
+WHERE NOT EXISTS (
+    SELECT 1 FROM machine_dex_audits existing
+     WHERE existing.audit_code = v.audit_code
+)
+AND (
+    u.role <> 'RESTOCKER'
+    OR (
+        m.sanitary_status <> 'QUARANTINE'
+        AND NOT EXISTS (
+            SELECT 1 FROM incidents i
+             WHERE i.machine_id = m.id
+               AND i.category = 'TEMPERATURE_COLD'
+               AND i.status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED')
+        )
+    )
+);
+
+
+-- Desglose de selecciones `PA1`/`PA2` (C4, QA-4).
+INSERT INTO machine_dex_selection_lines (
+    dex_audit_id, line_sequence, raw_selection_code, normalized_selection_code,
+    matched_slot_id, matched_slot_code_snapshot, match_status, unit_price_eur,
+    total_vend_units, total_sales_eur, reset_vend_units, reset_sales_eur,
+    delta_vend_units, delta_sales_eur
+)
+SELECT
+    a.id,
+    v.line_sequence,
+    v.raw_selection_code,
+    v.normalized_selection_code,
+    s.id,
+    v.matched_slot_code_snapshot,
+    v.match_status::dex_selection_match_status,
+    v.unit_price_eur,
+    v.total_vend_units,
+    v.total_sales_eur,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+FROM (VALUES
+    ('DEX-2026-0001', 1, '11', '11', 'VEND-0101', '11', 'EXACT_MATCH', 1.15, 46, 52.90),
+    ('DEX-2026-0001', 2, '013', '13', 'VEND-0101', '13', 'LEADING_ZERO_MATCH', 0.38, 72, 27.36),
+    ('DEX-2026-0002', 1, '01', '01', 'VEND-0102', NULL, 'HOT_DRINKS_SELECTION', 0.60, 42, 25.20),
+    ('DEX-2026-0002', 2, '02', '02', 'VEND-0102', NULL, 'HOT_DRINKS_SELECTION', 0.60, 31, 18.60),
+    ('DEX-2026-0002', 3, '03', '03', 'VEND-0102', NULL, 'HOT_DRINKS_SELECTION', 0.70, 23, 16.10),
+    ('DEX-2026-0003', 1, '11', '11', 'VEND-0701', '11', 'EXACT_MATCH', 1.15, 28, 32.20),
+    ('DEX-2026-0003', 2, '013', '13', 'VEND-0701', '13', 'LEADING_ZERO_MATCH', 0.38, 26, 9.88),
+    ('DEX-2026-0004', 1, '12', '12', 'VEND-0501', '12', 'EXACT_MATCH', 0.95, 40, 38.00),
+    ('DEX-2026-0004', 2, '99', '99', 'VEND-0501', NULL, 'UNMAPPED', 1.50, 9, 13.50)
+) AS v(audit_code, line_sequence, raw_selection_code, normalized_selection_code,
+       machine_code, matched_slot_code_snapshot, match_status, unit_price_eur,
+       total_vend_units, total_sales_eur)
+INNER JOIN machine_dex_audits a ON a.audit_code = v.audit_code
+INNER JOIN machines m ON m.code = v.machine_code
+LEFT JOIN machine_planogram_slots s
+       ON s.machine_id = m.id
+      AND s.slot_code = v.matched_slot_code_snapshot
+WHERE NOT EXISTS (
+    SELECT 1 FROM machine_dex_selection_lines existing
+     WHERE existing.dex_audit_id = a.id
+       AND existing.normalized_selection_code = v.normalized_selection_code
+);
+
+
+-- Eventos `EA1`/`EA2` clasificados por el catálogo fijo (D4, QA-4).
+INSERT INTO machine_dex_event_lines (
+    dex_audit_id, line_sequence, source_block, event_code, event_category,
+    severity, occurrence_count, count_since_reset, count_since_init,
+    is_active_flag, event_occurred_at_raw, description_es, is_thermal_alert
+)
+SELECT
+    a.id,
+    v.line_sequence,
+    v.source_block,
+    v.event_code,
+    v.event_category::dex_event_category,
+    v.severity::dex_event_severity,
+    v.occurrence_count,
+    v.count_since_reset,
+    v.count_since_init,
+    v.is_active_flag,
+    v.event_occurred_at_raw,
+    v.description_es,
+    v.is_thermal_alert
+FROM (VALUES
+    ('DEX-2026-0001', 1, 'EA2', 'EA201', 'PAYMENT_MDB', 'WARNING', 3, 3, 7, FALSE, NULL,
+     'Fallo del monedero: rechazo intermitente de monedas de 0,50 €.', FALSE),
+    ('DEX-2026-0002', 1, 'EA2', 'ED201', 'POWER_CONTROLLER', 'WARNING', 2, 2, 4, FALSE, NULL,
+     'Reinicio inesperado de la placa VMC tras un microcorte de tensión.', FALSE),
+    ('DEX-2026-0003', 1, 'EA1', 'EG01', 'THERMAL_REFRIGERATION', 'CRITICAL', 1, NULL, NULL, FALSE,
+     '2026-11-21T04:12', 'Fallo del grupo de frío: temperatura de cabina fuera del rango sanitario.', TRUE),
+    ('DEX-2026-0003', 2, 'EA2', 'EG01', 'THERMAL_REFRIGERATION', 'CRITICAL', 2, 2, 7, TRUE, NULL,
+     'Grupo de frío con dos fallos desde el último reseteo y siete desde el arranque.', TRUE),
+    ('DEX-2026-0004', 1, 'EA2', 'EF201', 'MECHANICAL_VEND', 'WARNING', 1, 1, 2, FALSE, NULL,
+     'Atasco detectado en la espiral del carril 12 antes de la retirada del volcado.', FALSE)
+) AS v(audit_code, line_sequence, source_block, event_code, event_category,
+       severity, occurrence_count, count_since_reset, count_since_init,
+       is_active_flag, event_occurred_at_raw, description_es, is_thermal_alert)
+INNER JOIN machine_dex_audits a ON a.audit_code = v.audit_code
+WHERE NOT EXISTS (
+    SELECT 1 FROM machine_dex_event_lines existing
+     WHERE existing.dex_audit_id = a.id
+       AND existing.line_sequence = v.line_sequence
+);
+
+
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante técnico · 3 vinculaciones de cuadrante de carga (M31) ·
 --       5 saldos de stock de furgoneta · 1 configuración de ruta ·
@@ -2415,4 +2650,8 @@ WHERE NOT EXISTS (
 --       martes-jueves, semanal y quincenal con fecha ancla— y 1 excepción diaria
 --       `SKIPPED` con causa tipificada y motivo justificado sobre una fecha
 --       civil pasada, para no perturbar la ruta del día.
+--       4 volcados `.dex` (Módulo 39) con sus 9 selecciones `PA1`/`PA2` y 5
+--       eventos `EA1`/`EA2`: uno vinculado a la visita M34, otro de café con
+--       `HOT_DRINKS_SELECTION`, otro con evento térmico `EG01` y otro `VOIDED`
+--       con motivo real.
 -- =============================================================================

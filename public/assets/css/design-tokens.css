@@ -672,6 +672,16 @@ h4 { font-size: var(--font-size-heading-md); }
   box-shadow: 0 0 0 3px var(--color-primary-subtle);
 }
 
+/* Selector de archivo: control nativo oculto y disparador legible */
+.vg-file-field {
+  position: relative;
+}
+
+.vg-file-field:focus-within .vg-file-trigger {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .vg-textarea {
   min-height: 80px;
   resize: vertical;

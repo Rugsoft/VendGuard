@@ -1749,7 +1749,7 @@ assert(
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/CashCollectionOfflineQueue.js')
     && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
-      .includes('vendguard-app-shell-v33')
+      .includes('vendguard-app-shell-v34')
 );
 assert(
   'La vista completa no expone ninguna de las cinco claves del Arqueo Ciego',
@@ -1902,7 +1902,7 @@ assert(
   readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .includes('/assets/js/utils/RestockerIncidentOfflineQueue.js')
     && readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
-      .includes('vendguard-app-shell-v33')
+      .includes('vendguard-app-shell-v34')
 );
 assert(
   'El cliente API expone inicio, resolución, escalado y volcado de conflicto L1',
@@ -2172,6 +2172,263 @@ api.restocker.startL1Incident = originalStartL1;
 api.restocker.resolveL1Incident = originalResolveL1;
 api.restocker.escalateMachineToSat = originalEscalateMachine;
 api.restocker.uploadIncidentPhoto = originalUploadIncidentPhoto;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 19. Auditorías EVA-DTS .dex (Módulo 39, T-DEX-12 · RF-03.2, RF-04.3, RF-05.2)
+// ─────────────────────────────────────────────────────────────────────────────
+const dexRaw = 'DXS*COMM-DEX12*VA*DEX 6.0\nID4*2\nVA1*2550*41\nEA2*EG01*1*1*0*1\nDXE*FIN';
+const dexFile = {
+  name: 'volcado.dex',
+  size: new TextEncoder().encode(dexRaw).length,
+  type: 'text/plain',
+  text: async () => dexRaw,
+  arrayBuffer: async () => new TextEncoder().encode(dexRaw).buffer
+};
+assert(
+  'api.restocker publica import/list/dump de .dex',
+  typeof api.restocker.importDexAudit === 'function'
+    && typeof api.restocker.getDexAudits === 'function'
+    && typeof api.restocker.dumpDexAuditConflict === 'function'
+);
+
+const originalDexImport = api.restocker.importDexAudit;
+const originalDexList = api.restocker.getDexAudits;
+let dexImportPayload = null;
+api.restocker.getDexAudits = async () => ({ data: { audits: [] } });
+api.restocker.importDexAudit = async (machineId, payload) => {
+  dexImportPayload = { machineId, payload };
+  return {
+    data: {
+      audit: {
+        id: 901,
+        audit_code: 'DEX-901',
+        has_thermal_alert: true,
+        va1_total_vend_units: 41,
+        delta_vend_units: 41,
+        events: [{ event_code: 'EG01', severity: 'CRITICAL', event_category: 'TEMPERATURE' }]
+      },
+      has_thermal_alert: true,
+      thermal_alert_enqueued: true,
+      prefill_sales_counter_reading_eur: 25.5,
+      suggested_escalation_payload: {
+        action: 'ESCALATE_TO_SAT',
+        breakdown_category: 'TEMPERATURE_COLD',
+        internal_note: '[DEX DEX-901] Códigos EA1/EA2: EG01',
+        dex_audit_id: 901,
+        is_internal: true
+      }
+    }
+  };
+};
+
+assert(
+  'El selector .dex es un disparador legible y anuncia el estado vacío',
+  viewSource.includes('data-testid="restocker-dex-file-trigger"')
+    && viewSource.includes('for="restocker-dex-file-input"')
+    && viewSource.includes("'Ningún archivo seleccionado'")
+    && /id="restocker-dex-file-input"[\s\S]{0,220}class="visually-hidden"/.test(viewSource)
+);
+
+const dexVm = buildVm({ restocker: { id: 12, name: 'Lucía Gómez', role: 'RESTOCKER' } });
+dexVm.visitMachine = { id: 7, code: 'VEND-0701', machine_type: 'COMBO' };
+dexVm.visitForm = { ...dexVm.visitForm, dex_audit_id: null, items: [] };
+await dexVm.openDexModal({ id: 7, code: 'VEND-0701' }, { fromVisit: true });
+assert('openDexModal abre el modal y carga el historial', dexVm.showDexModal === true && dexVm.dexHistory.length === 0);
+
+const baselineDexAudit = {
+  id: 900,
+  audit_code: 'DEX-900',
+  va1_total_vend_units: 118,
+  delta_vend_units: null,
+  delta_source: 'INITIAL_BASELINE'
+};
+assert(
+  'Un volcado base sin delta se pinta como — y no como 0',
+  dexVm.dexAuditDeltaUnits(baselineDexAudit) === null
+    && dexVm.dexAuditDeltaLabel(baselineDexAudit) === '—'
+    && dexVm.dexAuditDeltaLabel({ delta_vend_units: 41 }) === '41 u'
+    && RestockerRouteView.template.includes('dexAuditDeltaLabel(audit)')
+);
+
+const formattedDexCapturedAt = dexVm.formatDateTime('2026-11-25 13:06:05+00');
+assert(
+  'La fecha del historial .dex se localiza y no expone la zona UTC',
+  /^\d{2}\/\d{2}\/\d{2}, \d{2}:\d{2}$/.test(formattedDexCapturedAt)
+    && !formattedDexCapturedAt.includes('+00')
+    && dexVm.formatDateTime(null) === '—'
+    && RestockerRouteView.template.includes('formatDateTime(audit.captured_at)')
+);
+
+const dexModalTag = (RestockerRouteView.template.split('data-testid="restocker-dex-modal"')[1] || '').split('>')[0];
+assert(
+  'El panel .dex se anuncia como diálogo modal con título propio',
+  dexModalTag.includes('role="dialog"')
+    && dexModalTag.includes('aria-modal="true"')
+    && dexModalTag.includes('aria-labelledby="restocker-dex-title"')
+    && RestockerRouteView.template.includes('id="restocker-dex-title"')
+);
+await dexVm.handleDexFile({ target: { files: [dexFile] } });
+assert(
+  'El pre-filtro muestra unidades y el pre-relleno VA1 del Reponedor',
+  dexVm.dexPreview?.ok === true && dexVm.dexPreview.va1_total_vend_units === 41 && dexVm.dexPreview.va1_total_sales_eur === 25.5
+);
+await dexVm.submitDexAudit();
+assert(
+  'La importación online envía raw, nombre, captura y client_mutation_id',
+  dexImportPayload?.machineId === 7
+    && dexImportPayload.payload.raw_payload === dexRaw
+    && dexImportPayload.payload.original_filename === 'volcado.dex'
+    && /^[A-Za-z0-9_.:-]{8,64}$/.test(dexImportPayload.payload.client_mutation_id)
+    && Boolean(dexImportPayload.payload.captured_at)
+);
+assert(
+  'La visita abierta recibe el dex_audit_id devuelto por el servidor',
+  dexVm.visitForm.dex_audit_id === 901 && dexVm.dexSuggestedEscalation?.dex_audit_id === 901
+);
+assert(
+  'El prefill M35 queda pendiente y enlazado al audit 901',
+  dexVm.pendingDexPrefillByMachine[7]?.value === 25.5
+    && dexVm.pendingDexPrefillByMachine[7]?.dex_audit_id === 901
+);
+assert(
+  'La alerta térmica activa el banner y la sugerencia M36',
+  dexVm.dexThermalAudit?.id === 901
+    && dexVm.dexSuggestedEscalation?.breakdown_category === 'TEMPERATURE_COLD'
+);
+const linkedVisitPayload = dexVm.buildVisitPayload();
+assert('buildVisitPayload adjunta dex_audit_id a M34', linkedVisitPayload.dex_audit_id === 901);
+
+const cashVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+cashVm.availableMachines = [];
+cashVm.machines = [{ id: 7, code: 'VEND-0701', machine_type: 'COMBO', sanitary_status: 'OK' }];
+cashVm.pendingDexPrefillByMachine = { 7: { value: 25.5, dex_audit_id: 901, audit_code: 'DEX-901' } };
+cashVm.openCashCollection({ id: 7, code: 'VEND-0701', machine_type: 'COMBO', sanitary_status: 'OK' });
+assert(
+  'M35 recibe el pre-relleno VA1 y el vínculo dex_audit_id',
+  cashVm.cashForm.sales_counter_reading === 25.5 && cashVm.cashForm.dex_audit_id === 901
+);
+assert(
+  'buildCashCollectionPayload conserva el vínculo .dex',
+  cashVm.buildCashCollectionPayload(cashVm.cashForm).dex_audit_id === 901
+);
+cashVm.cashSalesCounterTouched = true;
+cashVm.applyDexPrefill(7, 99.99, { id: 902 });
+assert(
+  'Una lectura escrita por el operario no se sobrescribe con otro .dex',
+  cashVm.cashForm.sales_counter_reading === 25.5 && cashVm.pendingDexPrefillByMachine[7].value === 99.99
+);
+
+dexVm.openDexEscalation(dexVm.dexThermalAudit);
+assert(
+  'El escalado M36 en un toque hereda categoría, nota interna y dex_audit_id',
+  dexVm.showEscalateModal === true
+    && dexVm.escalateForm.category === 'TEMPERATURE_COLD'
+    && dexVm.escalateForm.workshop_internal_note.includes('EG01')
+    && dexVm.escalateForm.dex_audit_id === 901
+);
+
+// Cola offline: el .dex se guarda y se reproduce con el mismo client_mutation_id.
+const offlineDexVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+Object.defineProperty(offlineDexVm, 'navigatorOnline', { value: false, configurable: true });
+offlineDexVm.dexMachine = { id: 7, code: 'VEND-0701' };
+offlineDexVm.dexFile = dexFile;
+offlineDexVm.dexFileName = 'volcado.dex';
+offlineDexVm.dexPreview = { ok: true, va1_total_vend_units: 41, va1_total_sales_eur: 25.5, events: [] };
+await offlineDexVm.submitDexAudit();
+const pendingDex = await offlineDexVm.ensureDexQueue().list(12);
+assert(
+  'Sin cobertura el .dex se encola con actor, máquina y payload crudo',
+  pendingDex.length === 1
+    && pendingDex[0].machine_id === 7
+    && pendingDex[0].raw_payload === dexRaw
+    && pendingDex[0].status === 'PENDING'
+);
+let replayedDexPayload = null;
+api.restocker.importDexAudit = async (machineId, payload) => {
+  replayedDexPayload = { machineId, payload };
+  return { data: { audit: { id: 902 }, idempotent_replay: false } };
+};
+Object.defineProperty(offlineDexVm, 'navigatorOnline', { value: true, configurable: true });
+offlineDexVm.loadDexHistory = async () => {};
+await offlineDexVm.syncPendingDexAudits();
+assert(
+  'El replay FIFO reenvía el mismo client_mutation_id y vacía la cola',
+  replayedDexPayload?.payload.client_mutation_id === pendingDex[0].client_mutation_id
+    && replayedDexPayload?.machineId === 7
+    && (await offlineDexVm.ensureDexQueue().list(12)).length === 0
+);
+
+const conflictDexVm = buildVm({ restocker: { id: 12, role: 'RESTOCKER' } });
+await conflictDexVm.enqueueDexAudit({
+  client_mutation_id: 'dex12-conflict-0001',
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  captured_at: new Date().toISOString(),
+  raw_payload: dexRaw,
+  original_filename: 'volcado.dex'
+});
+await conflictDexVm.ensureDexQueue().markConflict('dex12-conflict-0001', {
+  code: 'DEX_DUPLICATE_HASH',
+  message: 'Duplicado',
+  http_status: 409
+});
+const [dexConflict] = await conflictDexVm.ensureDexQueue().list(12, ['CONFLICT']);
+let dumpedDexPayload = null;
+const originalDexDump = api.restocker.dumpDexAuditConflict;
+api.restocker.dumpDexAuditConflict = async (payload) => {
+  dumpedDexPayload = payload;
+  return { ok: true, outcome_status: 'CONFLICT_DUMPED' };
+};
+await conflictDexVm.archiveDexConflict(dexConflict);
+assert(
+  'El conflicto .dex se archiva con máquina y motivo, sin borrar la evidencia',
+  dumpedDexPayload?.machine_id === 7
+    && dumpedDexPayload?.reason === 'Duplicado'
+    && (await conflictDexVm.ensureDexQueue().list(12)).length === 0
+);
+let dexCloseFocused = false;
+let dexTriggerFocused = false;
+dexVm.$refs = {
+  dexCloseButton: { focus() { dexCloseFocused = true; } },
+  dexDialog: { querySelectorAll: () => [], contains: () => false, focus() {} }
+};
+await dexVm.openDexModal(
+  { id: 7, code: 'VEND-0701' },
+  { trigger: { focus() { dexTriggerFocused = true; }, isConnected: true } }
+);
+assert(
+  'El panel .dex mueve el foco al botón de cierre al abrirse',
+  dexVm.showDexModal === true && dexCloseFocused === true
+);
+
+let escapePrevented = false;
+dexVm.handleDexKeydown({ key: 'Escape', preventDefault() { escapePrevented = true; } });
+assert(
+  'Escape cierra el diálogo .dex y devuelve el foco al disparador',
+  dexVm.showDexModal === false && dexTriggerFocused === true && escapePrevented === true
+);
+
+let firstDexControlFocused = false;
+let tabPrevented = false;
+dexVm.showDexModal = true;
+dexVm.$refs.dexDialog = {
+  querySelectorAll: () => [
+    { focus() { firstDexControlFocused = true; } },
+    { focus() {} }
+  ],
+  contains: () => false,
+  focus() {}
+};
+dexVm.handleDexKeydown({ key: 'Tab', shiftKey: false, preventDefault() { tabPrevented = true; } });
+assert(
+  'Tab queda atrapado dentro del diálogo .dex',
+  tabPrevented === true && firstDexControlFocused === true
+);
+dexVm.showDexModal = false;
+
+api.restocker.dumpDexAuditConflict = originalDexDump;
+api.restocker.importDexAudit = originalDexImport;
+api.restocker.getDexAudits = originalDexList;
 
 api.restocker.createCashCollection = originalCreateCashCollection;
 api.restocker.getCashCollectionReceptionReceipt = originalCashReceipt;

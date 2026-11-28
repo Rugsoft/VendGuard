@@ -775,6 +775,12 @@ const LEGACY_DIALECT = [
         'drained_occurrences' => ['legacy_database' => 1],
         'why' => 'la suite certifica la factoría de conexión del motor único; se retiraron las ramas y consultas del motor heredado',
     ],
+    'tests/integration/PostgresDexAuditSchemaTest.php' => [
+        'kind' => KIND_GUARD,
+        'owner' => null,
+        'census' => ['backtick' => 2],
+        'why' => 'guarda del contrato de esquema del Módulo 39: cita dos valores del enumerado con su grafía de catálogo entre acentos graves para medir que el DDL los incorpora, sin ejecutar SQL del motor retirado',
+    ],
     'tests/integration/PendingInfoConcurrencyTest.php' => [
         'kind' => KIND_DRAINED, 'owner' => 'T-13-11', 'census' => [],
         'drained_occurrences' => ['catalog' => 2],

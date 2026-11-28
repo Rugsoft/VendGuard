@@ -7,12 +7,14 @@ namespace VendGuard\Presentation\Controller;
 use InvalidArgumentException;
 use Throwable;
 use VendGuard\Application\Service\AuditLogger;
+use VendGuard\Application\Service\DexAuditLinker;
 use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
 use VendGuard\Application\Service\OpportunisticIncidentService;
 use VendGuard\Core\Domain\Exception\ActiveInterventionConflictException;
 use VendGuard\Core\Domain\Exception\CashRefundPrivacyViolationException;
 use VendGuard\Core\Domain\Exception\ColdChainRouteWarningConfirmationException;
+use VendGuard\Core\Domain\Exception\DexAuditValidationException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\IncidentAlreadyInProgressByOtherTechnicianException;
 use VendGuard\Core\Domain\Exception\IncidentNotFoundException;
@@ -37,6 +39,7 @@ use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
+use VendGuard\Infrastructure\Repository\PdoMachineDexAuditRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Infrastructure\Storage\FileStorageCompensator;
@@ -303,7 +306,8 @@ final class TechnicianOpportunisticController
             transactions: $this->transactions(),
             auditLogger: $this->audit(),
             notifications: $this->notifications(),
-            pauses: new IncidentPauseService(incidentRepo: $incidents, notificationEnqueuer: $this->notifications())
+            pauses: new IncidentPauseService(incidentRepo: $incidents, notificationEnqueuer: $this->notifications()),
+            dexAuditLinks: new DexAuditLinker(new PdoMachineDexAuditRepository(), $this->audit())
         );
     }
 
@@ -429,6 +433,7 @@ final class TechnicianOpportunisticController
             'description',
             'confirm_cold_chain_override',
             'form_opened_within_grace',
+            'dex_audit_id',
         ]));
     }
 
@@ -444,6 +449,15 @@ final class TechnicianOpportunisticController
     private function failure(Throwable $exception): Response
     {
         if ($exception instanceof CashRefundPrivacyViolationException) {
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $exception->getDetails()
+            );
+        }
+
+        if ($exception instanceof DexAuditValidationException) {
             return Response::error(
                 $exception->getErrorCode(),
                 $exception->getMessage(),

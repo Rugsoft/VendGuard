@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Application\DTO;
 
 use InvalidArgumentException;
+use VendGuard\Application\Service\DexAuditLinker;
 
 /**
  * AssumeOpportunisticIncidentDto — Solicitud inmutable del **Flujo B · Asunción
@@ -50,7 +51,8 @@ final readonly class AssumeOpportunisticIncidentDto
         public ?string $takeoverInternalNote = null,
         public ?string $reopenReason = null,
         public bool $confirmColdChainOverride = false,
-        public bool $formOpenedWithinGrace = false
+        public bool $formOpenedWithinGrace = false,
+        public ?int $dexAuditId = null
     ) {
         if ($takeoverInternalNote !== null
             && mb_strlen(trim($takeoverInternalNote)) > self::MAX_TAKEOVER_NOTE_LENGTH
@@ -96,7 +98,8 @@ final readonly class AssumeOpportunisticIncidentDto
             takeoverInternalNote: $takeoverNote,
             reopenReason: $reopenReason,
             confirmColdChainOverride: self::toBool($payload['confirm_cold_chain_override'] ?? false),
-            formOpenedWithinGrace: self::toBool($payload['form_opened_within_grace'] ?? false)
+            formOpenedWithinGrace: self::toBool($payload['form_opened_within_grace'] ?? false),
+            dexAuditId: DexAuditLinker::parseOptionalId($payload['dex_audit_id'] ?? null)
         );
     }
 
@@ -133,6 +136,7 @@ final readonly class AssumeOpportunisticIncidentDto
             'reopen_reason' => $this->effectiveReopenReason(),
             'confirm_cold_chain_override' => $this->confirmColdChainOverride,
             'form_opened_within_grace' => $this->formOpenedWithinGrace,
+            'dex_audit_id' => $this->dexAuditId,
         ];
     }
 

@@ -128,11 +128,11 @@ $secretMarkers = [
 ];
 
 // ---------------------------------------------------------------------
-// 1. Cobertura de las 22 plantillas
+// 1. Cobertura de las 23 plantillas
 // ---------------------------------------------------------------------
-echo "--- 1. Las 22 plantillas del catálogo ---\n";
+echo "--- 1. Las 23 plantillas del catálogo ---\n";
 
-$assert('El catálogo cerrado declara 22 plantillas', count(NotificationTemplate::cases()) === 22);
+$assert('El catálogo cerrado declara 23 plantillas', count(NotificationTemplate::cases()) === 23);
 
 $subjects = [];
 $allRendered = [];
@@ -160,7 +160,7 @@ foreach (NotificationTemplate::cases() as $template) {
     );
 }
 
-$assert('Los 22 asuntos son distintos entre sí', count(array_unique($subjects)) === 22);
+$assert('Los 23 asuntos son distintos entre sí', count(array_unique($subjects)) === 23);
 $assert('El renderizador acepta el nombre de plantilla como cadena', $renderer->render('INCIDENT_OPENED_SITE', $payload)->template === NotificationTemplate::INCIDENT_OPENED_SITE);
 
 $handoverMessage = $allRendered['TELEGRAM_INCIDENT_ASSIGNMENT'];

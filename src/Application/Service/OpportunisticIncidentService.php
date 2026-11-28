@@ -98,6 +98,7 @@ final class OpportunisticIncidentService
     private OpportunisticCoexistencePolicy $coexistence;
     private OpportunisticColdChainGuardPolicy $coldChain;
     private IncidentTicketAllocator $tickets;
+    private ?DexAuditLinker $dexAuditLinks;
 
     public function __construct(
         OpportunisticIncidentRepositoryInterface $opportunistic,
@@ -111,7 +112,8 @@ final class OpportunisticIncidentService
         ?OpportunisticLocationEligibilityPolicy $eligibility = null,
         ?OpportunisticCoexistencePolicy $coexistence = null,
         ?OpportunisticColdChainGuardPolicy $coldChain = null,
-        ?IncidentTicketAllocator $tickets = null
+        ?IncidentTicketAllocator $tickets = null,
+        ?DexAuditLinker $dexAuditLinks = null
     ) {
         $this->opportunistic = $opportunistic;
         $this->machines = $machines;
@@ -125,6 +127,7 @@ final class OpportunisticIncidentService
         $this->coexistence = $coexistence ?? new OpportunisticCoexistencePolicy();
         $this->coldChain = $coldChain ?? new OpportunisticColdChainGuardPolicy();
         $this->tickets = $tickets ?? new IncidentTicketAllocator();
+        $this->dexAuditLinks = $dexAuditLinks;
     }
 
     /**
@@ -352,6 +355,8 @@ final class OpportunisticIncidentService
                 );
             }
 
+            $this->linkDexAudit($dto->dexAuditId, $machine->getId(), (int)$created->getId(), $technician);
+
             $this->auditLogger->logOpportunisticEvent(
                 ticketId: (int)$created->getId(),
                 action: 'INCIDENT_CREATED_OPPORTUNISTIC',
@@ -418,6 +423,7 @@ final class OpportunisticIncidentService
                 'sla_target_minutes' => $created->getSlaTargetMinutes(),
                 'sla_target_hours' => $created->getSlaTargetHours(),
                 'cold_chain_override_alerted' => $flaggedStops !== [],
+                'dex_audit_id' => $dto->dexAuditId,
             ];
         });
     }
@@ -554,6 +560,8 @@ final class OpportunisticIncidentService
             /** @var Incident $resultIncident */
             $resultIncident = $result['incident'];
 
+            $this->linkDexAudit($dto->dexAuditId, $resultIncident->getMachineId(), (int)$resultIncident->getId(), $technician);
+
             if ($dto->confirmColdChainOverride && $flaggedStops !== []) {
                 $this->auditLogger->logOpportunisticEvent(
                     ticketId: (int)$resultIncident->getId(),
@@ -598,6 +606,7 @@ final class OpportunisticIncidentService
                 'chronic_predecessor_ticket_code' => $predecessorTicketCode,
                 'started_at' => $resultIncident->getStartedAt(),
                 'cold_chain_override_alerted' => $flaggedStops !== [],
+                'dex_audit_id' => $dto->dexAuditId,
             ];
         });
     }
@@ -1056,6 +1065,31 @@ final class OpportunisticIncidentService
         if ($violating !== []) {
             throw new CashRefundPrivacyViolationException($violating);
         }
+    }
+
+    /**
+     * Enlaza el volcado `.dex` que motivó el alta o la asunción (Módulo 39,
+     * RF-04.3; H25-01). Se ejecuta dentro de la unidad de trabajo del caso de
+     * uso: si el vínculo no es válido, la incidencia no llega a persistirse.
+     */
+    private function linkDexAudit(?int $dexAuditId, int $machineId, int $incidentId, User $technician): void
+    {
+        if ($dexAuditId === null) {
+            return;
+        }
+
+        if ($this->dexAuditLinks === null) {
+            throw new \LogicException(
+                'La operación oportunista declara dex_audit_id pero el enlazador de auditorías no está configurado.'
+            );
+        }
+
+        $this->dexAuditLinks->linkToIncident(
+            $dexAuditId,
+            $machineId,
+            $incidentId,
+            $this->actorFor($technician)
+        );
     }
 
     /**

@@ -83,6 +83,11 @@ final class PostgresFixtureBuilder
         // declararlos, el alta mínima mediría un rechazo legítimo de
         // `chk_rrdo_type_fields_coherence` en lugar del CRUD.
         'restock_route_daily_overrides' => ['skip_reason_code', 'reason_text'],
+        // Selecciones `PA1`/`PA2` del Módulo 39: el estado de emparejamiento por
+        // defecto del arnés es `EXACT_MATCH`, cuya rama exige carril y snapshot
+        // (`chk_machine_dex_selection_lines_match_coherence`). Sin declararlos, el
+        // alta mínima mediría un rechazo legítimo del motor en lugar del CRUD.
+        'machine_dex_selection_lines' => ['matched_slot_id', 'matched_slot_code_snapshot'],
     ];
 
     /**
@@ -913,6 +918,20 @@ final class PostgresFixtureBuilder
                 => $variant === 'update' ? 'MCC-2026-9002' : 'MCC-2026-9001',
             $table === 'machine_cash_collections' && $column === 'bag_seal_code'
                 => $variant === 'update' ? 'BAG-2026-900002' : 'BAG-2026-900001',
+            // El volcado `.dex` del Módulo 39 declara el código legible
+            // (`DEX-AAAA-NNNN`), la huella SHA-256 en minúsculas y uno de los
+            // cuatro orígenes de delta. El texto sintético genérico violaría los
+            // tres `CHECK` y el alta mínima mediría un rechazo legítimo.
+            $table === 'machine_dex_audits' && $column === 'audit_code'
+                => $variant === 'update' ? 'DEX-2026-9002' : 'DEX-2026-9001',
+            $table === 'machine_dex_audits' && $column === 'sha256_hash'
+                => str_repeat($variant === 'update' ? 'b' : 'a', 64),
+            // La rama `INITIAL_BASELINE` es la única que no exige predecesor ni
+            // deltas: es la forma honesta del alta mínima sin cadena de deltas.
+            $table === 'machine_dex_audits' && $column === 'delta_source'
+                => 'INITIAL_BASELINE',
+            // El bloque de eventos del Módulo 39 solo admite `EA1` o `EA2`.
+            $table === 'machine_dex_event_lines' && $column === 'source_block' => 'EA1',
             // El expediente genérico del banco no representa una emergencia
             // sanitaria: nace como avería de medios de pago para no dejar un
             // ticket `TEMPERATURE_COLD` abierto sobre la máquina genérica, que

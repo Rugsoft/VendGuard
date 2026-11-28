@@ -101,6 +101,11 @@ export const TechnicianOpportunisticModal = {
     locationName: {
       type: String,
       default: ''
+    },
+    /** Contexto opcional de una auditoría `.dex` que abre el alta en un toque. */
+    dexAuditContext: {
+      type: Object,
+      default: null
     }
   },
   emits: ['update:modelValue', 'update:isOpen', 'close', 'created', 'assumed'],
@@ -300,6 +305,29 @@ export const TechnicianOpportunisticModal = {
       this.coldChainWarning = payload.cold_chain_route_warning || null;
       this.activeInterventionConflict = payload.active_intervention_conflict || null;
       this.catalogLoaded = true;
+      this.applyDexAuditContext();
+    },
+
+    /** Preselecciona la máquina y el síntoma sugeridos por el volcado `.dex`. */
+    applyDexAuditContext() {
+      const context = this.dexAuditContext;
+      const machineId = Number(context?.machine_id || 0);
+      if (!(machineId > 0)) return;
+
+      const machine = this.machines.find((row) => Number(row?.id) === machineId);
+      if (!machine) return;
+
+      this.selectMachine(machine);
+      if (this.mode === 'CREATE_NEW') {
+        this.category = context.breakdown_category || this.category;
+        this.originReason = 'TECHNICIAN_DETECTION';
+      }
+      if (context.internal_note) {
+        this.description = String(context.internal_note).slice(0, 500);
+        if (this.mode === 'ASSUME') {
+          this.takeoverNote = String(context.internal_note).slice(0, 500);
+        }
+      }
     },
 
     /**
@@ -422,7 +450,7 @@ export const TechnicianOpportunisticModal = {
         ? this.informantName.trim().slice(0, 100)
         : '';
 
-      return {
+      const payload = {
         machine_id: Number(this.selectedMachineId),
         category: this.category,
         origin_reason: this.originReason,
@@ -432,6 +460,11 @@ export const TechnicianOpportunisticModal = {
           && this.confirmColdChainOverride === true,
         form_opened_within_grace: this.formOpenedWithinGrace === true
       };
+      if (Number(this.dexAuditContext?.dex_audit_id || 0) > 0) {
+        payload.dex_audit_id = Number(this.dexAuditContext.dex_audit_id);
+      }
+
+      return payload;
     },
 
     buildAssumePayload() {
@@ -450,17 +483,25 @@ export const TechnicianOpportunisticModal = {
           payload.takeover_internal_note = note;
         }
       }
+      if (Number(this.dexAuditContext?.dex_audit_id || 0) > 0) {
+        payload.dex_audit_id = Number(this.dexAuditContext.dex_audit_id);
+      }
 
       return payload;
     },
 
     buildReopenPayload() {
-      return {
+      const payload = {
         reopen_reason: this.reopenReason.trim(),
         confirm_cold_chain_override: this.requiresColdChainConfirmation === true
           && this.confirmColdChainOverride === true,
         form_opened_within_grace: this.formOpenedWithinGrace === true
       };
+      if (Number(this.dexAuditContext?.dex_audit_id || 0) > 0) {
+        payload.dex_audit_id = Number(this.dexAuditContext.dex_audit_id);
+      }
+
+      return payload;
     },
 
     /** Construye el multipart solo cuando hay fotografía; sin ella viaja JSON limpio. */

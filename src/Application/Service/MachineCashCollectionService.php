@@ -81,18 +81,22 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
 
     private AuditLogger $audit;
 
+    private ?DexAuditLinker $dexAuditLinks;
+
     public function __construct(
         MachineCashCollectionRepositoryInterface $collections,
         MachineCashCollectionGatewayInterface $gateway,
         RefundRequestRepositoryInterface $refunds,
         TransactionManagerInterface $transactions,
-        AuditLogger $audit
+        AuditLogger $audit,
+        ?DexAuditLinker $dexAuditLinks = null
     ) {
         $this->collections = $collections;
         $this->gateway = $gateway;
         $this->refunds = $refunds;
         $this->transactions = $transactions;
         $this->audit = $audit;
+        $this->dexAuditLinks = $dexAuditLinks;
     }
 
     /**
@@ -124,6 +128,10 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
     ): array {
         $restocker = $this->requireActor($actor, 'RESTOCKER');
         $mutationId = trim((string)($payload['client_mutation_id'] ?? ''));
+        $dexAuditId = DexAuditLinker::parseOptionalId($payload['dex_audit_id'] ?? null);
+        if ($dexAuditId !== null) {
+            $this->requireDexAuditLinks()->assertCompatible($dexAuditId, $machineId);
+        }
 
         if (mb_strlen($mutationId, 'UTF-8') < MachineCashCollection::MIN_MUTATION_ID_LENGTH) {
             throw new InvalidArgumentException(sprintf(
@@ -292,6 +300,14 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                 throw $exception;
             }
 
+            if ($dexAuditId !== null) {
+                $collectionId = $persisted->getId();
+                if ($collectionId === null) {
+                    throw new \RuntimeException('La recaudación se insertó sin devolver una clave primaria.');
+                }
+                $this->requireDexAuditLinks()->linkToCashCollection($dexAuditId, $machineId, $collectionId, $actor);
+            }
+
             if ($refundId !== null) {
                 $transitioned = $this->refunds->transitionStatus(
                     $refundId,
@@ -322,7 +338,21 @@ final class MachineCashCollectionService implements CashCollectionRegistrarInter
                 metadata: ['machine_id' => $machineId, 'restock_visit_id' => $visitId]
             );
 
-        return RestockerCashCollectionViewDTO::fromMachineCashCollection($persisted)->toArray() + ['idempotent_replay' => false];
+        $response = RestockerCashCollectionViewDTO::fromMachineCashCollection($persisted)->toArray() + ['idempotent_replay' => false];
+        if ($dexAuditId !== null) {
+            $response['dex_audit_id'] = $dexAuditId;
+        }
+
+        return $response;
+    }
+
+    private function requireDexAuditLinks(): DexAuditLinker
+    {
+        if ($this->dexAuditLinks === null) {
+            throw new \LogicException('La recaudación declara dex_audit_id pero el enlazador de auditorías no está configurado.');
+        }
+
+        return $this->dexAuditLinks;
     }
 
     /**

@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace VendGuard\Presentation\Controller;
 
 use DateTimeImmutable;
+use InvalidArgumentException;
+use Throwable;
 use VendGuard\Application\DTO\IncidentPauseRequestDto;
 use VendGuard\Application\DTO\RootCauseCatalogItemDto;
 use VendGuard\Application\DTO\TechnicianRefundInspectionDTO;
 use VendGuard\Application\DTO\TechnicianRefundViewDTO;
 use VendGuard\Application\Service\AuditLogger;
+use VendGuard\Application\Service\MachineDexAuditService;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
@@ -25,6 +28,9 @@ use VendGuard\Core\Domain\Exception\IncompatibleSparePartException;
 use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
 use VendGuard\Core\Domain\Exception\InvalidRecoveredAmountException;
 use VendGuard\Core\Domain\Exception\InvalidRefundStateTransitionException;
+use VendGuard\Core\Domain\Exception\DexAuditConflictException;
+use VendGuard\Core\Domain\Exception\DexAuditForbiddenException;
+use VendGuard\Core\Domain\Exception\DexAuditValidationException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\ReceptionDeliveryNotAllowedException;
@@ -33,6 +39,7 @@ use VendGuard\Core\Domain\Exception\ServiceSheetPersistenceException;
 use VendGuard\Core\Domain\Model\CashCustodyAction;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
 use VendGuard\Infrastructure\Repository\PdoUnclaimedCashFindingRepository;
 use VendGuard\Core\Domain\Exception\InvalidOutOfCatalogJustificationException;
@@ -74,6 +81,9 @@ use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
+use VendGuard\Infrastructure\Repository\PdoMachineDexAuditGateway;
+use VendGuard\Infrastructure\Repository\PdoMachineDexAuditRepository;
+use VendGuard\Infrastructure\Repository\PdoNotificationOutboxRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoOfflineSyncMutationRepository;
@@ -147,6 +157,9 @@ class TechnicianController
     /** Catálogo maestro de causas y soluciones (Módulo 25); se resuelve bajo demanda. */
     private ?RootCauseRepositoryInterface $rootCauseRepo = null;
 
+    /** Libro EVA-DTS del técnico (Módulo 39); se resuelve bajo demanda. */
+    private ?MachineDexAuditService $dexAuditService = null;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?MachineRepositoryInterface $machineRepo = null,
@@ -167,7 +180,8 @@ class TechnicianController
         ?SparePartRequestRepositoryInterface $sparePartRequestRepo = null,
         ?VanStockRepositoryInterface $vanStockRepo = null,
         ?OfflineSyncService $offlineSyncService = null,
-        ?RootCauseRepositoryInterface $rootCauseRepo = null
+        ?RootCauseRepositoryInterface $rootCauseRepo = null,
+        ?MachineDexAuditService $dexAuditService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -207,6 +221,7 @@ class TechnicianController
         $this->vanStockRepo = $vanStockRepo;
         $this->offlineSyncService = $offlineSyncService;
         $this->rootCauseRepo = $rootCauseRepo;
+        $this->dexAuditService = $dexAuditService;
     }
 
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer = null;
@@ -252,6 +267,165 @@ class TechnicianController
     private function rootCauses(): RootCauseRepositoryInterface
     {
         return $this->rootCauseRepo ??= new PdoRootCauseRepository();
+    }
+
+    /** POST /api/technician/machines/{machineId}/dex-audits */
+    public function importDexAudit(Request $request): Response
+    {
+        return $this->runDexOperation(function () use ($request): Response {
+            $machineId = $this->positiveDexMachineId($request);
+            $actor = $this->dexActor($request);
+            $payload = $this->dexImportPayload($request, $machineId, $actor, 'TECHNICIAN_ROUTE');
+
+            $result = $this->dexService()->importDex($payload);
+
+            // H25-06: un replay idempotente responde 200, como M35; solo un
+            // alta nueva responde 201.
+            return Response::json(
+                $this->dexService()->presentImportResult($result, 'TECHNICIAN'),
+                ($result['idempotent_replay'] ?? false) === true ? 200 : 201,
+                'Volcado .dex importado para la máquina.'
+            );
+        });
+    }
+
+    /** GET /api/technician/machines/{machineId}/dex-audits */
+    public function listDexAudits(Request $request): Response
+    {
+        return $this->runDexOperation(function () use ($request): Response {
+            $machineId = $this->positiveDexMachineId($request);
+            $actor = $this->dexActor($request);
+
+            return Response::json(
+                ['audits' => $this->dexService()->listForRole($machineId, 'TECHNICIAN', (int)($actor['id'] ?? 0))],
+                200
+            );
+        });
+    }
+
+    /** POST /api/technician/dex-audits/conflict-dump */
+    public function dumpDexConflict(Request $request): Response
+    {
+        return $this->runDexOperation(function () use ($request): Response {
+            $payload = $request->getParsedBody();
+            $machineId = (int)($payload['machine_id'] ?? 0);
+            $reason = trim((string)($payload['reason'] ?? ''));
+            $actor = $this->dexActor($request);
+            $this->dexService()->assertConflictDumpMachine(
+                $machineId,
+                'TECHNICIAN',
+                (int)($actor['id'] ?? 0),
+                $reason
+            );
+
+            $this->audit()->logMachineEvent(
+                $machineId,
+                'OFFLINE_DEX_AUDIT_CONFLICT_DUMP',
+                $actor,
+                null,
+                ['reason' => $reason, 'client_mutation_id' => $payload['client_mutation_id'] ?? null],
+                ['module' => 'EVA_DTS_DEX_AUDIT']
+            );
+
+            return Response::json(['ok' => true, 'outcome_status' => 'CONFLICT_DUMPED'], 200);
+        });
+    }
+
+    private function positiveDexMachineId(Request $request): int
+    {
+        $raw = $request->getRouteParam('machineId');
+        if ($raw === null || !ctype_digit((string)$raw) || (int)$raw <= 0) {
+            throw new InvalidArgumentException('El identificador de máquina debe ser un número entero positivo.');
+        }
+
+        return (int)$raw;
+    }
+
+    /**
+     * @return array{id: int|null, role: string, name: string}
+     */
+    private function dexActor(Request $request): array
+    {
+        $user = $request->getAttribute('authenticated_user');
+
+        return [
+            'id' => (int)($request->getAttribute('user_id') ?? 0) ?: null,
+            'role' => (string)($request->getAttribute('user_role') ?? 'TECHNICIAN'),
+            'name' => $user instanceof User ? $user->getName() : 'Técnico',
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $actor
+     * @return array<string, mixed>
+     */
+    private function dexImportPayload(Request $request, int $machineId, array $actor, string $source): array
+    {
+        $file = $request->getFile('file') ?? $request->getFile('dex_file');
+        $rawPayload = '';
+        $filename = trim((string)($request->getBodyParam('original_filename') ?? ''));
+        if (is_array($file) && (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+            $tmpName = (string)($file['tmp_name'] ?? '');
+            $read = $tmpName !== '' ? file_get_contents($tmpName) : false;
+            if ($read === false) {
+                throw new DexAuditValidationException('No se pudo leer el fichero .dex adjunto.', 'DEX_INVALID_TEXT_PAYLOAD');
+            }
+            $rawPayload = $read;
+            $filename = $filename !== '' ? $filename : (string)($file['name'] ?? '');
+        } else {
+            $rawPayload = (string)($request->getBodyParam('raw_payload') ?? '');
+        }
+
+        $payload = [
+            'machine_id' => $machineId,
+            'actor_id' => (int)$actor['id'],
+            'import_source' => $source,
+            'raw_payload' => $rawPayload,
+            'original_filename' => $filename !== '' ? $filename : 'volcado.dex',
+            'captured_at' => trim((string)($request->getBodyParam('captured_at') ?? '')) ?: (new \DateTimeImmutable('now'))->format('Y-m-d\TH:i:sP'),
+        ];
+        foreach (['client_mutation_id', 'restock_visit_id', 'cash_collection_id', 'incident_id'] as $field) {
+            $value = $request->getBodyParam($field);
+            if ($value !== null && $value !== '') {
+                $payload[$field] = $value;
+            }
+        }
+
+        return $payload;
+    }
+
+    private function dexService(): MachineDexAuditService
+    {
+        if ($this->dexAuditService === null) {
+            $pdo = \VendGuard\Infrastructure\Database\ConnectionFactory::getConnection();
+            $this->dexAuditService = new MachineDexAuditService(
+                new PdoMachineDexAuditRepository($pdo),
+                new PdoMachineDexAuditGateway($pdo),
+                new \VendGuard\Core\Service\EvaDtsParser(),
+                new \VendGuard\Core\Service\DexSelectionMatcher(),
+                new \VendGuard\Core\Service\DexAuditValidator(),
+                new PdoNotificationOutboxRepository($pdo),
+                new PdoTransactionManager($pdo),
+                new AuditLogger(new PdoAuditLogRepository($pdo))
+            );
+        }
+
+        return $this->dexAuditService;
+    }
+
+    private function runDexOperation(callable $operation): Response
+    {
+        try {
+            return $operation();
+        } catch (DexAuditValidationException | DexAuditConflictException | DexAuditForbiddenException $exception) {
+            return Response::error($exception->getErrorCode(), $exception->getMessage(), $exception->getHttpStatusCode(), $exception->getDetails());
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('VALIDATION_ERROR', $exception->getMessage(), 422);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo inesperado al operar con auditorías .dex: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo completar la operación sobre auditorías .dex.', 500);
+        }
     }
 
     /**

@@ -8,8 +8,10 @@ use InvalidArgumentException;
 use PDO;
 use Throwable;
 use VendGuard\Application\Service\AuditLogger;
+use VendGuard\Application\Service\DexAuditLinker;
 use VendGuard\Application\Service\MachinePlanogramService;
 use VendGuard\Application\Service\MachineCashCollectionService;
+use VendGuard\Application\Service\MachineDexAuditService;
 use VendGuard\Application\Service\MachineRestockVisitService;
 use VendGuard\Application\Service\ProductLoadingOrderService;
 use VendGuard\Application\Service\RestockRouteOverrideService;
@@ -27,6 +29,9 @@ use VendGuard\Core\Domain\Exception\MachineRestockVisitValidationException;
 use VendGuard\Core\Domain\Exception\ProductLoadingValidationException;
 use VendGuard\Core\Domain\Exception\RestockRoutePlannerValidationException;
 use VendGuard\Core\Domain\Exception\RestockerSatSynergyValidationException;
+use VendGuard\Core\Domain\Exception\DexAuditConflictException;
+use VendGuard\Core\Domain\Exception\DexAuditForbiddenException;
+use VendGuard\Core\Domain\Exception\DexAuditValidationException;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\MachineRestockVisitRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
@@ -36,6 +41,9 @@ use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\SlaTier;
+use VendGuard\Core\Service\DexAuditValidator;
+use VendGuard\Core\Service\DexSelectionMatcher;
+use VendGuard\Core\Service\EvaDtsParser;
 use VendGuard\Core\Service\RestockCadenceEvaluator;
 use VendGuard\Core\Service\SlaTargetCalculator;
 use VendGuard\Core\Service\UrgencyCalculator;
@@ -48,6 +56,9 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionGateway;
 use VendGuard\Infrastructure\Repository\PdoMachineCashCollectionRepository;
+use VendGuard\Infrastructure\Repository\PdoMachineDexAuditGateway;
+use VendGuard\Infrastructure\Repository\PdoMachineDexAuditRepository;
+use VendGuard\Infrastructure\Repository\PdoNotificationOutboxRepository;
 use VendGuard\Infrastructure\Repository\PdoMachinePlanogramRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRestockVisitRepository;
@@ -117,6 +128,11 @@ final class RestockerRouteController
 
     private RouteSettingsRepositoryInterface $routeSettings;
 
+    private ?MachineDexAuditService $dexAuditService;
+
+    /** Registro de auditoría inyectable (PR25-06). */
+    private ?AuditLogger $auditLogger = null;
+
     public function __construct(
         ?PDO $pdo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -131,7 +147,9 @@ final class RestockerRouteController
         ?RestockerSatSynergyService $synergyService = null,
         ?RestockRoutePlannerService $routePlanner = null,
         ?RestockRouteOverrideService $routeOverrides = null,
-        ?RouteSettingsRepositoryInterface $routeSettings = null
+        ?RouteSettingsRepositoryInterface $routeSettings = null,
+        ?MachineDexAuditService $dexAuditService = null,
+        ?AuditLogger $auditLogger = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $this->pdo = $pdo;
@@ -157,12 +175,17 @@ final class RestockerRouteController
         $productRepository = new PdoVendingProductRepository($pdo);
 
         $this->visitRepository = $visitRepository ?? new PdoMachineRestockVisitRepository($pdo);
+        $dexAuditLinks = new DexAuditLinker(
+            new PdoMachineDexAuditRepository($pdo),
+            new AuditLogger(new PdoAuditLogRepository($pdo))
+        );
         $this->cashCollections = $cashCollections ?? new MachineCashCollectionService(
             new PdoMachineCashCollectionRepository($pdo),
             new PdoMachineCashCollectionGateway($pdo),
             new PdoRefundRequestRepository($pdo),
             new PdoTransactionManager($pdo),
-            new AuditLogger()
+            new AuditLogger(),
+            $dexAuditLinks
         );
 
         $this->planogramService = $planogramService ?? new MachinePlanogramService(
@@ -191,7 +214,7 @@ final class RestockerRouteController
             $pdo
         );
 
-        $this->synergyService = $synergyService ?? $this->buildSynergyService($pdo);
+        $this->synergyService = $synergyService ?? $this->buildSynergyService($pdo, $dexAuditLinks);
 
         $routeGateway = new PdoRestockRoutePlannerGateway($pdo);
         $routeReadModel = new PdoRestockRouteReadModel($pdo);
@@ -204,6 +227,8 @@ final class RestockerRouteController
             new PdoTransactionManager($pdo)
         );
         $this->routeSettings = $routeSettings ?? new PdoRouteSettingsRepository($pdo);
+        $this->dexAuditService = $dexAuditService;
+        $this->auditLogger = $auditLogger;
 
         $this->visitService = $visitService ?? new MachineRestockVisitService(
             $this->visitRepository,
@@ -218,7 +243,8 @@ final class RestockerRouteController
             null,
             $this->cashCollections,
             $routeGateway,
-            $routeReadModel
+            $routeReadModel,
+            $dexAuditLinks
         );
     }
 
@@ -226,7 +252,7 @@ final class RestockerRouteController
      * Compone el escalado real: resuelve el técnico con el recomendador de
      * siempre y encola el aviso en el outbox de notificaciones.
      */
-    private function buildSynergyService(PDO $pdo): RestockerSatSynergyService
+    private function buildSynergyService(PDO $pdo, DexAuditLinker $dexAuditLinks): RestockerSatSynergyService
     {
         $suggestions = new SuggestedTechniciansService(
             new PdoTechnicianSuggestionRepository($pdo)
@@ -384,7 +410,10 @@ final class RestockerRouteController
         return new RestockerSatSynergyService(
             new PdoRestockerSatSynergyGateway($pdo),
             $resolver,
-            $notifier
+            $notifier,
+            null,
+            $dexAuditLinks,
+            new PdoTransactionManager($pdo)
         );
     }
 
@@ -618,6 +647,67 @@ final class RestockerRouteController
 
             return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo cargar el parque de máquinas.', 500);
         }
+    }
+
+    /** POST /api/restocker/machines/{machineId}/dex-audits */
+    public function importDexAudit(Request $request): Response
+    {
+        return $this->runDexOperation(function () use ($request): Response {
+            $machineId = $this->positiveMachineId($request);
+            $actor = $this->actor($request);
+            $payload = $this->dexImportPayload($request, $machineId, $actor, 'RESTOCKER_ROUTE');
+
+            $result = $this->dexService()->importDex($payload);
+
+            // H25-06: un replay idempotente responde 200, como M35; solo un
+            // alta nueva responde 201.
+            return Response::json(
+                $this->dexService()->presentImportResult($result, 'RESTOCKER'),
+                ($result['idempotent_replay'] ?? false) === true ? 200 : 201,
+                'Volcado .dex importado para la máquina.'
+            );
+        });
+    }
+
+    /** GET /api/restocker/machines/{machineId}/dex-audits */
+    public function listDexAudits(Request $request): Response
+    {
+        return $this->runDexOperation(function () use ($request): Response {
+            $machineId = $this->positiveMachineId($request);
+            $actor = $this->actor($request);
+
+            return Response::json(
+                ['audits' => $this->dexService()->listForRole($machineId, 'RESTOCKER', (int)$actor['id'])],
+                200
+            );
+        });
+    }
+
+    /** POST /api/restocker/dex-audits/conflict-dump */
+    public function dumpDexConflict(Request $request): Response
+    {
+        return $this->runDexOperation(function () use ($request): Response {
+            $payload = $request->getParsedBody();
+            $machineId = (int)($payload['machine_id'] ?? 0);
+            $reason = trim((string)($payload['reason'] ?? ''));
+            $actor = $this->actor($request);
+            $this->dexService()->assertConflictDumpMachine(
+                $machineId,
+                'RESTOCKER',
+                (int)$actor['id'],
+                $reason
+            );
+            $this->audit()->logMachineEvent(
+                $machineId,
+                'OFFLINE_DEX_AUDIT_CONFLICT_DUMP',
+                $actor,
+                null,
+                ['reason' => $reason, 'client_mutation_id' => $payload['client_mutation_id'] ?? null],
+                ['module' => 'EVA_DTS_DEX_AUDIT']
+            );
+
+            return Response::json(['ok' => true, 'outcome_status' => 'CONFLICT_DUMPED'], 200);
+        });
     }
 
     /**
@@ -1129,6 +1219,15 @@ final class RestockerRouteController
                 $exception->getHttpStatusCode(),
                 $exception->getField() === null ? null : ['field' => $exception->getField()]
             );
+        } catch (DexAuditValidationException $exception) {
+            // H25-02: un vínculo .dex rechazado dentro de la transacción del
+            // escalado devuelve su código de contrato, no un 500 genérico.
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $exception->getDetails()
+            );
         } catch (InvalidArgumentException $exception) {
             return Response::error('VALIDATION_ERROR', $exception->getMessage(), 400);
         } catch (Throwable $exception) {
@@ -1379,6 +1478,83 @@ final class RestockerRouteController
         }
 
         return $filters;
+    }
+
+    /**
+     * @param array<string, mixed> $actor
+     * @return array<string, mixed>
+     */
+    private function dexImportPayload(Request $request, int $machineId, array $actor, string $source): array
+    {
+        $file = $request->getFile('file') ?? $request->getFile('dex_file');
+        $rawPayload = '';
+        $filename = trim((string)($request->getBodyParam('original_filename') ?? ''));
+        if (is_array($file) && (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+            $tmpName = (string)($file['tmp_name'] ?? '');
+            $read = $tmpName !== '' ? file_get_contents($tmpName) : false;
+            if ($read === false) {
+                throw new DexAuditValidationException('No se pudo leer el fichero .dex adjunto.', 'DEX_INVALID_TEXT_PAYLOAD');
+            }
+            $rawPayload = $read;
+            $filename = $filename !== '' ? $filename : (string)($file['name'] ?? '');
+        } else {
+            $rawPayload = (string)($request->getBodyParam('raw_payload') ?? '');
+        }
+
+        $payload = [
+            'machine_id' => $machineId,
+            'actor_id' => (int)$actor['id'],
+            'import_source' => $source,
+            'raw_payload' => $rawPayload,
+            'original_filename' => $filename !== '' ? $filename : 'volcado.dex',
+            'captured_at' => trim((string)($request->getBodyParam('captured_at') ?? '')) ?: (new \DateTimeImmutable('now'))->format('Y-m-d\TH:i:sP'),
+        ];
+        foreach (['client_mutation_id', 'restock_visit_id', 'cash_collection_id', 'incident_id'] as $field) {
+            $value = $request->getBodyParam($field);
+            if ($value !== null && $value !== '') {
+                $payload[$field] = $value;
+            }
+        }
+
+        return $payload;
+    }
+
+    private function audit(): AuditLogger
+    {
+        return $this->auditLogger ??= new AuditLogger(new PdoAuditLogRepository($this->pdo));
+    }
+
+    private function dexService(): MachineDexAuditService
+    {
+        if ($this->dexAuditService === null) {
+            $this->dexAuditService = new MachineDexAuditService(
+                new PdoMachineDexAuditRepository($this->pdo),
+                new PdoMachineDexAuditGateway($this->pdo),
+                new EvaDtsParser(),
+                new DexSelectionMatcher(),
+                new DexAuditValidator(),
+                new PdoNotificationOutboxRepository($this->pdo),
+                new PdoTransactionManager($this->pdo),
+                new AuditLogger(new PdoAuditLogRepository($this->pdo))
+            );
+        }
+
+        return $this->dexAuditService;
+    }
+
+    private function runDexOperation(callable $operation): Response
+    {
+        try {
+            return $operation();
+        } catch (DexAuditValidationException | DexAuditConflictException | DexAuditForbiddenException $exception) {
+            return Response::error($exception->getErrorCode(), $exception->getMessage(), $exception->getHttpStatusCode(), $exception->getDetails());
+        } catch (InvalidArgumentException $exception) {
+            return Response::error('VALIDATION_ERROR', $exception->getMessage(), 422);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo inesperado al operar con auditorías .dex: ' . $exception);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudo completar la operación sobre auditorías .dex.', 500);
+        }
     }
 
     private function positiveRouteId(Request $request): int

@@ -244,7 +244,7 @@ echo "\n--- 4. Catálogo de plantillas ---\n";
 
 $assert(
     '4.1 El catálogo cerrado declara 22 plantillas',
-    count(NotificationTemplate::cases()) === 22,
+    count(NotificationTemplate::cases()) === 23,
     (string)count(NotificationTemplate::cases())
 );
 

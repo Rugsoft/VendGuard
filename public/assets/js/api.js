@@ -1951,6 +1951,34 @@ export class ApiClient {
     exportCashCollectionsCsv: (params = {}) => {
       return this.downloadFile('/coordinator/cash-collections/export-csv', 'recaudaciones.csv', params);
     },
+
+    // Libro EVA-DTS `.dex` (Módulo 39, RF-07.1/RF-07.2, C6, QA-2/QA-3/QA-5).
+    //
+    // La lectura financiera es exclusiva de Coordinación. El original solo
+    // abandona el servidor por `/raw`; el alta manual sella la puerta
+    // COORDINATOR_CONSOLE y la anulación es lógica, nunca un DELETE.
+    getDexAudits: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/dex-audits${q ? `?${q}` : ''}`);
+    },
+    getDexAudit: (auditId) => {
+      return this.get(`/coordinator/dex-audits/${encodeURIComponent(auditId)}`);
+    },
+    importDexAudit: (machineId, payload) => {
+      return this.post(`/coordinator/machines/${encodeURIComponent(machineId)}/dex-audits`, payload);
+    },
+    downloadDexAuditRaw: (auditId, auditCode = 'volcado') => {
+      return this.downloadFile(
+        `/coordinator/dex-audits/${encodeURIComponent(auditId)}/raw`,
+        `${auditCode}.dex`
+      );
+    },
+    voidDexAudit: (auditId, payload) => {
+      return this.post(`/coordinator/dex-audits/${encodeURIComponent(auditId)}/void`, payload);
+    },
+    exportDexAuditsCsv: (params = {}) => {
+      return this.downloadFile('/coordinator/dex-audits/export-csv', 'dex-audits.csv', params);
+    },
     adjustRestockerVanStock: (restockerId, payload) => {
       return this.put(`/coordinator/restocker-van-stocks/${encodeURIComponent(restockerId)}`, payload);
     },
@@ -2367,6 +2395,33 @@ export class ApiClient {
       return this.post(`/restocker/machines/${encodeURIComponent(machineId)}/escalate-to-sat`, payload);
     },
 
+    /**
+     * Importa un volcado EVA-DTS `.dex` de una máquina de ruta (Módulo 39,
+     * RF-03.2, D1/D2). El servidor es el único parser autoritativo y devuelve
+     * la proyección sin CA3 ni importes por carril.
+     * @param {number|string} machineId
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    importDexAudit: (machineId, payload) => {
+      return this.post(`/restocker/machines/${encodeURIComponent(machineId)}/dex-audits`, payload);
+    },
+
+    /**
+     * Historial de auditorías `.dex` de una máquina, en unidades y sin euros
+     * por carril (Módulo 39, RF-04.3, Art. V.4).
+     * @param {number|string} machineId
+     * @returns {Promise<Object>}
+     */
+    getDexAudits: (machineId) => {
+      return this.get(`/restocker/machines/${encodeURIComponent(machineId)}/dex-audits`);
+    },
+
+    /** Archiva un `.dex` offline rechazado sin borrar la evidencia (Módulo 39, C5). */
+    dumpDexAuditConflict: (payload) => {
+      return this.post('/restocker/dex-audits/conflict-dump', payload);
+    },
+
     /** Archiva en auditoría una operación offline rechazada (C2, Art. III.3). */
     dumpIncidentConflict: (payload) => {
       return this.post('/restocker/incidents/conflict-dump', payload);
@@ -2492,6 +2547,32 @@ export class ApiClient {
      */
     assumeOpportunisticIncident: (incidentId, payload = {}) => {
       return this.post(`/technician/opportunistic/incidents/${encodeURIComponent(incidentId)}/assume`, payload);
+    },
+
+    /**
+     * Importa un volcado EVA-DTS `.dex` de una parada del técnico (Módulo 39,
+     * RF-03.2, D1/D2). El prefill económico nunca viaja a este rol.
+     * @param {number|string} machineId
+     * @param {Object} payload
+     * @returns {Promise<Object>}
+     */
+    importDexAudit: (machineId, payload) => {
+      return this.post(`/technician/machines/${encodeURIComponent(machineId)}/dex-audits`, payload);
+    },
+
+    /**
+     * Historial `.dex` de la máquina en unidades, sin euros ni CA3
+     * (Módulo 39, RF-04.3, Art. V.4).
+     * @param {number|string} machineId
+     * @returns {Promise<Object>}
+     */
+    getDexAudits: (machineId) => {
+      return this.get(`/technician/machines/${encodeURIComponent(machineId)}/dex-audits`);
+    },
+
+    /** Archiva un `.dex` offline rechazado sin borrar la evidencia (Módulo 39, C5). */
+    dumpDexAuditConflict: (payload) => {
+      return this.post('/technician/dex-audits/conflict-dump', payload);
     },
 
     /**

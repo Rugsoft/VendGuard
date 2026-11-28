@@ -107,7 +107,11 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   // auditan con tipo propio y el filtro del visor debe cubrir el enumerado
   // completo (`Art. III.3`).
   MACHINE_RESTOCK_SCHEDULE: 'Agenda de Reposición Periódica',
-  RESTOCK_ROUTE_DAILY_OVERRIDE: 'Excepción Diaria de Ruta'
+  RESTOCK_ROUTE_DAILY_OVERRIDE: 'Excepción Diaria de Ruta',
+  // Entidad del Módulo 39: el alta del volcado `.dex`, su vinculación y su
+  // anulación se auditan con tipo propio; sin etiqueta el filtro del visor
+  // perdería las filas del contrato inmutable (`Art. III.3`).
+  MACHINE_DEX_AUDIT: 'Volcado EVA-DTS (.dex)'
 });
 
 /**
@@ -277,6 +281,14 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'RESTOCK_VISIT_ABORTED_THERMAL_BREACH', label: 'Visita Abortada por Rotura de Cadena de Frío', tone: 'danger', group: 'sanitary' },
   { code: 'OFFLINE_RESTOCK_VISIT_CONFLICT_DUMP', label: 'Conflicto Offline Archivado en Auditoría', tone: 'warning', group: 'restock' },
   { code: 'OFFLINE_CASH_COLLECTION_CONFLICT_DUMP', label: 'Conflicto Offline de Recaudación Archivado', tone: 'warning', group: 'restock' },
+  // Módulo 39: la anulación del volcado y el volcado de un conflicto Offline de
+  // auditoría `.dex` se escriben bajo la entidad propia y necesitan etiqueta y
+  // filtro, o el visor los mostraría como códigos crudos (Art. III.3).
+  { code: 'DEX_AUDIT_IMPORTED', label: 'Volcado EVA-DTS Importado', tone: 'success', group: 'restock' },
+  { code: 'DEX_AUDIT_LINKED', label: 'Volcado EVA-DTS Vinculado', tone: 'info', group: 'restock' },
+  { code: 'DEX_AUDIT_VOIDED', label: 'Volcado EVA-DTS Anulado', tone: 'danger', group: 'restock' },
+  { code: 'EXPORT_DEX_AUDITS_CSV', label: 'Exportación CSV de Auditorías EVA-DTS', tone: 'neutral', group: 'restock' },
+  { code: 'OFFLINE_DEX_AUDIT_CONFLICT_DUMP', label: 'Conflicto Offline de Auditoría EVA-DTS Archivado', tone: 'warning', group: 'restock' },
   // Módulo 35: el ciclo de vida de la bolsa precintada se audita con tres acciones
   // propias. Sin catálogo, el visor mostraba el código crudo y el filtro no permitía
   // localizar el sellado, la recepción en cámara ni el arqueo terminal (Art. III.3).

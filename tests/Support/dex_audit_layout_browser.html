@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VendGuard · Layout de la consola EVA-DTS M39</title>
+  <link rel="stylesheet" href="/assets/css/design-tokens.css">
+  <link rel="stylesheet" href="/assets/css/styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; min-height: 100%; scrollbar-width: none; }
+    html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; width: 0; height: 0; }
+    body { background: var(--color-canvas, #f9fafb); font-family: var(--font-body, Inter, sans-serif); color: var(--color-slate, #2c333f); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import * as Vue from '/assets/js/vendor/vue.esm-browser.prod.js';
+    window.Vue = Vue;
+    const { api } = await import('/assets/js/api.js');
+    const { CoordinatorDexAuditsSubTab } = await import('/assets/js/components/CoordinatorDexAuditsSubTab.js');
+
+    const audits = [
+      {
+        id: 31,
+        audit_code: 'DEX-2026-0031',
+        machine_id: 1,
+        machine_code_snapshot: 'VEND-MAD-0001',
+        location_name: 'Hospital Universitario Central · Ala Este · Cuarto de máquinas junto a la farmacia',
+        location_code: 'MAD-HUC-01',
+        captured_at: '2026-11-24 09:30:00+00',
+        import_source: 'RESTOCKER_ROUTE',
+        import_source_label: 'Ruta del Reponedor',
+        status: 'ACTIVE',
+        status_label: 'Vigente',
+        va1_total_sales_eur: 125.5,
+        va1_total_vend_units: 42,
+        ca3_cashbox_eur: 120.25,
+        delta_sales_eur: 12.75,
+        delta_vend_units: 5,
+        effective_delta_sales_eur: 12.75,
+        effective_delta_vend_units: 5,
+        identity_mismatch_warning: true,
+        counter_reset_detected: false,
+        out_of_order_sync: false,
+        has_thermal_alert: true
+      },
+      {
+        id: 32,
+        audit_code: 'DEX-2026-0032',
+        machine_id: 2,
+        machine_code_snapshot: 'VEND-MAD-0002',
+        location_name: 'Centro Comercial Diagonal · Planta -1 · Zona de carga',
+        location_code: 'MAD-CCD-02',
+        captured_at: '2026-11-24 08:10:00+00',
+        import_source: 'TECHNICIAN_ROUTE',
+        import_source_label: 'Ruta del Técnico SAT',
+        status: 'ACTIVE',
+        status_label: 'Vigente',
+        va1_total_sales_eur: 75.2,
+        va1_total_vend_units: 18,
+        ca3_cashbox_eur: 74.2,
+        delta_sales_eur: -3.5,
+        delta_vend_units: -1,
+        effective_delta_sales_eur: -3.5,
+        effective_delta_vend_units: -1,
+        identity_mismatch_warning: false,
+        counter_reset_detected: true,
+        out_of_order_sync: false,
+        has_thermal_alert: false
+      },
+      {
+        id: 33,
+        audit_code: 'DEX-2026-0033',
+        machine_id: 3,
+        machine_code_snapshot: 'VEND-MAD-0003',
+        location_name: 'Residencial Norte · Portal B',
+        location_code: 'MAD-RN-03',
+        captured_at: '2026-11-23 17:45:00+00',
+        import_source: 'COORDINATOR_CONSOLE',
+        import_source_label: 'Consola de Coordinación',
+        status: 'VOIDED',
+        status_label: 'Anulado',
+        va1_total_sales_eur: 33.1,
+        va1_total_vend_units: 9,
+        ca3_cashbox_eur: 31,
+        delta_sales_eur: 1.2,
+        delta_vend_units: 1,
+        effective_delta_sales_eur: 0,
+        effective_delta_vend_units: 0,
+        identity_mismatch_warning: false,
+        counter_reset_detected: false,
+        out_of_order_sync: true,
+        has_thermal_alert: false
+      }
+    ];
+
+    const detail = {
+      ...audits[0],
+      imported_by: 7,
+      importer_role_snapshot: 'RESTOCKER',
+      importer_name: 'Marta Reponedora de Rutas Periódicas',
+      original_filename: 'DEX-2026-0031.dex',
+      file_size_bytes: 328,
+      sha256_hash: 'a'.repeat(64),
+      dxs_comm_id: 'DXS-1',
+      dxs_version: '2.0',
+      dex_machine_identifier: 'VM-001',
+      id4_decimal_places: 2,
+      ignored_unknown_lines_count: 1,
+      va1_reset_sales_eur: 10,
+      va1_reset_vend_units: 3,
+      ca3_coin_tubes_eur: 40,
+      ca3_bills_in_eur: 80,
+      previous_audit_id: 30,
+      previous_audit_voided: false,
+      delta_source: 'PREVIOUS_AUDIT',
+      restock_visit_id: 7,
+      cash_collection_id: 8,
+      incident_id: null,
+      void_reason: null,
+      voided_by: null,
+      voided_by_name_snapshot: null,
+      voided_at: null,
+      m34_cross_check: { linked_visit_id: 7, matches: true, units_variance: 0 },
+      m35_cross_check: { linked_collection_id: 8, variance_eur: 0.25, status: 'WITHIN_TOLERANCE' },
+      selections: [
+        {
+          id: 1,
+          raw_selection_code: '101',
+          normalized_selection_code: '101',
+          match_status: 'MATCHED',
+          match_status_label: 'Emparejada',
+          unit_price_eur: 2.5,
+          total_vend_units: 10,
+          total_sales_eur: 25,
+          delta_vend_units: 2,
+          delta_sales_eur: 5
+        },
+        {
+          id: 2,
+          raw_selection_code: '102',
+          normalized_selection_code: '102',
+          match_status: 'UNMATCHED',
+          match_status_label: 'Sin carril',
+          unit_price_eur: 1.5,
+          total_vend_units: 4,
+          total_sales_eur: 6,
+          delta_vend_units: 1,
+          delta_sales_eur: 1.5
+        }
+      ],
+      events: [
+        {
+          id: 1,
+          source_block: 'EVADTS',
+          event_code: 'E01',
+          event_category: 'TEMPERATURE',
+          event_category_label: 'Temperatura',
+          severity: 'CRITICAL',
+          severity_label: 'Crítica',
+          occurrence_count: 2,
+          is_thermal_alert: true,
+          description_es: 'Temperatura de cámara fuera del rango sanitario configurado.'
+        }
+      ]
+    };
+
+    api.coordinator.getDexAudits = async () => ({
+      data: {
+        audits,
+        total: 120,
+        limit: 100,
+        offset: 0,
+        export_limit: 500,
+        kpis: {
+          total_active: 2,
+          thermal_alert_count: 1,
+          warning_count: 2,
+          cash_deviation_count: 1,
+          voided_count: 1
+        }
+      }
+    });
+    api.coordinator.getMachines = async () => ({
+      data: {
+        machines: [
+          { id: 1, machine_code: 'VEND-MAD-0001', location_name: 'Hospital Universitario Central', site_code: 'MAD-HUC-01' },
+          { id: 2, machine_code: 'VEND-MAD-0002', location_name: 'Centro Comercial Diagonal', site_code: 'MAD-CCD-02' },
+          { id: 3, machine_code: 'VEND-MAD-0003', location_name: 'Residencial Norte', site_code: 'MAD-RN-03' }
+        ]
+      }
+    });
+    api.coordinator.getZones = async () => ({ data: { zones: [] } });
+    api.coordinator.getLocations = async () => ({ data: [] });
+    api.coordinator.getDexAudit = async () => ({ data: detail });
+    api.coordinator.downloadDexAuditRaw = async () => true;
+    api.coordinator.exportDexAuditsCsv = async () => true;
+
+    const Root = {
+      components: { CoordinatorDexAuditsSubTab },
+      template: '<div style="padding: 12px;"><CoordinatorDexAuditsSubTab ref="dex" /></div>'
+    };
+
+    try {
+      const app = Vue.createApp(Root);
+      const root = app.mount('#app');
+      const vm = root.$refs.dex;
+
+      const deadline = Date.now() + 10000;
+      while (vm.isLoading && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
+      }
+
+      window.__vm = vm;
+      window.__harness = {
+        async openDetail() {
+          await vm.openDetail(vm.audits[0]);
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        },
+        openVoid() {
+          vm.openVoid(vm.audits[0]);
+          vm.voidReason = 'La consola detectó un fichero duplicado del mismo turno; se conserva el original y se anula únicamente el registro duplicado con evidencia del hash.';
+        },
+        closeAll() {
+          vm.closeDetail();
+          vm.closeVoid();
+        },
+        openEmptyDetail() {
+          vm.audits = [];
+          vm.kpis = { total_active: 0, thermal_alert_count: 0, warning_count: 0, cash_deviation_count: 0, voided_count: 0 };
+        }
+      };
+      window.__harnessState = { audits: vm.audits.length, kpis: vm.safeKpis, error: null };
+      window.__harnessReady = true;
+    } catch (error) {
+      window.__harnessState = { error: error?.message ?? String(error) };
+      window.__harnessReady = true;
+    }
+  </script>
+</body>
+</html>

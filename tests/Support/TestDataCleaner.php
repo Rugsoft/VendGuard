@@ -121,6 +121,14 @@ final class TestDataCleaner
         // antes que la visita por su FK RESTRICT; son inmutables tras el arqueo,
         // así que el borrado pasa por la ventana de purga del arnés (Art. III.1).
         'machine_cash_collections',
+        // Volcados `.dex` (Módulo 39): cuelgan de `machines`, `users`, la visita
+        // in situ y la recaudación —maestras y raíces protegidas—, de modo que el
+        // grafo desde `incidents` no los alcanza. Entran como raíz propia, con
+        // las líneas antes que la cabecera por su FK RESTRICT; las tres tablas son
+        // inmutables, así que el borrado pasa por la ventana de purga (Art. III.1).
+        'machine_dex_selection_lines',
+        'machine_dex_event_lines',
+        'machine_dex_audits',
     ];
 
     /**

@@ -18,6 +18,7 @@
 
 import { api } from '../api.js';
 import { store } from '../store.js';
+import { formatDateTime } from '../utils/DateTimeFormat.js';
 import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
 import {
@@ -71,6 +72,20 @@ import {
   requiresSanitarySeal
 } from '../utils/OfflineStorage.js';
 import { OFFLINE_QUEUE_EVENT, OfflineSyncManager } from '../utils/OfflineSyncManager.js';
+import {
+  DexAuditOfflineQueue,
+  DEX_AUDIT_CONFLICT,
+  DEX_AUDIT_PENDING
+} from '../utils/DexAuditOfflineQueue.js';
+import { previewDexFile, readDexFileText, DEX_PREVIEW_ROLES } from '../utils/EvaDtsClientPreview.js';
+
+/** Identificador idempotente del alta `.dex` (Módulo 39, C5). */
+function createDexClientMutationId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `dex-${crypto.randomUUID()}`;
+  }
+  return `dex-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
@@ -219,6 +234,28 @@ export const TechnicianRouteView = {
       pendingCriticalStops: [],
       showOpportunisticModal: false,
       opportunisticLocation: null,
+      opportunisticDexContext: null,
+
+      // Auditorías EVA-DTS `.dex` online/offline (Módulo 39, T-DEX-12)
+      showDexModal: false,
+      dexIncident: null,
+      dexMachine: null,
+      dexFile: null,
+      dexFileName: '',
+      dexPreview: null,
+      dexHistory: [],
+      dexLoading: false,
+      dexSubmitting: false,
+      dexError: '',
+      dexSuccess: '',
+      dexThermalAudit: null,
+      dexSuggestedEscalation: null,
+      dexQueue: null,
+      pendingDexMutations: [],
+      dexQueueSequence: 0,
+      isSyncingDex: false,
+      dexSyncMessage: '',
+      dexSyncError: '',
 
       // Módulo 21: Control de Turno y Relevo de Fin de Jornada (RF-03, RF-05)
       shiftStatus: 'OFF_SHIFT',
@@ -722,6 +759,7 @@ export const TechnicianRouteView = {
     if (this.isAuthenticated) {
       this.loadRoute().then(() => this.applyDeepLink());
       this.loadShiftStatus();
+      this.loadPendingDexQueue();
     }
   },
   beforeUnmount() {
@@ -733,6 +771,7 @@ export const TechnicianRouteView = {
     }
   },
   methods: {
+    formatDateTime,
     /**
      * Aplica la respuesta del ciclo de jornada: estado y acumulado del día.
      *
@@ -1764,6 +1803,7 @@ export const TechnicianRouteView = {
 
       this.offlineNotice = '';
       const summary = await this.syncOfflineQueue({ silent: true });
+      this.syncPendingDexAudits();
 
       if (summary?.interrupted !== 'reauth_required') {
         await this.loadRoute();
@@ -2149,6 +2189,365 @@ export const TechnicianRouteView = {
       }
     },
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Auditorías EVA-DTS `.dex` online/offline (Módulo 39, T-DEX-12)
+    // ─────────────────────────────────────────────────────────────────────
+
+    async openDexModal(incident) {
+      const machine = incident?.machine || null;
+      if (!machine?.id) return;
+
+      this.dexIncident = incident;
+      this.dexMachine = machine;
+      this.dexFile = null;
+      this.dexFileName = '';
+      this.dexPreview = null;
+      this.dexHistory = [];
+      this.dexError = '';
+      this.dexSuccess = '';
+      this.dexThermalAudit = null;
+      this.dexSuggestedEscalation = null;
+      this.showDexModal = true;
+
+      await Promise.all([
+        this.loadDexHistory(machine.id),
+        this.loadPendingDexQueue()
+      ]);
+    },
+
+    closeDexModal() {
+      this.showDexModal = false;
+      this.dexIncident = null;
+      this.dexMachine = null;
+      this.dexFile = null;
+      this.dexFileName = '';
+      this.dexPreview = null;
+      this.dexError = '';
+      this.dexSuccess = '';
+    },
+
+    async handleDexFile(event) {
+      const file = event?.target?.files?.[0] ?? null;
+      this.dexError = '';
+      this.dexSuccess = '';
+      this.dexPreview = null;
+      this.dexFileName = file?.name || '';
+      this.dexFile = file;
+      if (!file) return;
+
+      try {
+        const preview = await previewDexFile(file, { role: DEX_PREVIEW_ROLES.TECHNICIAN });
+        if (!preview?.ok) {
+          this.dexError = preview?.errors?.[0]?.message || 'El fichero .dex no supera el pre-filtro.';
+          this.dexFile = null;
+          return;
+        }
+        this.dexPreview = preview;
+      } catch (error) {
+        this.dexFile = null;
+        this.dexError = error?.message || 'No se pudo leer el fichero .dex.';
+      }
+    },
+
+    async submitDexAudit() {
+      if (!this.dexMachine?.id || !this.dexFile || this.dexSubmitting) return;
+      if (!this.dexPreview?.ok) {
+        this.dexError = 'Selecciona un volcado .dex válido antes de importarlo.';
+        return;
+      }
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0)) {
+        this.dexError = 'Inicia sesión como técnico para importar auditorías .dex.';
+        return;
+      }
+
+      this.dexSubmitting = true;
+      this.dexError = '';
+      this.dexSuccess = '';
+      const clientMutationId = createDexClientMutationId();
+      const machineId = Number(this.dexMachine.id);
+      let queuedPayload = null;
+
+      try {
+        const rawPayload = await readDexFileText(this.dexFile);
+        const preview = await previewDexFile(this.dexFile, { role: DEX_PREVIEW_ROLES.TECHNICIAN });
+        if (!preview?.ok) {
+          this.dexError = preview?.errors?.[0]?.message || 'El fichero .dex no supera el pre-filtro.';
+          return;
+        }
+        const payload = {
+          raw_payload: rawPayload,
+          original_filename: this.dexFileName || 'volcado.dex',
+          captured_at: new Date().toISOString(),
+          client_mutation_id: clientMutationId
+        };
+        queuedPayload = {
+          client_mutation_id: clientMutationId,
+          machine_id: machineId,
+          machine_code: this.dexMachine.code || this.dexMachine.machine_code || null,
+          captured_at: payload.captured_at,
+          raw_payload: rawPayload,
+          original_filename: payload.original_filename
+        };
+
+        if (this.isBrowserOffline()) {
+          await this.enqueueDexAudit(queuedPayload);
+          this.dexSuccess = 'Volcado .dex guardado en el dispositivo: pendiente de sincronizar.';
+          await this.loadPendingDexQueue();
+          return;
+        }
+
+        const response = await api.technician.importDexAudit(machineId, payload);
+        const data = response?.data && typeof response.data === 'object' ? response.data : (response || {});
+        this.applyDexImportResult(data, machineId);
+      } catch (error) {
+        if (queuedPayload && this.isRetryableDexFailure(error)) {
+          await this.enqueueDexAudit(queuedPayload);
+          this.dexSuccess = 'Sin conexión con el servidor: el volcado .dex queda en la cola local.';
+          await this.loadPendingDexQueue();
+        } else {
+          this.dexError = error?.message || 'No se pudo importar el volcado .dex.';
+        }
+      } finally {
+        this.dexSubmitting = false;
+      }
+    },
+
+    isRetryableDexFailure(error) {
+      const status = Number(error?.status ?? -1);
+      const code = String(error?.code || '');
+      return status === 0 || status === 401 || status >= 500 || code === 'NETWORK_ERROR' || code === 'REQUEST_TIMEOUT';
+    },
+
+    applyDexImportResult(data, machineId) {
+      const audit = data?.audit || data || {};
+      this.dexThermalAudit = null;
+      this.dexSuggestedEscalation = null;
+      if (data?.has_thermal_alert === true || audit.has_thermal_alert === true) {
+        this.dexThermalAudit = audit;
+        this.dexSuggestedEscalation = data?.suggested_escalation_payload || null;
+      }
+      this.dexSuccess = data?.idempotent_replay === true
+        ? 'Volcado ya registrado: replay idempotente confirmado.'
+        : 'Auditoría .dex importada correctamente.';
+      this.loadDexHistory(machineId);
+    },
+
+    async loadDexHistory(machineId) {
+      const id = Number(machineId);
+      if (!(id > 0)) return;
+      if (this.isBrowserOffline()) return;
+
+      this.dexLoading = true;
+      try {
+        const response = await api.technician.getDexAudits(id);
+        const data = response?.data && typeof response.data === 'object' ? response.data : (response || {});
+        this.dexHistory = Array.isArray(data?.audits) ? data.audits : [];
+      } catch (error) {
+        if (!this.isRetryableDexFailure(error)) {
+          this.dexError = error?.message || 'No se pudo cargar el historial .dex.';
+        }
+      } finally {
+        this.dexLoading = false;
+      }
+    },
+
+    dexAuditUnits(audit) {
+      const value = Number(audit?.va1_total_vend_units);
+      return Number.isFinite(value) ? value : 0;
+    },
+
+    dexAuditDeltaUnits(audit) {
+      const raw = audit?.delta_vend_units;
+      if (raw === null || raw === undefined || raw === '') return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    },
+
+    dexAuditDeltaLabel(audit) {
+      const units = this.dexAuditDeltaUnits(audit);
+      return units === null ? '—' : `${units} u`;
+    },
+
+    dexAuditHasThermal(audit) {
+      return audit?.has_thermal_alert === true;
+    },
+
+    dexThermalCodes(audit) {
+      return (Array.isArray(audit?.events) ? audit.events : [])
+        .filter((event) => ['CRITICAL', 'WARNING'].includes(String(event?.severity || '').toUpperCase()))
+        .map((event) => String(event?.event_code || ''))
+        .filter((code) => code !== '');
+    },
+
+    dexSuggestedFor(audit) {
+      const codes = this.dexThermalCodes(audit);
+      return {
+        breakdown_category: 'TEMPERATURE_COLD',
+        internal_note: `[DEX ${audit?.audit_code || 'SIN-CÓDIGO'}] Códigos EA1/EA2: ${codes.join(', ') || 'ALERTA_TERMICA'}`
+      };
+    },
+
+    async attachDexInternalNote(audit) {
+      const target = audit || this.dexThermalAudit;
+      const incidentId = Number(this.dexIncident?.id || 0);
+      if (!(incidentId > 0) || !target) return;
+      if (this.isBrowserOffline()) {
+        this.dexError = 'La nota interna exige conexión para quedar en el hilo del ticket.';
+        return;
+      }
+
+      const suggestion = this.dexSuggestedEscalation || this.dexSuggestedFor(target);
+      this.dexSubmitting = true;
+      this.dexError = '';
+      this.dexSuccess = '';
+      try {
+        await api.technician.addComment(incidentId, {
+          comment_text: suggestion?.internal_note || this.dexSuggestedFor(target).internal_note,
+          is_internal: true
+        });
+        this.dexSuccess = 'Nota interna del .dex añadida al ticket activo.';
+      } catch (error) {
+        this.dexError = error?.message || 'No se pudo añadir la nota interna al ticket.';
+      } finally {
+        this.dexSubmitting = false;
+      }
+    },
+
+    openDexOpportunistic(audit) {
+      const target = audit || this.dexThermalAudit;
+      if (!target || !this.dexIncident?.machine?.id) return;
+      const suggestion = this.dexSuggestedEscalation || this.dexSuggestedFor(target);
+      const locationId = Number(this.dexIncident?.location?.id ?? this.dexIncident?.location_id ?? 0);
+      if (!(locationId > 0)) {
+        this.dexError = 'La parada no tiene una sede habilitada para el alta oportunista.';
+        return;
+      }
+
+      this.opportunisticDexContext = {
+        machine_id: Number(this.dexIncident.machine.id),
+        dex_audit_id: Number(target.id || 0) || null,
+        breakdown_category: suggestion?.breakdown_category || 'TEMPERATURE_COLD',
+        internal_note: suggestion?.internal_note || this.dexSuggestedFor(target).internal_note
+      };
+      this.showDexModal = false;
+      this._dexOpeningOpportunistic = true;
+      this.openOpportunisticModal({
+        location_id: locationId,
+        location: this.dexIncident.location
+      });
+    },
+
+    ensureDexQueue() {
+      if (!this.dexQueue) {
+        this.dexQueue = new DexAuditOfflineQueue();
+      }
+      return this.dexQueue;
+    },
+
+    async loadPendingDexQueue() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0)) {
+        this.pendingDexMutations = [];
+        return;
+      }
+      try {
+        this.pendingDexMutations = await this.ensureDexQueue().list(technicianId);
+      } catch (error) {
+        this.pendingDexMutations = [];
+        this.dexSyncError = error?.message || 'No se pudo leer la cola offline de auditorías .dex.';
+      }
+    },
+
+    async enqueueDexAudit(record) {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0)) {
+        throw new Error('Inicia sesión como técnico para guardar la auditoría .dex.');
+      }
+      const sequence = Date.now() * 1000 + (Number(this.dexQueueSequence || 0) % 1000);
+      this.dexQueueSequence = (Number(this.dexQueueSequence || 0) + 1) % 1000;
+      return this.ensureDexQueue().enqueue({
+        actor_id: technicianId,
+        actor_role: DEX_PREVIEW_ROLES.TECHNICIAN,
+        sequence_order: sequence,
+        ...record
+      });
+    },
+
+    async syncPendingDexAudits() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0)) return;
+      if (this.isBrowserOffline()) {
+        this.dexSyncError = 'Sin conexión. Las auditorías .dex seguirán guardadas en la cola offline.';
+        return;
+      }
+      if (this.isSyncingDex) return;
+
+      this.isSyncingDex = true;
+      this.dexSyncError = '';
+      this.dexSyncMessage = '';
+      try {
+        const summary = await this.ensureDexQueue().replay(technicianId, (item) => api.technician.importDexAudit(
+          item.machine_id,
+          {
+            raw_payload: item.raw_payload,
+            original_filename: item.original_filename,
+            captured_at: item.captured_at,
+            client_mutation_id: item.client_mutation_id,
+            ...item.local_links
+          }
+        ));
+
+        const parts = [];
+        if (summary.applied > 0) parts.push(`${summary.applied} importada(s)`);
+        if (summary.replayed > 0) parts.push(`${summary.replayed} replay(s)`);
+        if (summary.duplicates > 0) parts.push(`${summary.duplicates} duplicada(s)`);
+        if (summary.conflicts > 0) parts.push(`${summary.conflicts} conflicto(s)`);
+        if (summary.interrupted) {
+          this.dexSyncError = 'La sincronización .dex se interrumpió; los volcados siguen en la cola local.';
+        }
+        if (parts.length > 0) {
+          this.dexSyncMessage = `${parts.join(', ')}.`;
+        } else if (!this.dexSyncError) {
+          this.dexSyncMessage = 'No hay auditorías .dex pendientes de sincronizar.';
+        }
+        await this.loadPendingDexQueue();
+        if (this.dexMachine?.id) {
+          await this.loadDexHistory(this.dexMachine.id);
+        }
+      } catch (error) {
+        this.dexSyncError = error?.message || 'No se pudo sincronizar la cola offline de auditorías .dex.';
+      } finally {
+        this.isSyncingDex = false;
+      }
+    },
+
+    async archiveDexConflict(item) {
+      if (!item?.client_mutation_id || this.isSyncingDex) return;
+      this.isSyncingDex = true;
+      this.dexSyncError = '';
+      this.dexSyncMessage = '';
+      try {
+        await this.ensureDexQueue().dumpConflict(item.client_mutation_id, (queued) => (
+          api.technician.dumpDexAuditConflict({
+            machine_id: queued.machine_id,
+            client_mutation_id: queued.client_mutation_id,
+            reason: queued.conflict_reason || queued.conflict?.message || 'El volcado .dex offline ya no puede aplicarse.',
+            original_filename: queued.original_filename || null,
+            captured_at: queued.captured_at || null,
+            error_code: queued.conflict?.code || null,
+            http_status: Number(queued.conflict?.http_status || 0)
+          })
+        ));
+        await this.loadPendingDexQueue();
+        this.dexSyncMessage = 'Conflicto .dex archivado en auditoría. La cola local queda limpia.';
+      } catch (error) {
+        this.dexSyncError = error?.message || 'No se pudo archivar el conflicto .dex.';
+      } finally {
+        this.isSyncingDex = false;
+      }
+    },
+
     /**
      * Abre el catálogo oportunista de una sede (toque 1 del flujo, RNF-02).
      *
@@ -2160,6 +2559,10 @@ export const TechnicianRouteView = {
       if (!this.guardOnlineOnly('Registrar una avería oportunista')) {
         return;
       }
+      if (this._dexOpeningOpportunistic !== true) {
+        this.opportunisticDexContext = null;
+      }
+      this._dexOpeningOpportunistic = false;
 
       const locationId = Number(
         source?.location_id ?? source?.location?.id ?? this.enabledLocations[0]?.location_id ?? 0
@@ -2184,6 +2587,7 @@ export const TechnicianRouteView = {
      */
     async handleOpportunisticClosed() {
       this.showOpportunisticModal = false;
+      this.opportunisticDexContext = null;
       await this.loadRoute();
     },
 
@@ -2325,22 +2729,45 @@ export const TechnicianRouteView = {
     async handleLogout() {
       await this.refreshOfflineState();
 
-      if (this.offlineQueue.total > 0) {
+      const technicianId = this.offlineTechnicianId();
+      let pendingDex = 0;
+      if (technicianId > 0) {
+        try {
+          // Solo los PENDING bloquean: un CONFLICT ya rechazado puede no ser
+          // volcable (p. ej. fuera de zona) y no debe atrapar al técnico.
+          pendingDex = (await this.ensureDexQueue().list(technicianId, [DEX_AUDIT_PENDING])).length;
+        } catch (error) {
+          // Sin IndexedDB no se puede certificar la cola; el cierre sigue.
+        }
+      }
+
+      if (this.offlineQueue.total > 0 || pendingDex > 0) {
         const pending = this.offlineQueue.pending + this.offlineQueue.syncing;
-        this.errorMessage = `No puedes cerrar sesión: ${this.offlineQueue.total} operación(es) `
-          + `sin sincronizar (${pending} pendiente(s), ${this.offlineQueue.conflicts} en conflicto). `
+        this.errorMessage = `No puedes cerrar sesión: ${this.offlineQueue.total + pendingDex} operación(es) `
+          + `sin sincronizar (${pending} pendiente(s), ${this.offlineQueue.conflicts} en conflicto, ${pendingDex} .dex sin enviar). `
           + 'Sincroniza y vuelca los conflictos antes de salir.';
         this.showOfflineTray = true;
         return;
       }
 
       try {
-        const technicianId = this.offlineTechnicianId();
         if (technicianId > 0 && this.offlineStorage !== null) {
           await this.offlineStorage.clearTechnician(technicianId);
         }
       } catch (error) {
         // La sesión se cierra igualmente: sin la cuenta, la copia local no sirve.
+      }
+
+      try {
+        if (technicianId > 0) {
+          // PR25-07: se purga todo, incluidos los conflictos ya rechazados;
+          // estos no bloquean porque pueden no ser volcables.
+          await this.ensureDexQueue().clear(technicianId);
+          this.pendingDexMutations = [];
+          this.dexSyncError = '';
+        }
+      } catch (error) {
+        // La sesión se cierra igualmente: la limpieza local es best-effort.
       }
 
       store.clearSession();
@@ -4426,7 +4853,7 @@ export const TechnicianRouteView = {
               </div>
 
               <!-- Read-only incident history of this machine (RF-07 / EARS H.1, H.6) -->
-              <div v-if="incident.machine?.id" style="margin-top: 6px;">
+              <div v-if="incident.machine?.id" style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px;">
                 <button
                   type="button"
                   class="vg-btn vg-btn-secondary"
@@ -4435,6 +4862,15 @@ export const TechnicianRouteView = {
                   @click="openMachineHistoryModal(incident)"
                 >
                   🕘 Historial de la máquina
+                </button>
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  style="display: inline-flex; align-items: center; gap: 6px; height: 30px; font-size: 12px; padding: 0 10px;"
+                  data-testid="btn-open-dex-audit"
+                  @click="openDexModal(incident)"
+                >
+                  📄 Importar .dex
                 </button>
               </div>
 
@@ -5072,10 +5508,116 @@ export const TechnicianRouteView = {
       <!-- =================================================================== -->
       <!-- MODAL: INTERVENCIÓN OPORTUNISTA IN SITU (Módulo 16, T-OPP-11)          -->
       <!-- =================================================================== -->
+      <!-- MODAL AUDITORÍA EVA-DTS: historial en unidades, alerta térmica y M16 (Módulo 39, T-DEX-12) -->
+      <div
+        v-if="showDexModal"
+        data-testid="technician-dex-modal"
+        style="position: fixed; inset: 0; background-color: color-mix(in srgb, var(--color-slate) 45%, transparent); display: flex; align-items: flex-end; justify-content: center; z-index: 90; padding: 0;"
+        @click.self="closeDexModal"
+      >
+        <div style="background-color: var(--color-surface-card); width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; border-radius: var(--radius-card) var(--radius-card) 0 0; padding: 18px 16px; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); box-sizing: border-box;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <h2 style="font-family: var(--font-display); font-size: 17px; margin: 0 0 4px 0;">📄 Auditoría EVA-DTS</h2>
+              <p style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">
+                {{ dexMachine?.code || 'Máquina' }} · volcado .dex de la parada
+              </p>
+            </div>
+            <button type="button" class="vg-btn vg-btn-ghost vg-btn-sm" data-testid="btn-close-dex" @click="closeDexModal">Cerrar</button>
+          </div>
+
+          <p v-if="dexError" role="alert" data-testid="technician-dex-error" style="font-size: 12px; color: var(--color-error-text); background-color: var(--color-error-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;">⚠️ {{ dexError }}</p>
+          <p v-if="dexSuccess" data-testid="technician-dex-success" style="font-size: 12px; color: var(--color-success-text); background-color: var(--color-success-bg); border-radius: var(--radius-interactive); padding: 8px 10px; margin-top: 10px;">✓ {{ dexSuccess }}</p>
+
+          <label style="display: block; font-size: 12px; font-weight: 600; margin: 14px 0 4px 0;">Volcado EVA-DTS (.dex, máx. 1 MB)</label>
+          <div class="vg-file-field">
+            <input
+              id="technician-dex-file-input"
+              type="file"
+              accept=".dex,text/plain"
+              class="visually-hidden"
+              data-testid="technician-dex-file"
+              aria-label="Volcado EVA-DTS (.dex, máx. 1 MB)"
+              @change="handleDexFile"
+            />
+            <label
+              for="technician-dex-file-input"
+              class="vg-btn vg-btn-secondary vg-file-trigger"
+              data-testid="technician-dex-file-trigger"
+              style="display: inline-flex; cursor: pointer;"
+            >Seleccionar archivo .dex</label>
+          </div>
+          <p style="font-size: 11px; color: var(--color-ink-muted); margin: 4px 0 0 0;">{{ dexFileName ? '📄 ' + dexFileName : 'Ningún archivo seleccionado' }}</p>
+
+          <div v-if="dexPreview" data-testid="technician-dex-preview" style="margin-top: 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 9px 10px; font-size: 12px;">
+            <div style="display: flex; justify-content: space-between; gap: 8px;">
+              <span>Unidades vendidas (VA1)</span>
+              <strong>{{ dexPreview.va1_total_vend_units ?? '—' }}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; gap: 8px; margin-top: 4px;">
+              <span>Eventos EA1/EA2</span>
+              <strong>{{ dexPreview.events?.length || 0 }}</strong>
+            </div>
+            <p style="font-size: 10px; color: var(--color-ink-muted); margin: 5px 0 0 0;">Solo unidades y códigos; el técnico no recibe importes ni CA3 (Art. V.4).</p>
+          </div>
+
+          <div v-if="dexThermalAudit" data-testid="technician-dex-thermal-banner" style="margin-top: 10px; border-left: 3px solid var(--color-error-text); background-color: var(--color-error-bg); color: var(--color-error-text); border-radius: var(--radius-interactive); padding: 9px 10px; font-size: 12px;">
+            <strong style="display: block;">🌡️ Alerta térmica · {{ dexThermalAudit.audit_code || 'DEX' }}</strong>
+            <span>La cadena de frío aparece comprometida. Abre el alta oportunista M16 con la nota interna del volcado.</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px;">
+              <button type="button" class="vg-btn vg-btn-primary vg-btn-sm" data-testid="technician-dex-opportunistic" @click="openDexOpportunistic(dexThermalAudit)">📋 Abrir alta oportunista M16</button>
+              <button v-if="dexIncident?.id" type="button" class="vg-btn vg-btn-secondary vg-btn-sm" data-testid="technician-dex-internal-note" :disabled="dexSubmitting" @click="attachDexInternalNote(dexThermalAudit)">🔒 Nota interna del ticket</button>
+            </div>
+          </div>
+
+          <div style="margin-top: 12px;">
+            <button type="button" class="vg-btn vg-btn-primary w-100" data-testid="btn-import-dex" :disabled="!dexFile || !dexPreview || dexSubmitting" @click="submitDexAudit">
+              {{ dexSubmitting ? 'Importando…' : (isBrowserOffline() ? 'Guardar .dex sin conexión' : 'Importar .dex') }}
+            </button>
+          </div>
+
+          <div style="margin-top: 16px;">
+            <h3 style="font-family: var(--font-display); font-size: 13px; margin: 0 0 6px 0;">Historial de auditorías</h3>
+            <p v-if="dexLoading" style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">Cargando historial…</p>
+            <p v-else-if="dexHistory.length === 0" data-testid="technician-dex-history-empty" style="font-size: 12px; color: var(--color-ink-muted); margin: 0;">Sin auditorías .dex registradas en esta máquina.</p>
+            <ul v-else data-testid="technician-dex-history" style="list-style: none; padding: 0; margin: 0; display: grid; gap: 6px;">
+              <li v-for="audit in dexHistory" :key="audit.id" style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 7px 8px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; gap: 6px;">
+                  <strong>{{ audit.audit_code || ('DEX #' + audit.id) }}</strong>
+                  <span style="color: var(--color-ink-muted);">{{ formatDateTime(audit.captured_at) }}</span>
+                </div>
+                <div style="margin-top: 3px; color: var(--color-slate);">
+                  VA1 {{ dexAuditUnits(audit) }} u · Δ {{ dexAuditDeltaLabel(audit) }} · {{ audit.delta_source || '—' }}
+                </div>
+                <div v-if="dexAuditHasThermal(audit)" style="margin-top: 5px;">
+                  <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm" data-testid="technician-dex-history-opportunistic" @click="openDexOpportunistic(audit)">📋 Alta oportunista M16</button>
+                </div>
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="pendingDexMutations.length" data-testid="technician-dex-queue" style="margin-top: 14px;">
+            <h3 style="font-family: var(--font-display); font-size: 13px; margin: 0 0 6px 0;">Cola offline .dex</h3>
+            <div v-for="item in pendingDexMutations" :key="item.client_mutation_id" style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 7px 8px; margin-bottom: 6px; font-size: 11px;">
+              <div style="display: flex; justify-content: space-between; gap: 6px;">
+                <strong>{{ item.original_filename || 'volcado.dex' }}</strong>
+                <span>{{ item.status }}</span>
+              </div>
+              <div v-if="item.conflict_reason" style="color: var(--color-error-text); margin-top: 3px;">{{ item.conflict_reason }}</div>
+              <button v-if="item.status === 'CONFLICT'" type="button" class="vg-btn vg-btn-secondary vg-btn-sm" style="margin-top: 5px;" @click="archiveDexConflict(item)">Archivar conflicto</button>
+            </div>
+            <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm" data-testid="btn-sync-dex" :disabled="isSyncingDex" @click="syncPendingDexAudits">{{ isSyncingDex ? 'Sincronizando…' : 'Sincronizar .dex pendientes' }}</button>
+          </div>
+          <p v-if="dexSyncMessage" style="font-size: 11px; color: var(--color-success-text); margin-top: 8px;">{{ dexSyncMessage }}</p>
+          <p v-if="dexSyncError" style="font-size: 11px; color: var(--color-error-text); margin-top: 8px;">{{ dexSyncError }}</p>
+        </div>
+      </div>
+
       <TechnicianOpportunisticModal
         v-model="showOpportunisticModal"
         :location-id="opportunisticLocation?.location_id ?? null"
         :location-name="opportunisticLocation?.location_name ?? ''"
+        :dex-audit-context="opportunisticDexContext"
         @created="handleOpportunisticClosed"
         @assumed="handleOpportunisticClosed"
         @close="showOpportunisticModal = false"

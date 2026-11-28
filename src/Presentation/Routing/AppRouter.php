@@ -7,6 +7,7 @@ namespace VendGuard\Presentation\Routing;
 use Throwable;
 use VendGuard\Application\DTO\HealthCheckResponseDto;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Presentation\Controller\CoordinatorDexAuditController;
 use VendGuard\Presentation\Controller\CoordinatorPlanogramController;
 use VendGuard\Presentation\Controller\CoordinatorProductLoadingController;
 use VendGuard\Presentation\Controller\CoordinatorRefundController;
@@ -168,6 +169,16 @@ class AppRouter
         // Válvula de regularización: dictamina un expediente atascado en
         // PENDING_INSPECTION (avería cancelada o técnico ya fuera de la máquina).
         $router->post('/api/coordinator/refunds/{id}/regularize', [CoordinatorRefundController::class, 'regularize'], [$coordinatorAuth]);
+
+        // Consola de auditorías EVA-DTS `.dex` (Módulo 39: T-DEX-09). `export-csv`
+        // se registra antes que `{id}` para que el segmento estático no se lea como
+        // identificador; `/raw` es la única salida con el fichero original.
+        $router->get('/api/coordinator/dex-audits/export-csv', [CoordinatorDexAuditController::class, 'exportCsv'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/dex-audits', [CoordinatorDexAuditController::class, 'index'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/machines/{machineId}/dex-audits', [CoordinatorDexAuditController::class, 'import'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/dex-audits/{id}', [CoordinatorDexAuditController::class, 'show'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/dex-audits/{id}/raw', [CoordinatorDexAuditController::class, 'raw'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/dex-audits/{id}/void', [CoordinatorDexAuditController::class, 'void'], [$coordinatorAuth]);
 
         $router->get('/api/coordinator/map/active-incidents', [CoordinatorRouteMapController::class, 'getActiveIncidents'], [$coordinatorAuth]);
         $router->get('/api/coordinator/route/settings', [CoordinatorRouteMapController::class, 'getRouteSettings'], [$coordinatorAuth]);
@@ -520,6 +531,10 @@ class AppRouter
         $router->get('/api/technician/locations/{location_id}/opportunistic-machines', [TechnicianOpportunisticController::class, 'getLocationCatalog'], [$technicianAuth]);
         $router->post('/api/technician/opportunistic/incidents', [TechnicianOpportunisticController::class, 'createIncident'], [$technicianAuth]);
         $router->post('/api/technician/opportunistic/incidents/{id}/assume', [TechnicianOpportunisticController::class, 'assumeIncident'], [$technicianAuth]);
+        // Auditorías .dex del técnico en su zona (Módulo 39: T-DEX-09).
+        $router->post('/api/technician/dex-audits/conflict-dump', [\VendGuard\Presentation\Controller\TechnicianController::class, 'dumpDexConflict'], [$technicianAuth]);
+        $router->get('/api/technician/machines/{machineId}/dex-audits', [\VendGuard\Presentation\Controller\TechnicianController::class, 'listDexAudits'], [$technicianAuth]);
+        $router->post('/api/technician/machines/{machineId}/dex-audits', [\VendGuard\Presentation\Controller\TechnicianController::class, 'importDexAudit'], [$technicianAuth]);
         // Historial de averías de una máquina de la ruta (solo lectura, Art. V.4).
         $router->get('/api/technician/machines/{id}/history', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMachineHistory'], [$technicianAuth]);
         // Detalle read-only de una avería para el técnico (Módulo 25, EARS 04.1):
@@ -608,6 +623,10 @@ class AppRouter
         // segmento dinámico `{machineId}`. El reponedor sale siempre del token.
         $router->post('/api/restocker/route/override-conflict-dump', [RestockerRouteController::class, 'dumpOverrideConflict'], [$restockerAuth]);
         $router->post('/api/restocker/route/stops/{machineId}/skip', [RestockerRouteController::class, 'skipStop'], [$restockerAuth]);
+        // Auditorías .dex del reponedor en sus zonas vivas (Módulo 39: T-DEX-09).
+        $router->post('/api/restocker/dex-audits/conflict-dump', [RestockerRouteController::class, 'dumpDexConflict'], [$restockerAuth]);
+        $router->get('/api/restocker/machines/{machineId}/dex-audits', [RestockerRouteController::class, 'listDexAudits'], [$restockerAuth]);
+        $router->post('/api/restocker/machines/{machineId}/dex-audits', [RestockerRouteController::class, 'importDexAudit'], [$restockerAuth]);
         // Parque de máquinas y planograma de solo lectura del reponedor (Módulo 32,
         // QA 2, Art. V.4). El servicio acota por las zonas vivas del token y nunca
         // selecciona unit_cost_eur ni margen; fuera de ellas responde 403.

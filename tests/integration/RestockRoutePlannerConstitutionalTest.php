@@ -159,6 +159,11 @@ try {
     $yesterday = (new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))
         ->modify('-1 day')
         ->format('Y-m-d');
+    // La agenda semanal de la sección 5 no debe caer en el día de la corrida: si
+    // coincidiera, el tablero contaría una sexta máquina programada y la guarda
+    // dependería del calendario. Se elige siempre el día siguiente al de hoy.
+    $todayWeekday = (int)(new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))->format('N');
+    $weekdayNotToday = $todayWeekday === 7 ? 1 : $todayWeekday + 1;
 
     $createUser = static function (string $suffix, string $role, string $name) use ($pdo): int {
         $stmt = $pdo->prepare(
@@ -599,7 +604,7 @@ try {
 
     $updateSchedule = $call('PUT', '/api/coordinator/restock-schedules/machine/' . $machineSchedule, [
         'cadence_type' => 'WEEKLY',
-        'day_of_week' => 3,
+        'day_of_week' => $weekdayNotToday,
         'preferred_time_window' => 'AFTERNOON',
         'notes' => 'Segunda versión constitucional de la agenda.',
     ], $coordinatorToken);
@@ -769,7 +774,18 @@ try {
             && (int)($todayKpis['scheduled_machines_count'] ?? -1) === 5
             && (int)($todayKpis['completed_count'] ?? -1) === 1
             && (int)($todayKpis['skipped_count'] ?? -1) === 1
-            && (int)($todayKpis['blocked_count'] ?? -1) === 1
+            && (int)($todayKpis['blocked_count'] ?? -1) === 1,
+        json_encode([
+            'esperado' => [$today, false, 5, 1, 1, 1],
+            'obtenido' => [
+                $dayData['service_date'] ?? null,
+                $dayData['is_future_projection'] ?? null,
+                $todayKpis['scheduled_machines_count'] ?? null,
+                $todayKpis['completed_count'] ?? null,
+                $todayKpis['skipped_count'] ?? null,
+                $todayKpis['blocked_count'] ?? null,
+            ],
+        ], JSON_UNESCAPED_UNICODE)
     );
     $assert(
         '7.2 La ruta del titular separa completada, omitida y bloqueada',

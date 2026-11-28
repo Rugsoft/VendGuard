@@ -11,7 +11,7 @@ declare(strict_types=1);
  * certificación. Es la sustitución del nombre engañoso `PostgresParityTest`: aquí **no** se
  * compara con el motor local —eso es la correspondencia declarada de T-HYBRID-24, que exige los
  * dos motores a la vez— sino que se demuestra que el motor nuevo **hace** las cuatro operaciones
- * sobre las 51 tablas del contrato.
+ * sobre las 54 tablas del contrato.
  *
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
@@ -19,7 +19,7 @@ declare(strict_types=1);
  *      DDL base y la migración del motor aplicada por el ejecutor canónico. Si el DDL dejara de
  *      compilar o la migración dejara de aplicar, no habría dónde certificar nada.
  *
- *   2. **Alta mínima en las 51 tablas respetando el grafo de claves foráneas.** La fixture no se
+ *   2. **Alta mínima en las 54 tablas respetando el grafo de claves foráneas.** La fixture no se
  *      escribe a mano tabla por tabla: se deriva del catálogo vivo (`information_schema` y
  *      `pg_constraint`), de modo que una columna obligatoria nueva entra sola y una referencia
  *      nueva reordena el alta. Un ciclo en el grafo, o un tipo que el arnés no sepa sintetizar,
@@ -60,7 +60,7 @@ use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 51 tablas del contrato de correspondencia (§2.1, Módulos 14 a 37). */
+/** Las 54 tablas del contrato de correspondencia (§2.1, Módulos 14 a 39). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -95,6 +95,8 @@ const CONTRACT_TABLES = [
     'machine_cash_collections',
     // Módulo 37 · agenda periódica versionada por máquina y excepción diaria de ruta.
     'machine_restock_schedules', 'restock_route_daily_overrides',
+    // Módulo 39 · volcado `.dex` inmutable con su desglose de selecciones y eventos.
+    'machine_dex_audits', 'machine_dex_selection_lines', 'machine_dex_event_lines',
 ];
 
 /**
@@ -121,6 +123,14 @@ const APPEND_ONLY_TABLES = [
     // rechaza con 45000 cualquier reescritura de sus datos de custodia
     // (Art. III.3). La corrección se registra como una recaudación nueva.
     'machine_cash_collections',
+    // El volcado `.dex` (Módulo 39) congela toda su captura tras el alta y solo
+    // admite el enlace único de una operación o la anulación lógica; el `UPDATE`
+    // genérico toca su código legible y el motor lo rechaza con 45000 (Art. III.3).
+    'machine_dex_audits',
+    // Las líneas parseadas del volcado son inmutables desde el `INSERT`
+    // (`prevent_dex_line_rewrite()`), también con 45000 (Art. III.3).
+    'machine_dex_selection_lines',
+    'machine_dex_event_lines',
 ];
 
 $projectRoot = dirname(__DIR__, 2);
